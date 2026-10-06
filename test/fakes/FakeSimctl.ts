@@ -307,16 +307,28 @@ export class FakeSimctl implements ISimCtl {
     return this.launchAppResult;
   }
 
-  async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
-    this.recordCall("terminateApp", { bundleId, deviceId });
+  async terminateApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
+    this.recordCall("terminateApp", { bundleId, deviceId, options });
   }
 
-  async installApp(appPath: string, deviceId?: string): Promise<void> {
-    this.recordCall("installApp", { appPath, deviceId });
+  async installApp(
+    appPath: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number },
+  ): Promise<void> {
+    this.recordCall("installApp", { appPath, deviceId, options });
   }
 
-  async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
-    this.recordCall("uninstallApp", { bundleId, deviceId });
+  async uninstallApp(
+    bundleId: string,
+    deviceId?: string,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
+    this.recordCall("uninstallApp", { bundleId, deviceId, options });
   }
 
   async getScreenSize(deviceId?: string): Promise<ScreenSize> {

@@ -6,6 +6,7 @@ import {
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models";
+import { DeviceAlreadyRunningError } from "../../../src/models/DeviceAlreadyRunningError";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeouts";
 
@@ -645,6 +646,7 @@ describe("SimCtlClient boot self-verification", () => {
     await expect(sessionStart).resolves.toMatchObject({ deviceId: UDID });
     await expect(readiness).resolves.toMatchObject({ deviceId: UDID });
     expect(waitingError).toBeInstanceOf(ActionableError);
+    expect(waitingError).toBeInstanceOf(DeviceAlreadyRunningError);
     expect((waitingError as Error).message).toBe(`iOS simulator ${UDID} is already running`);
     expect(harness.bootstatusInvocations()).toBe(2);
     expect(harness.shutdownInvocations()).toBe(0);
@@ -660,6 +662,7 @@ describe("SimCtlClient boot self-verification", () => {
       .catch((error: unknown) => error);
 
     expect(lateStartError).toBeInstanceOf(ActionableError);
+    expect(lateStartError).toBeInstanceOf(DeviceAlreadyRunningError);
     expect((lateStartError as Error).message).toBe(`iOS simulator ${UDID} is already running`);
     expect(harness.bootstatusInvocations()).toBe(1);
     expect(ownerHandle.kill()).toBe(true);
@@ -783,6 +786,7 @@ describe("SimCtlClient boot self-verification", () => {
     expect(openSimulatorSignal?.aborted).toBe(true);
     const waitingError = await waitingStart;
     expect(waitingError).toBeInstanceOf(ActionableError);
+    expect(waitingError).toBeInstanceOf(DeviceAlreadyRunningError);
     expect((waitingError as Error).message).toBe(`iOS simulator ${UDID} is already running`);
     expect(harness.bootstatusInvocations()).toBe(1);
     expect(harness.shutdownInvocations()).toBe(0);
@@ -1296,6 +1300,7 @@ describe("SimCtlClient boot self-verification", () => {
     await expect(kill).resolves.toBe(shutdownError);
     const waitingError = await waitingStart;
     expect(waitingError).toBeInstanceOf(ActionableError);
+    expect(waitingError).toBeInstanceOf(DeviceAlreadyRunningError);
     expect((waitingError as Error).message).toBe(`iOS simulator ${UDID} is already running`);
     expect(harness.bootstatusInvocations()).toBe(1);
   });

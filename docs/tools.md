@@ -1093,7 +1093,7 @@ Without an owner, iOS selects the first element carrying a matching semantic
 link in document order, then resolves `occurrence` within that element. This
 changes the previous tree-wide counting (#6631). It never skips to a later owner
 when the first lacks the occurrence or link geometry. With multiple candidate
-owners, a successful SDK activation includes a runner `warning` naming the
+owners, a successful SDK activation adds the runner's note to the result's `warnings`, naming the
 selected owner and candidate count; use `container`/`subtext` for a specific owner.
 
 When SDK resolution fails, the XCUITest fallback remains available. Its flat
@@ -1580,7 +1580,21 @@ unchanged. `shake.intensity` sets Android shake intensity (default 100).
 `sendSms.phoneNumber` specifies the sender's number.
 `postNotification.channelId` supplies the Android channel ID or iOS APNs category.
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
-image path for `bigPicture`.
+image path for `bigPicture`. The host reads only the file's first bytes and
+rejects files over 16 MiB. It accepts PNG, JPEG, WebP, GIF and BMP everywhere,
+and HEIF/HEIC (decoded on Android 8.0+) and AVIF (Android 14+) with a warning,
+because the app falls back to showing the notification without the image on a
+device that cannot decode them.
+
+#### postNotification SDK compatibility
+
+The app's SDK receiver reports `0` (failed), `1` (posted) or `2` (posted, but the
+requested big picture could not be loaded, so it was shown without it). The host
+maps `2` to `success: true` with a warning and fails closed on any code it does
+not know, naming the code. A host older than the app's SDK predates code `2`, so
+an image-less `bigPicture` post that was actually posted is reported as
+`success: false` and a retry would post a duplicate. Update the host (AutoMobile)
+before, or together with, the SDK in the app.
 
 `biometricAuth.modality` selects `any` (default), `fingerprint`, or `face`.
 `fingerprintId` defaults to 1 for match/error and 2 for fail/cancel.

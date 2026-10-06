@@ -255,6 +255,10 @@ export class FakeNavigationGraphManager
     return this.currentScreen;
   }
 
+  recordEdgeReplayOutcome(edge: NavigationEdge, reached: boolean): void {
+    this.trackCall("recordEdgeReplayOutcome", [edge, reached]);
+  }
+
   findPath(targetScreen: string): PathResult {
     this.trackCall("findPath", [targetScreen]);
 

@@ -14,7 +14,7 @@ import type { prepareTargetDisplayAction } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { isStaleFrameContextRejection, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
-import type { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
+import type { TalkBackTapResult, TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import type { TalkBackNavigationDriver } from "../talkback/TalkBackNavigationDriver";
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 
@@ -155,6 +155,30 @@ export interface TalkBackDisplayTapContext {
   driver: TalkBackNavigationDriver;
 }
 
+/** Report touches the TalkBack strategy delivered and the warnings it attached. */
+function reportTalkBackDelivery(
+  result: TalkBackTapResult,
+  action: TapAnyElementOptions["action"],
+  hooks: { onDispatched: () => void; onWarning?: (warning: string) => void },
+): void {
+  if (result.success || result.focusCompleted) {
+    hooks.onDispatched();
+  }
+  if (!result.success) {
+    return;
+  }
+  if (action === "doubleTap") {
+    // The driver's atomic request delivers both activation touches, so a late
+    // cancellation is a completed double tap rather than a partial one.
+    hooks.onDispatched();
+  }
+  // A coordinate gesture the service acknowledged does not confirm semantic activation;
+  // surface the same warnings tapAt and the default route report.
+  for (const warning of result.warnings ?? []) {
+    hooks.onWarning?.(warning);
+  }
+}
+
 /** TalkBack-on tap on the default display: the strategies the implicit-display routes use. */
 function talkBackDisplayTapDispatch(
   options: Pick<TapAnyElementOptions, "action" | "duration">,
@@ -162,6 +186,7 @@ function talkBackDisplayTapDispatch(
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     signal?: AbortSignal;
     onDispatched: () => void;
+    onWarning?: (warning: string) => void;
     talkBack: TalkBackDisplayTapContext;
   },
 ): (point: { x: number; y: number }) => Promise<void> {
@@ -189,9 +214,7 @@ function talkBackDisplayTapDispatch(
               displayFence: fence,
             },
           );
-    if (result.success || result.focusCompleted) {
-      context.onDispatched();
-    }
+    reportTalkBackDelivery(result, action, context);
     throwIfAborted(signal);
     if (!result.success) {
       throw new ActionableError(

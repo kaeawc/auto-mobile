@@ -56,13 +56,21 @@ class StorageSubscriptionManagerTest {
   private val scope = TestScope(dispatcher)
   // Delays the manager asked for between a DISABLED reply and its retry; nothing really sleeps.
   private val pauses = mutableListOf<Long>()
+  private var fakeNowMs = 0L
 
   @Before
   fun setUp() {
     contentResolver = mockk(relaxed = true)
     context = mockk(relaxed = true)
     every { context.contentResolver } returns contentResolver
-    manager = StorageSubscriptionManager(context, dispatcher, scope, pause = { pauses += it })
+    manager =
+      StorageSubscriptionManager(
+        context,
+        dispatcher,
+        scope,
+        pause = { pauses += it },
+        nowMs = { fakeNowMs },
+      )
   }
 
   @After
@@ -396,6 +404,64 @@ class StorageSubscriptionManagerTest {
     assertEquals(3, pauses.size)
     assertTrue(manager.getActiveSubscriptions().isEmpty())
     verify(exactly = 6) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `refused start guidance applies within its time window`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "auth").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+
+    fakeNowMs += 9_999L
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "settings").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+  }
+
+  @Test
+  fun `expired refused start guidance is removed`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "auth").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+
+    fakeNowMs += 10_001L
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply())
+    val expiredError = manager.subscribe("com.example.app", "settings").exceptionOrNull()
+    assertTrue(expiredError is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", expiredError?.message)
+
+    givenSubscribeReplies(disabledReply())
+    val laterError = manager.subscribe("com.example.app", "other").exceptionOrNull()
+    assertTrue(laterError is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", laterError?.message)
+  }
+
+  @Test
+  fun `refused start guidance applies exactly at the window edge`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "auth").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
+
+    fakeNowMs += 10_000L
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply())
+    assertTrue(
+      manager.subscribe("com.example.app", "settings").exceptionOrNull()
+        is StorageError.AppStartedByRequest
+    )
   }
 
   @Test

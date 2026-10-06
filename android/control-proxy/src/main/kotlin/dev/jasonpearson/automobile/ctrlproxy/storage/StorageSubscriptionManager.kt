@@ -47,6 +47,7 @@ class StorageSubscriptionManager(
   // run without a wall-clock sleep; the subscribe path already blocks a background worker.
   private val retryDelayMs: Long = DISABLED_RETRY_DELAY_MS,
   private val pause: (Long) -> Unit = { Thread.sleep(it) },
+  private val nowMs: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
 
   /**
@@ -80,6 +81,8 @@ class StorageSubscriptionManager(
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
     private const val DISABLED_RETRY_DELAY_MS = 500L
+    // Keep launch guidance through multiple SDK startup intervals, then allow genuine disables.
+    private const val REFUSED_START_WINDOW_MS = DISABLED_RETRY_DELAY_MS * 20
     private const val MAX_REFUSED_START_PACKAGES = 64
   }
 
@@ -118,10 +121,10 @@ class StorageSubscriptionManager(
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  // Guarded by lifecycleLock, oldest entries evicted first. DISABLED cannot distinguish delayed
-  // initialization from a later intentional disable. Retain the launch guidance only until a
-  // non-DISABLED reply, explicit unsubscribe, or destroy; never claim the app is currently stopped.
-  private val refusedStartPackages = linkedSetOf<String>()
+  // Guarded by lifecycleLock, oldest entries evicted first. Retain launch guidance briefly because
+  // DISABLED cannot distinguish SDK startup from an intentional disable; never claim the app is
+  // currently stopped.
+  private val refusedStartPackages = linkedMapOf<String, Long>()
 
   // Bound events independently per subscribed file. If one file overflows, its newest event is
   // retained and exposes the sequence gap needed for snapshot recovery; unrelated files cannot
@@ -491,14 +494,16 @@ class StorageSubscriptionManager(
         refusedStartPackages.remove(packageName)
       } else if (!destroyed) {
         if (wasStopped) {
-          refusedStartPackages.add(packageName)
+          refusedStartPackages[packageName] = nowMs()
           if (refusedStartPackages.size > MAX_REFUSED_START_PACKAGES) {
-            refusedStartPackages.remove(refusedStartPackages.first())
+            refusedStartPackages.remove(refusedStartPackages.keys.first())
           }
         }
-        if (packageName in refusedStartPackages) {
+        val startedAtMs = refusedStartPackages[packageName]
+        if (startedAtMs != null && nowMs() - startedAtMs <= REFUSED_START_WINDOW_MS) {
           return Result.failure(StorageError.AppStartedByRequest(packageName))
         }
+        if (startedAtMs != null) refusedStartPackages.remove(packageName)
       }
     }
     return outcome.result

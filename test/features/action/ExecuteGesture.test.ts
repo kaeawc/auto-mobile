@@ -6,7 +6,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import type { BootedDevice } from "../../../src/models";
+import { ActionableError, type BootedDevice } from "../../../src/models";
 
 describe("ExecuteGesture", () => {
   const androidDevice: BootedDevice = {
@@ -235,6 +235,76 @@ describe("ExecuteGesture", () => {
     ).rejects.toThrow(
       "iOS multi-finger gesture failed: XCTest private multi-touch event synthesis classes are unavailable",
     );
+  });
+
+  describe("iOS single-finger path", () => {
+    const path = [
+      { x: 10, y: 600 },
+      { x: 10, y: 200 },
+    ];
+
+    function iosGesture(fakeClient: FakeIOSCtrlProxy): ExecuteGesture {
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeClient as unknown as IOSCtrlProxyClient,
+      );
+      return new ExecuteGesture(iosDevice, null);
+    }
+
+    test("a confirmed swipe resolves", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+
+      const result = await iosGesture(fakeClient).execute(path, 450);
+
+      expect(result).toEqual({ pathLength: 2, duration: 450, platform: "ios" });
+      expect(fakeClient.getSwipeHistory()).toEqual([
+        { x1: 10, y1: 600, x2: 10, y2: 200, duration: 450 },
+      ]);
+    });
+
+    test("a swipe sent without a reply is indeterminate, not a plain failure", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setSwipeResult({
+        success: false,
+        error: "Swipe timed out after 5000ms",
+        totalTimeMs: 5000,
+        dispatched: true,
+        acknowledged: false,
+      });
+
+      const error = await iosGesture(fakeClient)
+        .execute(path, 300)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toContain("Gesture outcome is indeterminate");
+      expect((error as Error).message).toContain("Swipe timed out after 5000ms");
+      expect((error as Error).message).toContain("Do not retry automatically");
+    });
+
+    test("a runner refusal stays a plain failure", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setSwipeResult({ success: false, error: "Runner refused", totalTimeMs: 1 });
+
+      await expect(iosGesture(fakeClient).execute(path, 300)).rejects.toThrow(
+        "iOS gesture failed: Runner refused",
+      );
+    });
+
+    test("a swipe that never reached the runner stays a plain failure", async () => {
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setSwipeResult({
+        success: false,
+        error: "Not connected",
+        totalTimeMs: 0,
+        dispatched: false,
+      });
+
+      const error = await iosGesture(fakeClient)
+        .execute(path, 300)
+        .catch((e: unknown) => e);
+
+      expect((error as Error).message).toBe("iOS gesture failed: Not connected");
+    });
   });
 
   test("rejects iOS multi-finger paths CtrlProxy cannot preserve", async () => {

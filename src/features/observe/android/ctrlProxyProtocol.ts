@@ -424,6 +424,8 @@ export interface ShowOverlayMessage {
   type: "show_overlay";
   requestId: string;
   spec: OverlaySpec;
+  /** Android logical display; omitted for the default display. Requires overlay_display_id_v1. */
+  displayId?: number;
 }
 /** Replacement spec.id must equal the top-level id; hosts reject mismatches before sending. */
 export type OverlayUpdate = { id: string } & (
@@ -788,12 +790,19 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "request_list_keyboard_profiles",
 ] as const satisfies readonly CtrlProxyRequestType[];
 
+/**
+ * Advertised only by a CtrlProxy that attaches `show_overlay` to the requested `displayId`. An
+ * older device would ignore the unknown field and show the overlay on the default display.
+ */
+export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
   "ime_key_events_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
+  OVERLAY_DISPLAY_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -1197,8 +1206,17 @@ export const ctrlProxyRequests = {
     return { type: "get_traversal_order", requestId: args.requestId };
   },
 
-  showOverlay(args: { requestId: string; spec: OverlaySpec }): ShowOverlayMessage {
-    return { type: "show_overlay", requestId: args.requestId, spec: args.spec };
+  showOverlay(args: {
+    requestId: string;
+    spec: OverlaySpec;
+    displayId?: number;
+  }): ShowOverlayMessage {
+    return {
+      type: "show_overlay",
+      requestId: args.requestId,
+      spec: args.spec,
+      ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
+    };
   },
 
   updateOverlay(args: { requestId: string } & OverlayUpdate): UpdateOverlayMessage {

@@ -8,6 +8,7 @@ import { sendCommand } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
+  OVERLAY_DISPLAY_CAPABILITY,
   type ShowOverlayMessage,
   type UpdateOverlayMessage,
   type DismissOverlayMessage,
@@ -16,6 +17,11 @@ import {
   type OverlayResult,
   type OverlayUpdate,
 } from "./ctrlProxyProtocol";
+
+/** Shared by the client transport guard and the tool-level refusal. */
+export function overlayDisplayUnsupportedMessage(displayId: number): string {
+  return `show_overlay: the connected CtrlProxy does not advertise ${OVERLAY_DISPLAY_CAPABILITY}, so it cannot show an overlay on display ${displayId} and would place it on the default display; update the connected CtrlProxy or omit display.`;
+}
 
 const overlayEventSchema = z.object({
   type: z.literal("overlay_event"),
@@ -34,13 +40,23 @@ export class CtrlProxyOverlays {
 
   constructor(private readonly context: DelegateContext) {}
 
+  /**
+   * [displayId] is the Android logical display; undefined and 0 both mean the default display and
+   * keep the wire byte-identical to a request from before display targeting existed.
+   */
   async requestShowOverlay(
     spec: OverlaySpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<OverlayResult> {
     this.validateSpec(spec);
-    return this.request(ctrlProxyRequests.showOverlay({ requestId: "", spec }), timeoutMs, perf);
+    const target = displayId === undefined || displayId === 0 ? undefined : displayId;
+    return this.request(
+      ctrlProxyRequests.showOverlay({ requestId: "", spec, displayId: target }),
+      timeoutMs,
+      perf,
+    );
   }
 
   async requestUpdateOverlay(
@@ -105,6 +121,14 @@ export class CtrlProxyOverlays {
       throw new ActionableError(
         `${type}: this CtrlProxy build does not support overlays; update the connected CtrlProxy.`,
       );
+    }
+    if (
+      message.type === "show_overlay" &&
+      message.displayId !== undefined &&
+      this.context.isCommandSupported?.(OVERLAY_DISPLAY_CAPABILITY) !== true
+    ) {
+      // Never send displayId to a device that would ignore it and show on the default display.
+      throw new ActionableError(overlayDisplayUnsupportedMessage(message.displayId));
     }
     const params: Record<string, unknown> = { ...message };
     delete params.type;

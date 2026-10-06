@@ -141,6 +141,37 @@ internal class FakeInteractiveOverlayHost : InteractiveOverlayHost {
   override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
 }
 
+/**
+ * Fake display provider: a display is available only while it is in [connected]. Each opened
+ * display gets its own recording WindowManager sharing [history], so cross-display ordering shows.
+ */
+internal class FakeOverlayDisplays(
+  private val main: FakeOverlayMainThread,
+  private val history: MutableList<String>,
+  private val context: android.content.Context,
+) : OverlayDisplayProvider, OverlayDisplayWindows {
+  val connected = mutableSetOf<Int>()
+  val densities = mutableMapOf<Int, Float>()
+  val opened = mutableListOf<Int>()
+  val managers = mutableMapOf<Int, RecordingOverlayWindowManager>()
+
+  fun connect(displayId: Int, density: Float = 2f): RecordingOverlayWindowManager {
+    connected += displayId
+    densities[displayId] = density
+    return managers.getOrPut(displayId) { RecordingOverlayWindowManager(main, history) }
+  }
+
+  override fun isAvailable(displayId: Int) = displayId == 0 || displayId in connected
+
+  override fun open(displayId: Int): OverlayDisplayWindow? {
+    if (displayId !in connected) return null
+    opened += displayId
+    return OverlayDisplayWindow(context, managers.getValue(displayId)) {
+      densities.getValue(displayId)
+    }
+  }
+}
+
 /** Virtual one-shot scheduler; cancelled callbacks can also be exercised to model queue races. */
 internal class FakeOverlayTimer : OverlayScheduler {
   internal data class Task(

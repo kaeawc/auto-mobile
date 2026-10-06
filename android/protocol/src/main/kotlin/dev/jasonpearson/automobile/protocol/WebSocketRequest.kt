@@ -428,11 +428,18 @@ data class AddHighlight(
 ) : WebSocketRequest()
 
 // Agent-authored overlays
+/**
+ * [displayId] is the Android logical display, with the same meaning as the gesture requests'
+ * `displayId`. Absent/null means the service's default display (the pre-#9308 behaviour); hosts
+ * only send it to a device advertising `overlay_display_id_v1`, because an older device would
+ * ignore the unknown field and silently show the overlay on the wrong display.
+ */
 @Serializable
 @SerialName("show_overlay")
 data class ShowOverlay(
   override val requestId: String? = null,
   val spec: OverlaySpec,
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 /** Replacement spec.id must equal id; the host rejects mismatches before sending. */

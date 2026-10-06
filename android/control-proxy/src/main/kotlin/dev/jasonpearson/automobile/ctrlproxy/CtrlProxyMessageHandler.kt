@@ -469,7 +469,18 @@ class CtrlProxyMessageHandler(
       is AddHighlight ->
         actions.addHighlight(request.requestId, request.id, request.shape?.toModel())
 
-      is ShowOverlay -> actions.showOverlay(request.requestId, request.spec)
+      is ShowOverlay -> {
+        // Same display rules as the gestures; the controller then checks the display is connected.
+        GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+          return OverlayResult(
+            timestamp = System.currentTimeMillis(),
+            requestId = request.requestId,
+            success = false,
+            error = error,
+          )
+        }
+        actions.showOverlay(request.requestId, request.spec, request.displayId)
+      }
       is UpdateOverlay -> {
         if ((request.spec == null) == (request.state == null)) {
           return OverlayResult(

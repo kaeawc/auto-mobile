@@ -99,7 +99,13 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   private overlayResult: OverlayResult = { success: true };
   private readonly overlayHistory: Array<
-    | { method: "show"; spec: OverlaySpec; timeoutMs: number; perf?: PerformanceTracker }
+    | {
+        method: "show";
+        spec: OverlaySpec;
+        timeoutMs: number;
+        perf?: PerformanceTracker;
+        displayId?: number;
+      }
     | { method: "update"; update: OverlayUpdate; timeoutMs: number; perf?: PerformanceTracker }
     | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
@@ -117,9 +123,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     spec: OverlaySpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<OverlayResult> {
     this.checkFailure("requestShowOverlay");
-    this.overlayHistory.push({ method: "show", spec, timeoutMs, perf });
+    this.overlayHistory.push({
+      method: "show",
+      spec,
+      timeoutMs,
+      perf,
+      ...(displayId === undefined ? {} : { displayId }),
+    });
     return this.overlayResult;
   }
 

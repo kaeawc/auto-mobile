@@ -584,9 +584,22 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
+`show` accepts the same optional `display` selector as the tap tools (a panel
+key, a role such as `inner` or `cover`, or `active`), resolved with the same
+precedence: an explicit `display`, then the session display pin, then the default
+display. Omitting it sends no display and behaves exactly as before. A resolved
+non-default display is sent as the panel's logical `displayId` and needs a
+CtrlProxy advertising `overlay_display_id_v1`; an older APK is refused with an
+error rather than showing the overlay on the default display. An unknown or
+disconnected panel is refused with the usual disconnected-panel guidance. If the
+panel disappears while the overlay is up (fold), the device dismisses it with
+reason `teardown`; it is never moved to another display. `update` and `dismiss`
+act on the overlay where it is shown and do not take `display`.
+
 `status` performs no device request. It reports only overlays successfully
 shown by this host in the current session and device, with their last action,
-result, and host timestamp in milliseconds. It also returns the last attempted
+result, and host timestamp in milliseconds, plus the logical `displayId` when a
+display was requested. It also returns the last attempted
 mutation as `lastResult`, including a failed show without claiming it is shown.
 Failed updates or dismissals retain known presence. Successful dismissal removes
 the id from that device's host records; successful dismiss-all clears that device's entries across host sessions.

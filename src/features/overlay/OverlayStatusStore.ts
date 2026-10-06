@@ -7,6 +7,8 @@ export interface OverlayLastResult {
   id?: string;
   all?: true;
   lastAction: OverlayMutation;
+  /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
+  displayId?: number;
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -29,6 +31,7 @@ export interface OverlayStatusStore {
     action: OverlayMutation,
     target: { id?: string; all?: true },
     result: OverlayResult,
+    displayId?: number,
   ): OverlayLastResult;
 }
 interface StoredOverlayStatus extends OverlayScope {
@@ -55,10 +58,16 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     action: OverlayMutation,
     target: { id?: string; all?: true },
     result: OverlayResult,
+    displayId?: number,
   ): OverlayLastResult {
-    const entry = this.createResult(action, target, result);
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
+    // An update or dismiss acts on the overlay already shown, wherever it was shown.
+    const shownDisplay =
+      action !== "show" && target.id !== undefined
+        ? existing?.shown.get(target.id)?.displayId
+        : undefined;
+    const entry = this.createResult(action, target, result, displayId ?? shownDisplay);
     if (!existing && !result.success) {
       return { ...entry };
     }
@@ -112,10 +121,12 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     action: OverlayMutation,
     target: { id?: string; all?: true },
     result: OverlayResult,
+    displayId?: number,
   ): OverlayLastResult {
     return {
       ...target,
       lastAction: action,
+      ...(displayId === undefined ? {} : { displayId }),
       success: result.success,
       ...(result.error ? { error: result.error } : {}),
       ...(result.totalTimeMs === undefined ? {} : { totalTimeMs: result.totalTimeMs }),

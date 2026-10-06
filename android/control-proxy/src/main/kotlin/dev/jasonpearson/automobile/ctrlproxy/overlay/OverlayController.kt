@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import android.util.Log
+import android.view.Display
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
@@ -28,6 +29,8 @@ class OverlayController(
   private val clock: () -> Long = System::currentTimeMillis,
   private val lifecycle: OverlayLifecycle = OverlayLifecycle(CoroutineOverlayScheduler()),
   private val render: (OverlaySpec) -> InteractiveOverlayRequest = { mapOverlaySpec(it).request() },
+  /** Decides whether a non-default display can host the overlay; the default always can. */
+  private val displays: OverlayDisplayProvider = OverlayDisplayProvider { true },
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -50,9 +53,14 @@ class OverlayController(
     classDiscriminator = "type"
   }
 
-  suspend fun show(requestId: String?, spec: OverlaySpec) =
+  /** [displayId] null means the default display, exactly as before display targeting. */
+  suspend fun show(requestId: String?, spec: OverlaySpec, displayId: Int? = null) =
     execute(requestId) {
-      display(spec, replace = activeRuntime != null)
+      display(
+        spec,
+        replace = activeRuntime != null,
+        displayId = displayId ?: Display.DEFAULT_DISPLAY,
+      )
     }
 
   suspend fun update(
@@ -66,7 +74,9 @@ class OverlayController(
       require(current?.id == id) { "Unknown overlay id: $id" }
       require((spec == null) != (state == null)) { "Exactly one of spec or state is required" }
       require(spec == null || spec.id == id) { "spec.id: Must match overlay id $id" }
-      if (spec != null) display(spec, replace = true, preservePages = true)
+      // A replacement spec stays on the display the overlay was shown on.
+      if (spec != null)
+        display(spec, replace = true, preservePages = true, displayId = shownDisplayId())
       else {
         val patched =
           validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
@@ -98,9 +108,23 @@ class OverlayController(
     }
   }
 
-  private suspend fun display(spec: OverlaySpec, replace: Boolean, preservePages: Boolean = false) {
+  private fun shownDisplayId(): Int = activeRequest?.displayId ?: Display.DEFAULT_DISPLAY
+
+  /** The default display is always present; any other must be connected, or nothing is replaced. */
+  private fun requireDisplayAvailable(displayId: Int) =
+    require(displayId == Display.DEFAULT_DISPLAY || displays.isAvailable(displayId)) {
+      "Unknown or disconnected display: $displayId"
+    }
+
+  private suspend fun display(
+    spec: OverlaySpec,
+    replace: Boolean,
+    preservePages: Boolean = false,
+    displayId: Int = Display.DEFAULT_DISPLAY,
+  ) {
     val validated = validate(spec)
-    val request = render(validated)
+    val request = render(validated).copy(displayId = displayId)
+    requireDisplayAvailable(displayId)
     val previous = activeRuntime
     val observerSession = lifecycle.observerSession()
     val runtime =
@@ -246,9 +270,28 @@ class OverlayController(
 
   /**
    * Rotation/density changes keep the same runtime and Compose tree; hiding retains authored state.
+   * The overlay's own display going away dismisses it even when the caller does not know that.
    */
   suspend fun onConfigurationChanged(displayAvailable: Boolean = true) = signal {
     val runtime = activeRuntime ?: return@signal
+    applyWindowDecision(runtime, displayAvailable && ownDisplayAvailable())
+  }
+
+  /**
+   * A display callback. Only the overlay's own display matters: its removal dismisses with
+   * `teardown` rather than moving the content to another display, and a change relayouts. Other
+   * displays' transitions are not this overlay's business.
+   */
+  suspend fun onDisplayTransition(displayId: Int, removed: Boolean) = signal {
+    val runtime = activeRuntime ?: return@signal
+    if (displayId == shownDisplayId())
+      applyWindowDecision(runtime, !removed && ownDisplayAvailable())
+  }
+
+  private fun ownDisplayAvailable(): Boolean =
+    shownDisplayId() == Display.DEFAULT_DISPLAY || displays.isAvailable(shownDisplayId())
+
+  private suspend fun applyWindowDecision(runtime: OverlayRuntime, displayAvailable: Boolean) {
     when (overlayWindowDecision(displayAvailable, lifecycle.isBlocked())) {
       OverlayWindowDecision.DISMISS -> runtime.dismiss(OverlayDismissReason.TEARDOWN)
       OverlayWindowDecision.HIDE -> {

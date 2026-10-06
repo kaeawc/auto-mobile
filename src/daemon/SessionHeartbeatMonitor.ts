@@ -16,10 +16,10 @@ export interface HeartbeatSessionSource {
   /** Remove expired sessions and fire their release callbacks. */
   cleanupExpiredSessions(): void;
   /**
-   * Give every session a fresh lease-plus-grace from `resumedAt` because the
-   * daemon itself stalled and cannot have received heartbeats meanwhile (#10051).
+   * Move every session's lease forward by `lostMs`, the interval the daemon itself stalled for
+   * and cannot have received heartbeats during (#10051). Never past `resumedAt`.
    */
-  forgiveDaemonStall?(resumedAt: number): number;
+  forgiveDaemonStall?(resumedAt: number, lostMs: number): number;
 }
 
 type SessionHeartbeatReleaseReason =
@@ -47,11 +47,17 @@ export interface SessionHeartbeatMonitorConfig {
   heartbeatTimeoutMs?: number;
   /**
    * How much later than scheduled a tick may fire before the daemon is judged to
-   * have stalled itself and no session is held to the stalled interval (#10051).
-   * Default: the default heartbeat lease.
+   * have stalled itself and no session is held to the lost interval (#10051).
+   * Judged against the monitor's own interval, not the lease: a daemon that was
+   * silent for only a fraction of the lease can still push a heartbeating owner
+   * past lease plus grace when the reaper runs before its buffered heartbeats.
+   * Default: {@link DEFAULT_STALL_MARGIN_MS}, which absorbs ordinary timer jitter.
    */
   stallThresholdMs?: number;
 }
+
+/** Timer jitter tolerated before a late scan is treated as a stall of the daemon itself. */
+export const DEFAULT_STALL_MARGIN_MS = 2_000;
 
 const DEFAULT_CHECK_INTERVAL_MS = 10_000;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
@@ -121,7 +127,7 @@ export class SessionHeartbeatMonitor {
         "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
-    this.stallThresholdMs = config.stallThresholdMs ?? this.defaultHeartbeatTimeoutMs;
+    this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
     this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () =>
       this.tickOnce(),
     );
@@ -159,9 +165,9 @@ export class SessionHeartbeatMonitor {
   }
 
   /**
-   * A tick that fires far later than scheduled means the daemon's own event loop
-   * stalled, so the owners' heartbeats could not have reached it. Never reap on
-   * the strength of that: restart every session's lease from this resumed tick.
+   * A tick that fires later than scheduled by more than the margin means the daemon's own event
+   * loop stalled, so the owners' heartbeats could not have reached it for that long. Never reap
+   * on the strength of that: every session's lease is moved forward by exactly the lateness.
    */
   private forgiveOwnStall(): void {
     const now = this.timer.now();
@@ -169,10 +175,10 @@ export class SessionHeartbeatMonitor {
     if (lateness === undefined || lateness <= this.stallThresholdMs) {
       return;
     }
-    const forgiven = this.sessions.forgiveDaemonStall?.(now) ?? 0;
+    const forgiven = this.sessions.forgiveDaemonStall?.(now, lateness) ?? 0;
     logger.warn(
       `Heartbeat monitor tick fired ${lateness}ms late; the daemon stalled, so ${forgiven} ` +
-        `session(s) get a fresh lease instead of being reaped for the stalled interval`,
+        `session(s) get their lease extended by ${lateness}ms instead of being reaped for the stalled interval`,
     );
   }
 

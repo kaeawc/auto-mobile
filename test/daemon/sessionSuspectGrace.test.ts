@@ -231,15 +231,13 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("a silent owner is still reaped by on-schedule ticks after lease plus grace", async () => {
       monitor.start();
+      // Each scan settles before the clock moves on, as on a daemon that is keeping its schedule.
       for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += 10_000) {
-        timer.advanceTime(10_000);
-        await Promise.resolve();
+        await timer.advanceTimeAsync(10_000);
       }
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(10_000);
-      await Promise.resolve();
-      await Promise.resolve();
+      await timer.advanceTimeAsync(10_000);
 
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
@@ -255,9 +253,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       expect(reaped).toEqual([]);
       expect(sessionManager.getSession(SESSION)).not.toBeNull();
+      // Exactly the lost interval is forgiven (#10051 review F7): 60s of silence, 10s scheduled,
+      // so the lease is judged as if only the scheduled 10s had passed.
       expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
         phase: "live",
-        remainingMs: LEASE_MS,
+        remainingMs: 0,
       });
     });
 
@@ -275,19 +275,21 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(sessionManager.getSession(SESSION)).toBe(original);
     });
 
-    test("an owner that never returns gets a fresh lease plus grace from the resumed tick", async () => {
+    test("an owner that never returns is reaped once its lease plus grace, minus the lost interval, is spent", async () => {
       monitor.start();
       timer.setCurrentTime(timer.now() + 60_000);
       await monitor.tick();
       const resumedAt = timer.now();
 
-      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS);
+      // 60s silent against a 10s schedule: 50s forgiven, so only the scheduled 10s was counted
+      // and 10s of lease plus grace remain.
+      timer.advanceTime(LEASE_MS);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
       timer.advanceTime(1);
       await monitor.tick();
-      expect(timer.now() - resumedAt).toBe(LEASE_MS + SUSPECT_GRACE_MS + 1);
+      expect(timer.now() - resumedAt).toBe(LEASE_MS + 1);
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
@@ -303,8 +305,8 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("a tick only slightly late is not a stall and forgives nothing", async () => {
       monitor.start();
-      // 5s late against a 10s threshold: heartbeats were being received.
-      timer.setCurrentTime(timer.now() + 10_000 + 5_000);
+      // 1s late against a 2s margin: ordinary timer jitter, heartbeats were being received.
+      timer.setCurrentTime(timer.now() + 10_000 + 1_000);
       await monitor.tick();
       expect(sessionManager.getSession(SESSION)?.stallForgivenAt).toBeUndefined();
     });
@@ -318,10 +320,73 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
+    test("a 16s stall that is only 7s late is forgiven instead of reaping a heartbeating owner (review F7)", async () => {
+      // The review's example: lease 10s, grace 10s, scans every 10s. The owner's last heartbeat
+      // is 4.5s before a 16s stall that starts 1s after a scan, so the scan that wakes first
+      // fires 7s late and sees a session aged 20.5s.
+      const original = sessionManager.getSession(SESSION);
+      monitor.start();
+      timer.setCurrentTime(6_500);
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      timer.setCurrentTime(10_000);
+      await monitor.tick();
+      timer.setCurrentTime(10_000 + 1_000 + 16_000);
+
+      await monitor.tick();
+
+      expect(reaped).toEqual([]);
+      expect(sessionManager.getSession(SESSION)).toBe(original);
+      // The 7s the daemon was late are not counted: the session ages from 6.5s + 7s.
+      expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
+        phase: "suspect",
+        remainingMs: 6_500,
+      });
+      // Its owner's buffered heartbeat then restores it.
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+    });
+
+    test("the same stall reaps the owner when the stall threshold is the lease (old blind spot)", async () => {
+      const strictMonitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+          await sessionManager.releaseSession(sessionId, reason);
+        },
+        timer,
+        { stallThresholdMs: LEASE_MS },
+      );
+      try {
+        strictMonitor.start();
+        timer.setCurrentTime(6_500);
+        await heartbeat(OWNER);
+        timer.setCurrentTime(10_000);
+        await strictMonitor.tick();
+        timer.setCurrentTime(27_000);
+
+        await strictMonitor.tick();
+
+        expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
+      } finally {
+        await strictMonitor.stop();
+      }
+    });
+
+    test("forgiveness never moves a lease past the resume point", () => {
+      const session = sessionManager.getSession(SESSION);
+      const heartbeatAt = session?.lastHeartbeat ?? 0;
+      timer.setCurrentTime(heartbeatAt + 5_000);
+
+      sessionManager.forgiveDaemonStall(timer.now(), 60_000);
+
+      expect(session?.stallForgivenAt).toBe(heartbeatAt + 5_000);
+    });
+
     test("a one-shot CLI session keeps its own idle policy through a stall", async () => {
       sessionManager.adoptCliLivenessPolicy(SESSION);
 
-      expect(sessionManager.forgiveDaemonStall(timer.now() + 60_000)).toBe(0);
+      expect(sessionManager.forgiveDaemonStall(timer.now() + 60_000, 60_000)).toBe(0);
       expect(sessionManager.getSession(SESSION)?.stallForgivenAt).toBeUndefined();
       expect(sessionManager.getSessionLeaseState(SESSION)).toBeUndefined();
     });
@@ -395,6 +460,91 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         await restartedMonitor.stop();
         restarted.stopCleanupTimer();
       }
+    });
+  });
+
+  describe("one owner at a time (#10050 review)", () => {
+    const THIRD = "harness-c";
+
+    test("two foreign tokens claiming a lapsed, unreaped session together: exactly one wins (F2)", async () => {
+      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+
+      const [first, second] = await Promise.all([heartbeat(FOREIGN, true), heartbeat(THIRD, true)]);
+
+      expect([first.success, second.success].sort()).toEqual([false, true]);
+      const loser = first.success ? second : first;
+      expect(loser.code).toBe("liveness_owner_conflict");
+      const winnerToken = first.success ? FOREIGN : THIRD;
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(winnerToken);
+      expect(sessionManager.hasLivenessOwnership(SESSION, winnerToken)).toBe(true);
+    });
+
+    test("the claim's own lease stamp makes a second claimant conflict before any heartbeat is recorded (F2)", async () => {
+      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+
+      expect(await sessionManager.claimLivenessOwnership(SESSION, FOREIGN)).toBe("claimed");
+
+      // No recordHeartbeat has run yet; the daemon must already see FOREIGN's lease as live.
+      expect(await sessionManager.claimLivenessOwnership(SESSION, THIRD)).toBe("conflict");
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(FOREIGN);
+    });
+
+    test("a rejected claim does not stamp the owner's lease (F2 pin)", async () => {
+      timer.advanceTime(LEASE_MS - 1_000);
+      const before = sessionManager.getSession(SESSION)?.lastOwnerHeartbeat;
+
+      expect(await sessionManager.claimLivenessOwnership(SESSION, FOREIGN)).toBe("conflict");
+
+      expect(sessionManager.getSession(SESSION)?.lastOwnerHeartbeat).toBe(before);
+    });
+
+    test("a non-owner's tool calls do not keep the owner's lease alive, so a restarted proxy wins after lease plus grace (F1a)", async () => {
+      // OWNER stops heartbeating at t=0 (a dead proxy). The restarted proxy, with a new token,
+      // keeps working: every call names the session and refreshes its activity.
+      for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += 5_000) {
+        timer.advanceTime(5_000);
+        await sessionManager.getOrCreateSession(SESSION);
+        await monitor.tick();
+        expect((await heartbeat(FOREIGN, true)).code).toBe("liveness_owner_conflict");
+      }
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(1);
+      await sessionManager.getOrCreateSession(SESSION);
+      const claim = await heartbeat(FOREIGN, true);
+
+      expect(claim.success).toBe(true);
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(FOREIGN);
+    });
+
+    test("cache updates by a non-owner do not extend the owner's lease either (F1a)", async () => {
+      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS);
+      sessionManager.updateSessionCache(SESSION, {});
+      sessionManager.getSessionCache(SESSION);
+      timer.advanceTime(1);
+
+      expect((await heartbeat(FOREIGN, true)).success).toBe(true);
+    });
+
+    test("an owner that heartbeats keeps foreign claims out however busy the session is (F1a pin)", async () => {
+      for (let elapsed = 0; elapsed < 60_000; elapsed += 5_000) {
+        timer.advanceTime(5_000);
+        expect((await heartbeat(OWNER)).success).toBe(true);
+        await sessionManager.getOrCreateSession(SESSION);
+        expect((await heartbeat(FOREIGN, true)).code).toBe("liveness_owner_conflict");
+      }
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(OWNER);
+    });
+
+    test("a single proxy's tool calls and heartbeats behave as before (F1a pin)", async () => {
+      timer.advanceTime(4_000);
+      await sessionManager.getOrCreateSession(SESSION);
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
+        phase: "live",
+        remainingMs: LEASE_MS,
+      });
     });
   });
 });

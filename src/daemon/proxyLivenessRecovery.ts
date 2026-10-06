@@ -12,6 +12,10 @@
  * the same owner token; a session the daemon holds as suspect is restored with the same UUID).
  * After that the proxy hands over to the harness with a structured error and does nothing more.
  *
+ * Only an answer from the daemon proves a session lost (`proxy_stalled`): a session the daemon says
+ * it no longer has, or that another token now owns. A daemon that never answers is stalled
+ * (`daemon_stalled`) whichever state recovery started in.
+ *
  * Nothing here reaches a daemon manager: the daemon is shared by every harness, so restarting it is
  * a harness action named in the handover, never a proxy one. The only way this module talks to the
  * daemon is the injected {@link LivenessRecoveryDeps.attempt}.
@@ -55,9 +59,6 @@ export type LivenessStallCode = typeof DAEMON_STALLED_CODE | typeof PROXY_STALLE
  */
 export const RECOVERY_SAFETY_MARGIN_MS = 1_000;
 
-/** The shortest a recovery attempt is given, however little of the budget is left. */
-export const MIN_RECOVERY_ATTEMPT_MS = 250;
-
 /** Recovery action named to the harness for each state. */
 export const RESTART_DAEMON_THEN_RESUME_ACTION = "restart_daemon_then_resume_by_session_uuid";
 export const REACQUIRE_LOST_SESSIONS_ACTION = "reacquire_lost_sessions";
@@ -77,19 +78,26 @@ export function ownershipConflictLeashMs(leaseMs: number, intervalMs: number): n
 }
 
 /**
- * The time given to each of the recovery attempts for one session, measured from `now`. The slots
- * divide whatever remains of the lease-plus-grace budget after the last acknowledged heartbeat, so
- * all attempts complete inside it whatever the heartbeat cadence; once the budget is already
- * spent each attempt still gets {@link MIN_RECOVERY_ATTEMPT_MS}.
+ * The time given to each of the recovery attempts for one session, measured from `now`.
+ *
+ * While a real share of the lease-plus-grace budget after the last acknowledged heartbeat is left,
+ * the slots divide it, so all attempts complete inside it whatever the heartbeat cadence. A budget
+ * that is already (nearly) spent says nothing about the daemon: after a long proxy stall the
+ * daemon may have forgiven its own stall and still hold the session, and an attempt shorter than
+ * a normal heartbeat could not tell a slow daemon from a dead one. Each attempt then gets the
+ * heartbeat request timeout, the time a regular heartbeat is given to be answered.
  */
 export function recoveryAttemptSlotMs(params: {
   leaseMs: number;
   lastAckAt: number;
   now: number;
+  /** How long a regular heartbeat is given before it counts as unanswered. */
+  requestTimeoutMs: number;
 }): number {
   const remaining =
     params.lastAckAt + livenessBudgetMs(params.leaseMs) - RECOVERY_SAFETY_MARGIN_MS - params.now;
-  return Math.max(MIN_RECOVERY_ATTEMPT_MS, Math.floor(remaining / LIVENESS_RECOVERY_ATTEMPTS));
+  const budgetSlot = Math.floor(remaining / LIVENESS_RECOVERY_ATTEMPTS);
+  return budgetSlot >= params.requestTimeoutMs / 2 ? budgetSlot : params.requestTimeoutMs;
 }
 
 /** Measures how much later than its cadence a periodic tick fired. */
@@ -150,8 +158,9 @@ export function livenessHandoverMessage(handover: LivenessHandover): string {
   }
   return (
     `This MCP proxy stalled for longer than the heartbeat lease and could not restore ${sessions} ` +
-    `after ${handover.attempts} automatic attempts: the daemon released them. Reacquire the ` +
-    `devices with getAndroid or getApple.`
+    `after ${handover.attempts} automatic attempt(s): the daemon answered that it released them ` +
+    `or that another liveness owner has taken them over. Reacquire the devices with getAndroid ` +
+    `or getApple.`
   );
 }
 
@@ -174,23 +183,35 @@ export function livenessHandoverPayload(handover: LivenessHandover) {
 /**
  * - `acknowledged`: the daemon answered the heartbeat; the session is live (or restored).
  * - `session-gone`: the daemon answered that it does not know the session.
+ * - `superseded`: the daemon answered that another token now owns the session's liveness, so this
+ *   proxy was displaced while it could not heartbeat.
  * - `unreachable`: no acknowledgement (error or the attempt's time slot ran out).
  */
-export type RecoveryAttemptOutcome = "acknowledged" | "session-gone" | "unreachable";
+export type RecoveryAttemptOutcome = "acknowledged" | "session-gone" | "superseded" | "unreachable";
 
 export interface LivenessRecoveryDeps {
   timer: Timer;
   /** The heartbeat lease the proxy believes the daemon enforces. */
   leaseMs: number;
+  /** How long a regular heartbeat is given before it counts as unanswered. */
+  requestTimeoutMs: number;
   lastAckAt(sessionUuid: string): number;
+  /** Whether the daemon acknowledged a heartbeat for the session after `sinceMs` (proxy clock). */
+  hasAcknowledgedSince(sessionUuid: string, sinceMs: number): boolean;
   deviceIdOf(sessionUuid: string): string | undefined;
   /** False once the session is no longer held or the proxy is closing. */
   isActive(sessionUuid: string): boolean;
-  /** One reconnect-if-needed and re-heartbeat with the proxy's owner token. */
+  /**
+   * One reconnect-if-needed and re-heartbeat with the proxy's owner token. `claimSocketReset`
+   * returns true at most once per recovery episode, shared by every session in it: the daemon
+   * socket is one connection for all of the proxy's sessions, so only one attempt per episode may
+   * replace it.
+   */
   attempt(
     sessionUuid: string,
     attemptNumber: number,
     deadlineMs: number,
+    claimSocketReset: () => boolean,
   ): Promise<RecoveryAttemptOutcome>;
   onRecovered(info: {
     sessionUuid: string;
@@ -204,35 +225,63 @@ export interface LivenessRecoveryDeps {
   onHandover(handover: LivenessHandover): void;
 }
 
+/** A session whose automatic recovery failed, held by its episode until the handover. */
+interface FailedSession {
+  session: StalledSession;
+  /** The state to report it under: `proxy_stalled` only when the daemon said it was lost. */
+  code: LivenessStallCode;
+  attempts: number;
+  /** Proxy clock reading when recovery gave up on it. */
+  failedAt: number;
+}
+
 interface Episode {
   pending: number;
-  failed: Map<string, StalledSession>;
-  attempts: number;
+  failed: Map<string, FailedSession>;
 }
+
+interface AttemptOutcomeContext {
+  sessionUuid: string;
+  code: LivenessStallCode;
+  episode: Episode;
+  attempt: number;
+  outcome: RecoveryAttemptOutcome;
+  restoredAfterLapse: boolean;
+}
+
+const HANDOVER_ORDER: readonly LivenessStallCode[] = [DAEMON_STALLED_CODE, PROXY_STALLED_CODE];
 
 /**
  * Runs bounded recovery for each session that lost its acknowledgements. Sessions entering the same
  * state while it is still open share one episode, so the harness gets one handover naming them all.
+ * A session that failed stays held by its episode, and is not recovered again, until that handover.
  */
 export class LivenessRecovery {
   private readonly recovering = new Map<string, Promise<void>>();
   private readonly episodes = new Map<LivenessStallCode, Episode>();
+  private readonly sleepers = new Set<() => void>();
+  private readonly stopSignal = new AbortController();
+  private socketResetClaimed = false;
   private stopped = false;
 
   constructor(private readonly deps: LivenessRecoveryDeps) {}
 
+  /** Whether the session is being recovered, or failed and awaits its episode's handover. */
   isRecovering(sessionUuid: string): boolean {
-    return this.recovering.has(sessionUuid);
+    return (
+      this.recovering.has(sessionUuid) ||
+      [...this.episodes.values()].some((episode) => episode.failed.has(sessionUuid))
+    );
   }
 
-  /** Start recovering a session; a no-op while it already is. */
+  /** Start recovering a session; a no-op while it already is (or awaits a handover). */
   begin(sessionUuid: string, code: LivenessStallCode): void {
-    if (this.stopped || this.recovering.has(sessionUuid)) {
+    if (this.stopped || this.isRecovering(sessionUuid)) {
       return;
     }
     let episode = this.episodes.get(code);
     if (!episode) {
-      episode = { pending: 0, failed: new Map(), attempts: 0 };
+      episode = { pending: 0, failed: new Map() };
       this.episodes.set(code, episode);
     }
     episode.pending += 1;
@@ -243,15 +292,27 @@ export class LivenessRecovery {
     this.recovering.set(sessionUuid, run);
   }
 
-  /** Stop all recovery without handing over (the proxy is closing). */
+  /** Abandon all recovery without handing over (the proxy is closing), cutting any wait short. */
   stop(): void {
     this.stopped = true;
+    this.stopSignal.abort();
+    for (const wake of [...this.sleepers]) {
+      wake();
+    }
   }
 
   /** Resolves when every recovery in flight has settled. For tests and shutdown. */
   async settled(): Promise<void> {
     await Promise.all([...this.recovering.values()]);
   }
+
+  private readonly claimSocketReset = (): boolean => {
+    if (this.socketResetClaimed) {
+      return false;
+    }
+    this.socketResetClaimed = true;
+    return true;
+  };
 
   private async run(sessionUuid: string, code: LivenessStallCode, episode: Episode): Promise<void> {
     const startedAt = this.deps.timer.now();
@@ -261,32 +322,50 @@ export class LivenessRecovery {
       leaseMs: this.deps.leaseMs,
       lastAckAt: lastAckBefore,
       now: startedAt,
+      requestTimeoutMs: this.deps.requestTimeoutMs,
     });
     for (let attempt = 1; attempt <= LIVENESS_RECOVERY_ATTEMPTS; attempt += 1) {
       if (this.stopped || !this.deps.isActive(sessionUuid)) {
         return;
       }
-      episode.attempts = Math.max(episode.attempts, attempt);
       const outcome = await this.runAttempt(sessionUuid, attempt, slotMs);
       if (this.stopped) {
         return;
       }
-      if (outcome === "acknowledged") {
-        this.deps.onRecovered({
-          sessionUuid,
-          code,
-          attempts: attempt,
-          restoredAfterLapse: startedAt - lastAckBefore > this.deps.leaseMs,
-        });
-        return;
-      }
-      if (outcome === "session-gone") {
-        this.sessionGone(sessionUuid, code, episode);
+      const restoredAfterLapse = startedAt - lastAckBefore > this.deps.leaseMs;
+      if (this.settle({ sessionUuid, code, episode, attempt, outcome, restoredAfterLapse })) {
         return;
       }
       await this.waitForSlotEnd(startedAt + attempt * slotMs, attempt);
     }
-    this.markFailed(sessionUuid, episode);
+    // No attempt got an answer. A daemon that does not answer is stalled, whatever stalled the
+    // proxy first; only an answer from the daemon proves a session lost.
+    this.markFailed(sessionUuid, episode, DAEMON_STALLED_CODE, LIVENESS_RECOVERY_ATTEMPTS);
+  }
+
+  /** Act on an attempt's outcome; true when recovery for the session is over. */
+  private settle(context: AttemptOutcomeContext): boolean {
+    const { sessionUuid, code, episode, attempt, outcome } = context;
+    if (outcome === "acknowledged") {
+      this.deps.onRecovered({
+        sessionUuid,
+        code,
+        attempts: attempt,
+        restoredAfterLapse: context.restoredAfterLapse,
+      });
+      return true;
+    }
+    if (outcome === "session-gone" && code === DAEMON_STALLED_CODE) {
+      this.deps.onSessionGone(sessionUuid, code);
+      return true;
+    }
+    if (outcome === "session-gone" || outcome === "superseded") {
+      // The daemon answered that the session is released or now belongs to another owner: the
+      // loss the `proxy_stalled` handover reports, with the session fenced.
+      this.markFailed(sessionUuid, episode, PROXY_STALLED_CODE, attempt);
+      return true;
+    }
+    return false;
   }
 
   private async runAttempt(
@@ -295,11 +374,15 @@ export class LivenessRecovery {
     slotMs: number,
   ): Promise<RecoveryAttemptOutcome> {
     try {
-      return await raceWithDeadline(() => this.deps.attempt(sessionUuid, attempt, slotMs), {
-        timer: this.deps.timer,
-        timeoutMs: slotMs,
-        label: "Liveness recovery heartbeat",
-      });
+      return await raceWithDeadline(
+        () => this.deps.attempt(sessionUuid, attempt, slotMs, this.claimSocketReset),
+        {
+          timer: this.deps.timer,
+          timeoutMs: slotMs,
+          signal: this.stopSignal.signal,
+          label: "Liveness recovery heartbeat",
+        },
+      );
     } catch (error) {
       // A rejected or timed-out attempt is the failure this loop exists to count; the handover
       // reports how many were made.
@@ -314,25 +397,38 @@ export class LivenessRecovery {
   private async waitForSlotEnd(slotEnd: number, attempt: number): Promise<void> {
     const remaining = slotEnd - this.deps.timer.now();
     if (attempt < LIVENESS_RECOVERY_ATTEMPTS && remaining > 0) {
-      await this.deps.timer.sleep(remaining);
+      await this.sleepUnlessStopped(remaining);
     }
   }
 
-  private sessionGone(sessionUuid: string, code: LivenessStallCode, episode: Episode): void {
-    if (code === DAEMON_STALLED_CODE) {
-      this.deps.onSessionGone(sessionUuid, code);
-      return;
-    }
-    // A proxy that was stalled past lease plus grace finds its session released: that is the
-    // loss the `proxy_stalled` handover reports.
-    this.markFailed(sessionUuid, episode);
+  /** A sleep that {@link stop} cuts short, cancelling its timer. */
+  private sleepUnlessStopped(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const wake = () => {
+        this.deps.timer.clearTimeout(handle);
+        this.sleepers.delete(wake);
+        resolve();
+      };
+      const handle = this.deps.timer.setTimeout(wake, ms);
+      this.sleepers.add(wake);
+    });
   }
 
-  private markFailed(sessionUuid: string, episode: Episode): void {
+  private markFailed(
+    sessionUuid: string,
+    episode: Episode,
+    code: LivenessStallCode,
+    attempts: number,
+  ): void {
     episode.failed.set(sessionUuid, {
-      sessionUuid,
-      deviceId: this.deps.deviceIdOf(sessionUuid) ?? null,
-      lastAcknowledgedHeartbeatAt: this.deps.lastAckAt(sessionUuid),
+      session: {
+        sessionUuid,
+        deviceId: this.deps.deviceIdOf(sessionUuid) ?? null,
+        lastAcknowledgedHeartbeatAt: this.deps.lastAckAt(sessionUuid),
+      },
+      code,
+      attempts,
+      failedAt: this.deps.timer.now(),
     });
   }
 
@@ -344,14 +440,35 @@ export class LivenessRecovery {
     if (this.episodes.get(code) === episode) {
       this.episodes.delete(code);
     }
-    if (this.stopped || episode.failed.size === 0) {
+    if (this.episodes.size === 0) {
+      // The next episode may replace the shared socket once again.
+      this.socketResetClaimed = false;
+    }
+    if (this.stopped) {
       return;
     }
-    const sessions = [...episode.failed.values()];
+    // A session the daemon acknowledged after it failed is healthy again: fencing it on the
+    // strength of a stale failure would strand a live session.
+    const failed = [...episode.failed.values()].filter(
+      (entry) => !this.deps.hasAcknowledgedSince(entry.session.sessionUuid, entry.failedAt),
+    );
+    for (const handoverCode of HANDOVER_ORDER) {
+      this.handOver(
+        handoverCode,
+        failed.filter((entry) => entry.code === handoverCode),
+      );
+    }
+  }
+
+  private handOver(code: LivenessStallCode, failed: readonly FailedSession[]): void {
+    if (failed.length === 0) {
+      return;
+    }
+    const sessions = failed.map((entry) => entry.session);
     this.deps.onHandover({
       code,
       sessions,
-      attempts: episode.attempts,
+      attempts: Math.max(...failed.map((entry) => entry.attempts)),
       lastAcknowledgedHeartbeatAt: Math.max(
         ...sessions.map((session) => session.lastAcknowledgedHeartbeatAt),
       ),

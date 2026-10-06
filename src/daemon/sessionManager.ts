@@ -44,9 +44,11 @@ import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../uti
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
+  effectiveLastHeartbeat,
   isLivenessOwnerLeaseLive,
   livenessLeaseState,
   sessionLeaseSnapshot,
+  sessionOwnerLeaseSnapshot,
   suspectGraceMsFor,
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
@@ -211,6 +213,13 @@ export interface Session {
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
+  /**
+   * The last time the session's liveness OWNER was alive: its own heartbeats, a recorded
+   * ownership claim, or the restore of a persisted owner. Unlike `lastHeartbeat` it is not advanced
+   * by tool activity, so a non-owner that merely uses the session cannot keep the owner's lease live
+   * (#10050). Unset until an owner exists; the lease then falls back to `lastHeartbeat`.
+   */
+  lastOwnerHeartbeat?: number;
   /**
    * The daemon's own resume point after it detected a stall of its event loop
    * (#10051). Not persisted: the daemon cannot have received heartbeats while it
@@ -2142,7 +2151,10 @@ export class SessionManager {
 
   private recoverySessionFields(
     persisted: DeviceSession | undefined,
-  ): Pick<Session, "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims"> {
+  ): Pick<
+    Session,
+    "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims" | "lastOwnerHeartbeat"
+  > {
     if (!persisted) {
       return {};
     }
@@ -2157,6 +2169,7 @@ export class SessionManager {
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
             livenessOwnershipClaims: new Set([persisted.liveness_owner_token]),
+            lastOwnerHeartbeat: this.timer.now(),
           }
         : {}),
     };
@@ -4838,12 +4851,15 @@ export class SessionManager {
     const previousActivity = {
       lastUsedAt: session.lastUsedAt,
       lastHeartbeat: session.lastHeartbeat,
+      lastOwnerHeartbeat: session.lastOwnerHeartbeat,
       expiresAt: session.expiresAt,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
       ownership: session.ownership,
       awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
+    // Only a heartbeat advances the owner lease; the handler admits one only from the owner.
+    session.lastOwnerHeartbeat = now;
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.activityGeneration++;
@@ -4921,12 +4937,17 @@ export class SessionManager {
       );
       return "conflict";
     }
+    const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
     processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
+    // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
+    // request handler records the claimant's heartbeat several awaits later; until then a second
+    // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
+    session.lastOwnerHeartbeat = this.timer.now();
     await this.persistNewLivenessOwnershipClaim(
       session,
       ownerToken,
-      previousOwnerToken,
+      { previousOwnerToken, previousOwnerHeartbeat },
       processedClaims,
     );
     return "claimed";
@@ -4937,7 +4958,8 @@ export class SessionManager {
     if (session.livenessOwnerToken === undefined || session.livenessOwnerToken === ownerToken) {
       return false;
     }
-    return isLivenessOwnerLeaseLive(sessionLeaseSnapshot(session, this.timer.now()));
+    // The owner's own heartbeats decide this, not tool activity by whoever else names the session.
+    return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.timer.now()));
   }
 
   /**
@@ -4972,19 +4994,20 @@ export class SessionManager {
   /**
    * Do not hold the daemon's own stall against any session (#10051).
    *
-   * Called by the heartbeat monitor when its tick fired later than scheduled:
-   * the daemon cannot have received heartbeats while its event loop was stalled,
-   * so every non-CLI session is given a fresh lease-plus-grace from `resumedAt`
-   * instead of being reaped on the strength of the daemon's own stall. Returns
-   * how many sessions were extended.
+   * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
+   * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
+   * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
+   * time is not counted against the owner while time the owner genuinely missed before the stall
+   * still is. Returns how many sessions were extended.
    */
-  forgiveDaemonStall(resumedAt: number): number {
+  forgiveDaemonStall(resumedAt: number, lostMs: number): number {
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
         continue;
       }
-      session.stallForgivenAt = Math.max(session.stallForgivenAt ?? resumedAt, resumedAt);
+      const leaseStart = effectiveLastHeartbeat(session);
+      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
       session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
       if (session.awaitingOwnerSince !== undefined) {
         session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
@@ -4997,7 +5020,10 @@ export class SessionManager {
   private async persistNewLivenessOwnershipClaim(
     session: Session,
     ownerToken: string,
-    previousOwnerToken: string | undefined,
+    previous: {
+      previousOwnerToken: string | undefined;
+      previousOwnerHeartbeat: number | undefined;
+    },
     processedClaims: Set<string>,
   ): Promise<void> {
     try {
@@ -5008,7 +5034,8 @@ export class SessionManager {
       }
     } catch (error) {
       processedClaims.delete(ownerToken);
-      session.livenessOwnerToken = previousOwnerToken;
+      session.livenessOwnerToken = previous.previousOwnerToken;
+      session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
       throw error;
     }
   }
@@ -5028,6 +5055,7 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
+    session.lastOwnerHeartbeat = this.timer.now();
     return true;
   }
 

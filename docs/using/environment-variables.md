@@ -164,8 +164,16 @@ export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 Liveness ownership has a single token per session, and the daemon protects it.
 A claim from a different token is rejected while the current owner's lease is
 live. The lease is the session's heartbeat timeout measured from the owner's
-last heartbeat, the same deadline the heartbeat monitor reaps on, so a claim
-succeeds exactly when the session would otherwise be released. A claim succeeds
+last heartbeat (or its recorded claim), the same deadline the heartbeat monitor
+reaps on, so a claim succeeds exactly when the session would otherwise be
+released. Only the owner's own heartbeats extend the owner's lease: a tool call
+that names the session, from any caller, keeps the session in use but does not
+keep a dead owner's lease alive, so a restarted proxy with a new token can claim
+once the lease plus the 10 s grace window have passed even while it is already
+working on the session. A healthy single proxy is unaffected, since its own
+heartbeats keep the lease live. Two claimants racing for a lapsed session are
+serialised: the first records the takeover and its lease in the same step, and
+the second is refused. A claim succeeds
 when the session is unowned, the owner's lease has expired, or the token matches
 the current owner (a restarted owner resuming). A session on the CLI idle policy
 never has a live lease for this purpose: its one-shot CLI owners exit between
@@ -246,14 +254,28 @@ then. The proxy uses that window for its own recovery, so a stall is reported to
 the harness only when recovery has failed. Recovery always fits inside the lease
 plus the grace window (20 s at the default 10 s timeout) at the 2 s and 5 s
 heartbeat cadences. The proxy applies this to every session it holds, one
-session at a time.
+session at a time. The daemon does not hold its own stalls against owners: when
+its heartbeat monitor runs more than 2 s later than scheduled it moves every
+session's lease forward by exactly that lateness, so a daemon stall of a few
+seconds cannot push a heartbeating owner past lease plus grace.
+
+When the lease and grace are already spent by the time recovery starts (a long
+proxy stall, such as a sleeping laptop), the daemon may have forgiven its own
+stall and still hold the sessions, so each attempt is given the heartbeat
+request timeout (half the lease, at most twice the heartbeat interval) instead
+of a share of the exhausted budget.
 
 Two distinct states, each with exactly three automatic recovery attempts:
 
 - `daemon_stalled`: the daemon's socket is open or reconnectable but heartbeat
   acknowledgements stop. Each attempt reconnects if needed and heartbeats again
-  with the same owner token (from the second attempt a silent socket is replaced
-  with a fresh one). An attempt that is acknowledged ends the episode and the
+  with the same owner token. From the second attempt a silent socket may be
+  replaced with a fresh one, but at most once per recovery episode (shared by
+  every session recovering together, because the socket is one connection for
+  all of them) and never while a tool call is in flight on it, unless an attempt
+  has already seen the socket fail at the transport level. A held session the
+  daemon answers "not found" is dropped once rather than retried, and a session
+  that failed recovery is not recovered again before its handover. An attempt that is acknowledged ends the episode and the
   session stays usable; nothing is surfaced to the harness and the recovery is
   logged. The proxy also starts this recovery when a tool call is refused with
   `daemon_session_suspect`, the daemon's signal that the session still exists and
@@ -261,14 +283,20 @@ Two distinct states, each with exactly three automatic recovery attempts:
 - `proxy_stalled`: the proxy's own heartbeat tick fired later than the lease
   allows, which it can only notice after it resumes. It re-heartbeats every
   session it holds with the same owner token. A session the daemon kept as suspect
-  is restored with the same UUID. A session the daemon already released is lost.
+  is restored with the same UUID. A session is lost only when the daemon says so:
+  it answers that the session was released, or that another token has taken it
+  over while this proxy was stalled (the session is fenced and listed in the
+  handover). A daemon that does not answer any of the three attempts is stalled,
+  not the proxy: those sessions are handed over as `daemon_stalled`.
 
 After the third failed attempt the proxy hands over. It stops heartbeating the
 affected sessions and returns this structured error on the next tool call that
 names an affected session (or reaches it implicitly), and it sends the same body
 as an MCP `notifications/message` (`level: "error"`,
 `logger: "auto-mobile.liveness"`, `data: <the error body>`) so a harness that is
-idle between calls is told too:
+idle between calls is told too. The notification honours a level the client set
+with `logging/setLevel`: a client that asked for `critical` or above is not sent
+it and learns from the tool-call error:
 
 ```json
 {

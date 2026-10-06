@@ -83,6 +83,7 @@ export function isLivenessOwnerLeaseLive(snapshot: LivenessOwnerLeaseSnapshot): 
 export type LeaseSession = Pick<
   Session,
   | "lastHeartbeat"
+  | "lastOwnerHeartbeat"
   | "stallForgivenAt"
   | "heartbeatTimeoutMs"
   | "livenessPolicy"
@@ -101,6 +102,25 @@ export function effectiveLastHeartbeat(
   session: Pick<LeaseSession, "lastHeartbeat" | "stallForgivenAt">,
 ): number {
   return Math.max(session.lastHeartbeat, session.stallForgivenAt ?? Number.NEGATIVE_INFINITY);
+}
+
+/**
+ * The last moment the daemon can vouch the session's OWNER was alive, for the decision whether a
+ * different token may claim it (#10050).
+ *
+ * `lastHeartbeat` is the session's activity clock: any tool call refreshes it, whoever made the
+ * call, so a client that merely names the session (a second harness, or a restarted proxy that has
+ * not claimed it yet) would keep the owner's lease looking live for as long as it kept working. The
+ * owner lease is therefore read from `lastOwnerHeartbeat`, which only the owner's own heartbeats and
+ * a recorded claim advance. A session that never had an owner stamp falls back to `lastHeartbeat`.
+ */
+export function ownerLeaseHeartbeat(
+  session: Pick<LeaseSession, "lastHeartbeat" | "lastOwnerHeartbeat" | "stallForgivenAt">,
+): number {
+  return Math.max(
+    session.lastOwnerHeartbeat ?? session.lastHeartbeat,
+    session.stallForgivenAt ?? Number.NEGATIVE_INFINITY,
+  );
 }
 
 /**
@@ -131,4 +151,15 @@ export function sessionLeaseSnapshot(
     livenessPolicy: session.livenessPolicy,
     graceMs: suspectGraceMsFor(session),
   };
+}
+
+/**
+ * The lease snapshot the claim path judges, built from the owner's own heartbeats rather than the
+ * session's tool activity (see {@link ownerLeaseHeartbeat}).
+ */
+export function sessionOwnerLeaseSnapshot(
+  session: LeaseSession,
+  now: number,
+): LivenessOwnerLeaseSnapshot {
+  return { ...sessionLeaseSnapshot(session, now), lastHeartbeat: ownerLeaseHeartbeat(session) };
 }

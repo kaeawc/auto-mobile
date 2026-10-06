@@ -94,10 +94,16 @@ describe("proxy liveness stalls (#10053)", () => {
   let daemonManager: FakeDaemonManager;
   /** Heartbeats the scripted daemon swallows before it answers again; Infinity = never. */
   let hangHeartbeats: number;
+  /** The scripted daemon swallows every heartbeat before this proxy-clock time (a slow wake-up). */
+  let hangUntil: number;
   /** Sessions whose heartbeats the scripted daemon never answers. */
   let hangSessions: Set<string>;
   /** `observe` is refused with the daemon's suspect-session error. */
   let suspectObserve: boolean;
+  /** `observe` calls for this session never answer: a tool call in flight on the shared socket. */
+  let hangObserveFor: string | undefined;
+  /** Daemon connections the proxy opened: one more for every time it replaced its socket. */
+  let clientsCreated: number;
   let heartbeatsSeen: number;
   let handovers: LivenessHandover[];
   let infoSpy: ReturnType<typeof spyOn>;
@@ -115,12 +121,20 @@ describe("proxy liveness stalls (#10053)", () => {
             : name === "observe" && suspectObserve
               ? shapeSuspectResult()
               : undefined,
+      onCallTool: async (name, params) => {
+        if (name === "observe" && params.sessionUuid === hangObserveFor) {
+          await new Promise<void>(() => {});
+        }
+      },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
           return;
         }
         heartbeatsSeen += 1;
         if (hangSessions.has(params.sessionId)) {
+          return new Promise<void>(() => {});
+        }
+        if (timer.now() < hangUntil) {
           return new Promise<void>(() => {});
         }
         if (hangHeartbeats > 0) {
@@ -147,7 +161,10 @@ describe("proxy liveness stalls (#10053)", () => {
 
   function createProxy(intervalMs: number, autoStartDaemon = false): DaemonMcpProxy {
     const proxy = new DaemonMcpProxy({
-      clientFactory: () => daemonBackedClient(),
+      clientFactory: () => {
+        clientsCreated += 1;
+        return daemonBackedClient();
+      },
       daemonManager,
       autoStartDaemon,
       timer,
@@ -181,6 +198,9 @@ describe("proxy liveness stalls (#10053)", () => {
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     hangHeartbeats = 0;
     hangSessions = new Set();
+    hangUntil = 0;
+    hangObserveFor = undefined;
+    clientsCreated = 0;
     suspectObserve = false;
     heartbeatsSeen = 0;
     handovers = [];
@@ -448,6 +468,154 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(
         warnSpy.mock.calls.some(([message]) => String(message).includes("tick fired more than")),
       ).toBe(false);
+    });
+  });
+
+  describe("review fixes (PR 10115)", () => {
+    /** A private map on the proxy, read without a type assertion. */
+    function trackedBy(proxy: DaemonMcpProxy, field: string): Map<string, unknown> {
+      const value = Reflect.get(proxy, field);
+      if (!(value instanceof Map)) {
+        throw new Error(`${field} is not a Map`);
+      }
+      return value;
+    }
+
+    test("F3: a proxy displaced while stalled is handed over as lost, with its session fenced", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+
+      timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
+      expect(sessionManager.getSessionLeaseState("android-session")?.phase).toBe("lapsed");
+      // Before the monitor reaps the lapsed session, another harness's proxy claims it.
+      expect(await sessionManager.claimLivenessOwnership("android-session", "other-token")).toBe(
+        "claimed",
+      );
+      await baseTimer.advanceTimeAsync(2_000);
+      await baseTimer.advanceTimeAsync(2_000);
+
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0]).toMatchObject({
+        code: "proxy_stalled",
+        attempts: 1,
+        action: "reacquire_lost_sessions",
+        sessions: [{ sessionUuid: "android-session", deviceId: "emulator-5554" }],
+      });
+      expect(
+        infoSpy.mock.calls.some(([message]) => String(message).includes("Recovered proxy_stalled")),
+      ).toBe(false);
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toBeInstanceOf(DaemonSessionStalledError);
+      // The other owner is untouched.
+      expect(sessionManager.getSession("android-session")?.livenessOwnerToken).toBe("other-token");
+    });
+
+    test("F4: after a long proxy stall, a daemon that is slow to answer still restores the session", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      timer.stall(55_000);
+      // The daemon woke with the proxy and needs a few seconds before it answers heartbeats.
+      hangUntil = timer.now() + 2_000 + 5_000;
+
+      await baseTimer.advanceTimeAsync(2_000);
+      await baseTimer.advanceTimeAsync(4_000);
+      await baseTimer.advanceTimeAsync(4_000);
+
+      expect(handovers).toEqual([]);
+      expect(
+        infoSpy.mock.calls.some(([message]) =>
+          String(message).includes("Recovered proxy_stalled for session android-session"),
+        ),
+      ).toBe(true);
+    });
+
+    test("F4: after a proxy stall, a daemon that never answers is reported as daemon_stalled, not as released sessions", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      timer.stall(55_000);
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+
+      await advanceUntilHandover();
+
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0]).toMatchObject({
+        code: "daemon_stalled",
+        attempts: LIVENESS_RECOVERY_ATTEMPTS,
+        action: "restart_daemon_then_resume_by_session_uuid",
+        sessions: [{ sessionUuid: "android-session" }],
+      });
+    });
+
+    test("F6: a held session the daemon does not know is dropped once, without resetting the shared socket", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      await acquire(proxy, "getApple");
+      // android-session is held, ios-session is the latest binding. The daemon loses the held one
+      // without any release notification reaching this proxy.
+      await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+      const clientsBefore = clientsCreated;
+      heartbeatsSeen = 0;
+
+      await baseTimer.advanceTimeAsync(2_000);
+      expect(heartbeatsSeen).toBe(2);
+      await baseTimer.advanceTimeAsync(2_000);
+      await baseTimer.advanceTimeAsync(2_000);
+
+      // After the single not-found answer only the latest binding is heartbeated, and the one
+      // socket every other session and tool call uses was never replaced.
+      expect(heartbeatsSeen).toBe(2 + 2);
+      expect(clientsCreated).toBe(clientsBefore);
+      expect(handovers).toEqual([]);
+      // F11: nothing is kept per session for what the proxy no longer holds.
+      expect(trackedBy(proxy, "livenessAcks").has("android-session")).toBe(false);
+      expect(trackedBy(proxy, "sessionDeviceIds").has("android-session")).toBe(false);
+      expect(trackedBy(proxy, "livenessAcks").has("ios-session")).toBe(true);
+    });
+
+    test("F6: recovery does not replace the socket beneath a tool call in flight", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      await acquire(proxy, "getApple");
+      hangSessions.add("android-session");
+      hangObserveFor = "ios-session";
+      void proxy.callTool("observe", { sessionUuid: "ios-session" }).catch(() => {});
+      const clientsBefore = clientsCreated;
+
+      await advanceUntilHandover();
+
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0].sessions.map((session) => session.sessionUuid)).toEqual([
+        "android-session",
+      ]);
+      expect(clientsCreated).toBe(clientsBefore);
+    });
+
+    test("F6: two sessions recovering together replace the socket once, not once each", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      await acquire(proxy, "getApple");
+      hangSessions.add("android-session");
+      hangSessions.add("ios-session");
+      const clientsBefore = clientsCreated;
+
+      await advanceUntilHandover();
+
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0].sessions).toHaveLength(2);
+      expect(clientsCreated - clientsBefore).toBe(1);
+    });
+
+    test("F11: a handed-over session keeps what resuming it needs, and drops its acknowledgement", async () => {
+      const proxy = createProxy(2_000);
+      await acquire(proxy, "getAndroid");
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+      await advanceUntilHandover();
+
+      // The session stays resumable by UUID: its device and the pending handover are kept.
+      expect(trackedBy(proxy, "sessionDeviceIds").get("android-session")).toBe("emulator-5554");
+      expect(trackedBy(proxy, "stallHandovers").has("android-session")).toBe(true);
+      expect(trackedBy(proxy, "livenessAcks").has("android-session")).toBe(false);
     });
   });
 

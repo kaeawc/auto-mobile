@@ -266,13 +266,13 @@ async function forwardLivenessHandover(
   handover: LivenessHandover,
 ): Promise<void> {
   try {
-    await server.server.notification({
-      method: "notifications/message",
-      params: {
-        level: "error",
-        logger: "auto-mobile.liveness",
-        data: livenessHandoverPayload(handover),
-      },
+    // sendLoggingMessage honours a level the client set with logging/setLevel; a client that
+    // asked for fewer messages than `error` is not sent the notification and still learns from
+    // the structured error on its next tool call.
+    await server.server.sendLoggingMessage({
+      level: "error",
+      logger: "auto-mobile.liveness",
+      data: livenessHandoverPayload(handover),
     });
   } catch (error) {
     // Best-effort: the next tool call for an affected session returns the same error.

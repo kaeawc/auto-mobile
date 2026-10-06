@@ -868,7 +868,11 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       await staleProxy.callTool("observe", { sessionUuid });
       await settleAsyncWork();
       // Past the 5 s lease and the suspect grace window that follows it (#10051).
-      sessionManager.getSession(sessionUuid)!.lastHeartbeat -= 6_000 + SUSPECT_GRACE_MS;
+      const owned = sessionManager.getSession(sessionUuid)!;
+      owned.lastHeartbeat -= 6_000 + SUSPECT_GRACE_MS;
+      // The owner lease is read from the owner's own heartbeats, which tool calls do not advance.
+      owned.lastOwnerHeartbeat =
+        (owned.lastOwnerHeartbeat ?? owned.lastHeartbeat) - (6_000 + SUSPECT_GRACE_MS);
       await cli.callTool("observe", { sessionUuid });
       const adopted = await cli.adoptCliSessionLiveness();
       expect(adopted).toBe(sessionUuid);

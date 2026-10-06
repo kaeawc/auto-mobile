@@ -272,6 +272,34 @@ function isLivenessOwnerConflictError(error: unknown): boolean {
   );
 }
 
+/** The daemon answered that another token owns this session's liveness now (#10050). */
+function isLivenessOwnerSupersededError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+  );
+}
+
+/**
+ * The daemon answered a held session's heartbeat with "session not found". Thrown instead of the
+ * raw error so the shared reconnect machinery (which resets the one daemon socket and retries
+ * "stale session" errors) is not triggered by a per-session answer.
+ */
+class HeldSessionNotFoundError extends Error {
+  constructor(readonly sessionUuid: string) {
+    // Deliberately not the daemon's "Session not found" wording, which the reconnect machinery matches on.
+    super(`The daemon does not know held session ${sessionUuid}`);
+    this.name = "HeldSessionNotFoundError";
+  }
+}
+
+/** The heartbeat request timeout: how long a heartbeat is given before it counts as unanswered. */
+function heartbeatRequestTimeoutMs(leaseMs: number, intervalMs: number): number {
+  return Math.max(1, Math.min(Math.floor(leaseMs / 2), intervalMs * 2));
+}
+
 /** The harness-supplied stable owner token when given, otherwise a per-process one (#10050). */
 function resolveLivenessOwnerToken(config: DaemonMcpProxyConfig): string {
   const suppliedToken = config.livenessOwnerToken?.trim();
@@ -911,6 +939,10 @@ export class DaemonMcpProxy {
     { handover: LivenessHandover; delivered: boolean }
   >();
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
+  /** Tool calls currently awaiting an answer on each daemon connection. */
+  private readonly toolCallsInFlight = new WeakMap<DaemonClientLike, number>();
+  /** Connections a liveness attempt saw fail at the transport level: dead, with nothing to lose. */
+  private readonly deadSocketClients = new WeakSet<DaemonClientLike>();
   /** Stable for this proxy instance, including all transport reconnects. */
   private readonly livenessOwnerToken: string;
   private readonly buildIdentity: BuildIdentity;
@@ -2975,24 +3007,26 @@ export class DaemonMcpProxy {
           signal?.throwIfAborted();
           this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
           const client = this.requireClient();
-          return client.callTool(
-            name,
-            this.withToolSelectionProfile(forwardedArgs),
-            progressToken,
-            (requestId) => {
-              this.removeProgressListener(registeredClient, registeredRequestId);
-              registeredClient = client;
-              registeredRequestId = requestId;
-              if (progressToken !== undefined && onProgress) {
-                let listeners = this.progressListeners.get(client);
-                if (!listeners) {
-                  listeners = new Map();
-                  this.progressListeners.set(client, listeners);
+          return this.trackToolCallInFlight(client, () =>
+            client.callTool(
+              name,
+              this.withToolSelectionProfile(forwardedArgs),
+              progressToken,
+              (requestId) => {
+                this.removeProgressListener(registeredClient, registeredRequestId);
+                registeredClient = client;
+                registeredRequestId = requestId;
+                if (progressToken !== undefined && onProgress) {
+                  let listeners = this.progressListeners.get(client);
+                  if (!listeners) {
+                    listeners = new Map();
+                    this.progressListeners.set(client, listeners);
+                  }
+                  listeners.set(requestId, { progressToken, listener: onProgress });
                 }
-                listeners.set(requestId, { progressToken, listener: onProgress });
-              }
-            },
-            signal,
+              },
+              signal,
+            ),
           );
         },
         forwardedSessionUuid,
@@ -3362,7 +3396,9 @@ export class DaemonMcpProxy {
     reason: string,
     release?: SessionReleaseSnapshot,
   ): void {
-    this.dropHeldSession(sessionUuid);
+    const handedOver = reason === DAEMON_STALLED_CODE || reason === PROXY_STALLED_CODE;
+    this.dropHeldSession(sessionUuid, handedOver);
+    this.forgetSessionLivenessState(sessionUuid, handedOver);
     if (this.terminalBoundSession) {
       if (this.terminalBoundSession.sessionUuid === sessionUuid) {
         if (reason !== "released") {
@@ -3738,10 +3774,14 @@ export class DaemonMcpProxy {
     return new LivenessRecovery({
       timer: this.timer,
       leaseMs: this.heartbeatLeashMs,
+      requestTimeoutMs: this.heartbeatRequestTimeoutMs(),
       lastAckAt: (sessionUuid) => this.livenessAckedAt(sessionUuid),
+      hasAcknowledgedSince: (sessionUuid, sinceMs) =>
+        (this.livenessAcks.get(sessionUuid) ?? Number.NEGATIVE_INFINITY) > sinceMs,
       deviceIdOf: (sessionUuid) => this.sessionDeviceIds.get(sessionUuid),
       isActive: (sessionUuid) => !this.closing && this.isHeldSession(sessionUuid),
-      attempt: (sessionUuid, attemptNumber) => this.runRecoveryAttempt(sessionUuid, attemptNumber),
+      attempt: (sessionUuid, attemptNumber, _deadlineMs, claimSocketReset) =>
+        this.runRecoveryAttempt(sessionUuid, attemptNumber, claimSocketReset),
       onRecovered: ({ sessionUuid, code, attempts, restoredAfterLapse }) => {
         logger.info(
           `[DaemonMcpProxy] Recovered ${code} for session ${sessionUuid} after ${attempts} attempt(s)` +
@@ -3769,33 +3809,90 @@ export class DaemonMcpProxy {
     );
   }
 
+  /** How long a heartbeat is given before it counts as unanswered. */
+  private heartbeatRequestTimeoutMs(): number {
+    return heartbeatRequestTimeoutMs(this.heartbeatLeashMs, this.heartbeatIntervalMs);
+  }
+
   /**
    * One recovery attempt: reconnect if needed and re-heartbeat with the same owner token. The
    * connection is observation-only, so an unreachable daemon fails the attempt; this proxy never
-   * starts, restarts or stops it. From the second attempt a socket that is open but silent is
-   * replaced by a fresh one, since it has already failed to carry a heartbeat.
+   * starts, restarts or stops it.
    */
   private async runRecoveryAttempt(
     sessionUuid: string,
     attemptNumber: number,
+    claimSocketReset: () => boolean,
   ): Promise<RecoveryAttemptOutcome> {
     const claimLivenessOwnership = this.livenessClaimPending(sessionUuid);
+    let attemptedClient: DaemonClientLike | null = null;
     try {
       await runWithoutDaemonLifecycle(async () => {
-        if (attemptNumber > 1 && this.client) {
+        if (this.shouldReplaceSocketForRecovery(attemptNumber, claimSocketReset)) {
           await this.resetConnection();
         }
         await this.ensureConnected();
-        await this.requireClient().callDaemonMethod(
+        attemptedClient = this.requireClient();
+        await attemptedClient.callDaemonMethod(
           DAEMON_HEARTBEAT_METHOD,
           this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
         );
       });
     } catch (error) {
+      if (attemptedClient && error instanceof DaemonUnavailableError) {
+        this.deadSocketClients.add(attemptedClient);
+      }
       return this.classifyRecoveryAttemptError(sessionUuid, attemptNumber, error);
     }
     this.recordRecoveryAcknowledgement(sessionUuid, claimLivenessOwnership);
     return "acknowledged";
+  }
+
+  /**
+   * Whether this attempt may replace the daemon socket. It is one connection shared by every
+   * session this proxy holds and by tool calls in flight, so replacing it rejects all of their
+   * requests. From the second attempt a socket that is open but silent has already failed to carry
+   * a heartbeat, so it is replaced, but at most once per recovery episode (not per session) and
+   * never beneath a tool call in flight unless the socket is already proven dead by a transport
+   * failure, when there is nothing left to lose.
+   */
+  private shouldReplaceSocketForRecovery(
+    attemptNumber: number,
+    claimSocketReset: () => boolean,
+  ): boolean {
+    const client = this.client;
+    if (attemptNumber <= 1 || !client) {
+      return false;
+    }
+    if (this.deadSocketClients.has(client)) {
+      return true;
+    }
+    if ((this.toolCallsInFlight.get(client) ?? 0) > 0) {
+      return false;
+    }
+    return claimSocketReset();
+  }
+
+  /**
+   * Count a tool call on `client` while it awaits an answer. The caller gets the call's own
+   * promise back, not a wrapper, so tracking adds no scheduling turns to the forwarding path.
+   */
+  private trackToolCallInFlight<T>(client: DaemonClientLike, send: () => Promise<T>): Promise<T> {
+    const settle = () =>
+      this.toolCallsInFlight.set(
+        client,
+        Math.max(0, (this.toolCallsInFlight.get(client) ?? 1) - 1),
+      );
+    this.toolCallsInFlight.set(client, (this.toolCallsInFlight.get(client) ?? 0) + 1);
+    let forwarded: Promise<T>;
+    try {
+      forwarded = send();
+    } catch (error) {
+      settle();
+      throw error;
+    }
+    forwarded.then(settle, settle);
+    return forwarded;
   }
 
   private classifyRecoveryAttemptError(
@@ -3806,8 +3903,12 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       return "session-gone";
     }
+    if (isLivenessOwnerSupersededError(error)) {
+      // Another token took the session over while this proxy could not heartbeat it.
+      return "superseded";
+    }
     if (!this.isMissingHeartbeatAcknowledgement(error)) {
-      // The daemon answered with an ownership refusal: it is reachable, and the regular tick's
+      // The daemon answered with a conflict refusal: it is reachable, and the regular tick's
       // own conflict handling takes it from here.
       return "acknowledged";
     }
@@ -3858,7 +3959,7 @@ export class DaemonMcpProxy {
       if (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) {
         this.fenceBoundSessionUuid(sessionUuid, handover.code);
       } else {
-        this.dropHeldSession(sessionUuid);
+        this.dropHeldSession(sessionUuid, true);
       }
     }
     for (const listener of this.livenessHandoverListeners) {
@@ -3923,11 +4024,7 @@ export class DaemonMcpProxy {
         // latest binding's tick: the release notification is authoritative.
         await runWithoutDaemonLifecycle(() =>
           this.withRecoverableReconnect(
-            () =>
-              this.requireClient().callDaemonMethod(
-                DAEMON_HEARTBEAT_METHOD,
-                this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
-              ),
+            () => this.sendHeldSessionHeartbeat(sessionUuid, claimLivenessOwnership),
             sessionUuid,
             true,
             false,
@@ -3939,6 +4036,29 @@ export class DaemonMcpProxy {
       });
     } catch (error) {
       this.handleHeldSessionHeartbeatError(sessionUuid, claimLivenessOwnership, error);
+    }
+  }
+
+  /**
+   * One held session's heartbeat. The daemon answering "session not found" is an answer about this
+   * session alone: it is raised as {@link HeldSessionNotFoundError}, which the shared reconnect
+   * machinery does not treat as a stale connection, so it never resets the one socket every other
+   * session and tool call is using.
+   */
+  private async sendHeldSessionHeartbeat(
+    sessionUuid: string,
+    claimLivenessOwnership: boolean,
+  ): Promise<void> {
+    try {
+      await this.requireClient().callDaemonMethod(
+        DAEMON_HEARTBEAT_METHOD,
+        this.boundSessionHeartbeatParams(sessionUuid, claimLivenessOwnership),
+      );
+    } catch (error) {
+      if (this.isDaemonSessionNotFoundError(error)) {
+        throw new HeldSessionNotFoundError(sessionUuid);
+      }
+      throw error;
     }
   }
 
@@ -3959,10 +4079,7 @@ export class DaemonMcpProxy {
     try {
       await raceWithDeadline(() => send(() => !abandoned), {
         timer: this.timer,
-        timeoutMs: Math.max(
-          1,
-          Math.min(Math.floor(this.heartbeatLeashMs / 2), this.heartbeatIntervalMs * 2),
-        ),
+        timeoutMs: this.heartbeatRequestTimeoutMs(),
         label: "Bound-session heartbeat",
         onTimeout: () => {
           abandoned = true;
@@ -3990,6 +4107,7 @@ export class DaemonMcpProxy {
   private isMissingHeartbeatAcknowledgement(error: unknown): boolean {
     if (
       error instanceof DaemonBoundSessionExpiredError ||
+      error instanceof HeldSessionNotFoundError ||
       this.isDaemonSessionNotFoundError(error)
     ) {
       return false;
@@ -3997,12 +4115,7 @@ export class DaemonMcpProxy {
     if (isLivenessOwnerConflictError(error)) {
       return false;
     }
-    return !(
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
-    );
+    return !isLivenessOwnerSupersededError(error);
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -4028,14 +4141,15 @@ export class DaemonMcpProxy {
     if (this.closing) {
       return;
     }
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
-    ) {
+    if (isLivenessOwnerSupersededError(error)) {
       // Same informational outcome as the latest binding: no fencing or re-claim.
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
+      return;
+    }
+    if (error instanceof HeldSessionNotFoundError) {
+      // The daemon does not know this session. Drop it once; retrying every tick would only
+      // keep asking, and resetting the socket to ask again would hurt its siblings.
+      this.dropGoneSession(sessionUuid);
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
@@ -4092,11 +4206,26 @@ export class DaemonMcpProxy {
     );
   }
 
+  /**
+   * Forget what the proxy tracks per session for liveness once it stops heartbeating it. A
+   * session handed over for a stall stays resumable by UUID, so its device and the pending
+   * handover are kept for the harness's next call.
+   */
+  private forgetSessionLivenessState(sessionUuid: string, keepHandover = false): void {
+    this.livenessAcks.delete(sessionUuid);
+    this.livenessConflictLogged.delete(sessionUuid);
+    if (!keepHandover) {
+      this.sessionDeviceIds.delete(sessionUuid);
+      this.stallHandovers.delete(sessionUuid);
+    }
+  }
+
   /** Stop heartbeating a held session; idle the keeper once nothing remains to heartbeat. */
-  private dropHeldSession(sessionUuid: string): void {
+  private dropHeldSession(sessionUuid: string, keepHandover = false): void {
     if (!this.otherHeldSessions.delete(sessionUuid)) {
       return;
     }
+    this.forgetSessionLivenessState(sessionUuid, keepHandover);
     if (
       this.otherHeldSessions.size === 0 &&
       (this.boundSessionUuid === undefined || this.terminalBoundSession)

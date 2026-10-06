@@ -6,7 +6,6 @@ import {
   DAEMON_STALLED_CODE,
   LIVENESS_RECOVERY_ATTEMPTS,
   LivenessRecovery,
-  MIN_RECOVERY_ATTEMPT_MS,
   PROXY_STALLED_CODE,
   REACQUIRE_LOST_SESSIONS_ACTION,
   RECOVERY_SAFETY_MARGIN_MS,
@@ -29,6 +28,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // #10053: per-session liveness recovery, driven entirely by a fake timer against a scripted daemon.
 
 const LEASE_MS = 10_000;
+/** The heartbeat request timeout of a 5s-cadence proxy on a 10s lease. */
+const REQUEST_TIMEOUT_MS = 5_000;
 
 interface Harness {
   timer: FakeTimer;
@@ -48,7 +49,12 @@ function harness(options: {
   outcomeFor: (sessionUuid: string, attempt: number) => RecoveryAttemptOutcome | "hang";
   lastAckAt?: number;
   leaseMs?: number;
+  requestTimeoutMs?: number;
   deviceIds?: Record<string, string>;
+  /** Sessions the proxy has since heard an acknowledgement for, with when (proxy clock). */
+  acknowledgedAt?: Record<string, number>;
+  /** Called with each attempt's `claimSocketReset` so a test can see who may replace the socket. */
+  onSocketReset?: (sessionUuid: string, attempt: number, granted: boolean) => void;
 }): Harness {
   const timer = new FakeTimer();
   const state: Harness = {
@@ -62,10 +68,16 @@ function harness(options: {
   const deps: LivenessRecoveryDeps = {
     timer,
     leaseMs: options.leaseMs ?? LEASE_MS,
+    requestTimeoutMs: options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS,
     lastAckAt: () => options.lastAckAt ?? 0,
+    hasAcknowledgedSince: (sessionUuid, sinceMs) =>
+      (options.acknowledgedAt?.[sessionUuid] ?? Number.NEGATIVE_INFINITY) > sinceMs,
     deviceIdOf: (sessionUuid) => options.deviceIds?.[sessionUuid],
     isActive: () => true,
-    attempt: async (sessionUuid, attempt) => {
+    attempt: async (sessionUuid, attempt, _deadlineMs, claimSocketReset) => {
+      if (attempt > 1) {
+        options.onSocketReset?.(sessionUuid, attempt, claimSocketReset());
+      }
       state.attempts.push({ sessionUuid, attempt, at: timer.now() });
       const outcome = options.outcomeFor(sessionUuid, attempt);
       return outcome === "hang" ? new Promise<RecoveryAttemptOutcome>(() => {}) : outcome;
@@ -90,16 +102,18 @@ describe("recovery budget arithmetic", () => {
     expect(ownershipConflictLeashMs(LEASE_MS, 2_000)).toBeGreaterThan(livenessBudgetMs(LEASE_MS));
   });
 
-  test("slots divide what remains of the budget and never drop below the minimum", () => {
-    expect(recoveryAttemptSlotMs({ leaseMs: LEASE_MS, lastAckAt: 0, now: 6_000 })).toBe(
+  test("slots divide what remains of the budget, and a spent budget falls back to the request timeout", () => {
+    const slot = (now: number, requestTimeoutMs = REQUEST_TIMEOUT_MS) =>
+      recoveryAttemptSlotMs({ leaseMs: LEASE_MS, lastAckAt: 0, now, requestTimeoutMs });
+    expect(slot(6_000)).toBe(
       Math.floor((20_000 - RECOVERY_SAFETY_MARGIN_MS - 6_000) / LIVENESS_RECOVERY_ATTEMPTS),
     );
-    expect(recoveryAttemptSlotMs({ leaseMs: LEASE_MS, lastAckAt: 0, now: 19_500 })).toBe(
-      MIN_RECOVERY_ATTEMPT_MS,
-    );
-    expect(recoveryAttemptSlotMs({ leaseMs: LEASE_MS, lastAckAt: 0, now: 90_000 })).toBe(
-      MIN_RECOVERY_ATTEMPT_MS,
-    );
+    // An hour-old acknowledgement says nothing about the daemon (review F4): each attempt is
+    // given as long as a regular heartbeat, not a constant 250 ms.
+    expect(slot(19_500)).toBe(REQUEST_TIMEOUT_MS);
+    expect(slot(90_000)).toBe(REQUEST_TIMEOUT_MS);
+    expect(slot(3_600_000, 4_000)).toBe(4_000);
+    expect(slot(3_600_000, 1_000)).toBe(1_000);
   });
 
   test("tick lateness is how far a tick overshot its cadence, and a reset forgets the last tick", () => {
@@ -187,6 +201,7 @@ describe("LivenessRecovery attempts", () => {
           leaseMs: LEASE_MS,
           lastAckAt: 0,
           now: detectedAfterMs,
+          requestTimeoutMs: REQUEST_TIMEOUT_MS,
         });
       expect(lastSlotEnd).toBeLessThanOrEqual(
         livenessBudgetMs(LEASE_MS) - RECOVERY_SAFETY_MARGIN_MS,
@@ -284,6 +299,180 @@ describe("LivenessRecovery states", () => {
     await h.timer.advanceTimeAsync(20_000);
 
     expect(h.handovers[0].sessions[0].deviceId).toBeNull();
+  });
+});
+
+describe("recovery review fixes (PR 10115)", () => {
+  test("F4: an hour-stale acknowledgement still gives each attempt a request timeout, not 250 ms", async () => {
+    const h = harness({ outcomeFor: () => "unreachable", lastAckAt: 0 });
+    h.timer.setCurrentTime(3_600_000);
+    h.recovery.begin("session-a", PROXY_STALLED_CODE);
+    await h.timer.advanceTimeAsync(30_000);
+
+    expect(h.attempts.map((a) => a.at)).toEqual([
+      3_600_000,
+      3_600_000 + REQUEST_TIMEOUT_MS,
+      3_600_000 + 2 * REQUEST_TIMEOUT_MS,
+    ]);
+  });
+
+  test("F4: a proxy stall followed by a daemon that never answers is daemon_stalled, not proxy_stalled", async () => {
+    const h = harness({ outcomeFor: () => "unreachable", deviceIds: { a: "emulator-5554" } });
+    h.timer.setCurrentTime(3_600_000);
+    h.recovery.begin("a", PROXY_STALLED_CODE);
+    await h.timer.advanceTimeAsync(30_000);
+
+    expect(h.handovers).toHaveLength(1);
+    expect(h.handovers[0]).toMatchObject({
+      code: "daemon_stalled",
+      action: RESTART_DAEMON_THEN_RESUME_ACTION,
+      attempts: 3,
+      sessions: [{ sessionUuid: "a", deviceId: "emulator-5554" }],
+    });
+    expect(livenessHandoverMessage(h.handovers[0])).not.toContain("released them");
+  });
+
+  test("F4: a daemon answer of not-found still proves a proxy-stalled session lost", async () => {
+    const h = harness({
+      outcomeFor: (session, attempt) =>
+        session === "lost" && attempt === 2 ? "session-gone" : "unreachable",
+    });
+    h.timer.setCurrentTime(3_600_000);
+    h.recovery.begin("lost", PROXY_STALLED_CODE);
+    h.recovery.begin("silent", PROXY_STALLED_CODE);
+    await h.timer.advanceTimeAsync(30_000);
+
+    // The lost session is reported as lost, the silent one as a stalled daemon: two handovers.
+    expect(
+      h.handovers.map((handover) => [handover.code, handover.sessions[0].sessionUuid]),
+    ).toEqual([
+      ["daemon_stalled", "silent"],
+      ["proxy_stalled", "lost"],
+    ]);
+    expect(h.handovers[1].attempts).toBe(2);
+    expect(h.handovers[1].action).toBe(REACQUIRE_LOST_SESSIONS_ACTION);
+  });
+
+  test.each([DAEMON_STALLED_CODE, PROXY_STALLED_CODE] as const)(
+    "F3: a proxy displaced while stalled (%s recovery) is handed over as lost, not recovered",
+    async (code) => {
+      const h = harness({
+        outcomeFor: () => "superseded",
+        deviceIds: { a: "emulator-5554" },
+      });
+      h.timer.setCurrentTime(30_000);
+      h.recovery.begin("a", code);
+      await h.timer.advanceTimeAsync(30_000);
+
+      expect(h.recovered).toEqual([]);
+      // A displaced owner is told once; retrying would only be refused again.
+      expect(h.attempts).toHaveLength(1);
+      expect(h.handovers).toEqual([
+        {
+          code: "proxy_stalled",
+          sessions: [
+            { sessionUuid: "a", deviceId: "emulator-5554", lastAcknowledgedHeartbeatAt: 0 },
+          ],
+          attempts: 1,
+          lastAcknowledgedHeartbeatAt: 0,
+          action: REACQUIRE_LOST_SESSIONS_ACTION,
+        },
+      ]);
+      expect(livenessHandoverMessage(h.handovers[0])).toContain("another liveness owner");
+    },
+  );
+
+  test("F5: a failed session is not recovered again by the next keeper tick while its episode is open", async () => {
+    const h = harness({ outcomeFor: () => "unreachable" });
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(10_000);
+    // b joins the same episode later (a stall onset mid-tick), so a's run ends at 12.7s while b's,
+    // sharing what remains of the budget, ends at 16s and the episode stays open.
+    h.recovery.begin("b", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(3_000);
+    expect(h.attempts.filter((a) => a.sessionUuid === "a")).toHaveLength(3);
+    expect(h.handovers).toEqual([]);
+
+    // The keeper tick that would heartbeat `a` again finds it held.
+    expect(h.recovery.isRecovering("a")).toBe(true);
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(40_000);
+
+    expect(h.attempts.filter((a) => a.sessionUuid === "a")).toHaveLength(3);
+    expect(h.attempts.filter((a) => a.sessionUuid === "b")).toHaveLength(3);
+    expect(h.handovers).toHaveLength(1);
+    expect(h.handovers[0].attempts).toBe(3);
+    expect(h.handovers[0].sessions.map((s) => s.sessionUuid)).toEqual(["a", "b"]);
+    // After the handover the session is free to be recovered by a later episode.
+    expect(h.recovery.isRecovering("a")).toBe(false);
+  });
+
+  test("F5: a session that became healthy after it failed is not handed over", async () => {
+    const h = harness({
+      outcomeFor: () => "unreachable",
+      // a was acknowledged long after it failed; b never was.
+      acknowledgedAt: { a: 1_000_000 },
+    });
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(2_000);
+    h.recovery.begin("b", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(40_000);
+
+    expect(h.handovers).toHaveLength(1);
+    expect(h.handovers[0].sessions.map((s) => s.sessionUuid)).toEqual(["b"]);
+  });
+
+  test("F5: no handover at all when every failed session has since been acknowledged", async () => {
+    const h = harness({ outcomeFor: () => "unreachable", acknowledgedAt: { a: 1_000_000 } });
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(40_000);
+
+    expect(h.handovers).toEqual([]);
+  });
+
+  test("F6: the shared socket may be replaced by at most one attempt per episode, across sessions", async () => {
+    const grants: Array<[string, number, boolean]> = [];
+    const h = harness({
+      outcomeFor: () => "unreachable",
+      onSocketReset: (session, attempt, granted) => grants.push([session, attempt, granted]),
+    });
+    for (const session of ["a", "b", "c"]) {
+      h.recovery.begin(session, DAEMON_STALLED_CODE);
+    }
+    await h.timer.advanceTimeAsync(40_000);
+
+    // Each of three sessions asked on attempts 2 and 3; exactly one asked successfully.
+    expect(grants).toHaveLength(6);
+    expect(grants.filter(([, , granted]) => granted)).toHaveLength(1);
+  });
+
+  test("F6: a later episode may replace the socket once again", async () => {
+    const grants: boolean[] = [];
+    const h = harness({
+      outcomeFor: () => "unreachable",
+      onSocketReset: (_session, _attempt, granted) => grants.push(granted),
+    });
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(40_000);
+    h.recovery.begin("b", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(40_000);
+
+    expect(grants.filter(Boolean)).toHaveLength(2);
+  });
+
+  test("F11: stop cancels the in-flight slot wait and fires nothing afterwards", async () => {
+    const h = harness({ outcomeFor: () => "unreachable" });
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    await h.timer.advanceTimeAsync(0);
+    const pendingWaits = () => h.timer.getPendingTimeoutCount() + h.timer.getPendingSleepCount();
+    expect(pendingWaits()).toBeGreaterThan(0);
+
+    h.recovery.stop();
+    await h.recovery.settled();
+
+    expect(pendingWaits()).toBe(0);
+    expect(h.attempts).toHaveLength(1);
+    expect(h.handovers).toEqual([]);
   });
 });
 

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import {
+  LoggingMessageNotificationSchema,
+  type LoggingLevel,
+} from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
@@ -20,61 +23,90 @@ afterEach(() => {
   isAvailableSpy = null;
 });
 
+/** A proxy server behind an MCP client, with a daemon that stops answering heartbeats on demand. */
+async function connectStallingHarness(loggingLevel?: LoggingLevel) {
+  isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+  const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
+  const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+  const timer = new FakeTimer();
+  let hang = false;
+  const fakeClient = new FakeDaemonClient({
+    daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+    toolResultFor: (name) =>
+      name === "getAndroid"
+        ? {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  runtime: { deviceId: "emulator-5554", session: { sessionUuid: "session-1" } },
+                }),
+              },
+            ],
+          }
+        : undefined,
+    onCallDaemonMethod: (method) =>
+      method === "daemon/heartbeat" && hang ? new Promise<void>(() => {}) : undefined,
+  });
+  const daemonManager = new FakeDaemonManager();
+  daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+  const { server, proxy } = createProxyMcpServer({
+    proxyConfig: {
+      timer,
+      clientFactory: () => fakeClient,
+      daemonManager,
+      autoStartDaemon: false,
+      heartbeatTimeoutMs: 10_000,
+      heartbeatIntervalMs: 2_000,
+    },
+  });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "liveness-stall-client", version: "0.0.1" });
+  const notifications: unknown[] = [];
+  client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
+    notifications.push(notification.params);
+  });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  if (loggingLevel) {
+    await client.setLoggingLevel(loggingLevel);
+  }
+  return {
+    client,
+    daemonManager,
+    notifications,
+    timer,
+    stall: () => {
+      hang = true;
+    },
+    async close() {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+      await client.close();
+      await server.close();
+      await proxy.close();
+    },
+  };
+}
+
+async function settleTurns(): Promise<void> {
+  for (let turn = 0; turn < 5; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+}
+
 describe("proxy server liveness stall reporting", () => {
   test("an unresponsive daemon is reported by notification and on the next tool call", async () => {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-    const errorSpy = spyOn(logger, "error").mockImplementation(() => {});
-    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    const timer = new FakeTimer();
-    let hang = false;
-    const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-      toolResultFor: (name) =>
-        name === "getAndroid"
-          ? {
-              content: [
-                {
-                  type: "text",
-                  text: JSON.stringify({
-                    runtime: { deviceId: "emulator-5554", session: { sessionUuid: "session-1" } },
-                  }),
-                },
-              ],
-            }
-          : undefined,
-      onCallDaemonMethod: (method) =>
-        method === "daemon/heartbeat" && hang ? new Promise<void>(() => {}) : undefined,
-    });
-    const daemonManager = new FakeDaemonManager();
-    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
-    const { server, proxy } = createProxyMcpServer({
-      proxyConfig: {
-        timer,
-        clientFactory: () => fakeClient,
-        daemonManager,
-        autoStartDaemon: false,
-        heartbeatTimeoutMs: 10_000,
-        heartbeatIntervalMs: 2_000,
-      },
-    });
-    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "liveness-stall-client", version: "0.0.1" });
-    const notifications: unknown[] = [];
-    client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => {
-      notifications.push(notification.params);
-    });
+    const harness = await connectStallingHarness();
+    const { client, notifications, timer, daemonManager } = harness;
 
     try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
       expect(client.getServerCapabilities()?.logging).toEqual({});
       await client.callTool({ name: "getAndroid", arguments: {} });
 
-      hang = true;
+      harness.stall();
       await timer.advanceTimeAsync(19_000);
-      for (let turn = 0; turn < 5; turn += 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
+      await settleTurns();
 
       // The idle harness was told without making a call.
       expect(notifications).toHaveLength(1);
@@ -105,11 +137,48 @@ describe("proxy server liveness stall reporting", () => {
       expect(JSON.parse(text).error.message).toContain("restart the daemon yourself");
       expect(daemonManager.restartCallCount).toBe(0);
     } finally {
-      errorSpy.mockRestore();
-      warnSpy.mockRestore();
-      await client.close();
-      await server.close();
-      await proxy.close();
+      await harness.close();
+    }
+  });
+
+  test("a client that set a logging level above error is not sent the notification but still gets the error", async () => {
+    const harness = await connectStallingHarness("critical");
+    const { client, notifications, timer } = harness;
+
+    try {
+      await client.callTool({ name: "getAndroid", arguments: {} });
+
+      harness.stall();
+      await timer.advanceTimeAsync(19_000);
+      await settleTurns();
+
+      expect(notifications).toEqual([]);
+      const result = await client.callTool({
+        name: "observe",
+        arguments: { sessionUuid: "session-1" },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0].text;
+      expect(JSON.parse(text).error.code).toBe("daemon_stalled");
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("a client that set the error level still receives it", async () => {
+    const harness = await connectStallingHarness("error");
+    const { client, notifications, timer } = harness;
+
+    try {
+      await client.callTool({ name: "getAndroid", arguments: {} });
+
+      harness.stall();
+      await timer.advanceTimeAsync(19_000);
+      await settleTurns();
+
+      expect(notifications).toHaveLength(1);
+    } finally {
+      await harness.close();
     }
   });
 });

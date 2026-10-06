@@ -127,6 +127,7 @@ import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
+import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
@@ -233,6 +234,8 @@ interface TapPointContext {
   screenSize?: ObserveResult["screenSize"];
 }
 
+/** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
+type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
 
@@ -3544,6 +3547,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       selection: ElementSelectionResult;
       signal?: AbortSignal;
       onDispatched: () => void;
+      talkBack: AndroidDisplayTalkBackState;
     },
   ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
     const { target, signal } = context;
@@ -3599,10 +3603,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
-    const displayWarnings: string[] = [];
+    const displayWarnings: string[] = [...context.talkBack.warnings];
     const dispatchAction = await this.androidDisplayDispatch(options, {
       ...context,
-      onWarnings: (warnings) => displayWarnings.push(...warnings),
+      onWarning: (warning) => displayWarnings.push(warning),
     });
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
@@ -3631,21 +3635,36 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
+  /**
+   * Detect TalkBack once, before any element search, so a refusal (a non-default display)
+   * is not masked by a "not found" result or an already-satisfied ensureChecked. Unknown
+   * state keeps the raw gesture and carries the default route's warning.
+   */
+  private async resolveAndroidDisplayTalkBack(
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+  ): Promise<AndroidDisplayTalkBackState> {
+    const warnings: string[] = [];
+    const enabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
+      warnings.push(warning),
+    );
+    const refusal = enabled ? talkBackDisplayRefusal(target.displayId) : undefined;
+    if (refusal) {
+      throw refusal;
+    }
+    return { enabled, warnings };
+  }
+
   private async androidDisplayDispatch(
     options: TapOnElementOptions,
     context: {
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       signal?: AbortSignal;
       onDispatched: () => void;
-      onWarnings?: (warnings: string[]) => void;
+      onWarning?: (warning: string) => void;
+      talkBack: AndroidDisplayTalkBackState;
     },
   ): Promise<(point: { x: number; y: number }) => Promise<void>> {
-    // Same TalkBack detection as the default route; unknown state keeps the raw gesture.
-    const warnings: string[] = [];
-    const talkBackEnabled = await this.strategy.isAccessibilityServiceEnabled((warning) =>
-      warnings.push(warning),
-    );
-    const dispatch = await androidDisplayTapDispatch(
+    return androidDisplayTapDispatch(
       this.accessibilityService,
       this.adb,
       {
@@ -3657,7 +3676,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal: context.signal,
         onDispatched: context.onDispatched,
         timer: this.timer,
-        talkBack: talkBackEnabled
+        onWarning: context.onWarning,
+        talkBack: context.talkBack.enabled
           ? {
               strategy: this.talkBackStrategy,
               driver: this.talkBackDriverFactory.createDriver(this.device),
@@ -3665,8 +3685,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : undefined,
       },
     );
-    context.onWarnings?.(warnings);
-    return dispatch;
   }
 
   private selectElementOnDisplay(
@@ -3751,6 +3769,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     },
   ): Promise<TapOnElementResult> {
     const { target, signal } = context;
+    const talkBack = await this.resolveAndroidDisplayTalkBack(target);
     const refresh: AndroidTapVerification["refresh"] = (timeoutMs) =>
       refreshTargetDisplayHierarchy(
         target,
@@ -3781,6 +3800,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             target,
             selection,
             signal,
+            talkBack,
             onDispatched: () => {
               tapTimestamp = this.timer.now();
             },

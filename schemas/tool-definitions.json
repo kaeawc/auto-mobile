@@ -716,6 +716,12 @@
           "description": "Deprecated alias for name",
           "type": "string"
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -20695,6 +20701,12 @@
           "description": "Key",
           "type": "string"
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -25893,6 +25905,12 @@
             "DICTIONARY",
             "UNKNOWN"
           ]
+        },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",

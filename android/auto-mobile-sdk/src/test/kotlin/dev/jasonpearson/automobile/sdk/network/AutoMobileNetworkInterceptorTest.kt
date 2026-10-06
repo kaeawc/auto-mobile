@@ -35,9 +35,17 @@ import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.asResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
+import okio.BufferedSink
+import okio.Source
+import okio.Timeout
+import okio.buffer
 import org.junit.After
 import org.junit.Test
 
@@ -92,8 +100,10 @@ class AutoMobileNetworkInterceptorTest {
     responseContentType: String = "application/json",
     protocol: Protocol = Protocol.HTTP_2,
     throwOnProceed: Exception? = null,
+    responseBodyOverride: ResponseBody? = null,
   ): Interceptor.Chain {
     return FakeInterceptorChain(
+      responseBodyOverride = responseBodyOverride,
       request = request,
       responseCode = responseCode,
       responseBody = responseBody,
@@ -111,6 +121,7 @@ class AutoMobileNetworkInterceptorTest {
     private val protocol: Protocol = Protocol.HTTP_2,
     private val throwOnProceed: Exception? = null,
     private val onProceed: (() -> Unit)? = null,
+    private val responseBodyOverride: ResponseBody? = null,
   ) : Interceptor.Chain {
     override fun request(): Request = request
 
@@ -123,7 +134,9 @@ class AutoMobileNetworkInterceptorTest {
         .protocol(protocol)
         .message("OK")
         .header("Content-Type", responseContentType)
-        .body(responseBody.toResponseBody(responseContentType.toMediaType()))
+        .body(
+          responseBodyOverride ?: responseBody.toResponseBody(responseContentType.toMediaType())
+        )
         .build()
     }
 
@@ -411,7 +424,7 @@ class AutoMobileNetworkInterceptorTest {
         .post("""{"name":"test"}""".toRequestBody("application/json".toMediaType()))
         .build()
 
-    interceptor.intercept(fakeChain(request = request, responseCode = 201))
+    interceptor.intercept(fakeChain(request = request, responseCode = 201)).close()
     drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -423,7 +436,8 @@ class AutoMobileNetworkInterceptorTest {
     val (buffer, flushed) = collectingBuffer()
     val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
 
-    interceptor.intercept(fakeChain(responseBody = """{"ok":true}"""))
+    val response = interceptor.intercept(fakeChain(responseBody = """{"ok":true}"""))
+    assertEquals("""{"ok":true}""", response.body.string())
     drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -458,7 +472,7 @@ class AutoMobileNetworkInterceptorTest {
         .post("binary".toRequestBody("image/png".toMediaType()))
         .build()
 
-    interceptor.intercept(fakeChain(request = request))
+    interceptor.intercept(fakeChain(request = request)).close()
     drainDelivery()
 
     val event = flushed[0][0] as SdkNetworkRequestEvent
@@ -848,5 +862,306 @@ class AutoMobileNetworkInterceptorTest {
     assertNull(event.responseHeaders)
     assertNull(event.requestBody)
     assertNull(event.responseBody)
+  }
+
+  // --- Bounded request body capture (#10136) ---
+
+  /** A request body that records how often and how far the SDK or the chain wrote it. */
+  private class RecordingRequestBody(
+    private val mediaType: String,
+    private val length: Long,
+    private val chunk: ByteArray,
+    private val chunks: Int,
+    private val oneShot: Boolean = false,
+    private val duplex: Boolean = false,
+  ) : RequestBody() {
+    var writeToCalls = 0
+    var bytesWritten = 0L
+
+    override fun contentType() = mediaType.toMediaType()
+
+    override fun contentLength() = length
+
+    override fun isOneShot() = oneShot
+
+    override fun isDuplex() = duplex
+
+    override fun writeTo(sink: BufferedSink) {
+      check(!(oneShot && writeToCalls >= 1)) { "one-shot body written twice" }
+      writeToCalls++
+      repeat(chunks) {
+        sink.write(chunk)
+        bytesWritten += chunk.size
+      }
+    }
+  }
+
+  private fun postRequest(body: RequestBody) =
+    Request.Builder().url("https://api.example.com/upload").post(body).build()
+
+  @Test
+  fun `one-shot request body is not written by capture and reaches the chain intact`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val payload = """{"stream":"from input stream"}""".toByteArray()
+    val body = RecordingRequestBody("application/json", payload.size.toLong(), payload, 1, true)
+    val request = postRequest(body)
+    var sent = ""
+
+    interceptor
+      .intercept(
+        FakeInterceptorChain(
+          request = request,
+          onProceed = {
+            val wire = Buffer()
+            request.body!!.writeTo(wire)
+            sent = wire.readUtf8()
+          },
+        )
+      )
+      .close()
+    drainDelivery()
+
+    assertEquals(1, body.writeToCalls)
+    assertEquals("""{"stream":"from input stream"}""", sent)
+    assertNull((flushed.single().single() as SdkNetworkRequestEvent).requestBody)
+  }
+
+  @Test
+  fun `duplex request body is never written by capture`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val body = RecordingRequestBody("text/plain", -1, "x".toByteArray(), 1, duplex = true)
+
+    interceptor.intercept(fakeChain(request = postRequest(body))).close()
+    drainDelivery()
+
+    assertEquals(0, body.writeToCalls)
+    assertNull((flushed.single().single() as SdkNetworkRequestEvent).requestBody)
+  }
+
+  @Test
+  fun `known-length 50 MB request body is skipped without being written`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val fiftyMb = 50L * 1024 * 1024
+    val body =
+      RecordingRequestBody("text/csv", fiftyMb, ByteArray(1024) { 'a'.code.toByte() }, 51_200)
+
+    interceptor.intercept(fakeChain(request = postRequest(body))).close()
+    drainDelivery()
+
+    assertEquals(0, body.writeToCalls)
+    assertEquals(0L, body.bytesWritten)
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertNull(event.requestBody)
+    assertEquals(fiftyMb, event.requestBodySize)
+  }
+
+  @Test
+  fun `unknown-length request body stops being pulled at the capture cap`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val chunk = ByteArray(1024) { 'a'.code.toByte() }
+    val body = RecordingRequestBody("text/plain", -1, chunk, 10 * 1024) // 10 MB if fully written
+
+    interceptor.intercept(fakeChain(request = postRequest(body))).close()
+    drainDelivery()
+
+    assertEquals(1, body.writeToCalls)
+    assertTrue(
+      body.bytesWritten < 4 * AutoMobileNetworkInterceptor.MAX_BODY_BYTES,
+      "capture pulled ${body.bytesWritten} bytes",
+    )
+    val captured = (flushed.single().single() as SdkNetworkRequestEvent).requestBody
+    assertEquals(AutoMobileNetworkInterceptor.MAX_BODY_BYTES.toInt(), captured?.length)
+  }
+
+  @Test
+  fun `small known-length request body is still captured whole`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val chunk = "hello".toByteArray()
+    val body = RecordingRequestBody("text/plain", 10, chunk, 2)
+
+    interceptor.intercept(fakeChain(request = postRequest(body))).close()
+    drainDelivery()
+
+    assertEquals("hellohello", (flushed.single().single() as SdkNetworkRequestEvent).requestBody)
+  }
+
+  // --- Non-blocking response body capture (#10137) ---
+
+  /** A response source that yields one chunk and fails the test if anyone reads past it. */
+  private class OneChunkSource(
+    private val chunk: ByteArray,
+    private val failWith: IOException? = null,
+  ) : Source {
+    var reads = 0
+    var closed = false
+
+    override fun read(sink: Buffer, byteCount: Long): Long {
+      reads++
+      if (reads == 2 && failWith != null) throw failWith
+      if (reads > 1) throw AssertionError("source read again before the test released it")
+      sink.write(chunk)
+      return chunk.size.toLong()
+    }
+
+    override fun timeout() = Timeout.NONE
+
+    override fun close() {
+      closed = true
+    }
+  }
+
+  private fun streamingBody(source: Source, contentType: String) =
+    source.buffer().asResponseBody(contentType.toMediaType(), -1)
+
+  private val twentyBytes = "data: hello\n\nabcdefg".toByteArray()
+
+  @Test
+  fun `server-sent-event response is returned without reading the body and is not captured`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val source = OneChunkSource(twentyBytes)
+
+    val response =
+      interceptor.intercept(
+        fakeChain(
+          responseContentType = "text/event-stream",
+          responseBodyOverride = streamingBody(source, "text/event-stream"),
+        )
+      )
+    drainDelivery()
+
+    assertEquals(0, source.reads)
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertEquals(200, event.statusCode)
+    assertNull(event.responseBody)
+    assertEquals("data: hello\n\nabcdefg", response.body.source().readUtf8(20))
+    assertEquals(1, source.reads)
+  }
+
+  @Test
+  fun `streaming json response is returned without a read and reported when the app closes it`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val source = OneChunkSource(twentyBytes)
+
+    val response =
+      interceptor.intercept(
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+      )
+    drainDelivery()
+    assertEquals(0, source.reads)
+    assertTrue(flushed.isEmpty())
+
+    assertEquals("data: hello\n\nabcdefg", response.body.source().readUtf8(20))
+    drainDelivery()
+    assertTrue(flushed.isEmpty())
+
+    response.close()
+    drainDelivery()
+    assertTrue(source.closed)
+    assertEquals(
+      "data: hello\n\nabcdefg",
+      (flushed.single().single() as SdkNetworkRequestEvent).responseBody,
+    )
+  }
+
+  @Test
+  fun `large response is delivered whole while only the cap is captured`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val big = "a".repeat(100 * 1024)
+
+    val response = interceptor.intercept(fakeChain(responseBody = big))
+    drainDelivery()
+    assertTrue(flushed.isEmpty())
+
+    assertEquals(big, response.body.string())
+    drainDelivery()
+
+    val captured = (flushed.single().single() as SdkNetworkRequestEvent).responseBody
+    assertEquals("a".repeat(AutoMobileNetworkInterceptor.MAX_BODY_BYTES.toInt()), captured)
+  }
+
+  @Test
+  fun `response read failure reports what was captured and rethrows`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+    val failure = IOException("connection reset")
+    val source = OneChunkSource("partial".toByteArray(), failWith = failure)
+
+    val response =
+      interceptor.intercept(
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+      )
+    val thrown = assertFailsWith<IOException> { response.body.string() }
+    drainDelivery()
+
+    assertSame(failure, thrown)
+    assertEquals("partial", (flushed.single().single() as SdkNetworkRequestEvent).responseBody)
+  }
+
+  @Test
+  fun `abandoned response body is reported at the deadline exactly once`() {
+    val (buffer, flushed) = collectingBuffer()
+    val deadlines = mutableListOf<Pair<Runnable, Long>>()
+    var cancelled = 0
+    val interceptor =
+      AutoMobileNetworkInterceptor(buffer, captureBodies = true).apply {
+        scheduleCaptureDeadline = { task, delayMs ->
+          deadlines.add(task to delayMs)
+          val cancel: () -> Unit = { cancelled++ }
+          cancel
+        }
+      }
+    val source = OneChunkSource(twentyBytes)
+
+    val response =
+      interceptor.intercept(
+        fakeChain(responseBodyOverride = streamingBody(source, "application/json"))
+      )
+    response.body.source().require(1)
+    drainDelivery()
+    assertTrue(flushed.isEmpty())
+    assertEquals(NetworkBodyCapture.RESPONSE_CAPTURE_DEADLINE_MS, deadlines.single().second)
+
+    deadlines.single().first.run()
+    response.close()
+    drainDelivery()
+
+    assertEquals(
+      "data: hello\n\nabcdefg",
+      (flushed.single().single() as SdkNetworkRequestEvent).responseBody,
+    )
+    assertEquals(1, cancelled) // the late close does not re-emit
+  }
+
+  @Test
+  fun `completing the body cancels its deadline`() {
+    val (buffer, _) = collectingBuffer()
+    var cancelled = 0
+    val interceptor =
+      AutoMobileNetworkInterceptor(buffer, captureBodies = true).apply {
+        scheduleCaptureDeadline = { _, _ -> { cancelled++ } }
+      }
+
+    interceptor.intercept(fakeChain(responseBody = """{"ok":true}""")).body.string()
+
+    assertEquals(1, cancelled)
+  }
+
+  @Test
+  fun `empty response body is reported immediately`() {
+    val (buffer, flushed) = collectingBuffer()
+    val interceptor = AutoMobileNetworkInterceptor(buffer, captureBodies = true)
+
+    interceptor.intercept(fakeChain(responseBody = ""))
+    drainDelivery()
+
+    assertEquals("", (flushed.single().single() as SdkNetworkRequestEvent).responseBody)
   }
 }

@@ -123,8 +123,10 @@ export class AndroidPhysicalDisplayIdResolver {
   /**
    * Resolve an Android logical display id (as listed by `cmd display
    * get-displays`) to the physical id `screencap -d` takes. Returns null when
-   * the list is unreadable or the display has no `local:` physical id, so the
-   * caller can keep its legacy argument. Only a non-empty list is cached.
+   * the list is unreadable or the display has no `local:` physical id; the
+   * caller decides how to proceed, because the logical id itself is rejected by
+   * `screencap -d`. A cached list that lacks the requested id is refetched once
+   * (a hot-plugged display or a lagging fold transition), never more.
    */
   async resolveLogical(
     adb: AdbExecutor,
@@ -135,9 +137,28 @@ export class AndroidPhysicalDisplayIdResolver {
     const revision = this.displayRevision(deviceId);
     const cached = this.logicalCache.get(deviceId);
     if (cached && cached.expiresAt > this.timer.now() && cached.revision === revision) {
-      return physicalDisplayIdForLogicalId(cached.infos, logicalId) ?? null;
+      const hit = physicalDisplayIdForLogicalId(cached.infos, logicalId);
+      if (hit !== undefined) {
+        return hit;
+      }
     }
     this.logicalCache.delete(deviceId);
+    const infos = await this.readLogicalDisplayInfos(adb, deviceId, revision, signal);
+    const physicalId = infos ? physicalDisplayIdForLogicalId(infos, logicalId) : undefined;
+    if (infos && physicalId === undefined) {
+      logger.warn(
+        `[AndroidPhysicalDisplayId] Logical display ${logicalId} has no physical display id in the display list`,
+      );
+    }
+    return physicalId ?? null;
+  }
+
+  private async readLogicalDisplayInfos(
+    adb: AdbExecutor,
+    deviceId: string,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<ReturnType<typeof parseAndroidDisplayInfos> | null> {
     try {
       const output = await adb.executeCommand(
         DEFAULT_DISPLAY_INFO_COMMAND,
@@ -154,11 +175,10 @@ export class AndroidPhysicalDisplayIdResolver {
           revision,
         });
       }
-      return physicalDisplayIdForLogicalId(infos, logicalId) ?? null;
+      return infos;
     } catch (error) {
       signal?.throwIfAborted();
-      // The display list is optional; keep the legacy logical-id argument when it cannot be read.
-      logger.debug(`[AndroidPhysicalDisplayId] Logical display lookup failed: ${error}`);
+      logger.warn(`[AndroidPhysicalDisplayId] Logical display lookup failed: ${error}`, error);
       return null;
     }
   }

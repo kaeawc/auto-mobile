@@ -41,14 +41,14 @@ function captureFor(adb: FakeAdbExecutor): Base64Capture {
     new FakeScreenshotFileWriter(),
     new FakeFileSystem(),
     () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(),
+    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
   ) as unknown as Base64Capture;
 }
 
 const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken("cleanup")}.png`;
-const command = `shell "screencap -d 0 -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
+const command = `shell "screencap -d 4619827259835644672 -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
 const options = { format: "png", displayId: 0 } as const;
 const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -183,7 +183,9 @@ describe("Android base64 screenshot cleanup", () => {
       captureFor(adb).captureScreenshotBase64("/screenshots/result.png", options, undefined, true),
     ).rejects.toBe(failure);
 
-    expect(adb.getExecutedCommands()).toEqual([`shell "screencap -d 0 -p | base64"`]);
+    expect(adb.getExecutedCommands()).toEqual([
+      `shell "screencap -d 4619827259835644672 -p | base64"`,
+    ]);
   });
 });
 
@@ -262,7 +264,7 @@ function filePullHarness(
     },
     fileSystem,
     () => "/screenshots/cache",
-    new FakeAndroidPhysicalDisplayIdResolver(),
+    new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
   ) as unknown as FilePullCapture;

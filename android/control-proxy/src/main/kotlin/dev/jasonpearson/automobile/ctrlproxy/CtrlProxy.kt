@@ -5673,16 +5673,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  internal enum class ImeActionStep(val error: String? = null) {
+  internal enum class ImeActionStep(val error: String? = null, val approximated: Boolean? = null) {
     NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
-    NEXT,
-    PREVIOUS,
+    NEXT(approximated = true),
+    PREVIOUS(approximated = true),
+    EDITOR_NEXT,
+    EDITOR_PREVIOUS,
     IME_ENTER,
     KEYCODE_ENTER,
     UNSUPPORTED;
 
     companion object {
-      fun select(action: String, hasFocusedEditable: Boolean, sdkInt: Int): ImeActionStep {
+      fun select(
+        action: String,
+        hasFocusedEditable: Boolean,
+        sdkInt: Int,
+        hasImeConnection: Boolean = false,
+      ): ImeActionStep {
+        if (hasImeConnection) {
+          if (action == "next") return EDITOR_NEXT
+          if (action == "previous") return EDITOR_PREVIOUS
+        }
         if (!hasFocusedEditable) {
           return NO_FOCUSED_EDITABLE
         }
@@ -5700,8 +5711,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform IME action using AccessibilityService. This properly handles focus movement
-   * (next/previous) and keyboard actions (done/go/search/send).
+   * Dispatch navigation through the active IME when possible, otherwise approximate it with focus
+   * traversal. Other keyboard actions retain their AccessibilityService handling.
    */
   private fun performImeAction(requestId: String?, action: String) {
     rememberedInsert = null
@@ -5711,13 +5722,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     var root: android.view.accessibility.AccessibilityNodeInfo? = null
     var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
+    var approximated: Boolean? = null
     try {
       perfProvider.startOperation("findFocusedNode")
       root = rootInActiveWindow
       focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
-      val step = ImeActionStep.select(action, focusedNode != null, android.os.Build.VERSION.SDK_INT)
+      val navigationActionId =
+        when (action) {
+          "next" -> android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
+          "previous" -> android.view.inputmethod.EditorInfo.IME_ACTION_PREVIOUS
+          else -> null
+        }
+      val editorActionResult =
+        if (navigationActionId != null) {
+          kotlinx.coroutines.runBlocking {
+            CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
+          }
+        } else null
+      // Accessibility nodes expose no configured imeOptions. ACTION_IME_ENTER alone does not
+      // prove the editor is configured for NEXT, so an unavailable IME uses traversal.
+      val step =
+        ImeActionStep.select(
+          action,
+          focusedNode != null,
+          android.os.Build.VERSION.SDK_INT,
+          hasImeConnection = editorActionResult != null,
+        )
+      approximated = step.approximated
       val error = step.error
       if (error != null) {
         perfProvider.end()
@@ -5732,6 +5765,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.startOperation("executeAction")
       val success =
         when (step) {
+          ImeActionStep.EDITOR_NEXT,
+          ImeActionStep.EDITOR_PREVIOUS -> editorActionResult == true
           ImeActionStep.NEXT -> {
             // Find next focusable element and focus it
             val nextNode = findNextFocusableNode(root, focusedNode!!)
@@ -5817,6 +5852,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           if (success) null else "Action failed",
           totalTime,
+          approximated,
         )
       }
     } catch (e: Exception) {
@@ -5824,7 +5860,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       kotlinx.coroutines.runBlocking {
-        broadcastImeActionResult(requestId, action, false, e.message, errorTime - startTime)
+        broadcastImeActionResult(
+          requestId,
+          action,
+          false,
+          e.message,
+          errorTime - startTime,
+          approximated,
+        )
       }
     } finally {
       if (focusedNode !== root) {
@@ -7122,8 +7165,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     node: android.view.accessibility.AccessibilityNodeInfo,
     result: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
   ) {
-    // A node is a valid IME target if it's editable and focusable
-    if (node.isEditable && node.isFocusable) {
+    // Approximate traversal must only include editors the user can reach.
+    if (
+      isImeFocusCandidate(
+        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled)
+      )
+    ) {
       // Create a copy to add to our list (we'll recycle the originals as we traverse)
       result.add(android.view.accessibility.AccessibilityNodeInfo.obtain(node))
     }
@@ -7444,6 +7491,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    approximated: Boolean? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
@@ -7453,6 +7501,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resultBroadcaster.guard(requestId, "ime_action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         webSocketFrameJson("ime_action_result", requestId = requestId, perfTiming = perfTiming) {
+          if (approximated != null) put("approximated", approximated)
           put("action", action)
           put("success", success)
           put("totalTimeMs", totalTimeMs)
@@ -8986,3 +9035,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 }
+
+internal data class ImeFocusCandidate(
+  val isEditable: Boolean,
+  val isFocusable: Boolean,
+  val isVisibleToUser: Boolean,
+  val isEnabled: Boolean,
+)
+
+internal fun isImeFocusCandidate(row: ImeFocusCandidate): Boolean =
+  row.isEditable && row.isFocusable && row.isVisibleToUser && row.isEnabled

@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
@@ -36,6 +37,8 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionDriver
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardSession
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -171,6 +174,22 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     super.onFinishInput()
     restoreLastIme()
   }
+
+  /** Null means no active editor connection; false means the editor rejected the action. */
+  internal suspend fun performNavigationAction(actionId: Int): Boolean? =
+    withContext(Dispatchers.Main.immediate) {
+      val selectedIme =
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+          ?.let(ComponentName::unflattenFromString)
+      dispatchNavigationAction(
+        actionId,
+        isActive =
+          instance === this@CtrlProxyIme &&
+            selectedIme == ComponentName(this@CtrlProxyIme, CtrlProxyIme::class.java),
+        isInputStarted,
+        connectionAdapter(),
+      )
+    }
 
   fun commitText(
     text: String,
@@ -395,6 +414,18 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   companion object {
+    internal fun dispatchNavigationAction(
+      actionId: Int,
+      isActive: Boolean,
+      isInputStarted: Boolean,
+      connection: ImeConnection?,
+    ): Boolean? {
+      if (actionId != EditorInfo.IME_ACTION_NEXT && actionId != EditorInfo.IME_ACTION_PREVIOUS)
+        return null
+      if (!isActive || !isInputStarted || connection == null) return null
+      return connection.performEditorAction(actionId)
+    }
+
     /** A prompt null/empty read is valid; an exception or timed-out read is not. */
     internal fun editorSyncSucceeded(
       connection: ImeConnection?,

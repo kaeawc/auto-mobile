@@ -12,6 +12,7 @@ import {
 } from "../shared/SharedGestureDelegate";
 import type { DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
+import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import {
@@ -44,6 +45,17 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       strategy === "displayTargetedObserved"
       ? { diagnostics: true, tapStrategy: strategy }
       : { diagnostics: true };
+  }
+
+  /**
+   * A swipe written to the runner whose reply is late or lost has very likely scrolled the
+   * screen, so it reports `dispatched`/`acknowledged` like the other iOS dispatch commands. A
+   * runner reply, including a refusal, is acknowledged; a timeout or socket close is not.
+   */
+  protected override sendSwipeCommand(
+    options: SendCommandOptions<GestureTimingResult>,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return sendIOSPressCommand(this.context, options);
   }
 
   /**

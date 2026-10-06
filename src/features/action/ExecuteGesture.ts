@@ -348,22 +348,52 @@ export class ExecuteGesture extends BaseVisualChange {
     const fence = options.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
-
-    const result = await perf.track("xctestSwipe", async () => {
-      throwIfAborted(signal);
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      return await client.requestSwipe(
-        x1,
-        y1,
-        x2,
-        y2,
-        duration,
-        Math.min(5_000, options.timeoutMs ?? 5_000),
-        perf,
-        options.lockScreen === true ? { lockScreen: true } : undefined,
-      );
+    let dispatched = false;
+    const indeterminateResult = (reason: string): SwipeResult => ({
+      success: false,
+      outcomeIndeterminate: true,
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). The swipe may have been applied. Do not retry automatically.`,
     });
+
+    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestSwipe"]>>;
+    try {
+      result = await perf.track("xctestSwipe", async () => {
+        throwIfAborted(signal);
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence?.assertCurrent();
+        return await client.requestSwipe(
+          x1,
+          y1,
+          x2,
+          y2,
+          duration,
+          Math.min(5_000, options.timeoutMs ?? 5_000),
+          perf,
+          options.lockScreen === true ? { lockScreen: true } : undefined,
+          signal,
+          () => {
+            dispatched = true;
+          },
+        );
+      });
+    } catch (error) {
+      // An ActionableError (runner refusal, stale display) is a definite answer, not a lost reply.
+      if (!dispatched || error instanceof ActionableError) {
+        throw error;
+      }
+      logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${errorMessage(error)}`);
+      return indeterminateResult(errorMessage(error));
+    }
+    // Only a runner reply (success or refusal) is acknowledged; a sent swipe without one may have run.
+    if (!result.success && (result.dispatched ?? dispatched) && result.acknowledged !== true) {
+      logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${result.error}`);
+      return indeterminateResult(result.error ?? "unknown error");
+    }
     throwIfAborted(signal);
 
     if (result.success) {

@@ -14,7 +14,7 @@ import type {
   BaseResult,
   SwipeRequestOptions,
 } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 
 /** Default transport budget for coordinate taps and VoiceOver activation. */
 export const DEFAULT_GESTURE_REQUEST_TIMEOUT_MS = 5000;
@@ -126,6 +126,16 @@ export class SharedGestureDelegate {
     };
   }
 
+  /**
+   * Transport seam for the single-finger swipe. iOS overrides it to report a dispatched but
+   * unconfirmed swipe, while every other consumer keeps the plain request/response contract.
+   */
+  protected sendSwipeCommand(
+    options: SendCommandOptions<GestureTimingResult>,
+  ): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(this.context, options);
+  }
+
   async requestSwipe(
     x1: number,
     y1: number,
@@ -141,7 +151,7 @@ export class SharedGestureDelegate {
     beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
-    const result = await sendCommand<GestureTimingResult>(this.context, {
+    const result = await this.sendSwipeCommand({
       idPrefix: "swipe",
       responseType: "swipe",
       messageType: "request_swipe",

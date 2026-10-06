@@ -166,7 +166,7 @@ describe("AC2: platform-qualified domains", () => {
     const report = computeStorageCapabilities(
       ctx({ platform: "android", activeUserProfile: true }),
     );
-    // putAppFile/stageSharedStorage and the shared-storage resource templates back these operations.
+    // putAppFile and the shared-storage resource templates back these operations.
     expect(isStorageOperationAvailable(report, "user_files", "write")).toBe(true);
     for (const operation of ["list", "read"] as const) {
       const capability = findOperationCapability(report, "user_files", operation)!;

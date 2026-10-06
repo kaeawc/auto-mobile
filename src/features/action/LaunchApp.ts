@@ -5,6 +5,7 @@ import { BaseVisualChange } from "./BaseVisualChange";
 import {
   BootedDevice,
   ClearAppDataResult,
+  DeviceLockState,
   LaunchAppResult,
   ObserveResult,
   TerminateAppResult,
@@ -65,6 +66,8 @@ const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
+// One bounded lock re-read before a launch timeout names a SystemUI blocker (#10182).
+const LAUNCH_BLOCKER_LOCK_REREAD_TIMEOUT_MS = 3_000;
 const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
@@ -1476,8 +1479,7 @@ export class LaunchApp extends BaseVisualChange {
       latestObservation,
       expectedPackageName,
       timeoutMs,
-      coldBoot,
-      expectedUserId,
+      { coldBoot, expectedUserId, signal },
     );
   }
 
@@ -1562,14 +1564,14 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private resolveLaunchObservationTimeout(
+  private async resolveLaunchObservationTimeout(
     result: LaunchAppResult,
     latestObservation: ObserveResult,
     expectedPackageName: string,
     timeoutMs: number,
-    coldBoot?: boolean,
-    expectedUserId?: number,
-  ): LaunchAppResult {
+    options: { coldBoot?: boolean; expectedUserId?: number; signal?: AbortSignal },
+  ): Promise<LaunchAppResult> {
+    const { coldBoot, expectedUserId, signal } = options;
     // Distinguish "genuinely launched but no foreground window could be read at
     // all" from "observed a different/stale app" (issue #6220 follow-up). The
     // latter is a real mismatch — reject and strip the stale observation, as
@@ -1608,30 +1610,84 @@ export class LaunchApp extends BaseVisualChange {
     }
 
     const foregroundDescription = this.describeLaunchObservationPackages(latestObservation);
+    const lock = await this.resolveLockForLaunchBlocker(latestObservation, signal);
     return this.withoutStaleLaunchObservation(
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, foregroundDescription, expectedPackageName, coldBoot)}`,
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${foregroundDescription} in the foreground — ${this.describeLaunchObservationBlocker(latestObservation, lock, foregroundDescription, expectedPackageName, coldBoot)}`,
       },
       expectedPackageName,
       latestObservation,
     );
   }
 
+  private isSystemUiOverlayObservation(observation: ObserveResult): boolean {
+    const activeWindow = observation.activeWindow;
+    return activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true;
+  }
+
+  /**
+   * The lock sample the timeout message is based on (#10182). The observation's
+   * own sample can be absent (the `dumpsys window policy` read failed or lacked
+   * the keyguard fields) or taken before the keyguard settled, so when a SystemUI
+   * surface covers the app and the observation does not already say the device is
+   * locked, take one more read bounded by the request signal and a short
+   * deadline. A failed re-read falls back to the observation's sample, then to
+   * `undefined` (unknown) — never to a guessed "unlocked".
+   */
+  private async resolveLockForLaunchBlocker(
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<DeviceLockState | undefined> {
+    if (
+      this.device.platform !== "android" ||
+      !this.isSystemUiOverlayObservation(observation) ||
+      observation.deviceLock?.locked === true ||
+      signal?.aborted
+    ) {
+      return observation.deviceLock;
+    }
+    try {
+      const fresh = await raceWithDeadline(() => this.adb.getDeviceLock(signal), {
+        timer: this.timer,
+        timeoutMs: LAUNCH_BLOCKER_LOCK_REREAD_TIMEOUT_MS,
+        signal,
+        label: "Launch blocker lock re-read",
+        relabelDefaultAbort: false,
+      });
+      return fresh ?? observation.deviceLock;
+    } catch (error) {
+      logger.warn(
+        `[LaunchApp] Lock re-read for the launch timeout message failed: ${errorMessage(error)}`,
+        error,
+      );
+      return observation.deviceLock;
+    }
+  }
+
   private describeLaunchObservationBlocker(
     latestObservation: ObserveResult,
+    lock: DeviceLockState | undefined,
     foregroundDescription: string,
     expectedPackageName: string,
     coldBoot?: boolean,
   ): string {
-    const activeWindow = latestObservation.activeWindow;
-    if (latestObservation.deviceLock?.locked === true) {
-      return "the device is locked; call `wakeAndUnlock` first.";
+    // The hierarchy read itself can name the keyguard (`device_locked`) when the
+    // lock sample is missing from the observation.
+    if (
+      lock?.locked === true ||
+      latestObservation.viewHierarchy?.hierarchy?.unavailableReason === "device_locked"
+    ) {
+      return "the device is locked (the lock screen is covering the app); call `wakeAndUnlock` first.";
     }
 
-    if (activeWindow?.appId === "com.android.systemui" && activeWindow.systemOverlay === true) {
-      return "the system UI (notification shade) is covering the app.";
+    if (this.isSystemUiOverlayObservation(latestObservation)) {
+      // Only a lock sample that says "not locked" makes the shade the evidence-backed
+      // cause. Without one, a keyguard the lock read missed looks identical (#10182).
+      return lock?.locked === false
+        ? "the system UI (notification shade) is covering the app."
+        : "the system UI is covering the app and the lock state could not be determined, so it may be the lock screen or the notification shade; call `wakeAndUnlock` to clear a lock screen, or collapse the shade, then retry.";
     }
 
     if (coldBoot) {

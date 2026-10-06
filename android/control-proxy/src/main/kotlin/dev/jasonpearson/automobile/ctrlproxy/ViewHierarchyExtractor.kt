@@ -394,7 +394,15 @@ internal constructor(
 
           val windowBounds = Rect()
           window.getBoundsInScreen(windowBounds)
-          windowInfos.add(windowInfo(window, windowBounds, displayId, panelUniqueId))
+          windowInfos.add(
+            windowInfo(
+              window,
+              windowBounds,
+              displayId,
+              panelUniqueId,
+              rootNode.packageName?.toString(),
+            )
+          )
           val element =
             extractNodeInfo(
               rootNode,
@@ -702,6 +710,7 @@ internal constructor(
     bounds: Rect,
     displayId: Int?,
     panelUniqueId: String?,
+    packageName: String?,
   ): WindowInfo =
     WindowInfo(
       id = window.id,
@@ -715,6 +724,7 @@ internal constructor(
       isActive = window.isActive,
       isFocused = window.isFocused,
       bounds = ElementBounds(bounds),
+      packageName = packageName,
     )
 
   private fun detectContentHiddenRegions(

@@ -975,6 +975,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           recordingId: config.recordingId,
           outputPath: config.outputPath,
           startedAt: config.startedAt,
+          // simctl writes the raw .mov; `outputPath` exists only after stop's post-process.
+          liveCapturePath: capturePath,
           backendHandle,
         };
       } catch (error) {

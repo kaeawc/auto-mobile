@@ -11,6 +11,7 @@ import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools
 import { logger } from "../../../src/utils/logger";
 import { screenshotTempIdToken } from "../../../src/utils/screenshot/screenshotFormats";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
@@ -40,7 +41,7 @@ function captureFor(adb: FakeAdbExecutor): Base64Capture {
     new FakeScreenshotFileWriter(),
     new FakeFileSystem(),
     () => "/screenshots/cache",
-    undefined,
+    new FakeAndroidPhysicalDisplayIdResolver(),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
   ) as unknown as Base64Capture;
@@ -261,7 +262,7 @@ function filePullHarness(
     },
     fileSystem,
     () => "/screenshots/cache",
-    undefined,
+    new FakeAndroidPhysicalDisplayIdResolver(),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
   ) as unknown as FilePullCapture;

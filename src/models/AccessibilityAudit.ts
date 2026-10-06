@@ -120,6 +120,12 @@ export interface AccessibilityAuditSummary {
   /** Number of violations suppressed by baseline */
   baselinedViolations: number;
 
+  /**
+   * Checks that could not run for this observation (for example contrast when
+   * the observation has no screenshot), so a missing check is not read as a pass.
+   */
+  notEvaluated?: Array<{ check: ViolationType; reason: string }>;
+
   /** Whether the audit passed based on failure mode */
   passed: boolean;
 

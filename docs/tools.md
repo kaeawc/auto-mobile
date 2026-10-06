@@ -1658,10 +1658,10 @@ postures. A `foldable` form factor alone does not imply two panels: some foldabl
 AVDs only change posture on one panel. Booted devices use their display inventory.
 
 Booted device entries in `listDevices` and the booted-devices resource optionally carry
-`unhealthy: { reason, since }`. Reasons are `biometric-enrollment`, `network-condition`, or
-`clock`; `since` is the daemon's timestamp in milliseconds. Unresolved restore failures
-exclude devices from available/idle counts and new session allocation. Biometric and
-network failures get three background recovery opportunities with 1s/2s/4s backoff;
+`unhealthy: { reason, since }`. Reasons are `biometric-enrollment`, `network-condition`, `clock`, or
+`app-cleanup` (an `executePlan` app cleanup did not complete); `since` is the daemon's timestamp in milliseconds. Unresolved restore failures
+exclude devices from available/idle counts and new session allocation. Biometric,
+network, and app-cleanup failures get three background recovery opportunities with 1s/2s/4s backoff;
 a live owner is never restored by this recovery. Clock failures retain the existing
 busy quarantine and retry until success or removal. No automatic erase/reboot occurs;
 use `killDevice`/`startDevice` for replacement if recovery is exhausted. Health markers

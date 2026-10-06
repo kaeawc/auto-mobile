@@ -29,6 +29,7 @@ type FakeSimCtlClientContract = Pick<
 >;
 
 export class FakeSimCtlClient implements FakeSimCtlClientContract {
+  private listAppsError: Error | null = null;
   private deviceInfo = new Map<string, AppleDevice | null>();
   private deviceInfoError: Error | null = null;
   private runtimes: AppleDeviceRuntime[] = [];
@@ -90,6 +91,10 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   setInstalledApps(apps: any[]): void {
     this.installedApps = apps;
+  }
+
+  setListAppsError(error: Error | null): void {
+    this.listAppsError = error;
   }
 
   setContainerPath(bundleId: string, containerPath: string): void {
@@ -282,6 +287,9 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
 
   async listAppsOrThrow(deviceId?: string): Promise<any[]> {
     this.recordCall("listAppsOrThrow", { deviceId });
+    if (this.listAppsError) {
+      throw this.listAppsError;
+    }
     return this.installedApps;
   }
 

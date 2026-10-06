@@ -6811,7 +6811,7 @@
                 "properties": {
                   "reason": {
                     "type": "string",
-                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                    "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                   },
                   "since": {
                     "type": "number"
@@ -7484,7 +7484,7 @@
                 "properties": {
                   "reason": {
                     "type": "string",
-                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                    "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                   },
                   "since": {
                     "type": "number"
@@ -19768,7 +19768,7 @@
               "properties": {
                 "reason": {
                   "type": "string",
-                  "enum": ["biometric-enrollment", "network-condition", "clock"]
+                  "enum": ["biometric-enrollment", "network-condition", "clock", "app-cleanup"]
                 },
                 "since": {
                   "type": "number"

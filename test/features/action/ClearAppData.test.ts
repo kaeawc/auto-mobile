@@ -3,7 +3,7 @@ import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
-import { ActionableError } from "../../../src/models/ActionableError";
+import { ActionableError, AppNotInstalledError } from "../../../src/models/ActionableError";
 import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -271,13 +271,21 @@ describe("ClearAppData", () => {
         expect(containerStat.isDirectory()).toBe(true);
       });
 
-      test("returns failure when the data container cannot be resolved", async () => {
+      test("returns failure when the data container cannot be resolved for an installed app", async () => {
         const fakeSimctl = new FakeSimCtlClient();
+        fakeSimctl.setInstalledApps([{ bundleId }]);
         const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
           bundleId,
         );
         expect(result.success).toBe(false);
         expect(result.error).toContain("data container");
+      });
+
+      test("throws AppNotInstalledError when the app is not installed", async () => {
+        const fakeSimctl = new FakeSimCtlClient();
+        await expect(
+          new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(bundleId),
+        ).rejects.toBeInstanceOf(AppNotInstalledError);
       });
     });
 

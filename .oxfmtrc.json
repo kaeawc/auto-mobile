@@ -5,6 +5,7 @@
     "ios/**",
     "android/**",
     "scratch/**",
+    "test/fixtures/accessibility-contrast/**",
     "test/fixtures/android-display/fold-pixel10pf-api36/README.md",
     "test/fixtures/release/CHANGELOG-0.0.82.md",
     "test/fixtures/android-notification-policy/*.txt",

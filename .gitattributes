@@ -100,3 +100,5 @@ schemas/overlay-asset-contract.json text eol=lf
 
 # Real `ps -o lstart=` captures whose exact bytes (trailing padding) are asserted (issue #10116).
 test/fixtures/daemon-ps-lstart/*.txt text eol=lf
+# Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
+test/fixtures/accessibility-contrast/*.json text eol=lf

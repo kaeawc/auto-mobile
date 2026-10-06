@@ -82,7 +82,8 @@ import {
   markNodeVisited,
   markEdgeTraversed,
   selectNextEdgeToTraverse,
-  findElementMatchingEdge,
+  resolveEdgeTarget,
+  markEdgeSkipped,
   validateNavigation,
 } from "./ExploreValidateMode";
 
@@ -835,26 +836,47 @@ export class Explore extends BaseVisualChange {
       markNodeVisited(state, currentScreen);
     }
 
-    const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
-    if (!targetEdge) {
-      if (state.pendingEdges.size === 0) {
-        this.stopReason = "All edges in navigation graph have been traversed";
-        logger.info(`[Explore] ${this.stopReason}`);
+    // Each skipped edge leaves the pending set, so this terminates.
+    for (;;) {
+      const targetEdge = selectNextEdgeToTraverse(state, currentScreen);
+      if (!targetEdge) {
+        if (state.pendingEdges.size === 0) {
+          this.stopReason = "All edges in navigation graph have been traversed";
+          logger.info(`[Explore] ${this.stopReason}`);
+        }
+        // Pending sources elsewhere: let the loop use its bounded back recovery.
+        return null;
       }
-      // Pending sources elsewhere: let the loop use its bounded back recovery.
-      return null;
-    }
 
-    const match = findElementMatchingEdge(candidates, targetEdge);
-    if (!match) {
-      this.stopReason =
-        `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
-        `App may have diverged from known graph.`;
-      logger.error(`[Explore] ${this.stopReason}`);
-      markEdgeTraversed(state, targetEdge, null, false, this.timer, "Element not found on screen");
-      return null;
+      const resolution = resolveEdgeTarget(candidates, targetEdge);
+      if (resolution.status === "not-validatable") {
+        // A property of the recorded edge, not of the app: skip it and try the next one.
+        markEdgeSkipped(state, targetEdge, resolution.reason, this.timer);
+        continue;
+      }
+      if (resolution.status === "not-found") {
+        this.stopReason =
+          `Validate mode: Cannot find element matching edge ${targetEdge.from}->${targetEdge.to}. ` +
+          `App may have diverged from known graph.`;
+        logger.error(`[Explore] ${this.stopReason}`);
+        markEdgeTraversed(
+          state,
+          targetEdge,
+          null,
+          false,
+          this.timer,
+          "Element not found on screen",
+        );
+        return null;
+      }
+      return this.targetValidateEdge(targetEdge, resolution);
     }
+  }
 
+  private targetValidateEdge(
+    targetEdge: NavigationEdge,
+    match: { element: Element; confidence: number },
+  ): Element {
     logger.info(
       `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
         `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
@@ -1265,7 +1287,9 @@ export class Explore extends BaseVisualChange {
 
     const results = Array.from(state.edgeValidationResults.values());
     const validated = results.filter((result) => result.success).length;
-    const failed = results.length - validated;
+    const skipped = results.filter((result) => result.skipped).length;
+    const failed = results.length - validated - skipped;
+    const skippedNote = skipped > 0 ? `${skipped} skipped (not replayable); ` : "";
     const pending = Array.from(
       state.pendingEdges,
       ([key, edge]) => `${edge.from}->${edge.to} (${key})`,
@@ -1274,7 +1298,7 @@ export class Explore extends BaseVisualChange {
     // they are globally unreachable. Preserve its reason alongside the remainder.
     return (
       `${reason}. Validated ${validated} of ${state.totalEdgesInGraph} edges; ` +
-      `${failed} failed validation; ${state.pendingEdges.size} remain pending. ` +
+      `${failed} failed validation; ${skippedNote}${state.pendingEdges.size} remain pending. ` +
       `Pending edges not reached before stopping (source->destination): ${pending.join(", ")}`
     );
   }

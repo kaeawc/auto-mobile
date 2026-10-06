@@ -2442,6 +2442,69 @@ describe("Explore", () => {
       }
     });
 
+    function addUnrecordedEdge(from: string, to: string): void {
+      fakeGraph.addEdge({
+        from,
+        to,
+        edgeType: "unknown",
+        timestamp: fakeTimer.now(),
+        uiState: { selectedElements: [{ text: "Settings" }] },
+      });
+    }
+
+    test("validate regression: an edge with no recorded interaction is skipped, not reported as divergence", async () => {
+      addUnrecordedEdge("A", "B");
+      addValidateEdge("A", "C", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toBe(completionReason);
+        expect(result.stopReason).not.toContain("diverged");
+        expect(result.graphTraversal?.edgesTraversed).toBe(1);
+        const results = result.graphTraversal?.edgeValidationResults ?? [];
+        expect(results.find((edge) => edge.skipped)?.expectedTo).toBe("B");
+        expect(results.find((edge) => edge.skipped)?.error).toContain(
+          "no interaction was recorded",
+        );
+        expect(results.find((edge) => !edge.skipped)?.success).toBe(true);
+        expect(fakeGraph.getCurrentScreen()).toBe("C");
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("validate regression: a graph of only unrecorded edges completes without tapping or Back", async () => {
+      addUnrecordedEdge("A", "B");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toBe(completionReason);
+        expect(result.graphTraversal?.edgesTraversed).toBe(0);
+        expect(result.graphTraversal?.edgeValidationResults[0]?.skipped).toBe(true);
+        expect(result.graphTraversal?.edgeValidationResults[0]?.success).toBe(false);
+        expect(run.backStopReasons).toEqual([]);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        run.restore();
+      }
+    });
+
+    test("validate regression: a skipped edge does not mask a real divergence in the summary", async () => {
+      addUnrecordedEdge("A", "B");
+      addValidateEdge("A", "C", "Missing button");
+      addValidateEdge("X", "Y", "Profile");
+      const run = setupValidateRun();
+      try {
+        const result = await explore.execute({ mode: "validate", maxInteractions: 10 });
+        expect(result.stopReason).toContain("Cannot find element matching edge A->C");
+        expect(result.stopReason).toContain("1 failed validation");
+        expect(result.stopReason).toContain("1 skipped (not replayable)");
+        expect(result.stopReason).toContain("1 remain pending");
+      } finally {
+        run.restore();
+      }
+    });
+
     test("validate regression: screen with no candidates stops on element divergence without Back", async () => {
       addValidateEdge("A", "B", "Settings");
       const run = setupValidateRun();

@@ -167,6 +167,32 @@ export function markEdgeTraversed(
 }
 
 /**
+ * Record that an edge cannot be validated by tapping (no replayable element
+ * interaction). It leaves the pending set but is neither a validation success
+ * nor a failure, and it does not count as traversed.
+ */
+export function markEdgeSkipped(
+  state: GraphTraversalState,
+  edge: NavigationEdge,
+  reason: string,
+  timer: Timer,
+): void {
+  const edgeKey = getEdgeKey(edge);
+  state.edgeValidationResults.set(edgeKey, {
+    edgeKey,
+    fromScreen: edge.from,
+    expectedTo: edge.to,
+    actualTo: null,
+    success: false,
+    skipped: true,
+    timestamp: timer.now(),
+    error: `Not validatable: ${reason}`,
+  });
+  removePendingEdge(state, edgeKey);
+  logger.info(`[Explore] Edge ${edgeKey} skipped: ${reason}`);
+}
+
+/**
  * Select next edge to traverse in validate mode
  * Only selects edges from the current screen to avoid false divergence
  */
@@ -271,27 +297,89 @@ function describeInteractionTarget(edge: NavigationEdge): TargetDescriptors {
   return { descriptors };
 }
 
-/**
- * Resolve the on-screen element for a target edge from its recorded interaction
- * (`edge.interaction.args`). Never matches against `uiState.selectedElements`.
- */
-export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
-  const target = describeInteractionTarget(edge);
-  if ("reason" in target) {
-    logger.warn(`[Explore] Edge ${edge.from}->${edge.to} is not validatable: ${target.reason}`);
-    return { status: "not-validatable", reason: target.reason };
-  }
+/** Coordinate containment is weaker evidence than a selector match on identity. */
+const COORDINATE_CONFIDENCE = 0.7;
 
+function boundsArea(element: Element): number {
+  const { left, top, right, bottom } = element.bounds;
+  return (right - left) * (bottom - top);
+}
+
+function boundsContain(element: Element, x: number, y: number): boolean {
+  const { left, top, right, bottom } = element.bounds ?? {};
+  // Non-finite or missing edges make every comparison false (NaN) or fail the check.
+  return (
+    [left, top, right, bottom].every(Number.isFinite) &&
+    inRange(x, left, right) &&
+    inRange(y, top, bottom)
+  );
+}
+
+function inRange(value: number, min: number, max: number): boolean {
+  return value >= min && value <= max;
+}
+
+function notValidatable(edge: NavigationEdge, reason: string): EdgeTargetResolution {
+  logger.warn(`[Explore] Edge ${edge.from}->${edge.to} is not validatable: ${reason}`);
+  return { status: "not-validatable", reason };
+}
+
+/**
+ * A recorded `tapAt {x, y}` can be replayed by tapping an element only if the
+ * coordinate falls inside a current element's bounds (the smallest one wins);
+ * otherwise there is nothing on screen to tap for it.
+ */
+function resolveCoordinateTap(
+  elements: Element[],
+  edge: NavigationEdge,
+  args: Record<string, unknown>,
+): EdgeTargetResolution {
+  const { x, y } = args;
+  if (typeof x !== "number" || typeof y !== "number") {
+    return notValidatable(edge, 'recorded "tapAt" interaction has no numeric x/y coordinate');
+  }
+  const containing = elements.filter((element) => boundsContain(element, x, y));
+  const [smallest] = containing.sort((a, b) => boundsArea(a) - boundsArea(b));
+  if (!smallest) {
+    return notValidatable(
+      edge,
+      `recorded "tapAt" coordinate (${x},${y}) is not inside any current element, so it cannot be replayed by tapping an element`,
+    );
+  }
+  return { status: "matched", element: smallest, confidence: COORDINATE_CONFIDENCE };
+}
+
+/** Highest-scoring element for any descriptor; the first wins ties. */
+function bestDescriptorMatch(
+  elements: Element[],
+  descriptors: TargetDescriptor[],
+): { element: Element; confidence: number } | null {
   let best: { element: Element; confidence: number } | null = null;
   for (const element of elements) {
-    for (const descriptor of target.descriptors) {
+    for (const descriptor of descriptors) {
       const score = scoreSelectedElementMatch(element, descriptor);
       if (score > (best?.confidence ?? 0)) {
         best = { element, confidence: score };
       }
     }
   }
+  return best;
+}
 
+/**
+ * Resolve the on-screen element for a target edge from its recorded interaction
+ * (`edge.interaction.args`). Never matches against `uiState.selectedElements`.
+ */
+export function resolveEdgeTarget(elements: Element[], edge: NavigationEdge): EdgeTargetResolution {
+  if (edge.interaction?.toolName === "tapAt") {
+    return resolveCoordinateTap(elements, edge, edge.interaction.args ?? {});
+  }
+  const target = describeInteractionTarget(edge);
+  if ("reason" in target) {
+    return notValidatable(edge, target.reason);
+  }
+
+  const best = bestDescriptorMatch(elements, target.descriptors);
   if (best && best.confidence >= MIN_CONFIDENCE) {
     logger.debug(
       `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${best.confidence.toFixed(2)}`,

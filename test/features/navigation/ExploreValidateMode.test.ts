@@ -12,6 +12,7 @@ import {
   hashEdgeAction,
   markNodeVisited,
   markEdgeTraversed,
+  markEdgeSkipped,
   selectNextEdgeToTraverse,
   findElementMatchingEdge,
   resolveEdgeTarget,
@@ -353,6 +354,26 @@ describe("ExploreValidateMode", () => {
     });
   });
 
+  describe("markEdgeSkipped", () => {
+    test("removes the edge from pending without counting it as traversed or failed", async () => {
+      const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
+      const edge = createMockEdge("A", "B");
+      addPendingEdge(state, edge);
+
+      markEdgeSkipped(state, edge, "no interaction was recorded", fakeTimer);
+
+      expect(state.pendingEdges.size).toBe(0);
+      expect(state.pendingEdgesByFrom.has("A")).toBe(false);
+      expect(state.traversedEdges.size).toBe(0);
+      expect(state.edgeValidationResults.get(getEdgeKey(edge))).toMatchObject({
+        skipped: true,
+        success: false,
+        actualTo: null,
+        error: "Not validatable: no interaction was recorded",
+      });
+    });
+  });
+
   describe("selectNextEdgeToTraverse", () => {
     test("should return edge from current screen", async () => {
       const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
@@ -538,6 +559,56 @@ describe("ExploreValidateMode", () => {
       });
 
       expect(findElementMatchingEdge([outer, inner], edge)?.element).toBe(inner);
+    });
+
+    test("reads the selector/index shape recorded by explore actions", () => {
+      const target = openSettings();
+      const edge = interactionEdge("tapOn", {
+        selector: { elementId: "com.test:id/open_settings" },
+        index: 1,
+        action: "tap",
+      });
+
+      expect(findElementMatchingEdge([homeTab(), target], edge)?.element).toBe(target);
+    });
+
+    test("swipeOn reads the container selector recorded by explore actions", () => {
+      const feed = createMockElement({ text: "", "resource-id": "com.test:id/feed" });
+      const edge = interactionEdge("swipeOn", {
+        container: { elementId: "com.test:id/feed" },
+        direction: "up",
+        speed: "slow",
+      });
+
+      expect(findElementMatchingEdge([homeTab(), feed], edge)?.element).toBe(feed);
+    });
+
+    describe("tapAt", () => {
+      const at = (x: unknown, y: unknown) => interactionEdge("tapAt", { x, y, action: "tap" });
+
+      test("matches the smallest current element containing the coordinate", () => {
+        const wide = createMockElement({ bounds: { left: 0, top: 0, right: 400, bottom: 400 } });
+        const small = createMockElement({ bounds: { left: 10, top: 10, right: 110, bottom: 60 } });
+
+        expect(resolveEdgeTarget([wide, small], at(50, 30))).toEqual({
+          status: "matched",
+          element: small,
+          confidence: 0.7,
+        });
+      });
+
+      test("is not validatable when no current element contains the coordinate", () => {
+        const result = resolveEdgeTarget([createMockElement()], at(900, 900));
+
+        expect(result.status).toBe("not-validatable");
+        expect(result.status === "not-validatable" && result.reason).toContain("not inside");
+      });
+
+      test("is not validatable without numeric coordinates", () => {
+        expect(resolveEdgeTarget([createMockElement()], at("5", undefined)).status).toBe(
+          "not-validatable",
+        );
+      });
     });
 
     test("does not use scrollPosition as the target", () => {

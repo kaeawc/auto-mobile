@@ -23,6 +23,7 @@ import {
   Session,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
+import type { LivenessLeasePhase, LivenessLeaseState } from "./livenessOwnerLease";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
@@ -64,6 +65,8 @@ export interface DaemonStateAccess {
     claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
     /** Verify that a keeper still owns the token permitted to refresh liveness. */
     hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
+    /** Lease phase (live, suspect, lapsed) and time remaining in it; absent for `cli-idle` (#10051). */
+    getSessionLeaseState?(sessionId: string): LivenessLeaseState | undefined;
     /** Recover daemon-local ownership only when no token is currently recorded. */
     claimUnownedLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
@@ -508,9 +511,21 @@ async function handleSessionInfo(
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
     },
   };
+}
+
+/**
+ * Additive `liveness` field for `session-info` (#10051): `state` is `live`, or
+ * `suspect` while the owner's lease has expired and the session is held for its
+ * grace window; `remainingMs` counts down the lease (live) or the grace (suspect).
+ */
+function livenessInfo(
+  lease: LivenessLeaseState | undefined,
+): { liveness: { state: LivenessLeasePhase; remainingMs: number } } | Record<string, never> {
+  return lease ? { liveness: { state: lease.phase, remainingMs: lease.remainingMs } } : {};
 }
 
 async function handleActiveSessions(

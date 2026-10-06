@@ -6,6 +6,7 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -170,7 +171,9 @@ describe("proxy liveness owner token (#10050)", () => {
     // The owner stops heartbeating (closed proxy) and its lease lapses.
     await owner.close();
     const leaseMs = sessionManager.getSession(SESSION)!.heartbeatTimeoutMs;
-    timer.advanceTime(leaseMs + 1);
+    // Past the lease the session is held as suspect for the grace window (#10051);
+    // only after that does the owner stop blocking a foreign claim.
+    timer.advanceTime(leaseMs + SUSPECT_GRACE_MS + 1);
     const challenger = proxyFor("harness-b");
     try {
       await challenger.ensureConnected();

@@ -9,6 +9,7 @@ import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
@@ -338,6 +339,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       timer,
     );
     timer.advanceTime(12_367);
+    await monitor.tick();
+    // Past the lease the session is suspect (#10051), reaped once the grace window ends.
+    expect(reaped).toEqual([]);
+    timer.advanceTime(SUSPECT_GRACE_MS);
     await monitor.tick();
     expect(reaped).toEqual([{ sessionId: "shared", reason: "heartbeat-timeout" }]);
   });
@@ -852,7 +857,8 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     try {
       await staleProxy.callTool("observe", { sessionUuid });
       await settleAsyncWork();
-      sessionManager.getSession(sessionUuid)!.lastHeartbeat -= 6_000;
+      // Past the 5 s lease and the suspect grace window that follows it (#10051).
+      sessionManager.getSession(sessionUuid)!.lastHeartbeat -= 6_000 + SUSPECT_GRACE_MS;
       await cli.callTool("observe", { sessionUuid });
       const adopted = await cli.adoptCliSessionLiveness();
       expect(adopted).toBe(sessionUuid);

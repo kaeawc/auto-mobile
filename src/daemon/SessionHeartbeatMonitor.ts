@@ -6,6 +6,7 @@ import {
   type Session,
 } from "./sessionManager";
 import { SingleFlightInterval } from "./SingleFlightInterval";
+import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -14,6 +15,11 @@ export interface HeartbeatSessionSource {
   getAllSessions(): Session[];
   /** Remove expired sessions and fire their release callbacks. */
   cleanupExpiredSessions(): void;
+  /**
+   * Give every session a fresh lease-plus-grace from `resumedAt` because the
+   * daemon itself stalled and cannot have received heartbeats meanwhile (#10051).
+   */
+  forgiveDaemonStall?(resumedAt: number): number;
 }
 
 type SessionHeartbeatReleaseReason =
@@ -39,6 +45,12 @@ export interface SessionHeartbeatMonitorConfig {
   graceMs?: number;
   /** Default timeout for sessions that do not carry their own heartbeat timeout. Default: 10s. */
   heartbeatTimeoutMs?: number;
+  /**
+   * How much later than scheduled a tick may fire before the daemon is judged to
+   * have stalled itself and no session is held to the stalled interval (#10051).
+   * Default: the default heartbeat lease.
+   */
+  stallThresholdMs?: number;
 }
 
 const DEFAULT_CHECK_INTERVAL_MS = 10_000;
@@ -72,6 +84,9 @@ export class SessionHeartbeatMonitor {
   private readonly graceMs: number;
   private readonly preFirstHeartbeatGraceMs: number;
   private readonly defaultHeartbeatTimeoutMs: number;
+  private readonly stallThresholdMs: number;
+  /** When the previous scan finished (or the monitor started); undefined until started. */
+  private lastScanSettledAt: number | undefined;
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -106,12 +121,14 @@ export class SessionHeartbeatMonitor {
         "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
+    this.stallThresholdMs = config.stallThresholdMs ?? this.defaultHeartbeatTimeoutMs;
     this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () =>
       this.tickOnce(),
     );
   }
 
   start(): void {
+    this.lastScanSettledAt ??= this.timer.now();
     this.interval.start();
   }
 
@@ -130,14 +147,58 @@ export class SessionHeartbeatMonitor {
     return this.interval.run();
   }
 
-  private async tickOnce(): Promise<void> {
-    // Release idle/expired sessions promptly (e.g. autolocked devices whose idle
-    // timeout has elapsed). Their idle timeout equals their heartbeat timeout, so
-    // they expire out of getAllSessions() exactly when they would become stale —
-    // sweeping here gives them the monitor's interval granularity instead of the
-    // 5-minute cleanup sweep.
-    this.sessions.cleanupExpiredSessions();
+  /**
+   * How late this scan fired relative to its schedule, judged on the injected
+   * clock. Undefined before the monitor starts, so a manually driven `tick()`
+   * has no schedule to be late against.
+   */
+  private scanLatenessMs(now: number): number | undefined {
+    return this.lastScanSettledAt === undefined
+      ? undefined
+      : now - this.lastScanSettledAt - this.checkIntervalMs;
+  }
 
+  /**
+   * A tick that fires far later than scheduled means the daemon's own event loop
+   * stalled, so the owners' heartbeats could not have reached it. Never reap on
+   * the strength of that: restart every session's lease from this resumed tick.
+   */
+  private forgiveOwnStall(): void {
+    const now = this.timer.now();
+    const lateness = this.scanLatenessMs(now);
+    if (lateness === undefined || lateness <= this.stallThresholdMs) {
+      return;
+    }
+    const forgiven = this.sessions.forgiveDaemonStall?.(now) ?? 0;
+    logger.warn(
+      `Heartbeat monitor tick fired ${lateness}ms late; the daemon stalled, so ${forgiven} ` +
+        `session(s) get a fresh lease instead of being reaped for the stalled interval`,
+    );
+  }
+
+  private async tickOnce(): Promise<void> {
+    this.forgiveOwnStall();
+    try {
+      // Release idle/expired sessions promptly (e.g. autolocked devices whose idle
+      // timeout has elapsed). Their idle timeout equals their heartbeat timeout, so
+      // they expire out of getAllSessions() exactly when they would become stale —
+      // sweeping here gives them the monitor's interval granularity instead of the
+      // 5-minute cleanup sweep.
+      this.sessions.cleanupExpiredSessions();
+      const results = await Promise.allSettled(this.reapStaleSessions());
+      const firstFailure = results.find((result) => result.status === "rejected");
+      if (firstFailure) {
+        throw firstFailure.reason;
+      }
+    } finally {
+      if (this.lastScanSettledAt !== undefined) {
+        this.lastScanSettledAt = this.timer.now();
+      }
+    }
+  }
+
+  /** Start a reap for every stale session and return the in-flight reaps. */
+  private reapStaleSessions(): Promise<void>[] {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.hasActiveExecutions(session.sessionId)) {
@@ -167,11 +228,7 @@ export class SessionHeartbeatMonitor {
         }
       }
     }
-    const results = await Promise.allSettled(reaps);
-    const firstFailure = results.find((result) => result.status === "rejected");
-    if (firstFailure) {
-      throw firstFailure.reason;
-    }
+    return reaps;
   }
 
   /**
@@ -182,7 +239,11 @@ export class SessionHeartbeatMonitor {
    */
   private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
     const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-    const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
+    // The daemon's own stall is never held against the owner (#10051).
+    const lastHeartbeat = effectiveLastHeartbeat({
+      lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
+      stallForgivenAt: session.stallForgivenAt,
+    });
 
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
     // the 10 s heartbeat contract: the `--cli` process that owns it exits between
@@ -204,7 +265,11 @@ export class SessionHeartbeatMonitor {
       }
     }
 
-    return now - lastHeartbeat > timeoutMs ? "heartbeat-timeout" : undefined;
+    // Past the lease the session is suspect, not released: it is held for the
+    // grace window with its device reserved so the owner can restore it (#10051).
+    return now - lastHeartbeat > timeoutMs + suspectGraceMsFor(session)
+      ? "heartbeat-timeout"
+      : undefined;
   }
 
   private rehydrationOwnerStaleReason(

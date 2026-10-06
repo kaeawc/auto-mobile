@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
   DevicePoolStats,
@@ -274,6 +275,8 @@ describe("handleDaemonRequest", () => {
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      // Additive liveness state (#10051); a fresh session is live with its full lease.
+      liveness: { state: "live", remainingMs: session.heartbeatTimeoutMs },
     });
   });
 
@@ -322,8 +325,9 @@ describe("handleDaemonRequest", () => {
         }),
         state,
       );
-      // The first owner's lease must lapse or the daemon rejects the second claim (#10050).
-      fakeTimer.advanceTime(10_001);
+      // The first owner's lease and its suspect grace window must lapse or the
+      // daemon rejects the second claim (#10050, #10051).
+      fakeTimer.advanceTime(10_001 + SUSPECT_GRACE_MS);
       const claim = await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
           sessionId,
@@ -505,7 +509,13 @@ describe("handleDaemonRequest", () => {
           success: false,
           code: "liveness_owner_conflict",
         });
+        // Past the lease the owner's session is suspect (#10051) and still held for it.
         fakeTimer.advanceTime(1);
+        expect(await handleDaemonRequest(claimRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_conflict",
+        });
+        fakeTimer.advanceTime(SUSPECT_GRACE_MS);
         expect((await handleDaemonRequest(claimRequest(challenger), state)).success).toBe(true);
         expect(snapshotOf(sessionId)).toMatchObject({
           livenessOwnerToken: challenger,
@@ -594,8 +604,11 @@ describe("handleDaemonRequest", () => {
       { heartbeatTimeoutMs: timeoutMs },
     );
     try {
-      for (let tick = 0; tick < 6; tick++) {
-        fakeTimer.advanceTime(Math.floor(timeoutMs / 5));
+      const tickMs = Math.floor(timeoutMs / 5);
+      // Lease plus the suspect grace window (#10051) must pass before the reap.
+      const ticksUntilReap = Math.floor((timeoutMs + SUSPECT_GRACE_MS) / tickMs) + 1;
+      for (let tick = 0; tick < ticksUntilReap; tick++) {
+        fakeTimer.advanceTime(tickMs);
         expect(
           await handleDaemonRequest(
             buildRequest("daemon/heartbeat", {

@@ -43,7 +43,13 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
-import { isLivenessOwnerLeaseLive } from "./livenessOwnerLease";
+import {
+  isLivenessOwnerLeaseLive,
+  livenessLeaseState,
+  sessionLeaseSnapshot,
+  suspectGraceMsFor,
+  type LivenessLeaseState,
+} from "./livenessOwnerLease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /**
@@ -204,6 +210,13 @@ export interface Session {
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
+  /**
+   * The daemon's own resume point after it detected a stall of its event loop
+   * (#10051). Not persisted: the daemon cannot have received heartbeats while it
+   * was stalled, so the lease is judged from this point when it is later than
+   * `lastHeartbeat`.
+   */
+  stallForgivenAt?: number;
   sessionTimeoutMs: number; // Idle timeout used when extending this session
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
@@ -383,6 +396,25 @@ export class TerminalSessionError extends Error {
         "Acquire a new device with getAndroid or getApple.",
     );
     this.name = "TerminalSessionError";
+  }
+}
+
+/**
+ * A tool call reached a session whose owner's lease expired and that is held
+ * inside its suspect window (#10051). Nothing runs against it until its owner
+ * restores it with a heartbeat from the owner token.
+ */
+export class SessionSuspectError extends ActionableError {
+  constructor(
+    readonly sessionUuid: string,
+    readonly remainingMs: number,
+  ) {
+    super(
+      `Session ${sessionUuid} is suspect: its owner's heartbeat lapsed and the session is held ` +
+        `for ${Math.ceil(remainingMs / 1000)}s more with its device reserved. Resume heartbeats ` +
+        `from the owner to restore it, or retry after the window if the owner is gone.`,
+    );
+    this.name = "SessionSuspectError";
   }
 }
 
@@ -1617,6 +1649,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
+      this.assertSessionNotSuspect(existing);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -1835,6 +1868,7 @@ export class SessionManager {
         // acquisition semantics promote awaiting-owner to owned.
         const observed = this.getSessionInternal(sessionId, true, execution, false);
         if (observed) {
+          this.assertSessionNotSuspect(observed);
           return observed;
         }
         if (this.sessions.has(sessionId)) {
@@ -4899,12 +4933,61 @@ export class SessionManager {
     if (session.livenessOwnerToken === undefined || session.livenessOwnerToken === ownerToken) {
       return false;
     }
-    return isLivenessOwnerLeaseLive({
-      now: this.timer.now(),
-      lastHeartbeat: session.lastHeartbeat,
-      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-      livenessPolicy: session.livenessPolicy,
-    });
+    return isLivenessOwnerLeaseLive(sessionLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /**
+   * Whether the session's owner lease is live or inside its suspect window, and
+   * how long until that phase ends. Undefined for an unknown session and for a
+   * `cli-idle` session, which has no lease.
+   */
+  getSessionLeaseState(sessionId: string): LivenessLeaseState | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.livenessPolicy === "cli-idle") {
+      return undefined;
+    }
+    return livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /** Whether the session is inside its suspect window (lease expired, grace running). */
+  private isSessionSuspect(session: Session): boolean {
+    return (
+      session.livenessPolicy === "heartbeat" &&
+      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "suspect"
+    );
+  }
+
+  /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
+  private assertSessionNotSuspect(session: Session): void {
+    if (this.isSessionSuspect(session)) {
+      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+      throw new SessionSuspectError(session.sessionId, remainingMs);
+    }
+  }
+
+  /**
+   * Do not hold the daemon's own stall against any session (#10051).
+   *
+   * Called by the heartbeat monitor when its tick fired later than scheduled:
+   * the daemon cannot have received heartbeats while its event loop was stalled,
+   * so every non-CLI session is given a fresh lease-plus-grace from `resumedAt`
+   * instead of being reaped on the strength of the daemon's own stall. Returns
+   * how many sessions were extended.
+   */
+  forgiveDaemonStall(resumedAt: number): number {
+    let forgiven = 0;
+    for (const session of this.sessions.values()) {
+      if (session.livenessPolicy === "cli-idle") {
+        continue;
+      }
+      session.stallForgivenAt = Math.max(session.stallForgivenAt ?? resumedAt, resumedAt);
+      session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
+      if (session.awaitingOwnerSince !== undefined) {
+        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
+      }
+      forgiven++;
+    }
+    return forgiven;
   }
 
   private async persistNewLivenessOwnershipClaim(
@@ -5118,8 +5201,12 @@ export class SessionManager {
     if (session.livenessPolicy === "cli-idle") {
       return false;
     }
+    // A session whose owner has been heartbeating is held a further suspect
+    // window past its deadline (#10051), so an owner that missed a beat can
+    // still restore it.
     return (
-      !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
+      !this.activeSessionExecutionChecker(session.sessionId) &&
+      this.timer.now() > session.expiresAt + suspectGraceMsFor(session)
     );
   }
 
@@ -5127,7 +5214,7 @@ export class SessionManager {
     session: Session,
     execution?: SessionExecutionMetadata,
   ): boolean {
-    if (this.timer.now() <= session.expiresAt) {
+    if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
     return execution?.startTime === undefined || execution.startTime > session.expiresAt;

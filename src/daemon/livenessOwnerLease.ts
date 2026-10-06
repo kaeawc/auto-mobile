@@ -1,12 +1,27 @@
 /**
- * The decision "is the current liveness owner's lease still live?" (#10050).
+ * The decision "is the current liveness owner's lease still live?" (#10050) and
+ * the suspect/grace window that follows lease expiry (#10051).
  *
- * A daemon rejects a claim from a different token only while this answers true.
- * It is a pure function of a snapshot so the suspect/grace window (#10051) can
- * extend the decision in one place without touching the claim path.
+ * A daemon rejects a claim from a different token while this answers true. It is
+ * a pure function of a snapshot so the claim path, the reaper and `session-info`
+ * all judge a lease the same way.
  */
 
-import type { SessionLivenessPolicy } from "./sessionManager";
+import type { Session, SessionLivenessPolicy } from "./sessionManager";
+
+/**
+ * How long a session whose owner missed its lease is held, device still reserved
+ * for the owner token, before it is released (#10051, owner decision 2026-10-05).
+ */
+export const SUSPECT_GRACE_MS = 10_000;
+
+/**
+ * - `live`: the owner's lease has not expired.
+ * - `suspect`: the lease expired but the grace window has not; the session and
+ *   its device are held for the owner token, and only the owner can restore it.
+ * - `lapsed`: the lease and any grace are over; the session may be released.
+ */
+export type LivenessLeasePhase = "live" | "suspect" | "lapsed";
 
 /** Everything the lease decision reads, captured at one instant. */
 export interface LivenessOwnerLeaseSnapshot {
@@ -17,14 +32,40 @@ export interface LivenessOwnerLeaseSnapshot {
   /** The lease length: the session's heartbeat timeout. */
   heartbeatTimeoutMs: number;
   livenessPolicy: SessionLivenessPolicy;
+  /** Length of the suspect window after lease expiry. Absent means no grace. */
+  graceMs?: number;
+}
+
+/** The lease phase plus how long until it ends (the lease for `live`, the grace for `suspect`). */
+export interface LivenessLeaseState {
+  phase: LivenessLeasePhase;
+  /** Milliseconds until the phase ends; 0 once `lapsed`. */
+  remainingMs: number;
 }
 
 /**
- * Whether the owner holds a live lease.
+ * Where the lease stands.
  *
- * The comparison is the heartbeat monitor's own reaping rule inverted (a session
- * is reaped when `now - lastHeartbeat > heartbeatTimeoutMs`), so an owner is never
- * "live" for a claim after the monitor would already have released the session.
+ * The comparison is the heartbeat monitor's own reaping rule (a session is
+ * reaped when `now - lastHeartbeat > heartbeatTimeoutMs`, plus the grace window
+ * for a session that has one), so an owner is never reported live for a claim
+ * after the monitor would already have released the session.
+ */
+export function livenessLeaseState(snapshot: LivenessOwnerLeaseSnapshot): LivenessLeaseState {
+  const age = snapshot.now - snapshot.lastHeartbeat;
+  if (age <= snapshot.heartbeatTimeoutMs) {
+    return { phase: "live", remainingMs: snapshot.heartbeatTimeoutMs - age };
+  }
+  const graceEnd = snapshot.heartbeatTimeoutMs + (snapshot.graceMs ?? 0);
+  if (age <= graceEnd) {
+    return { phase: "suspect", remainingMs: graceEnd - age };
+  }
+  return { phase: "lapsed", remainingMs: 0 };
+}
+
+/**
+ * Whether the owner still holds the session: its lease is live or it is inside
+ * the suspect window.
  *
  * A `cli-idle` session is owned by one-shot `--cli` processes that exit between
  * invocations (#6870). Nobody is left to hold a lease, and the next invocation
@@ -35,5 +76,59 @@ export function isLivenessOwnerLeaseLive(snapshot: LivenessOwnerLeaseSnapshot): 
   if (snapshot.livenessPolicy === "cli-idle") {
     return false;
   }
-  return snapshot.now - snapshot.lastHeartbeat <= snapshot.heartbeatTimeoutMs;
+  return livenessLeaseState(snapshot).phase !== "lapsed";
+}
+
+/** The slice of a session the lease reads. */
+export type LeaseSession = Pick<
+  Session,
+  | "lastHeartbeat"
+  | "stallForgivenAt"
+  | "heartbeatTimeoutMs"
+  | "livenessPolicy"
+  | "hasReceivedHeartbeat"
+  | "ownership"
+>;
+
+/**
+ * The last moment the daemon can vouch the owner's lease was running from.
+ *
+ * It is the owner's last heartbeat, or the daemon's resume point after a stall
+ * of its own when that is later: a daemon cannot have received heartbeats while
+ * it was stalled, so the stalled interval is never held against the owner.
+ */
+export function effectiveLastHeartbeat(
+  session: Pick<LeaseSession, "lastHeartbeat" | "stallForgivenAt">,
+): number {
+  return Math.max(session.lastHeartbeat, session.stallForgivenAt ?? Number.NEGATIVE_INFINITY);
+}
+
+/**
+ * The suspect window a session is entitled to. Only a session whose owner has
+ * actually delivered a heartbeat holds a lease worth a grace period; a session
+ * that never heartbeated, an awaiting-owner rehydration and a `cli-idle` session
+ * keep their existing release policies.
+ */
+export function suspectGraceMsFor(
+  session: Pick<LeaseSession, "livenessPolicy" | "hasReceivedHeartbeat" | "ownership">,
+): number {
+  return session.livenessPolicy === "heartbeat" &&
+    session.hasReceivedHeartbeat &&
+    session.ownership === "owned"
+    ? SUSPECT_GRACE_MS
+    : 0;
+}
+
+/** Build the lease snapshot for a session at `now`. */
+export function sessionLeaseSnapshot(
+  session: LeaseSession,
+  now: number,
+): LivenessOwnerLeaseSnapshot {
+  return {
+    now,
+    lastHeartbeat: effectiveLastHeartbeat(session),
+    heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+    livenessPolicy: session.livenessPolicy,
+    graceMs: suspectGraceMsFor(session),
+  };
 }

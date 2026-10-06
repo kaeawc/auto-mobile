@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -91,14 +92,18 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     });
   }
 
-  function createProxy(options: { token?: string; initialSessionUuid?: string }): DaemonMcpProxy {
+  function createProxy(options: {
+    token?: string;
+    initialSessionUuid?: string;
+    leashMs?: number;
+  }): DaemonMcpProxy {
     const proxy = new DaemonMcpProxy({
       clientFactory: () => daemonBackedClient(),
       daemonManager: matchingDaemonManager(),
       autoStartDaemon: false,
       timer,
       idGenerator: new FakeIdGenerator(["minted-token"]),
-      heartbeatTimeoutMs: 10_000,
+      heartbeatTimeoutMs: options.leashMs ?? 10_000,
       heartbeatIntervalMs: INTERVAL_MS,
       livenessOwnerToken: options.token,
       ...(options.initialSessionUuid ? { initialSessionUuid: options.initialSessionUuid } : {}),
@@ -214,7 +219,9 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       daemonStateFor(sessionManager),
     );
     expect(foreign.success).toBe(true);
-    const proxy = createProxy({ token: "harness-token" });
+    // The claim must keep retrying through the foreign owner's lease plus its
+    // suspect grace window (#10051), so the conflict leash is longer than both.
+    const proxy = createProxy({ token: "harness-token", leashMs: 40_000 });
     await acquire(proxy, "getAndroid", "android-session");
     await acquire(proxy, "getApple", "ios-session");
 
@@ -232,8 +239,9 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       warnSpy.mock.calls.filter(([message]) => String(message).includes("another live liveness")),
     ).toHaveLength(1);
 
-    // Once the foreign lease lapses the retried claim wins the session.
-    await timer.advanceTimeAsync(INTERVAL_MS * 3);
+    // Once the foreign lease and its suspect grace window (#10051) lapse, the
+    // retried claim wins the session.
+    await timer.advanceTimeAsync(INTERVAL_MS * 4 + SUSPECT_GRACE_MS);
     expect(ownerOf("android-session")).toBe("harness-token");
     expect(ownerOf("ios-session")).toBe("harness-token");
   });
@@ -253,7 +261,11 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       },
       daemonStateFor(sessionManager),
     );
-    const proxy = createProxy({ token: "harness-token", initialSessionUuid: "android-session" });
+    const proxy = createProxy({
+      token: "harness-token",
+      initialSessionUuid: "android-session",
+      leashMs: 40_000,
+    });
     await proxy.ensureConnected();
     await tickSessions();
     await tickSessions();
@@ -267,7 +279,7 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
       warnSpy.mock.calls.filter(([message]) => String(message).includes("another live liveness")),
     ).toHaveLength(1);
 
-    await timer.advanceTimeAsync(INTERVAL_MS * 3);
+    await timer.advanceTimeAsync(INTERVAL_MS * 4 + SUSPECT_GRACE_MS);
     expect(ownerOf("android-session")).toBe("harness-token");
   });
 

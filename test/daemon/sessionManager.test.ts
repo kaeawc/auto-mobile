@@ -1,5 +1,6 @@
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -3077,7 +3078,12 @@ describe("SessionManager", () => {
       fakeTimer.advanceTime(4000);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
+      // A heartbeating session past its deadline is held for the suspect grace
+      // window (#10051) before the sweep releases it.
       fakeTimer.advanceTime(1500);
+      expect(sessionManager.getSession("session-1")).not.toBeNull();
+
+      fakeTimer.advanceTime(SUSPECT_GRACE_MS);
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });
@@ -3638,8 +3644,15 @@ describe("SessionManager", () => {
       expect(manager.getSession("session-1")).toMatchObject(before);
       expect(persistedTokens).toEqual(["owner-a"]);
 
-      // The rejection is not remembered: owner-b can claim once the lease lapses.
+      // The suspect grace window (#10051) still holds the session for owner-a.
       fakeTimer.advanceTime(1);
+      await expect(manager.claimLivenessOwnership("session-1", "owner-b")).resolves.toBe(
+        "conflict",
+      );
+      expect(persistedTokens).toEqual(["owner-a"]);
+
+      // The rejection is not remembered: owner-b can claim once the grace window ends.
+      fakeTimer.advanceTime(SUSPECT_GRACE_MS);
       await expect(manager.claimLivenessOwnership("session-1", "owner-b")).resolves.toBe("claimed");
       expect(persistedTokens).toEqual(["owner-a", "owner-b"]);
       await expect(manager.claimLivenessOwnership("session-1", "owner-a")).resolves.toBe(
@@ -6182,7 +6195,7 @@ describe("SessionManager", () => {
       );
       await sessionCreated.promise;
       // The persisted owner's lease must lapse or the reconnect claim is rejected (#10050).
-      fakeTimer.advanceTime(persisted.heartbeat_timeout_ms + 1);
+      fakeTimer.advanceTime(persisted.heartbeat_timeout_ms + SUSPECT_GRACE_MS + 1);
       await expect(
         restarted.claimLivenessOwnership("slow-owner-recovery", "reconnected-owner"),
       ).resolves.toBe("claimed");

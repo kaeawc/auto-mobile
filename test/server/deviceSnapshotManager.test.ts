@@ -972,7 +972,7 @@ describe("deviceSnapshotManager", () => {
     async (ready) => {
       const { device, manifest } = await seedVmRestore();
       const apps = new FakeInstalledAppsRepository();
-      await apps.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 123);
+      await apps.seedInstalledApp(device.deviceId, 0, "com.example.app", false, 123);
       const barrier = new FakeDbWriteBarrier();
       let invalidations = 0;
       let notifications = 0;

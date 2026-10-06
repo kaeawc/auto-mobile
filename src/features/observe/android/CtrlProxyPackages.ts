@@ -17,6 +17,28 @@ import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtoco
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 
+/** Android's per-user uid range: a package uid is `userId * 100000 + appId`. */
+const ANDROID_PER_USER_UID_RANGE = 100_000;
+/** The lowest uid Android assigns to an installed app; no real user id reaches it. */
+const ANDROID_FIRST_APPLICATION_UID = 10_000;
+
+/**
+ * The Android user a `package_event` refers to (#10067). Current APKs send the user id in
+ * `userId` and the raw package uid in `uid`. APKs that predate the fix sent the uid in
+ * `userId` and no `uid`, so an app uid there (>= 10000, never a real user id) is divided down
+ * to its user; a small value is already a user id (system shared uids below 10000 belong to
+ * user 0 but are indistinguishable from a user id, and an old APK reports them rarely).
+ */
+export function packageEventAndroidUserId(event: { userId: number; uid?: number | null }): number {
+  if (typeof event.uid === "number") {
+    return event.userId;
+  }
+  if (event.userId >= ANDROID_FIRST_APPLICATION_UID) {
+    return Math.floor(event.userId / ANDROID_PER_USER_UID_RANGE);
+  }
+  return event.userId;
+}
+
 export interface PackageInfoOptions {
   includePermissions?: boolean;
 }

@@ -54,6 +54,7 @@ import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../../src/utils/logger";
+import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 
@@ -836,12 +837,84 @@ describe("Explore", () => {
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
       try {
         const result = await explore.execute({ timeoutMs: 1000 });
-        expect(back).toHaveBeenCalledWith("back");
+        expect(back.mock.calls[0][0]).toBe("back");
         expect(launch).not.toHaveBeenCalled();
         expect(result.stopReason).toBe("Reached timeout limit (1000ms)");
       } finally {
         back.mockRestore();
         launch.mockRestore();
+      }
+    });
+
+    test("a run that only re-traverses known transitions reports no edges added (#10194)", async () => {
+      const initialGraph = seedTargetGraph();
+      // Re-traversal appends rows to the log; the distinct transitions are unchanged.
+      const retraversed = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue({
+        ...initialGraph,
+        edges: [...initialGraph.edges, ...initialGraph.edges, ...initialGraph.edges],
+      });
+      try {
+        const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
+        expect(result.edgesAdded).toBe(0);
+      } finally {
+        retraversed.mockRestore();
+      }
+    });
+
+    test("a cancel that lands after the loop's check does not press Back for the dead end (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => {
+          controller.abort();
+          return createMockObservation([], "");
+        },
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(back).not.toHaveBeenCalled();
+        expect(result.cancelled).toBe(true);
+        expect(result.stopReason).toBe("Operation cancelled");
+      } finally {
+        back.mockRestore();
+      }
+    });
+
+    test("forwards the exploration signal into the dead-end Back press (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], ""),
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
+      try {
+        await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(back).toHaveBeenCalledWith("back", undefined, undefined, controller.signal);
+      } finally {
+        back.mockRestore();
+      }
+    });
+
+    test("a cancel during the dead-end Back press is a cancelled run, not a failed recovery (#10151)", async () => {
+      const controller = new AbortController();
+      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+      explore.observeScreen = {
+        execute: async () => createMockObservation([], ""),
+      } as typeof explore.observeScreen;
+      recoverySeams().selectNextElement = async () => undefined;
+      const back = spyOn(PressButton.prototype, "press").mockImplementation(async () => {
+        controller.abort();
+        throw new Error("Operation cancelled");
+      });
+      try {
+        const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
+        expect(result.cancelled).toBe(true);
+        expect(result.stopReason).toBe("Operation cancelled");
+      } finally {
+        back.mockRestore();
       }
     });
 
@@ -1675,6 +1748,28 @@ describe("Explore", () => {
       expect(args).toEqual({ selector: { elementId: "com.test:id/settings_btn" }, action: "tap" });
       expect(tapOnSchema.safeParse(args).success).toBe(true);
       expect(await historySize()).toBe(1);
+    });
+
+    test("a dispatch the tap reports reaches the recorded call (#10196)", async () => {
+      const dispatched: number[] = [];
+      const record = spyOn(fakeGraph, "recordToolCall").mockImplementation(() =>
+        Object.assign(() => {}, { markDispatched: () => dispatched.push(1) }),
+      );
+      const tap = spyOn(TapOnElement.prototype, "execute").mockImplementation(async () => {
+        reportToolDispatched();
+        return { success: true };
+      });
+      try {
+        await perform()(
+          createMockElement({ text: "Settings", "resource-id": "com.test:id/settings_btn" }),
+          createMockObservation(),
+        );
+      } finally {
+        tap.mockRestore();
+        record.mockRestore();
+      }
+
+      expect(dispatched).toEqual([1]);
     });
 
     test("a repeated control records the occurrence index beside the selector", async () => {

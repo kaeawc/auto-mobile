@@ -16,6 +16,12 @@ export type VideoQualityPreset = "low" | "medium" | "high";
 
 export type VideoFormat = "mp4";
 
+/**
+ * The container of a finished recording's file. Recordings are requested as `mp4`, but an
+ * iOS capture whose post-processing did not finish is returned as its raw `.mov` (#10188).
+ */
+export type VideoContainerFormat = VideoFormat | "mov";
+
 export interface VideoResolution {
   width: number;
   height: number;
@@ -71,7 +77,7 @@ export interface VideoRecordingMetadata {
   recordingId: string;
   fileName: string;
   filePath: string;
-  format: VideoFormat;
+  format: VideoContainerFormat;
   sizeBytes: number;
   durationMs?: number;
   codec?: string;

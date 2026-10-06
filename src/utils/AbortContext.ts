@@ -64,6 +64,16 @@ export const runWithAbortSignal = async <T>(
   return abortContext.run({ signal, request }, fn);
 };
 
+/**
+ * Run `fn` with NO ambient request context and NO abort signal. `runWithAbortSignal(undefined, …)`
+ * does not do this: it keeps the ambient request context (and with it the request's deadline).
+ * Use it for work that is not part of the live tool request that happened to start it, such as
+ * a recording auto-stop armed during the `start` call: a timer captures the store that was
+ * ambient when it was armed, so without this it would fire with that request's long-expired
+ * deadline and abort signal.
+ */
+export const runOutsideRequestContext = <T>(fn: () => T): T => abortContext.exit(fn);
+
 export const getRequestContext = (): RequestContext | undefined => abortContext.getStore()?.request;
 
 export const getAbortSignal = (): AbortSignal | undefined => {

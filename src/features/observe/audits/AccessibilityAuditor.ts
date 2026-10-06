@@ -3,6 +3,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { pathExists } from "../../../utils/filesystem/DefaultFileSystem";
 import { WcagAudit, capAccessibilityViolations } from "../../accessibility/WcagAudit";
 import { projectAuditElements } from "../../accessibility/AuditElementProjection";
+import type { ContrastChecker } from "../../accessibility/ContrastChecker";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { AccessibilityAuditConfig } from "../../../models/AccessibilityAudit";
@@ -16,6 +17,8 @@ export interface AccessibilityAuditorOptions {
   screenshotPathResolver?: (observationId: string) => Promise<string | undefined>;
   /** Allow tests to stub the config gate */
   getConfig?: () => AccessibilityAuditConfig | null;
+  /** Allow tests to read screenshot pixels through an injected image backend */
+  contrastChecker?: ContrastChecker;
 }
 
 /**
@@ -51,9 +54,11 @@ export class AccessibilityAuditor {
   private readonly device: BootedDevice;
   private readonly screenshotPathResolver: (observationId: string) => Promise<string | undefined>;
   private readonly getConfig: () => AccessibilityAuditConfig | null;
+  private readonly contrastChecker: ContrastChecker | undefined;
 
   constructor(opts: AccessibilityAuditorOptions) {
     this.device = opts.device;
+    this.contrastChecker = opts.contrastChecker;
     this.screenshotPathResolver = opts.screenshotPathResolver ?? (() => Promise.resolve(undefined));
     this.getConfig = opts.getConfig ?? (() => serverConfig.getAccessibilityAuditConfig());
   }
@@ -91,13 +96,15 @@ export class AccessibilityAuditor {
         );
 
         // Initialize audit
-        const wcagAudit = new WcagAudit();
+        const wcagAudit = new WcagAudit(undefined, undefined, this.contrastChecker);
 
         // Extract elements directly from view hierarchy for audit, noting which
         // clickable containers are labelled by merged descendant text.
-        const { elements: allElements, descendantLabelled } = projectAuditElements(
-          result.viewHierarchy!,
-        );
+        const {
+          elements: allElements,
+          descendantLabelled,
+          windowIds,
+        } = projectAuditElements(result.viewHierarchy!);
 
         // Only this observation's own capture may feed the contrast check
         const screenshotPath = await this.screenshotPathResolver(result.observationId);
@@ -113,6 +120,7 @@ export class AccessibilityAuditor {
             density: result.viewHierarchy!.density,
             windows: result.viewHierarchy!.windows,
             descendantLabelled,
+            elementWindowIds: windowIds,
           },
         );
 

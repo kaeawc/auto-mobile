@@ -38,6 +38,7 @@ import {
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "./AndroidPreferencesXmlFile";
+import { resolveDefaultAndroidPreferencesUser } from "./resolveAndroidPreferencesUser";
 import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
@@ -52,6 +53,11 @@ export interface GetPreferenceInput {
   appId?: string;
   suite?: string;
   key: string;
+  /**
+   * Android sharedPreferences only: the user whose copy of the app to read/write
+   * (`run-as <pkg> --user <id>`). Defaults to user 0 when the app is installed for it.
+   */
+  userId?: number;
 }
 
 export interface SetPreferenceInput extends GetPreferenceInput {
@@ -67,6 +73,8 @@ export interface PreferenceResult {
   appId?: string;
   suite?: string;
   key: string;
+  /** Android sharedPreferences only: the user whose app copy was read or written. */
+  userId?: number;
   value: PreferenceResultValue | null;
   type?: PreferenceResultType;
   found: boolean;
@@ -229,7 +237,10 @@ export class AppPreferences {
           `shell setprop ${shellQuoteUnlessSafe(input.key)} ${shellQuoteUnlessSafe(stringValue(normalizedValue))}`,
         );
       } else {
-        await this.setAndroidSharedPreference({ ...input, value: normalizedValue });
+        // Resolve the target user once so the write and its read-back hit the same copy.
+        const target = { ...input, userId: await this.resolveAndroidPreferencesUser(input) };
+        await this.setAndroidSharedPreference({ ...target, value: normalizedValue });
+        return this.verifiedWriteResult(target, normalizedValue, await this.getPreference(target));
       }
     } else {
       const deadlineMs = this.iosDefaultsDeadline();
@@ -318,6 +329,14 @@ export class AppPreferences {
     ) {
       throw new ActionableError(`appId is required for ${input.scope}.`);
     }
+    if (input.userId !== undefined && input.scope !== "sharedPreferences") {
+      throw new ActionableError("userId is only supported for Android sharedPreferences.");
+    }
+  }
+
+  /** Explicit `userId` wins; otherwise user 0 unless the app is only on one other user. */
+  private async resolveAndroidPreferencesUser(input: GetPreferenceInput): Promise<number> {
+    return input.userId ?? (await resolveDefaultAndroidPreferencesUser(this.adb(), input.appId!));
   }
 
   private adb(): AdbExecutor {
@@ -347,11 +366,16 @@ export class AppPreferences {
 
   private async getAndroidSharedPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
     const fileName = androidSharedPreferencesFileName(input);
-    const xml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
+    const userId = await this.resolveAndroidPreferencesUser(input);
+    const xml = await readAndroidPreferencesXml(this.adb(), input.appId!, fileName, userId);
     const entry = await readAndroidPreferenceEntry(xml, input.key);
-    return this.result(input, entry !== null, entry?.value ?? null, entry?.type);
+    return {
+      ...this.result(input, entry !== null, entry?.value ?? null, entry?.type),
+      userId,
+    };
   }
 
+  /** `input.userId` must already be resolved by the caller. */
   private async setAndroidSharedPreference(input: SetPreferenceInput): Promise<void> {
     const fileName = androidSharedPreferencesFileName(input);
     await getAndroidSharedPreferencesMutationCoordinator().run(
@@ -359,20 +383,28 @@ export class AppPreferences {
       input.appId!,
       fileName,
       async () => {
-        const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
+        const existingXml = await readAndroidPreferencesXml(
+          this.adb(),
+          input.appId!,
+          fileName,
+          input.userId,
+        );
         const updatedXml = await writeAndroidPreferenceEntry(
           existingXml,
           input.key,
           input.value,
           input.type,
         );
-        await writeAndroidPreferencesXml(this.adb(), input.appId!, fileName, updatedXml);
+        await writeAndroidPreferencesXml(
+          this.adb(),
+          input.appId!,
+          fileName,
+          updatedXml,
+          input.userId,
+        );
       },
+      input.userId,
     );
-  }
-
-  private async readAndroidSharedPreferencesXml(appId: string, fileName: string): Promise<string> {
-    return readAndroidPreferencesXml(this.adb(), appId, fileName);
   }
 
   private async getIosUserDefault(

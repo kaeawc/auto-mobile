@@ -136,6 +136,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -976,8 +977,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
   // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
+  // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
+  // main-thread clear or lookup never touches the disk.
   private val overlayAssets by lazy {
-    OverlayAssetStore(OverlayAssetDirectory(File(cacheDir, "overlay-assets")))
+    OverlayAssetStore(
+      OverlayAssetDirectory(File(cacheDir, "overlay-assets")),
+      session = {
+        if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+      },
+      fileWorker = Dispatchers.IO.asExecutor(),
+    )
   }
   private val overlayAssetController by lazy {
     OverlayAssetController(
@@ -1651,7 +1660,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             clearAssets = { overlayAssets.clear() },
           )
         // Service start: drop anything a previous process left in the cache directory.
-        overlayAssets.clear()
+        overlayAssets.purgeLeftovers()
       }
       overlayManager.setInteractiveOverlayAttached(overlayController.isShowing)
 

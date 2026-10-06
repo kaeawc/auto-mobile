@@ -26,6 +26,22 @@ function barInsets(visibleTop: number, stableTop: number = visibleTop): Observat
   };
 }
 
+/** Insets with a bottom bar of `bottom` px; `tappableBottom` is how much of it takes touches. */
+function bottomBarInsets(bottom: number, tappableBottom?: number): ObservationInsets {
+  return {
+    available: true,
+    source: "android-window-metrics",
+    units: "physical-pixels",
+    systemBars: {
+      visible: { top: 0, bottom, left: 0, right: 0 },
+      stable: { top: 136, bottom, left: 0, right: 0 },
+    },
+    ...(tappableBottom === undefined
+      ? {}
+      : { tappableElement: { top: 136, bottom: tappableBottom, left: 0, right: 0 } }),
+  };
+}
+
 interface Scenario {
   /** The captured control is rendered by the overlay window (otherwise by the app). */
   overlayOwnsControl: boolean;
@@ -45,7 +61,12 @@ function createCommand(scenario: Scenario) {
   }
   hierarchy.screenWidth = 1080;
   hierarchy.screenHeight = 2400;
-  hierarchy.systemInsets = { top: scenario.legacyTop, bottom: 63, left: 0, right: 0 };
+  hierarchy.systemInsets = {
+    top: scenario.legacyTop,
+    bottom: scenario.insets?.systemBars?.visible.bottom ?? 63,
+    left: 0,
+    right: 0,
+  };
   hierarchy.insets = scenario.insets;
   const shown = scenario.overlayShown ?? scenario.overlayOwnsControl;
   const capturedRoot = hierarchy.hierarchy;
@@ -183,5 +204,42 @@ describe("Android tapOn under a system bar while an AutoMobile overlay is shown 
     expect(service.getTapHistory()).toEqual([
       { x: 517, y: Math.floor((barEnd + bounds.bottom) / 2), duration: 10 },
     ]);
+  });
+
+  test("a control wholly inside the gesture navigation bar is tapped, a three-button bar refuses it (#10156)", async () => {
+    const probe = createCommand({
+      overlayOwnsControl: true,
+      insets: barInsets(136),
+      legacyTop: 136,
+    });
+    const bounds = (await probe.command.execute({ action: "tap", text: "Disabled" })).element
+      ?.bounds;
+    if (!bounds) {
+      throw new Error("Expected the captured control bounds");
+    }
+    mock.restore();
+    // A bottom bar tall enough to cover the whole control.
+    const barHeight = 2400 - bounds.top + 1;
+
+    const gesture = createCommand({
+      overlayOwnsControl: true,
+      insets: bottomBarInsets(barHeight, 0),
+      legacyTop: 0,
+    });
+    const tapped = await gesture.command.execute({ action: "tap", text: "Disabled" });
+    expect(tapped.success).toBe(true);
+    expect(tapped.warnings?.join(" ")).toContain("gesture navigation bar");
+    expect(gesture.service.getTapHistory()).toEqual([{ x: 517, y: 1479, duration: 10 }]);
+    mock.restore();
+
+    const buttons = createCommand({
+      overlayOwnsControl: true,
+      insets: bottomBarInsets(barHeight, barHeight),
+      legacyTop: 0,
+    });
+    const refused = await buttons.command.execute({ action: "tap", text: "Disabled" });
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain("under the navigation bar");
+    expect(buttons.service.getTapHistory()).toEqual([]);
   });
 });

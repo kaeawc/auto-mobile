@@ -350,13 +350,14 @@ private fun overlayNodeModifier(
   style.border?.let {
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
   }
+  val insetFloor = LocalOverlayInsetFloor.current
   node.safeArea?.let { safeArea ->
     var insets: WindowInsets = WindowInsets(0, 0, 0, 0)
     for (type in safeArea.types) {
       insets =
         insets.union(
           when (type) {
-            "systemBars" -> WindowInsets.systemBars
+            "systemBars" -> WindowInsets.systemBars.union(insetFloor.asComposeInsets())
             "cutout" -> WindowInsets.displayCutout
             "ime" -> WindowInsets.ime
             else -> WindowInsets(0, 0, 0, 0)

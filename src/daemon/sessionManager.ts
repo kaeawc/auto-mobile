@@ -1,3 +1,5 @@
+import type { TimingData } from "../utils/PerformanceTracker";
+import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
@@ -219,6 +221,7 @@ export interface NetworkConditionRestorer {
  * cross-tool session state gets its own typed slot here, not an untyped bag.
  */
 export interface SessionCacheData {
+  pendingSetupTiming?: TimingData; // Consumed once by this session; discarded with its cache.
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastActionMetadata?: { deviceId: string; blocks: Record<string, unknown> };
@@ -802,7 +805,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||
-    releaseReason.startsWith("device-disconnected:")
+    isDeviceLossCancellationReason(releaseReason)
   );
 }
 

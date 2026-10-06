@@ -1,3 +1,4 @@
+import { isDeviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -711,7 +712,7 @@ export class ExecutionTracker {
     execution: ActiveExecution,
     cancelReason: ExecutionCancellationReason,
   ): void {
-    if (typeof cancelReason === "string" && cancelReason.startsWith("device-disconnected:")) {
+    if (isDeviceLossCancellationReason(cancelReason)) {
       // Record the reason on the execution *before* aborting, so the tracker's own
       // authoritative `cancelReason` is set synchronously with the counted cancellation
       // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same

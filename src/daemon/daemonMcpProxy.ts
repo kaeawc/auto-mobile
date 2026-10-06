@@ -940,7 +940,8 @@ export class DaemonMcpProxy {
   private readonly sessionDeviceIds = new Map<string, string>();
   /**
    * Handovers awaiting delivery, per affected session. The first tool call that names the session
-   * (or reaches it implicitly) returns the structured error; naming it again afterwards resumes it.
+   * (or reaches it implicitly) returns the structured error; naming it again attempts an
+   * observation-only resume and retains the handover until the daemon acknowledges the UUID.
    */
   private readonly stallHandovers = new Map<
     string,
@@ -957,6 +958,7 @@ export class DaemonMcpProxy {
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
   private connecting: Promise<void> | null = null;
+  private connectingAllowsLifecycle = false;
   private connectionCloseReject: ((reason?: unknown) => void) | null = null;
   /**
    * A `daemon-shutdown` release arrives before the old daemon closes its socket.
@@ -1169,24 +1171,56 @@ export class DaemonMcpProxy {
       return;
     }
 
-    // Prevent multiple concurrent connection attempts
+    const allowsLifecycle = this.connectionAllowsLifecycle();
+    this.assertConnectionPlanCompatible(allowsLifecycle);
+    // Serialize socket publication, but never let observation-only work ride a lifecycle attempt.
     if (this.connecting) {
       return this.connecting;
     }
 
-    const attempt = this.doConnect();
+    const attempt = this.doConnect(allowsLifecycle);
     const connecting = new Promise<void>((resolve, reject) => {
       this.connectionCloseReject = reject;
       void attempt.then(resolve, reject);
     });
     this.connecting = connecting;
+    this.connectingAllowsLifecycle = allowsLifecycle;
     try {
       await connecting;
+    } catch (error) {
+      await this.handleConnectionFailure(error);
     } finally {
       if (this.connecting === connecting) {
         this.connecting = null;
         this.connectionCloseReject = null;
       }
+    }
+  }
+
+  private connectionAllowsLifecycle(): boolean {
+    const allowed = daemonLifecycleAllowed();
+    if (allowed) {
+      this.throwIfLivenessHandedOver();
+    }
+    return allowed && !this.hasLivenessLifecycleFence();
+  }
+
+  private assertConnectionPlanCompatible(allowsLifecycle: boolean): void {
+    if (this.connecting && !allowsLifecycle && this.connectingAllowsLifecycle) {
+      throw new DaemonUnavailableError(
+        "Lifecycle-capable daemon connection is in flight; retry observation-only recovery",
+      );
+    }
+  }
+
+  private async handleConnectionFailure(error: unknown): Promise<void> {
+    if (!daemonLifecycleAllowed() || !this.hasLivenessLifecycleFence()) {
+      throw error;
+    }
+    await this.waitForLivenessRecovery();
+    this.throwIfLivenessHandedOver();
+    if (!this.connected || !this.client) {
+      throw error;
     }
   }
 
@@ -1196,14 +1230,74 @@ export class DaemonMcpProxy {
     }
   }
 
+  private assertDaemonLifecycleUnfenced(): void {
+    if (this.hasLivenessLifecycleFence()) {
+      throw new DaemonUnavailableError(
+        "Liveness recovery or handover forbids daemon lifecycle changes",
+      );
+    }
+  }
+
+  private async waitForLivenessRecovery(): Promise<void> {
+    if (
+      daemonLifecycleAllowed() &&
+      this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
+    ) {
+      await this.livenessRecovery.settled();
+    }
+  }
+
+  private throwIfLivenessHandedOver(): void {
+    const first = this.stallHandovers.entries().next().value;
+    if (first) {
+      const [sessionUuid, record] = first;
+      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+    }
+  }
+
+  private async listDuringLivenessFence<T>(
+    request: () => Promise<T>,
+    coldList: () => T,
+  ): Promise<T> {
+    if (this.shouldServeLivenessDiscoveryCold()) {
+      return coldList();
+    }
+    try {
+      return await runWithoutDaemonLifecycle(request);
+    } catch (error) {
+      // Discovery is session-independent; an unreachable daemon keeps its existing cold surface.
+      logger.debug("[DaemonMcpProxy] Fenced discovery unavailable; serving cold list", error);
+      return coldList();
+    }
+  }
+
+  private shouldServeLivenessDiscoveryCold(): boolean {
+    return (
+      this.hasLivenessLifecycleFence() &&
+      (this.connecting !== null ||
+        this.daemonShutdownDisconnect !== null ||
+        this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid)))
+    );
+  }
+
+  private hasLivenessLifecycleFence(): boolean {
+    return (
+      this.stallHandovers.size > 0 ||
+      this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
+    );
+  }
+
   /**
    * What connecting must do about the daemon's lifecycle: `start` it (not running, auto-start on),
    * `reconcile` a running one with this client, or only `observe`. Liveness recovery shares the
    * daemon with other harnesses, so a connection it establishes only observes: it fails when the
    * daemon is not reachable and never starts it or reconciles it by restarting it.
    */
-  private daemonLifecyclePlan(isAvailable: boolean): "start" | "reconcile" | "observe" {
-    if (!daemonLifecycleAllowed()) {
+  private daemonLifecyclePlan(
+    isAvailable: boolean,
+    allowsLifecycle: boolean,
+  ): "start" | "reconcile" | "observe" {
+    if (!allowsLifecycle || this.hasLivenessLifecycleFence()) {
       if (!isAvailable) {
         throw new DaemonUnavailableError(
           "Daemon is not reachable; liveness recovery never starts or restarts the daemon",
@@ -1220,7 +1314,7 @@ export class DaemonMcpProxy {
     return "start";
   }
 
-  private async doConnect(): Promise<void> {
+  private async doConnect(allowsLifecycle: boolean): Promise<void> {
     this.throwIfClosing();
     this.reconciliationSnapshot = undefined;
     this.structuredSessionNotFound = false;
@@ -1232,7 +1326,7 @@ export class DaemonMcpProxy {
     // verify that candidate would sever a live daemon.
     const isAvailable = await this.daemonAvailabilityProbe(socketPath);
 
-    const lifecycle = this.daemonLifecyclePlan(isAvailable);
+    const lifecycle = this.daemonLifecyclePlan(isAvailable, allowsLifecycle);
     if (lifecycle === "start") {
       logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
       await this.startDaemon();
@@ -1943,6 +2037,7 @@ export class DaemonMcpProxy {
   }
 
   private assertAutomaticRestartAllowed(status: DaemonStatus, reason: string): void {
+    this.assertDaemonLifecycleUnfenced();
     if (status.activeProvisioning) {
       throw new DaemonRestartDeferredError(reason);
     }
@@ -2330,6 +2425,7 @@ export class DaemonMcpProxy {
    */
   private async startDaemon(): Promise<void> {
     const status = await this.daemonManager.status();
+    this.assertDaemonLifecycleUnfenced();
 
     if (!status.running) {
       logger.info("[DaemonMcpProxy] Starting daemon...");
@@ -2723,6 +2819,9 @@ export class DaemonMcpProxy {
    * through {@link callTool}'s gate.
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
+    if (this.hasLivenessLifecycleFence()) {
+      return this.cachedTools ?? this.staticToolDefinitionsProvider();
+    }
     if (!this.connected || !this.client) {
       this.servedStaticToolList = true;
       return this.staticToolDefinitionsProvider();
@@ -2775,6 +2874,9 @@ export class DaemonMcpProxy {
    * re-fetches the real resources.
    */
   async listAdvertisedResources(): Promise<ProxiedResourceDefinition[]> {
+    if (this.hasLivenessLifecycleFence()) {
+      return this.cachedResources ?? [];
+    }
     if (this.connected && this.client) {
       return this.listResources();
     }
@@ -2787,6 +2889,9 @@ export class DaemonMcpProxy {
    * daemon connection exists yet. See {@link listAdvertisedResources}.
    */
   async listAdvertisedResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
+    if (this.hasLivenessLifecycleFence()) {
+      return this.cachedResourceTemplates ?? [];
+    }
     if (this.connected && this.client) {
       return this.listResourceTemplates();
     }
@@ -2915,7 +3020,16 @@ export class DaemonMcpProxy {
    * Get list of available tools from daemon
    */
   async listTools(): Promise<ProxiedToolDefinition[]> {
-    const releasedResultMint = this.discoveryAfterResultMintRelease();
+    if (this.hasLivenessLifecycleFence()) {
+      return this.listDuringLivenessFence(
+        () => this.fetchTools(true),
+        () => this.cachedTools ?? this.staticToolDefinitionsProvider(),
+      );
+    }
+    return this.fetchTools(this.discoveryAfterResultMintRelease());
+  }
+
+  private async fetchTools(releasedResultMint: boolean): Promise<ProxiedToolDefinition[]> {
     // Return cached tools if available
     if (this.cachedTools) {
       return this.cachedTools;
@@ -2999,7 +3113,12 @@ export class DaemonMcpProxy {
     // caller cannot forge or override that configuration.
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
-    this.reportStalledSessionNamedBy(callerArgs);
+    if (this.hasLivenessLifecycleFence()) {
+      await this.waitForLivenessRecovery();
+    }
+    if (this.stallHandovers.size > 0) {
+      await this.reportStalledSessionNamedBy(callerArgs);
+    }
     // Device-session acquisition (including booted provisionDevice) mints a NEW
     // session in its RESULT and is never routed to — or fenced by — the connection's
     // bound session: it must be admitted even on a terminally fenced connection so
@@ -4007,10 +4126,10 @@ export class DaemonMcpProxy {
 
   /**
    * A tool call names a session this proxy gave up on (#10053). The first one returns the
-   * structured handover; naming it again afterwards means the harness acted on it, so the session
-   * is resumed through the ordinary path (the claim is re-sent with the same owner token).
+   * structured handover; naming it again attempts an observation-only claim with the same token.
+   * The fence survives failed resumes and lifts only once the daemon acknowledges the UUID.
    */
-  private reportStalledSessionNamedBy(args: Record<string, unknown>): void {
+  private async reportStalledSessionNamedBy(args: Record<string, unknown>): Promise<void> {
     const sessionUuid = this.sessionUuidFromArgs(args);
     const record = sessionUuid ? this.stallHandovers.get(sessionUuid) : undefined;
     if (!sessionUuid || !record) {
@@ -4018,6 +4137,30 @@ export class DaemonMcpProxy {
     }
     if (!record.delivered) {
       record.delivered = true;
+      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+    }
+    try {
+      await runWithoutDaemonLifecycle(() =>
+        raceWithDeadline(
+          async () => {
+            await this.ensureConnected();
+            await this.requireClient().callDaemonMethod(
+              DAEMON_HEARTBEAT_METHOD,
+              this.boundSessionHeartbeatParams(sessionUuid, true),
+            );
+          },
+          {
+            timer: this.timer,
+            timeoutMs: this.heartbeatRequestTimeoutMs(),
+            label: "Resume handed-over session",
+          },
+        ),
+      );
+    } catch (error) {
+      logger.warn(
+        "[DaemonMcpProxy] Handed-over session was not acknowledged; retaining lifecycle fence",
+        error,
+      );
       throw new DaemonSessionStalledError(sessionUuid, record.handover);
     }
     this.stallHandovers.delete(sessionUuid);
@@ -4841,7 +4984,16 @@ export class DaemonMcpProxy {
    * Get list of available resources from daemon
    */
   async listResources(): Promise<ProxiedResourceDefinition[]> {
-    const releasedResultMint = this.discoveryAfterResultMintRelease();
+    if (this.hasLivenessLifecycleFence()) {
+      return this.listDuringLivenessFence(
+        () => this.fetchResources(true),
+        () => this.cachedResources ?? [],
+      );
+    }
+    return this.fetchResources(this.discoveryAfterResultMintRelease());
+  }
+
+  private async fetchResources(releasedResultMint: boolean): Promise<ProxiedResourceDefinition[]> {
     // Return cached resources if available
     if (this.cachedResources) {
       return this.cachedResources;
@@ -4874,7 +5026,18 @@ export class DaemonMcpProxy {
    * Get list of resource templates from daemon
    */
   async listResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
-    const releasedResultMint = this.discoveryAfterResultMintRelease();
+    if (this.hasLivenessLifecycleFence()) {
+      return this.listDuringLivenessFence(
+        () => this.fetchResourceTemplates(true),
+        () => this.cachedResourceTemplates ?? [],
+      );
+    }
+    return this.fetchResourceTemplates(this.discoveryAfterResultMintRelease());
+  }
+
+  private async fetchResourceTemplates(
+    releasedResultMint: boolean,
+  ): Promise<ProxiedResourceTemplate[]> {
     // Return cached templates if available
     if (this.cachedResourceTemplates) {
       return this.cachedResourceTemplates;
@@ -4943,6 +5106,9 @@ export class DaemonMcpProxy {
    * Read a resource from the daemon
    */
   async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
+    signal?.throwIfAborted();
+    await this.waitForLivenessRecovery();
+    this.throwIfLivenessHandedOver();
     signal?.throwIfAborted();
     const terminalSessionUuid = this.terminalBoundSession?.sessionUuid;
     // A tool-output artifact read is session-independent, so it survives a

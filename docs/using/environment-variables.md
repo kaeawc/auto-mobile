@@ -331,10 +331,18 @@ it and learns from the tool-call error:
 For `daemon_stalled` the harness restarts the daemon, then resumes each session
 by passing its `sessionUuid` on a tool call: the first call after the error
 re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
-reacquire them with `getAndroid` or `getApple`. **A proxy never stops or
-restarts the daemon**, because every harness shares it: restarting it is a
-harness action. A proxy's heartbeat and recovery connections are observation-only
-and fail rather than start a daemon.
+reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
+or while a session remains handed over, **the proxy never starts or restarts the
+daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
+successful recovery surfaces no error, and exhausted recovery returns the structured
+handover on calls/reads and by notification. Discovery does not wait for recovery or
+report the handover: it serves cached/static lists when unreachable, and uncached
+direct lists may observe the daemon unbound. Discovery never starts or restarts the
+daemon during an episode or handover. A named resume uses an observation-only connection
+and retains the handover until the daemon acknowledges the same UUID and owner
+token; a failed resume returns the same error. Recovery cannot join a pending
+connection allowed to start or restart the daemon. Healthy proxies and proxies
+without device sessions retain normal auto-start and skew reconciliation.
 
 A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
 the other owner's lease plus its grace window (plus one heartbeat interval), so a

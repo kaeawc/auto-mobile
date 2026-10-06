@@ -7,10 +7,14 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_RESTART_HANDOFF_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   LIVENESS_RECOVERY_ATTEMPTS,
+  LivenessRecovery,
+  runWithoutDaemonLifecycle,
+  recoveryAttemptSlotMs,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../../src/daemon/types";
@@ -104,6 +108,7 @@ describe("proxy liveness stalls (#10053)", () => {
   let hangObserveFor: string | undefined;
   /** Daemon connections the proxy opened: one more for every time it replaced its socket. */
   let clientsCreated: number;
+  let latestClient: FakeDaemonClient;
   let heartbeatsSeen: number;
   let handovers: LivenessHandover[];
   let infoSpy: ReturnType<typeof spyOn>;
@@ -113,6 +118,11 @@ describe("proxy liveness stalls (#10053)", () => {
 
   function daemonBackedClient(): FakeDaemonClient {
     return new FakeDaemonClient({
+      daemonMethodResults: new Map<string, unknown>([
+        ["tools/list", { tools: [{ name: "getAndroid", inputSchema: { type: "object" } }] }],
+        ["resources/list", { resources: [{ uri: "automobile:devices/booted", name: "booted" }] }],
+        ["resources/list-templates", { resourceTemplates: [] }],
+      ]),
       toolResultFor: (name, params) =>
         name === "getAndroid"
           ? deviceStartResult("android-session", DEVICES["android-session"])
@@ -159,14 +169,20 @@ describe("proxy liveness stalls (#10053)", () => {
     });
   }
 
-  function createProxy(intervalMs: number, autoStartDaemon = false): DaemonMcpProxy {
+  function createProxy(
+    intervalMs: number,
+    autoStartDaemon = false,
+    initialSessionUuid?: string,
+  ): DaemonMcpProxy {
     const proxy = new DaemonMcpProxy({
       clientFactory: () => {
         clientsCreated += 1;
-        return daemonBackedClient();
+        latestClient = daemonBackedClient();
+        return latestClient;
       },
       daemonManager,
       autoStartDaemon,
+      initialSessionUuid,
       timer,
       idGenerator: new FakeIdGenerator(["proxy-token"]),
       heartbeatTimeoutMs: LEASE_MS,
@@ -196,6 +212,12 @@ describe("proxy liveness stalls (#10053)", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const start = daemonManager.start.bind(daemonManager);
+    spyOn(daemonManager, "start").mockImplementation(async (options) => {
+      const result = await start(options);
+      daemonManager.statusResult = { ...daemonManager.statusResult, running: true };
+      return result;
+    });
     hangHeartbeats = 0;
     hangSessions = new Set();
     hangUntil = 0;
@@ -392,6 +414,249 @@ describe("proxy liveness stalls (#10053)", () => {
     });
   });
 
+  describe("lifecycle isolation", () => {
+    const calls: Array<[string, (proxy: DaemonMcpProxy) => Promise<unknown>]> = [
+      ["named tool", (proxy) => proxy.callTool("observe", { sessionUuid: "android-session" })],
+      ["resource read", (proxy) => proxy.readResource("automobile:devices/booted")],
+      ["tool output read", (proxy) => proxy.readResource("automobile:tool-output/test")],
+    ];
+
+    for (const phase of ["recovering", "handed over"] as const) {
+      for (const available of [false, true]) {
+        test.each(calls)(
+          `%s while ${phase}, available=${available}, never manages lifecycle`,
+          async (_name, call) => {
+            const proxy = createProxy(2_000, true);
+            await acquire(proxy, "getAndroid");
+            hangHeartbeats = Number.POSITIVE_INFINITY;
+            if (phase === "handed over") {
+              await advanceUntilHandover();
+              // Deliver once so the named-tool case exercises the second call too.
+              await expect(
+                proxy.callTool("observe", { sessionUuid: "android-session" }),
+              ).rejects.toBeInstanceOf(DaemonSessionStalledError);
+            } else {
+              await baseTimer.advanceTimeAsync(6_000);
+            }
+            latestClient.emitConnectionClosed();
+            isAvailableSpy.mockResolvedValue(available);
+            if (!available) {
+              daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+            }
+            if (available) {
+              daemonManager.statusResults = [
+                { ...daemonManager.statusResult, version: "0.0.1" },
+                daemonManager.statusResult,
+              ];
+            }
+            let settled = false;
+            let error: unknown;
+            void call(proxy).then(
+              () => {
+                settled = true;
+              },
+              (rejected: unknown) => {
+                error = rejected;
+                settled = true;
+              },
+            );
+            for (let elapsed = 0; elapsed < 40_000 && !settled; elapsed += 250) {
+              await baseTimer.advanceTimeAsync(250);
+            }
+            expect(settled).toBe(true);
+            expect(error).toBeInstanceOf(DaemonSessionStalledError);
+            if (error instanceof DaemonSessionStalledError) {
+              expect(error.toPayload().error).toMatchObject({
+                code: "daemon_stalled",
+                attempts: 3,
+              });
+            }
+            expect(daemonManager.startCallCount).toBe(0);
+            expect(daemonManager.restartCallCount).toBe(0);
+            expect(daemonManager.recoverControlStateCallCount).toBe(0);
+          },
+        );
+      }
+    }
+
+    test.each(["recovering", "handed over"] as const)(
+      "discovery while %s serves cold lists without managing lifecycle or awaiting recovery",
+      async (phase) => {
+        const proxy = createProxy(2_000, true);
+        await acquire(proxy, "getAndroid");
+        hangHeartbeats = Number.POSITIVE_INFINITY;
+        if (phase === "handed over") {
+          await advanceUntilHandover();
+        } else {
+          await baseTimer.advanceTimeAsync(6_000);
+        }
+        latestClient.emitConnectionClosed();
+        isAvailableSpy.mockResolvedValue(false);
+        daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+        const discoveries = [
+          () => proxy.listTools(),
+          () => proxy.listResources(),
+          () => proxy.listResourceTemplates(),
+          () => proxy.listAdvertisedTools(),
+          () => proxy.listAdvertisedResources(),
+          () => proxy.listAdvertisedResourceTemplates(),
+        ];
+        for (const discover of discoveries) {
+          expect(Array.isArray(await discover())).toBe(true);
+        }
+        expect(await proxy.listTools()).toEqual(getStaticToolDefinitions());
+        expect(await proxy.listResources()).toEqual([]);
+        expect(await proxy.listResourceTemplates()).toEqual([]);
+        expect(handovers).toHaveLength(phase === "handed over" ? 1 : 0);
+        expect(daemonManager.startCallCount).toBe(0);
+        expect(daemonManager.restartCallCount).toBe(0);
+        expect(daemonManager.recoverControlStateCallCount).toBe(0);
+      },
+    );
+
+    test("discovery preserves cached lists during recovery without dispatching list RPCs", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      const tools = await proxy.listTools();
+      const resources = await proxy.listResources();
+      const templates = await proxy.listResourceTemplates();
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+      await baseTimer.advanceTimeAsync(6_000);
+      const callsBefore = latestClient.callDaemonMethodCalls.length;
+      expect(await proxy.listTools()).toEqual(tools);
+      expect(await proxy.listAdvertisedTools()).toEqual(tools);
+      expect(await proxy.listResources()).toEqual(resources);
+      expect(await proxy.listAdvertisedResources()).toEqual(resources);
+      expect(await proxy.listResourceTemplates()).toEqual(templates);
+      expect(await proxy.listAdvertisedResourceTemplates()).toEqual(templates);
+      expect(latestClient.callDaemonMethodCalls).toHaveLength(callsBefore);
+      expect(handovers).toEqual([]);
+      expect(daemonManager.startCallCount).toBe(0);
+      expect(daemonManager.restartCallCount).toBe(0);
+    });
+
+    test.each([false, true])(
+      "uncached discovery after handover, available=%s, cannot reconcile or start a daemon",
+      async (available) => {
+        const proxy = createProxy(2_000, true);
+        await acquire(proxy, "getAndroid");
+        hangHeartbeats = Number.POSITIVE_INFINITY;
+        await advanceUntilHandover();
+        latestClient.emitConnectionClosed();
+        isAvailableSpy.mockResolvedValue(available);
+        daemonManager.statusResult = {
+          ...daemonManager.statusResult,
+          running: available,
+          version: "0.0.1",
+        };
+        await baseTimer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 250);
+        const tools = await proxy.listTools();
+        const resources = await proxy.listResources();
+        const templates = await proxy.listResourceTemplates();
+        expect(tools).toEqual(
+          available
+            ? [{ name: "getAndroid", inputSchema: { type: "object" } }]
+            : getStaticToolDefinitions(),
+        );
+        expect(resources).toEqual(
+          available ? [{ uri: "automobile:devices/booted", name: "booted" }] : [],
+        );
+        expect(templates).toEqual([]);
+        expect(daemonManager.startCallCount).toBe(0);
+        expect(daemonManager.restartCallCount).toBe(0);
+        expect(daemonManager.recoverControlStateCallCount).toBe(0);
+        await expect(proxy.readResource("automobile:devices/booted")).rejects.toMatchObject({
+          reason: "daemon_stalled",
+        });
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "android-session" }),
+        ).rejects.toMatchObject({
+          reason: "daemon_stalled",
+        });
+      },
+    );
+
+    test("a no-lifecycle operation cannot join an in-flight lifecycle-capable connect", async () => {
+      const proxy = createProxy(2_000, true);
+      let finishProbe: (available: boolean) => void = () => {};
+      isAvailableSpy.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finishProbe = resolve;
+          }),
+      );
+      const ordinary = proxy.ensureConnected();
+      const recovery = runWithoutDaemonLifecycle(() => proxy.ensureConnected());
+      let recoverySettled = false;
+      void recovery.then(
+        () => {
+          recoverySettled = true;
+        },
+        () => {
+          recoverySettled = true;
+        },
+      );
+      await baseTimer.advanceTimeAsync(1);
+      const settledBeforeProbe = recoverySettled;
+      daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+      finishProbe(false);
+      await ordinary;
+      await recovery.catch(() => {});
+      expect(settledBeforeProbe).toBe(true);
+      expect(daemonManager.startCallCount).toBe(1);
+    });
+
+    test("recovery completes without joining a lifecycle-capable pending connect", async () => {
+      const proxy = createProxy(2_000, true, "android-session");
+      let finishProbe: (available: boolean) => void = () => {};
+      isAvailableSpy.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            finishProbe = resolve;
+          }),
+      );
+      const ordinary = proxy.ensureConnected().catch((error: unknown) => error);
+      const recovery = Reflect.get(proxy, "livenessRecovery");
+      if (!(recovery instanceof LivenessRecovery)) {
+        throw new Error("Proxy liveness recovery seam is missing");
+      }
+      const slotMs = recoveryAttemptSlotMs({
+        leaseMs: LEASE_MS,
+        lastAckAt: timer.now(),
+        now: timer.now(),
+        requestTimeoutMs: 4_000,
+      });
+      recovery.begin("android-session", "daemon_stalled");
+      expect(await proxy.listTools()).toEqual(getStaticToolDefinitions());
+      expect(await proxy.listResources()).toEqual([]);
+      expect(await proxy.listResourceTemplates()).toEqual([]);
+      expect(await proxy.listAdvertisedTools()).toEqual(getStaticToolDefinitions());
+      expect(await proxy.listAdvertisedResources()).toEqual([]);
+      expect(await proxy.listAdvertisedResourceTemplates()).toEqual([]);
+      const elapsedMs = await advanceUntilHandover();
+      const handedOverBeforeProbe = handovers.length;
+      finishProbe(false);
+      await ordinary;
+      expect(handedOverBeforeProbe).toBe(1);
+      expect(elapsedMs).toBeLessThan(3 * slotMs);
+      expect(handovers[0]).toMatchObject({ code: "daemon_stalled", attempts: 3 });
+      expect(daemonManager.startCallCount).toBe(0);
+      expect(daemonManager.restartCallCount).toBe(0);
+    });
+
+    test.each([false, true])(
+      "a proxy holding healthy sessions=%s still auto-starts",
+      async (holdsSessions) => {
+        const proxy = createProxy(2_000, true, holdsSessions ? "android-session" : undefined);
+        isAvailableSpy.mockResolvedValue(false);
+        daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+        await proxy.ensureConnected();
+        expect(daemonManager.startCallCount).toBe(1);
+        expect(daemonManager.restartCallCount).toBe(0);
+      },
+    );
+  });
+
   describe("proxy_stalled", () => {
     test("a tick delayed past the lease but inside the grace window restores the same UUID", async () => {
       const proxy = createProxy(2_000);
@@ -454,6 +719,33 @@ describe("proxy liveness stalls (#10053)", () => {
         code: "proxy_stalled",
         recovery: { action: "reacquire_lost_sessions" },
       });
+    });
+
+    test("lost-session handover fences repeated tool and resource reads without lifecycle changes", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
+      await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+      await baseTimer.advanceTimeAsync(4_000);
+      expect(handovers[0]?.code).toBe("proxy_stalled");
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toBeInstanceOf(DaemonSessionStalledError);
+      latestClient.emitConnectionClosed();
+      isAvailableSpy.mockResolvedValue(false);
+      const namedCall = proxy
+        .callTool("observe", { sessionUuid: "android-session" })
+        .catch((error: unknown) => error);
+      for (let step = 0; step < 24; step += 1) {
+        await baseTimer.advanceTimeAsync(250);
+      }
+      expect(await namedCall).toMatchObject({ handover: { code: "proxy_stalled" } });
+      await expect(proxy.readResource("automobile:devices/booted")).rejects.toMatchObject({
+        handover: { code: "proxy_stalled" },
+      });
+      await expect(proxy.listAdvertisedTools()).resolves.toBeArray();
+      expect(daemonManager.startCallCount).toBe(0);
+      expect(daemonManager.restartCallCount).toBe(0);
     });
 
     test("a tick that is merely slow, not late by more than the lease, starts no recovery", async () => {

@@ -4,11 +4,7 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import {
-  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
-  DAEMON_SHUTDOWN_TIMEOUT_MS,
-  DAEMON_VERSION,
-} from "../../src/daemon/constants";
+import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -732,7 +728,7 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     }
   });
 
-  test("bounds a missing shutdown EOF before reacquiring (#6336)", async () => {
+  test("bounds a missing shutdown EOF but never auto-starts after a liveness handover (#6336)", async () => {
     const M1 = "shutdown-without-eof";
     const M2 = "replacement-after-timeout";
     const oldDaemon = acquiringClient(sessionManager, [M1]);
@@ -762,17 +758,30 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       const reacquired = proxy.callTool("getAndroid", {
         avdName: "am-api34-ga-arm64",
       });
+      let settled = false;
+      let error: unknown;
+      void reacquired.then(
+        () => {
+          settled = true;
+        },
+        (rejected: unknown) => {
+          error = rejected;
+          settled = true;
+        },
+      );
       await Promise.resolve();
       await Promise.resolve();
       expect(replacementDaemon.nextIndex()).toBe(0);
 
       manager.statusResult = { running: false };
-      await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS);
-      await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
-
-      await expect(reacquired).resolves.toEqual(deviceStartResult(M2));
-      expect(manager.startCalled).toBe(true);
-      expect(replacementDaemon.nextIndex()).toBe(1);
+      for (let elapsed = 0; elapsed < 40_000 && !settled; elapsed += 250) {
+        await timer.advanceTimeAsync(250);
+      }
+      expect(settled).toBe(true);
+      expect(error).toMatchObject({ reason: "daemon_stalled", handover: { attempts: 3 } });
+      expect(manager.startCallCount).toBe(0);
+      expect(manager.restartCallCount).toBe(0);
+      expect(replacementDaemon.nextIndex()).toBe(0);
     } finally {
       await proxy.close();
     }

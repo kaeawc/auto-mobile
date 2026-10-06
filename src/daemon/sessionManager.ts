@@ -492,11 +492,19 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
   }
 }
 
+/** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
+export interface SessionReleaseOptions {
+  expiryOrigin?: "lazy-expiry" | "cleanup-expired";
+  /** Set by the expiry handler when it owns the ordered device return after release. */
+  deviceReleaseManaged?: boolean;
+}
+
 export type SessionReleaseCallback = (
   sessionId: string,
   deviceId: string,
   releaseReason: string,
   snapshot: SessionReleaseSnapshot,
+  options: SessionReleaseOptions,
 ) => void;
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
@@ -769,6 +777,7 @@ export interface RecoveryExpiryReleaseHandler {
     sessionId: string,
     releaseReason: string,
     attempt: () => Promise<string | null>,
+    options: SessionReleaseOptions,
   ): Promise<string | null> | undefined;
 }
 
@@ -1633,6 +1642,8 @@ export class SessionManager {
         sessionId,
         this.expiredSessionReleaseReason(session, "lazy-expiry"),
         true,
+        undefined,
+        { expiryOrigin: "lazy-expiry" },
       );
       void this.getBarrier()
         .trackExisting(release)
@@ -2655,14 +2666,23 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
+    const releaseOptions = { ...options };
     const attempt = () =>
-      this.releaseSessionAttempt(sessionId, releaseReason, allowExpired, shouldCommit);
+      this.releaseSessionAttempt(
+        sessionId,
+        releaseReason,
+        allowExpired,
+        shouldCommit,
+        releaseOptions,
+      );
     if (EXPIRY_RELEASE_REASONS.has(releaseReason)) {
       const recoveryRelease = this.recoveryExpiryReleaseHandler?.release(
         sessionId,
         releaseReason,
         attempt,
+        releaseOptions,
       );
       if (recoveryRelease) {
         return await recoveryRelease;
@@ -2676,6 +2696,7 @@ export class SessionManager {
     releaseReason: string,
     allowExpired: boolean,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
@@ -2697,10 +2718,10 @@ export class SessionManager {
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
           )
-        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit);
+        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options);
     const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -3034,7 +3055,8 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     reason: ReleaseReasonState,
-    shouldCommit?: ReleaseCommitFence,
+    shouldCommit: ReleaseCommitFence | undefined,
+    options: SessionReleaseOptions,
   ): Promise<string | null> {
     try {
       // Release restores the device to `none` itself, so a standalone TTL is now
@@ -3112,7 +3134,7 @@ export class SessionManager {
         this.terminalReleaseReasonStates.delete(sessionId);
       }
 
-      this.notifySessionRelease(releaseSnapshot);
+      this.notifySessionRelease(releaseSnapshot, options);
       let persistedSnapshot: SessionReleaseSnapshot;
       try {
         persistedSnapshot = await this.completeReleasePersistence(releaseSnapshot, reason, session);
@@ -3125,7 +3147,7 @@ export class SessionManager {
       }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
-        this.notifySessionRelease(persistedSnapshot);
+        this.notifySessionRelease(persistedSnapshot, options);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -3502,10 +3524,13 @@ export class SessionManager {
     this.latestFinalizedSessionIdentities.delete(sessionId);
   }
 
-  private notifySessionRelease(snapshot: SessionReleaseSnapshot): void {
+  private notifySessionRelease(
+    snapshot: SessionReleaseSnapshot,
+    options: SessionReleaseOptions = {},
+  ): void {
     for (const callback of this.releaseCallbacks) {
       try {
-        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot);
+        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
       } catch (error) {
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }
@@ -5882,6 +5907,8 @@ export class SessionManager {
         sessionId,
         this.expiredSessionReleaseReason(session, "cleanup-expired"),
         true,
+        undefined,
+        { expiryOrigin: "cleanup-expired" },
       );
       void this.getBarrier()
         .trackExisting(release)

@@ -1,5 +1,6 @@
 import { DispatchedObservationError } from "../../../../src/models/DispatchedObservationError";
 import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";
 import { harness } from "./displaySwipeHarness";
@@ -211,6 +212,35 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       });
       expect(result.error).not.toContain("not found");
       expect(h.legs()).toHaveLength(2);
+    });
+    test("a cancel landing before the first swipe is sent reports no swipes (#10151)", async () => {
+      const h = harness({ route, foundAfter: Infinity });
+      const controller = new AbortController();
+      const interaction = h.action.observedInteraction;
+      // The cancel arrives after the pre-swipe check, inside the interaction's own setup.
+      h.action.observedInteraction = async (run, options) => {
+        controller.abort();
+        return interaction(run, options);
+      };
+      const error = await h.action.execute(search, undefined, controller.signal).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      expect(error).not.toBeInstanceOf(SwipeSearchCancelledError);
+      expect((error as Error).message).toBe("Operation cancelled");
+      expect(h.legs()).toEqual([]);
+    });
+    test("a cancel after one sent swipe reports exactly one (#10151)", async () => {
+      const h = harness({ route, foundAfter: Infinity });
+      const controller = new AbortController();
+      h.afterSwipe(() => controller.abort());
+      const error = await h.action.execute(search, undefined, controller.signal).then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(SwipeSearchCancelledError);
+      expect((error as SwipeSearchCancelledError).swipesDispatched).toBe(1);
+      expect(h.legs()).toHaveLength(1);
     });
     for (const count of [2, 3, 4, 5]) {
       test(`wrong panel observation at capture ${count} cannot satisfy search`, async () => {

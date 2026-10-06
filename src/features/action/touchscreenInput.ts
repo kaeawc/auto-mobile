@@ -24,15 +24,22 @@ export async function executeTouchscreenInput(
   displayId?: number,
   signal?: AbortSignal,
   assertCurrent?: () => void,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; onDispatch?: () => void },
 ): Promise<void> {
   const command = touchscreenInputCommand(action, displayId);
+  if (!assertCurrent) {
+    // No dispatch hook on this path: report the send as it begins.
+    options?.onDispatch?.();
+  }
   // Preserve executeCommand's single remote shell payload; execute exposes its dispatch hook.
   const result = assertCurrent
     ? await adb.execute(["shell", command.slice("shell ".length)], {
         signal,
         timeoutMs: options?.timeoutMs,
-        beforeDispatch: async () => assertCurrent(),
+        beforeDispatch: async () => {
+          assertCurrent();
+          options?.onDispatch?.();
+        },
       })
     : await adb.executeCommand(command, options?.timeoutMs, undefined, undefined, signal);
   assertTouchscreenInputSucceeded(command, result);

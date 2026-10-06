@@ -15,7 +15,11 @@ data class OverlayRuntimeSnapshot(
   val spec: OverlaySpec,
   val pages: Map<String, Int>,
   val active: Boolean = true,
-  /** Bumped per key each time an external patch changes that text value; see [TextChange]. */
+  /**
+   * Bumped per key each time the controller's text for that key is replaced from outside the field:
+   * an authoritative patch that changes it, or a rejected edit that must be reverted. The field
+   * adopts the value whenever the epoch moves; see [TextChange].
+   */
   val textEpochs: Map<String, Int> = emptyMap(),
 ) {
   val state: Map<String, OverlayScalar>
@@ -96,9 +100,7 @@ class OverlayRuntime(
       is OverlayInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
       is OverlayInteraction.SettledPage -> setPage(interaction.pager, interaction.page)
-      is OverlayInteraction.TextChange ->
-        if (interaction.epoch >= (current.textEpochs[interaction.key] ?: 0))
-          change(interaction.key, OverlayScalar.Text(interaction.value))
+      is OverlayInteraction.TextChange -> textChange(interaction)
       is OverlayInteraction.Select -> {
         if (interaction.pager != null) setPage(interaction.pager, interaction.index)
         else
@@ -152,6 +154,24 @@ class OverlayRuntime(
       (validation as? OverlaySpecValidation.Failure)?.error.toString()
     }
     mutableSnapshot.value = current.copy(spec = spec)
+  }
+
+  /**
+   * An edit the validator rejects (e.g. the spec size cap) leaves the state untouched, so the field
+   * that already shows it must be told to revert: the key's epoch moves, the field adopts the
+   * accepted text, and edits still in flight from the abandoned text go stale. Rethrown so the
+   * controller still logs the failure (never the typed text).
+   */
+  private suspend fun textChange(interaction: OverlayInteraction.TextChange) {
+    val key = interaction.key
+    if (interaction.epoch < (current.textEpochs[key] ?: 0)) return
+    try {
+      change(key, OverlayScalar.Text(interaction.value))
+    } catch (error: IllegalArgumentException) {
+      mutableSnapshot.value =
+        current.copy(textEpochs = current.textEpochs + (key to (current.textEpochs[key] ?: 0) + 1))
+      throw error
+    }
   }
 
   /** Changes emit once only for a changed value; setState actions and wire patches are silent. */

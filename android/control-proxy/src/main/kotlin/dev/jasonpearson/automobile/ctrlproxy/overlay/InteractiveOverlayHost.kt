@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
 import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -123,10 +125,11 @@ interface InteractiveOverlayHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible the window is focusable, and Back (delivered to the focused window
- * as a key event) dismisses the overlay through the request's `onHostDismiss` on [backScope], the
- * same `user`-reason path as the fullscreen dismiss row. Without a visible text field the window is
- * not focusable and never sees Back at all.
+ * While a text field is visible the window is focusable, and Back dismisses the overlay through the
+ * request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss
+ * row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
+ * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
+ * text field the window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for this window; [densityProvider] defaults to
  * its resources. All other platform access is constructor-injected. No permission probe occurs.
@@ -144,9 +147,14 @@ class DefaultInteractiveOverlayHost(
   private val isBlocked: () -> Boolean = { false },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+  private val backRegistrarFactory: (View) -> OverlayBackCallbackRegistrar = { view ->
+    if (sdkInt >= OVERLAY_BACK_CALLBACK_MIN_SDK) AndroidOverlayBackRegistrar(view)
+    else NoOverlayBackCallbackRegistrar
+  },
 ) : InteractiveOverlayHost {
   private class Window(
     val view: OverlayComposeView,
+    val back: OverlayBackBinding,
     val owner: OverlayWindowOwner,
     var params: WindowManager.LayoutParams,
     var request: InteractiveOverlayRequest,
@@ -191,6 +199,7 @@ class DefaultInteractiveOverlayHost(
       current.request = request
       placement = request.placement
       applyContent(current)
+      current.back.sync(request.hasTextField)
       return true
     }
     val owner = OverlayWindowOwner()
@@ -201,7 +210,14 @@ class DefaultInteractiveOverlayHost(
         setViewTreeViewModelStoreOwner(owner)
         setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
       }
-    val added = Window(view, owner, params, request)
+    val added =
+      Window(
+        view,
+        OverlayBackBinding(sdkInt, backRegistrarFactory(view), ::dismissFromBack),
+        owner,
+        params,
+        request,
+      )
     applyContent(added)
     try {
       windowManager.addView(view, params)
@@ -214,6 +230,7 @@ class DefaultInteractiveOverlayHost(
     window = added
     placement = request.placement
     owner.resume()
+    added.back.sync(request.hasTextField)
     onWindowAttached()
     return true
   }
@@ -248,10 +265,17 @@ class DefaultInteractiveOverlayHost(
     val current = window ?: return@onMain true
     val previous = current.request
     if (previous.hasTextField == visible) return@onMain true
+    if (!visible) hideKeyboard(current.view)
     current.request = previous.copy(hasTextField = visible)
     val applied = relayoutOnMain(current)
-    if (!applied) current.request = previous
+    if (applied) current.back.sync(visible) else current.request = previous
     applied
+  }
+
+  /** Still focused here: ask the keyboard to go before the window stops being focusable. */
+  @SuppressLint("NewApi")
+  private fun hideKeyboard(view: View) {
+    if (sdkInt >= 30) view.windowInsetsController?.hide(android.view.WindowInsets.Type.ime())
   }
 
   private fun backDecision(event: KeyEvent): OverlayBackDecision =
@@ -262,8 +286,9 @@ class DefaultInteractiveOverlayHost(
       event.isCanceled,
     )
 
+  /** The one Back target for the key-event path and the predictive-back callback. */
   private fun dismissFromBack() {
-    val request = window?.request ?: return
+    val request = window?.request?.takeIf { it.hasTextField } ?: return
     backScope.launch { request.onHostDismiss() }
   }
 
@@ -299,6 +324,7 @@ class DefaultInteractiveOverlayHost(
     touchThroughToken = null
     window = null
     placement = null
+    current.back.release()
     current.owner.destroy()
     current.view.disposeComposition()
   }

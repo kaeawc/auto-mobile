@@ -231,6 +231,29 @@ class OverlayTextFieldControllerTest {
     }
 
   @Test
+  fun `a rejected edit leaves the accepted text and moves the epoch so the field reverts`() =
+    runTest {
+      controller.show("show", spec(field))
+      val runtime = checkNotNull(controller.activeRuntime)
+      controller.interact(runtime, OverlayInteraction.TextChange("query", "ok"))
+      val before = runtime.current.textEpochs["query"] ?: 0
+      val tooBig = "x".repeat(OverlaySpecValidator.MAX_OVERLAY_SPEC_BYTES + 1)
+      controller.interact(runtime, OverlayInteraction.TextChange("query", tooBig, epoch = before))
+      // State, events and activity are untouched; only the epoch moved.
+      assertEquals(OverlayScalar.Text("ok"), runtime.current.state["query"])
+      assertEquals(1, events.size)
+      assertTrue(runtime.current.active)
+      val after = checkNotNull(runtime.current.textEpochs["query"])
+      assertEquals(before + 1, after)
+      // Edits typed against the rejected text (still in flight) are stale; the reverted field's
+      // next edit carries the new epoch and is accepted.
+      controller.interact(runtime, OverlayInteraction.TextChange("query", "stale", epoch = before))
+      assertEquals(OverlayScalar.Text("ok"), runtime.current.state["query"])
+      controller.interact(runtime, OverlayInteraction.TextChange("query", "ok!", epoch = after))
+      assertEquals(OverlayScalar.Text("ok!"), runtime.current.state["query"])
+    }
+
+  @Test
   fun `edits arriving in order keep their per-overlay sequence`() = runTest {
     controller.show("show", spec(field))
     val runtime = checkNotNull(controller.activeRuntime)

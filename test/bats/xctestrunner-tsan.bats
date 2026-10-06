@@ -93,6 +93,11 @@ pid_is_gone() {
 
 assert_pid_gone() {
   local attempt
+  # An empty or non-numeric pid would make `ps` match nothing and pass vacuously.
+  if [[ ! ${1:-} =~ ^[0-9]+$ ]]; then
+    echo "assert_pid_gone: not a numeric pid: '${1:-}'" >&2
+    return 1
+  fi
   for ((attempt = 0; attempt < 100; attempt++)); do
     if pid_is_gone "$1"; then return 0; fi
     sleep 0.05
@@ -102,7 +107,13 @@ assert_pid_gone() {
 }
 
 assert_stub_gone() {
-  assert_pid_gone "$(cat "${1:-${TSAN_PID_FILE}}")"
+  local pid_file="${1:-${TSAN_PID_FILE}}" pid
+  if [[ ! -s ${pid_file} ]]; then
+    echo "assert_stub_gone: missing or empty pid file: ${pid_file}" >&2
+    return 1
+  fi
+  pid="$(< "${pid_file}")"
+  assert_pid_gone "${pid}"
 }
 
 @test "clean run saves complete output and uses sanitized simulator-free discovery and CI" {

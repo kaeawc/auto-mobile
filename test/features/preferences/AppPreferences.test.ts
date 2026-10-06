@@ -1214,6 +1214,127 @@ describe("AppPreferences", () => {
     ).rejects.toThrow("iOS physical devices");
   });
 
+  describe("Android user targeting (#9919)", () => {
+    const owner = { userId: 0, name: "Owner", flags: 0x4c13, running: true };
+    const work = { userId: 10, name: "Work profile", flags: 0x1030, running: true };
+
+    function workProfileAdb(installedFor: { user0: boolean; user10: boolean }): FakeAdbExecutor {
+      const adb = new FakeAdbExecutor();
+      adb.setUsers([owner, work]);
+      adb.setCommandResponse(
+        "shell pm list packages --user 0",
+        createExecResult(installedFor.user0 ? "package:com.example.app" : "", ""),
+      );
+      adb.setCommandResponse(
+        "shell pm list packages --user 10",
+        createExecResult(installedFor.user10 ? "package:com.example.app" : "", ""),
+      );
+      adb.setCommandResponse(
+        "cat shared_prefs/settings.xml",
+        createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+      );
+      return adb;
+    }
+
+    function runAsCommands(adb: AdbExecutor & { getExecutedCommands(): string[] }): string[] {
+      return adb.getExecutedCommands().filter((command) => command.includes("run-as"));
+    }
+
+    const setInput = {
+      scope: "sharedPreferences" as const,
+      appId: "com.example.app",
+      suite: "settings",
+      key: "launch_count",
+      value: 3,
+      type: "int" as const,
+    };
+
+    test("an explicit userId reads and writes that user's copy and reports it", async () => {
+      const adb = workProfileAdb({ user0: true, user10: true });
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.setPreference({ ...setInput, userId: 10 });
+
+      expect(result).toMatchObject({ userId: 10 });
+      const commands = runAsCommands(adb);
+      expect(commands).toHaveLength(3);
+      for (const command of commands) {
+        expect(command).toStartWith("shell run-as com.example.app --user 10 ");
+      }
+    });
+
+    test("an explicit userId on getPreference skips resolution and targets that user", async () => {
+      const adb = workProfileAdb({ user0: true, user10: true });
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "launch_count",
+        userId: 10,
+      });
+
+      expect(result.userId).toBe(10);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell run-as com.example.app --user 10 cat shared_prefs/settings.xml",
+      ]);
+    });
+
+    test("auto-resolves to the work profile when the app is installed only there", async () => {
+      const adb = workProfileAdb({ user0: false, user10: true });
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.setPreference(setInput);
+
+      expect(result).toMatchObject({ userId: 10 });
+      expect(runAsCommands(adb).every((c) => c.includes("run-as com.example.app --user 10 "))).toBe(
+        true,
+      );
+    });
+
+    test("auto-resolves to user 0 without --user when the app is installed only there", async () => {
+      const adb = workProfileAdb({ user0: true, user10: false });
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.setPreference(setInput);
+
+      expect(result).toMatchObject({ userId: 0 });
+      expect(runAsCommands(adb).some((command) => command.includes("--user"))).toBe(false);
+    });
+
+    test("a single-user device sends the same unscoped run-as commands as before", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "cat shared_prefs/settings.xml",
+        createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+      );
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      const result = await preferences.getPreference({
+        scope: "sharedPreferences",
+        appId: "com.example.app",
+        suite: "settings",
+        key: "launch_count",
+      });
+
+      expect(result.userId).toBe(0);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell run-as com.example.app cat shared_prefs/settings.xml",
+      ]);
+    });
+
+    test("rejects userId for scopes that are not Android sharedPreferences", async () => {
+      const adb = new FakeAdbExecutor();
+      const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+
+      await expect(
+        preferences.getPreference({ scope: "systemProperty", key: "debug.x", userId: 10 }),
+      ).rejects.toThrow("userId is only supported for Android sharedPreferences.");
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+  });
+
   describe("validateScope guards", () => {
     // Each guard must fire BEFORE any device command runs — a wrong scope on the
     // wrong platform must never silently run `adb getprop` on an iOS device, and a

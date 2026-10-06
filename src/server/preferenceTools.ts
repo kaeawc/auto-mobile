@@ -33,6 +33,14 @@ const getPreferenceBaseSchema = z
       .optional()
       .describe("SharedPreferences file name or UserDefaults suite/app group"),
     key: z.string().min(1).describe("Preference key or Android system property name"),
+    userId: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Android sharedPreferences only: user whose copy of the app to read/write (e.g. a work profile). Defaults to the user the app is installed for, as clearAppData resolves it.",
+      ),
   })
   .strict();
 
@@ -127,6 +135,14 @@ function validatePreferenceArgs(
       code: "custom",
       path: ["scope"],
       message: "userDefaults is only supported on iOS",
+    });
+  }
+
+  if (args.userId !== undefined && args.scope !== "sharedPreferences") {
+    context.addIssue({
+      code: "custom",
+      path: ["userId"],
+      message: "userId is only supported for Android sharedPreferences.",
     });
   }
 

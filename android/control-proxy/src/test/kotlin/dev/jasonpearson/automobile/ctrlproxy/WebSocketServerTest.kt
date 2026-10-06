@@ -9,6 +9,8 @@ import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
@@ -668,7 +670,8 @@ class WebSocketServerTest {
           """{"type":"set_hierarchy_interval","requestId":"interval"}""",
           """{"type":"set_recomposition_tracking","requestId":"recomposition","enabled":true}""",
           """{"type":"set_accessibility_flags","requestId":"accessibility"}""",
-          """{"type":"set_network_mock_rules","requestId":"mock-rules","rules":[]}""",
+          // set_network_mock_rules is awaited when it carries a requestId (#10101); see
+          // `set_network_mock_rules records an owner only when it carries a requestId`.
           """{"type":"set_network_error_simulation","requestId":"network-error","enabled":true}""",
           """{"type":"start_recording","requestId":"record-start"}""",
           """{"type":"stop_recording","requestId":"record-stop"}""",
@@ -840,6 +843,26 @@ class WebSocketServerTest {
       server.recordsRequestOwner(
         RequestHierarchyIfStale(sinceTimestamp = 0L, requestId = "stale_owner")
       )
+    )
+  }
+
+  // Issue #10101: a rules push that asks for the rejected-rule report keeps an owner so the reply
+  // reaches the asking client; the fire-and-forget push must not leak one.
+  @Test
+  fun `set_network_mock_rules records an owner only when it carries a requestId`() {
+    assertTrue(
+      server.recordsRequestOwner(SetNetworkMockRules(requestId = "r1", rules = emptyList()))
+    )
+    assertFalse(server.recordsRequestOwner(SetNetworkMockRules(rules = emptyList())))
+  }
+
+  @Test
+  fun `the rules result is routed by its requestId`() {
+    assertEquals(
+      "r1",
+      WebSocketServer.correlationRequestId(
+        SetNetworkMockRulesResult(timestamp = 1L, requestId = "r1")
+      ),
     )
   }
 

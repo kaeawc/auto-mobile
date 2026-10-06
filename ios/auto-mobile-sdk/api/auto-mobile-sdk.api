@@ -495,6 +495,7 @@ public final class AutoMobileNetwork: Sendable
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
 public class AutoMobileURLProtocol: URLProtocol
   public override class func canInit(with request: URLRequest) -> Bool
+  public override class func canInit(with task: URLSessionTask) -> Bool
   public override class func canonicalRequest(for request: URLRequest) -> URLRequest
   public override func startLoading()
   public override func stopLoading()

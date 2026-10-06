@@ -409,6 +409,24 @@ data class CommitTextResult(
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+/**
+ * Reply to `set_network_mock_rules` when the request carried a `requestId` (issue #10101).
+ *
+ * [rejectedMockIds] is null when no app confirmed the rules (an older SDK, or no SDK app), which
+ * the host reports as "sent, not confirmed"; an empty list means every rule was installed.
+ * [rejectedReasons] maps each rejected id to the device's own reason.
+ */
+@Serializable
+@SerialName("set_network_mock_rules_result")
+data class SetNetworkMockRulesResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean = true,
+  val rejectedMockIds: List<String>? = null,
+  val rejectedReasons: Map<String, String>? = null,
+  val error: String? = null,
+) : WebSocketResponse()
+
 @Serializable
 @SerialName("set_keyboard_profile_result")
 data class SetKeyboardProfileResult(

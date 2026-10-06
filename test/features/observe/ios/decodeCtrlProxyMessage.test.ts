@@ -532,6 +532,43 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  // Issue #10101: the runner reports the rules the app's regex engine rejected.
+  test("set_network_mock_rules_result carries the rejected ids and reasons", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "set_network_mock_rules_result",
+        ok: true,
+        totalTimeMs: 4,
+        rejectedMockIds: ["m1"],
+        rejectedReasons: { m1: "invalid regex" },
+      }),
+    );
+
+    expect(decoded?.result).toEqual({
+      success: true,
+      totalTimeMs: 4,
+      error: undefined,
+      rejectedMockIds: ["m1"],
+      rejectedReasons: { m1: "invalid regex" },
+    });
+  });
+
+  test("set_network_mock_rules_result from an older runner has no rejection fields", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "set_network_mock_rules_result", ok: true, totalTimeMs: 4 }),
+    );
+
+    expect(decoded?.result).toEqual({ success: true, totalTimeMs: 4, error: undefined });
+  });
+
+  test("set_network_mock_rules_result keeps an empty rejection list distinct from none reported", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "set_network_mock_rules_result", ok: true, rejectedMockIds: [] }),
+    );
+
+    expect(decoded?.result).toMatchObject({ rejectedMockIds: [] });
+  });
+
   test("execute_sql_result carries query fields", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({
@@ -757,14 +794,13 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
   //   3. current_focus_result               — focus push, no awaiter
   //   4. traversal_order_result             — traversal push, no awaiter
   //   5. connected                          — connection handshake push
-  //   6. set_network_mock_rules_result      — mock-rules ack
+  //   (set_network_mock_rules_result is now decoded: it carries rejectedMockIds, #10101)
   const FIRE_AND_FORGET_EXCUSES = [
     "set_hierarchy_poll_interval_result",
     "screenshot_error",
     "current_focus_result",
     "traversal_order_result",
     "connected",
-    "set_network_mock_rules_result",
     "set_network_fault_rules_result",
   ];
 
@@ -782,8 +818,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 42 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(42);
+  test("the decoder explicitly reshapes exactly 43 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(43);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -840,6 +876,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_preference_result", expected: false },
     { type: "remove_preference_result", expected: false },
     { type: "clear_preferences_result", expected: false },
+    { type: "set_network_mock_rules_result", expected: false },
     { type: "set_network_fault_rules_result", expected: false },
     { type: "set_network_error_simulation_result", expected: false },
     { type: "execute_sql_result", expected: false },
@@ -901,8 +938,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 42 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(42);
+  test("the default table covers all 43 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(43);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -940,8 +977,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 41 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(41);
+  test("the passthrough set is the 42 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(42);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -967,6 +1004,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     "set_preference_result",
     "remove_preference_result",
     "clear_preferences_result",
+    "set_network_mock_rules_result",
     "set_network_fault_rules_result",
     "set_network_error_simulation_result",
   ];

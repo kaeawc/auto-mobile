@@ -120,8 +120,14 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState } from "../../../server/NetworkState";
-import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import {
+  buildNetworkMockRules,
+  NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  type NetworkMockPushResult,
+  type NetworkMockRuleSync,
+} from "../../../server/networkMockRules";
+import { pushNetworkMockRules } from "./networkMockRulesPush";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
@@ -452,6 +458,15 @@ interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   type: "set_keyboard_profile_result";
   activeProfileId?: string;
   previousProfileId?: string;
+}
+
+interface WsSetNetworkMockRulesResultMessage extends WsMessageBase {
+  type: "set_network_mock_rules_result";
+  requestId: string;
+  success?: boolean;
+  /** Absent: no app confirmed the rules. Present (even empty): the app compiled the list. */
+  rejectedMockIds?: string[];
+  rejectedReasons?: Record<string, string>;
 }
 
 interface WsKeyboardProfilesResultMessage extends WsMessageBase {
@@ -971,6 +986,7 @@ type WebSocketMessage =
   | WsCommitTextResultMessage
   | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
+  | WsSetNetworkMockRulesResultMessage
   | WsKeyboardProfilesResultMessage
   | WsInsertTextStateResultMessage
   | WsInsertTextResultMessage
@@ -2480,6 +2496,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Push THIS device's mock rules for a `mockNetwork`/`clearMockNetwork` call and wait (bounded)
+   * for the rules the app's regex engine rejected (issue #10101). A runner or SDK that does not
+   * report resolves to `unconfirmed`; only an undelivered push is a failure.
+   */
+  async pushNetworkMockRules(
+    rules: NetworkMockRuleSync[],
+    timeoutMs: number = NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  ): Promise<NetworkMockPushResult> {
+    return pushNetworkMockRules(
+      this.createDelegateContext(),
+      rules,
+      () =>
+        this.sendMessage(
+          serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })),
+        ),
+      timeoutMs,
+    );
+  }
+
+  /**
    * Push THIS device's mock rules and error simulation from the host store.
    * Runs on every (re)connect, and after a session release clears the store so
    * the device drops what that session installed (issue #10061).
@@ -2505,6 +2541,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             errorType: sim?.errorType,
             limit: sim?.limit,
             expiresAtEpochMs: sim?.expiresAt,
+            // What is left now, not the original duration: the device times it on its own
+            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
+            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
           }),
         ),
       );
@@ -5394,6 +5433,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: message.success,
         activeProfileId: message.activeProfileId,
         previousProfileId: message.previousProfileId,
+        error: message.error,
+      })),
+
+    set_network_mock_rules_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? true,
+        totalTimeMs: 0,
+        rejectedMockIds: message.rejectedMockIds,
+        rejectedReasons: message.rejectedReasons,
         error: message.error,
       })),
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Playground typography
 
@@ -22,6 +23,25 @@ enum PlaygroundFont {
 /// Shantell Sans family), each anchored to a matching SwiftUI `TextStyle` for
 /// correct Dynamic Type scaling.
 struct PlaygroundTypography {
+    /// UIKit bridge for the native semantic-link and segmented-control fixtures.
+    /// UIFontMetrics follows the same semantic scaling curve as the SwiftUI role.
+    var uiKitBody: UIFont {
+        UIFontMetrics(forTextStyle: .body).scaledFont(
+            for: UIFont(name: PlaygroundFont.baseName, size: 16) ?? UIFont.systemFont(ofSize: 16)
+        )
+    }
+
+    var uiKitLabel: UIFont {
+        UIFontMetrics(forTextStyle: .caption1).scaledFont(
+            for: UIFont(name: PlaygroundFont.baseName, size: 12) ?? UIFont.systemFont(ofSize: 12)
+        )
+    }
+
+    // SF Symbols keep their existing metrics; they are icons, not text roles.
+    let thumbnailIcon = Font.system(size: 24)
+    let profileIcon = Font.system(size: 50)
+    let featureIcon = Font.system(size: 60)
+
     let displayLarge = PlaygroundFont.shantell(57, .regular, relativeTo: .largeTitle)
     let displayMedium = PlaygroundFont.shantell(45, .regular, relativeTo: .largeTitle)
     let displaySmall = PlaygroundFont.shantell(36, .regular, relativeTo: .largeTitle)

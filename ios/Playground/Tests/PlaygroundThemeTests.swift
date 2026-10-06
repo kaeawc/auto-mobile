@@ -8,7 +8,6 @@ import XCTest
 /// registration (AC2), and the hand-drawn shape scale (AC3) — mirroring the
 /// Android `PlaygroundContrastTest` / `PlaygroundShapesTest`.
 final class PlaygroundThemeTests: XCTestCase {
-
     private func luminance(_ color: Color) -> Double {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -68,6 +67,21 @@ final class PlaygroundThemeTests: XCTestCase {
             families.contains { $0.localizedCaseInsensitiveContains("Shantell") },
             "Shantell Sans must be registered via UIAppFonts. Available: \(families)"
         )
+    }
+
+    func testUIKitBodyUsesRegisteredThemeFamilyAndBodyScale() {
+        let typography = PlaygroundTypography()
+        let expected = UIFontMetrics(forTextStyle: .body).scaledValue(for: 16)
+        XCTAssertTrue(typography.uiKitBody.familyName.localizedCaseInsensitiveContains("Shantell"))
+        XCTAssertEqual(typography.uiKitBody.pointSize, expected, accuracy: 0.01)
+    }
+
+    func testFixtureShapeTokensPreserveExistingRadii() {
+        let shapes = PlaygroundShapes()
+        XCTAssertEqual(shapes.swatch, 4)
+        XCTAssertEqual(shapes.thumbnail, 8)
+        XCTAssertEqual(shapes.gestureTarget, 16)
+        XCTAssertEqual(shapes.layeredBackdrop, 20)
     }
 
     func testShapeScaleIsChunkyHandDrawn() {

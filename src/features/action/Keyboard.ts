@@ -27,6 +27,13 @@ import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
 import { getImeOccluder, getVisibleIosImeBounds } from "../observe/output/SkeletonProjection";
+import type { A11yActionResult, AccessibilityNodeSelector } from "../observe/android/types";
+import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
+import { errorMessage } from "../../utils/describeUnknownError";
+import {
+  nodeActionTargetError,
+  stableNodeSelectorForElement,
+} from "../talkback/TalkBackTapStrategy";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -105,6 +112,24 @@ type KeyboardDetection = {
   imeWindowPresent?: boolean;
 };
 
+/**
+ * The slice of the CtrlProxy client `open` needs to show the IME without a touch:
+ * a node `click` (the framework shows the keyboard for the focused field without
+ * a touch position, so the caret and selection stay put) and the caret read used
+ * to report a moved caret when the tap fallback has to run.
+ */
+export interface KeyboardOpenClient {
+  supportsNodeActionSelectors(): Promise<boolean>;
+  requestNodeAction(
+    action: string,
+    selector: AccessibilityNodeSelector,
+    timeoutMs?: number,
+    perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+  requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -120,6 +145,8 @@ export class Keyboard {
   private geometry: ElementGeometry;
   private finder: ElementFinder;
   private timer: Timer;
+  private adbFactory: AdbClientFactory;
+  private openClient: KeyboardOpenClient | undefined;
 
   constructor(
     device: BootedDevice,
@@ -129,8 +156,11 @@ export class Keyboard {
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
     finder: ElementFinder = new DefaultElementFinder(),
+    openClient?: KeyboardOpenClient,
   ) {
     this.device = device;
+    this.adbFactory = adbFactory;
+    this.openClient = openClient;
     this.adb = adbFactory.create(device);
     this.parser = parser;
     this.geometry = geometry;
@@ -377,11 +407,32 @@ export class Keyboard {
       };
     }
 
-    await this.tapOnElement(focusedInput, signal);
+    // Show the IME without a touch first: a coordinate tap lands inside the field
+    // and moves the caret into existing text (#9942).
+    if (await this.showWithoutTouch(focusedInput, hierarchy, signal)) {
+      const shown = await this.waitForKeyboardState(true, signal);
+      if (shown.open && !shown.error) {
+        return this.openResult(shown, "Keyboard opened");
+      }
+      logger.warn("Keyboard did not open after a node click; falling back to a tap");
+    }
 
+    const caretBefore = await this.readCaret(signal);
+    await this.tapOnElement(focusedInput, signal);
     const afterState = await this.waitForKeyboardState(true, signal);
+    const caretNote = afterState.open ? await this.caretMovedNote(caretBefore, signal) : "";
+    return this.openResult(afterState, "Keyboard opened", caretNote);
+  }
+
+  private openResult(
+    afterState: KeyboardDetection,
+    openedMessage: string,
+    caretNote: string = "",
+  ): KeyboardResult {
     const success = afterState.open && !afterState.error;
-    const message = success ? "Keyboard opened" : (afterState.error ?? "Failed to open keyboard");
+    const message = success
+      ? `${openedMessage}${caretNote}`
+      : (afterState.error ?? "Failed to open keyboard");
 
     return {
       success,
@@ -390,6 +441,94 @@ export class Keyboard {
       message,
       ...(afterState.error ? { error: afterState.error } : {}),
     };
+  }
+
+  private getOpenClient(): KeyboardOpenClient {
+    this.openClient ??= AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    return this.openClient;
+  }
+
+  /**
+   * Ask CtrlProxy to `click` the focused editable node, which makes the framework
+   * show the IME for that field without a touch position. Returns true only when
+   * the runner accepted the action; false means "use the tap fallback" (no stable
+   * selector, the id is not unique, the runner is too old, or the action failed).
+   */
+  private async showWithoutTouch(
+    element: Element,
+    hierarchy: ViewHierarchyResult | null,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const selector = stableNodeSelectorForElement(element);
+    if (!selector) {
+      return false;
+    }
+    try {
+      const client = this.getOpenClient();
+      // A bare resource-id resolves globally on the device, so it must be unique in
+      // this hierarchy or the click could land on a different field.
+      const targetError = await nodeActionTargetError(
+        selector,
+        {
+          supportsNodeActionSelectors: () => client.supportsNodeActionSelectors(),
+          getAccessibilityHierarchy: async () => hierarchy,
+        },
+        element,
+      );
+      if (targetError) {
+        logger.warn(`Keyboard open: node click unavailable (${targetError})`);
+        return false;
+      }
+      throwIfAborted(signal);
+      const result = await client.requestNodeAction(
+        "click",
+        selector,
+        undefined,
+        undefined,
+        signal,
+      );
+      throwIfAborted(signal);
+      if (!result.success) {
+        logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
+      }
+      return result.success;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
+      return false;
+    }
+  }
+
+  /** Best-effort caret read; undefined when the runner cannot report it. */
+  private async readCaret(signal?: AbortSignal): Promise<InsertTextState | undefined> {
+    try {
+      const result = await this.getOpenClient().requestInsertTextState();
+      throwIfAborted(signal);
+      return result.success ? result.state : undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: caret read failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
+  }
+
+  /** Non-empty only when both caret reads succeeded and the selection differs. */
+  private async caretMovedNote(
+    before: InsertTextState | undefined,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!before) {
+      return "";
+    }
+    const after = await this.readCaret(signal);
+    if (
+      !after ||
+      (after.selectionStart === before.selectionStart && after.selectionEnd === before.selectionEnd)
+    ) {
+      return "";
+    }
+    const range = (state: InsertTextState) => `${state.selectionStart}-${state.selectionEnd}`;
+    return ` (the tap used to show it moved the caret from ${range(before)} to ${range(after)})`;
   }
 
   private async close(signal?: AbortSignal): Promise<KeyboardResult> {

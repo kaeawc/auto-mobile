@@ -33,6 +33,8 @@ export interface ImeCommitActionResult extends BaseResult {
   committedUnits?: number;
   /** Cancellation could not be acknowledged; the host must retain the temporary IME. */
   sessionUnsafe?: boolean;
+  /** Host transport failed to deliver an unambiguous device result. */
+  transportFailure?: boolean;
 }
 
 /** Preserve old APK result shapes: absent/zero count conveys no known dispatch progress. */
@@ -299,6 +301,7 @@ export class CtrlProxyText extends SharedTextDelegate {
             success: false,
             totalTimeMs: timeout,
             partialApplication: true,
+            transportFailure: true,
             error: `IME commit response timed out after ${timeout}ms; editor state is unknown`,
           };
         },
@@ -314,6 +317,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         success: false,
         totalTimeMs: 0,
         partialApplication: true,
+        transportFailure: true,
         error: errorMessage(error),
       };
     }

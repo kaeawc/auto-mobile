@@ -25754,6 +25754,70 @@
                 "required": ["observedGeneration", "currentGeneration", "retry"],
                 "additionalProperties": false
               },
+              "imeFailure": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "unsupportedCapability",
+                      "activationBinding",
+                      "commit",
+                      "verification",
+                      "transport",
+                      "restoration"
+                    ]
+                  },
+                  "cause": {
+                    "type": "string"
+                  },
+                  "expectedText": {
+                    "type": "string"
+                  },
+                  "observedText": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "focusedFieldClass": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "textMayHaveBeenApplied": {
+                    "type": "boolean"
+                  },
+                  "committedUnits": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "verifiedGraphemes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "stage",
+                  "cause",
+                  "expectedText",
+                  "observedText",
+                  "focusedFieldClass",
+                  "textMayHaveBeenApplied"
+                ],
+                "additionalProperties": false
+              },
               "backend": {
                 "type": "string",
                 "const": "autoMobileIme"

@@ -52,6 +52,18 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   }
   constructor(private readonly timer: Timer = defaultTimer) {}
 
+  // Session binding (matches IOSCtrlProxyClient.bindSession/getBoundSessionId, which the
+  // navigation graph resolver reads to pick the device's session graph)
+  private boundSessionId: string | null = null;
+
+  bindSession(sessionId: string): void {
+    this.boundSessionId = sessionId;
+  }
+
+  getBoundSessionId(): string | null {
+    return this.boundSessionId;
+  }
+
   // Configurable response data
   private hierarchyData: CtrlProxyHierarchy | null = null;
   private screenshotData: string | null = null;

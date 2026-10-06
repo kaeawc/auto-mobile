@@ -29,7 +29,7 @@ export async function initializeGraphTraversal(
     pendingEdgesByFrom: new Map<string, NavigationEdge[]>(),
     edgeValidationResults: new Map<string, EdgeValidationResult>(),
     totalNodesInGraph: graph.nodes.length,
-    totalEdgesInGraph: allEdges.length,
+    totalEdgesInGraph: 0,
   };
 
   // Hash each edge key exactly once here; markEdgeTraversed then removes by key
@@ -37,12 +37,35 @@ export async function initializeGraphTraversal(
   for (const edge of allEdges) {
     addPendingEdge(state, edge);
   }
+  // The total is the number of distinct transitions, the same keyed identity the
+  // traversed and pending sets use, so coverage can reach 100% (#10194).
+  state.totalEdgesInGraph = state.pendingEdges.size;
 
   logger.info(
-    `[Explore] Initialized graph traversal: ${graph.nodes.length} nodes, ${allEdges.length} edges`,
+    `[Explore] Initialized graph traversal: ${graph.nodes.length} nodes, ${state.totalEdgesInGraph} edges`,
   );
 
   return state;
+}
+
+/**
+ * Number of distinct transitions in `finalEdges` that `initialEdges` did not already
+ * contain, by the same keyed identity as {@link getEdgeKey}. A re-traversal of a known
+ * transition is not a discovery (#10194).
+ */
+export function countNewTransitions(
+  initialEdges: readonly NavigationEdge[],
+  finalEdges: readonly NavigationEdge[],
+): number {
+  const knownKeys = new Set(initialEdges.map(getEdgeKey));
+  const newKeys = new Set(finalEdges.map(getEdgeKey));
+  let added = 0;
+  for (const key of newKeys) {
+    if (!knownKeys.has(key)) {
+      added += 1;
+    }
+  }
+  return added;
 }
 
 /**

@@ -259,6 +259,15 @@ export class FakeNavigationGraphManager
     this.trackCall("recordEdgeReplayOutcome", [edge, reached]);
   }
 
+  hasEdgeReplayFailure(edge: NavigationEdge): boolean {
+    this.trackCall("hasEdgeReplayFailure", [edge]);
+    return false;
+  }
+
+  settleTransientEdgeFailure(edge: NavigationEdge, searched: boolean): void {
+    this.trackCall("settleTransientEdgeFailure", [edge, searched]);
+  }
+
   findPath(targetScreen: string): PathResult {
     this.trackCall("findPath", [targetScreen]);
 

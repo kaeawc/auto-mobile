@@ -4,7 +4,6 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import {
   FocusNavigationExecutor,
   type FocusNavigationDriver,
-  type FocusNavigationPath,
 } from "../../../src/features/talkback/FocusNavigationExecutor";
 import {
   DeviceDataStreamSocketServer,
@@ -97,22 +96,27 @@ async function createHarness() {
       },
     });
 
-  // Navigation's driver: the real client for every read, a recorder for the swipe gesture.
-  const swipes: number[] = [];
+  // Navigation's driver: the real client for every read, a recorder for accessibility actions.
+  const actions: string[] = [];
   const driver: FocusNavigationDriver = {
     requestTraversalOrder: () => client.requestTraversalOrder(),
     requestCurrentFocus: () => client.requestCurrentFocus(),
-    requestSwipe: async () => {
-      swipes.push(swipes.length);
-      return { success: true, totalTimeMs: 1 };
+    requestAction: async (action) => {
+      actions.push(action);
+      return { success: true, action, totalTimeMs: 1 };
     },
-    // The client's cached screen geometry, which every hierarchy frame refreshes; reading it
-    // spawns nothing, unlike getAccessibilityHierarchy's liveness checks.
-    getScreenSize: async () => ({
-      width: client.screenGeometry.width ?? 0,
-      height: client.screenGeometry.height ?? 0,
-    }),
+    requestNodeAction: async (action) => {
+      actions.push(action);
+      return { success: true, action, totalTimeMs: 1 };
+    },
+    supportsNodeActionSelectors: async () => true,
   };
+  // The client's cached screen geometry, which every hierarchy frame refreshes; reading it
+  // spawns nothing, unlike getAccessibilityHierarchy's liveness checks.
+  const screenSize = async () => ({
+    width: client.screenGeometry.width ?? 0,
+    height: client.screenGeometry.height ?? 0,
+  });
   const executor = new FocusNavigationExecutor({
     timer,
     driverFactory: { createDriver: () => driver },
@@ -126,8 +130,8 @@ async function createHarness() {
     sent,
     reply,
     replyHierarchy,
-    swipes,
-    driver,
+    actions,
+    screenSize,
     executor,
     probe,
   };
@@ -141,13 +145,6 @@ const consentTree = [
     bounds: { left: 180, top: 684, right: 540, bottom: 740 },
   },
 ];
-
-const noSwipePath: FocusNavigationPath = {
-  currentFocusIndex: 0,
-  targetFocusIndex: 0,
-  swipeCount: 0,
-  direction: "forward",
-};
 
 describe("TalkBack consent probe and focus navigation share one CtrlProxy connection", () => {
   beforeEach(() => {
@@ -170,12 +167,7 @@ describe("TalkBack consent probe and focus navigation share one CtrlProxy connec
 
       const probing = h.probe.probe();
       await flush();
-      const navigating = h.executor.navigateToElement(
-        "device-1",
-        { resourceId: "target" },
-        noSwipePath,
-        { verificationInterval: 1, swipeDelay: 0 },
-      );
+      const navigating = h.executor.navigateToElement("device-1", { resourceId: "target" });
       await flush();
       const hierarchyRequest = h.sent("request_hierarchy").at(-1)!;
       const traversalRequest = h.sent("get_traversal_order").at(-1);
@@ -205,7 +197,7 @@ describe("TalkBack consent probe and focus navigation share one CtrlProxy connec
       expect(h.pushes).not.toHaveBeenCalled();
       expect(h.backoff).not.toHaveBeenCalled();
       expect(h.client.hierarchyObservationStreamSuppressions.size).toBe(0);
-      expect(h.swipes).toEqual([]);
+      expect(h.actions).toEqual([]);
     } finally {
       await h.client.close();
     }
@@ -220,7 +212,7 @@ describe("TalkBack consent probe and focus navigation share one CtrlProxy connec
       const probing = h.probe.probe();
       await flush();
       // Navigation's size read is a cache read and must not wait for, or consume, the probe.
-      const size = await h.driver.getScreenSize();
+      const size = await h.screenSize();
       expect(size).toEqual({ width: 1080, height: 2340 });
       expect(h.sent("request_hierarchy")).toHaveLength(1);
 
@@ -228,7 +220,7 @@ describe("TalkBack consent probe and focus navigation share one CtrlProxy connec
       h.replyHierarchy(hierarchyRequest.requestId, 200, consentTree, { width: 1080, height: 2340 });
       await probing;
 
-      expect(await h.driver.getScreenSize()).toEqual({
+      expect(await h.screenSize()).toEqual({
         width: 1080,
         height: 2340,
       });
@@ -249,7 +241,7 @@ describe("TalkBack consent probe and focus navigation share one CtrlProxy connec
       h.replyHierarchy(hierarchyRequest.requestId, 200, consentTree, { width: 1080, height: 2340 });
       await probing;
 
-      expect(await h.driver.getScreenSize()).toEqual({ width: 2340, height: 1080 });
+      expect(await h.screenSize()).toEqual({ width: 2340, height: 1080 });
     } finally {
       await h.client.close();
     }

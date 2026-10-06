@@ -317,6 +317,66 @@ describe("InstallApp", () => {
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
   });
 
+  describe("install-aware user targeting with a running work profile", () => {
+    const apkPath = "/tmp/app-debug.apk";
+
+    const setup = (installed: { personal: boolean; work: boolean }) => {
+      fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+      fakeHost.setCommandResponse(
+        "aapt2",
+        createExecResult("package: name='com.example.app' versionCode='1'"),
+      );
+      fakeAdb.setForegroundApp({ packageName: "com.android.launcher3", userId: 0 });
+      fakeAdb.setUsers([
+        { userId: 0, name: "Owner", flags: 0x4c13, running: true },
+        { userId: 10, name: "Work profile", flags: 0x1030, running: true },
+      ]);
+      const listing = (isInstalled: boolean) =>
+        createExecResult(isInstalled ? "package:com.example.app" : "");
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", listing(installed.personal));
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", listing(installed.work));
+      fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+      fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));
+      return new InstallApp(device, fakeAdbFactory, {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      });
+    };
+
+    test("reinstalls a personal-only app for the personal user instead of adding a work copy", async () => {
+      const result = await setup({ personal: true, work: false }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 0, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${apkPath}"`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("install --user 10")).toBe(false);
+    });
+
+    test("reinstalls a work-only app for the work profile", async () => {
+      const result = await setup({ personal: false, work: true }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("keeps the work-profile tie-break when the app is installed for both users", async () => {
+      const result = await setup({ personal: true, work: true }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: true });
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("first install (installed nowhere) keeps the work-profile default", async () => {
+      const result = await setup({ personal: false, work: false }).execute(apkPath);
+      expect(result).toMatchObject({ success: true, userId: 10, upgrade: false });
+      expect(fakeAdb.wasCommandExecuted("install --user 0")).toBe(false);
+    });
+
+    test("an explicit userId wins over where the app is installed", async () => {
+      const result = await setup({ personal: true, work: false }).execute(apkPath, 10);
+      expect(result).toMatchObject({ success: true, userId: 10 });
+      expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
+    });
+  });
+
   test("reports when aapt's package ID differs from the package installed on device", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const parsedPackageName = "dev.jasonpearson.automobile.playground";

@@ -950,7 +950,8 @@ describe("Explore", () => {
           to: "B",
           timestamp: 0,
           edgeType: "tool",
-          uiState: { selectedElements: [{ text: "Settings" }] },
+          interaction: { toolName: "tapOn", args: { text: "Settings" }, timestamp: 0 },
+          uiState: { selectedElements: [{ text: "Home tab" }] },
         });
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         spyOn(explore.observeScreen, "execute").mockResolvedValue(createMockObservation());
@@ -2105,7 +2106,9 @@ describe("Explore", () => {
         to,
         edgeType: "tool",
         timestamp: fakeTimer.now(),
-        uiState: { selectedElements: [{ text }] },
+        interaction: { toolName: "tapOn", args: { text }, timestamp: fakeTimer.now() },
+        // Pre-action state (the active tab); validate must target the interaction, not this.
+        uiState: { selectedElements: [{ text: "Home tab" }] },
       });
     }
 

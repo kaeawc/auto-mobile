@@ -14,6 +14,7 @@ import {
   markEdgeTraversed,
   selectNextEdgeToTraverse,
   findElementMatchingEdge,
+  resolveEdgeTarget,
   addPendingEdge,
 } from "../../../src/features/navigation/ExploreValidateMode";
 
@@ -89,7 +90,8 @@ describe("ExploreValidateMode", () => {
         "tapOn",
         { text: "Button1" },
         {
-          selectedElements: [{ text: "Button1", resourceId: "btn1", contentDesc: "" }],
+          // Pre-action state (the active tab), not the tapped control.
+          selectedElements: [{ text: "Home", resourceId: "tab_home", contentDesc: "" }],
         },
       );
 
@@ -433,144 +435,163 @@ describe("ExploreValidateMode", () => {
     });
   });
 
-  describe("findElementMatchingEdge", () => {
-    test("keeps the first element on equal selected and scroll match scores", () => {
-      const first = createMockElement({ text: "Shared", "resource-id": "id/first" });
-      const second = createMockElement({ text: "Shared", "resource-id": "id/second" });
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ text: "unrelated" }, { text: "Shared" }],
-          scrollPosition: { targetElement: { text: "Shared" }, direction: "up" },
-        },
+  describe("findElementMatchingEdge / resolveEdgeTarget", () => {
+    function interactionEdge(
+      toolName: string,
+      args: Record<string, unknown>,
+      overrides: Partial<NavigationEdge> = {},
+    ): NavigationEdge {
+      return createMockEdge("Home", "Settings", {
+        interaction: { toolName, args, timestamp: 0 },
+        ...overrides,
       });
-      expect(findElementMatchingEdge([first, second], edge)).toEqual({
-        element: first,
-        confidence: 0.9,
-      });
+    }
+
+    const homeTab = () =>
+      createMockElement({ text: "Home", "resource-id": "com.test:id/tab_home", selected: "true" });
+    const openSettings = () =>
+      createMockElement({ text: "Open settings", "resource-id": "com.test:id/open_settings" });
+
+    test("targets the recorded tapOn element, not the pre-action selected tab", () => {
+      const tab = homeTab();
+      const target = openSettings();
+      const edge = interactionEdge(
+        "tapOn",
+        { text: "Open settings" },
+        { uiState: { selectedElements: [{ text: "Home" }] } },
+      );
+
+      const result = findElementMatchingEdge([tab, target], edge);
+
+      expect(result?.element).toBe(target);
+      expect(result?.confidence).toBe(0.9);
     });
 
-    test("a later scroll match can beat earlier selected matches", () => {
-      const selected = createMockElement({ text: "Shared suffix", "resource-id": "id/first" });
-      const scrollTarget = createMockElement({ text: "Other", "resource-id": "id/target" });
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ text: "Shared" }],
-          scrollPosition: { targetElement: { resourceId: "id/target" }, direction: "down" },
-        },
-      });
-      expect(findElementMatchingEdge([selected, scrollTarget], edge)).toEqual({
-        element: scrollTarget,
-        confidence: 0.8,
-      });
+    test("never taps the selected tab when the recorded target is absent", () => {
+      const edge = interactionEdge(
+        "tapOn",
+        { text: "Open settings" },
+        { uiState: { selectedElements: [{ text: "Home" }] } },
+      );
+
+      expect(resolveEdgeTarget([homeTab()], edge)).toEqual({ status: "not-found", bestScore: 0 });
+      expect(findElementMatchingEdge([homeTab()], edge)).toBeNull();
     });
 
-    test("scroll-only UI state is matched and empty explicit state takes precedence over interaction state", () => {
-      const element = createMockElement({ text: "Target" });
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [],
-          scrollPosition: { targetElement: { text: "Target" }, direction: "up" },
-        },
-        interaction: {
-          toolName: "tapOn",
-          args: {},
-          timestamp: 0,
-          uiState: { selectedElements: [{ text: "Target" }] },
-        },
-      });
-      expect(findElementMatchingEdge([element], edge)).toEqual({ element, confidence: 0.75 });
-      edge.uiState = { selectedElements: [] };
-      expect(findElementMatchingEdge([element], edge)).toBeNull();
+    test("still matches when the edge carries an interaction but no uiState", () => {
+      const target = openSettings();
+      const edge = interactionEdge("tapOn", { text: "Open settings" });
+
+      expect(findElementMatchingEdge([homeTab(), target], edge)?.element).toBe(target);
     });
 
-    test("should return null for edge without uiState", () => {
-      const elements = [createMockElement({ text: "Button" })];
-      const edge = createMockEdge("A", "B");
-
-      const result = findElementMatchingEdge(elements, edge);
-
-      expect(result).toBeNull();
-    });
-
-    test("should match element by resource-id", () => {
-      const elements = [createMockElement({ "resource-id": "com.test:id/btn", text: "Click" })];
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ resourceId: "com.test:id/btn", text: "", contentDesc: "" }],
-        },
+    test("reads the public nested selector form", () => {
+      const target = openSettings();
+      const edge = interactionEdge("tapOn", {
+        selector: { text: "Open settings" },
+        action: "tap",
       });
 
-      const result = findElementMatchingEdge(elements, edge);
-
-      expect(result).not.toBeNull();
-      expect(result?.element["resource-id"]).toBe("com.test:id/btn");
-      expect(result?.confidence).toBeGreaterThan(0.6);
+      expect(findElementMatchingEdge([homeTab(), target], edge)?.element).toBe(target);
     });
 
-    test("should match element by text", () => {
-      const elements = [createMockElement({ text: "Submit Button" })];
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ text: "Submit Button", resourceId: "", contentDesc: "" }],
-        },
+    test("matches an elementId selector against the resource id", () => {
+      const target = openSettings();
+      const edge = interactionEdge("tapOn", {
+        selector: { elementId: "com.test:id/open_settings" },
       });
 
-      const result = findElementMatchingEdge(elements, edge);
+      const result = findElementMatchingEdge([homeTab(), target], edge);
 
-      expect(result).not.toBeNull();
-      expect(result?.element.text).toBe("Submit Button");
+      expect(result?.element).toBe(target);
+      expect(result?.confidence).toBe(0.95);
     });
 
-    test("should return null when confidence is below threshold", () => {
-      const elements = [
-        createMockElement({ text: "Different Text", "resource-id": "different_id" }),
-      ];
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ text: "Submit", resourceId: "submit_btn", contentDesc: "" }],
-        },
+    test("matches a text selector against the content description", () => {
+      const target = createMockElement({ text: "", "content-desc": "Open settings" });
+      const edge = interactionEdge("tapOn", { text: "Open settings" });
+
+      expect(findElementMatchingEdge([homeTab(), target], edge)?.element).toBe(target);
+    });
+
+    test("matches any textAny variant", () => {
+      const target = createMockElement({ text: "Preferences" });
+      const edge = interactionEdge("tapOn", { selector: { textAny: ["Settings", "Preferences"] } });
+
+      expect(findElementMatchingEdge([homeTab(), target], edge)?.element).toBe(target);
+    });
+
+    test("prefers an exact match over a partial one regardless of order", () => {
+      const partial = createMockElement({ text: "Open settings now" });
+      const exact = openSettings();
+      const edge = interactionEdge("tapOn", { text: "Open settings" });
+
+      expect(findElementMatchingEdge([partial, exact], edge)?.element).toBe(exact);
+    });
+
+    test("swipeOn targets the innermost recorded container", () => {
+      const outer = createMockElement({ text: "", "resource-id": "com.test:id/outer" });
+      const inner = createMockElement({ text: "", "resource-id": "com.test:id/feed" });
+      const edge = interactionEdge("swipeOn", {
+        direction: "up",
+        container: { elementId: "com.test:id/outer", container: { elementId: "com.test:id/feed" } },
       });
 
-      const result = findElementMatchingEdge(elements, edge);
-
-      expect(result).toBeNull();
+      expect(findElementMatchingEdge([outer, inner], edge)?.element).toBe(inner);
     });
 
-    test("should return best match when multiple elements match", () => {
-      const elements = [
-        createMockElement({ text: "Submit", "resource-id": "wrong_id" }),
-        createMockElement({ text: "Submit", "resource-id": "com.test:id/submit" }),
-      ];
-      const edge = createMockEdge("A", "B", {
-        uiState: {
-          selectedElements: [{ text: "Submit", resourceId: "com.test:id/submit", contentDesc: "" }],
-        },
-      });
-
-      const result = findElementMatchingEdge(elements, edge);
-
-      expect(result).not.toBeNull();
-      // Should match the one with both text and resource-id match
-      expect(result?.element["resource-id"]).toBe("com.test:id/submit");
-    });
-
-    test("should match using interaction uiState as fallback", () => {
-      const elements = [createMockElement({ text: "Navigate" })];
-      const edge = createMockEdge("A", "B", {
-        interaction: {
-          toolName: "tapOn",
-          args: { text: "Navigate" },
-          timestamp: 1000,
+    test("does not use scrollPosition as the target", () => {
+      const scrollTarget = createMockElement({ text: "Scrolled to" });
+      const edge = interactionEdge(
+        "tapOn",
+        { text: "Open settings" },
+        {
           uiState: {
-            selectedElements: [{ text: "Navigate", resourceId: "", contentDesc: "" }],
+            selectedElements: [],
+            scrollPosition: { targetElement: { text: "Scrolled to" }, direction: "up" },
           },
         },
+      );
+
+      expect(findElementMatchingEdge([scrollTarget], edge)).toBeNull();
+    });
+
+    test("is below the confidence threshold for an unrelated element", () => {
+      const edge = interactionEdge("tapOn", { text: "Submit", elementId: "submit_btn" });
+      const unrelated = createMockElement({
+        text: "Different Text",
+        "resource-id": "different_id",
       });
 
-      const result = findElementMatchingEdge(elements, edge);
-
-      expect(result).not.toBeNull();
-      expect(result?.element.text).toBe("Navigate");
+      expect(resolveEdgeTarget([unrelated], edge)).toEqual({ status: "not-found", bestScore: 0 });
     });
+
+    test("an edge with no recorded interaction is not validatable, even with uiState", () => {
+      const edge = createMockEdge("Home", "Settings", {
+        uiState: { selectedElements: [{ text: "Home" }] },
+      });
+
+      const result = resolveEdgeTarget([homeTab()], edge);
+
+      expect(result.status).toBe("not-validatable");
+      expect(result.status === "not-validatable" && result.reason).toContain(
+        "no interaction was recorded",
+      );
+      expect(findElementMatchingEdge([homeTab()], edge)).toBeNull();
+    });
+
+    for (const [toolName, args] of [
+      ["pressButton", { button: "back" }],
+      ["sendKeys", { text: "hello" }],
+      ["swipeOn", { direction: "up" }],
+      ["tapOn", { action: "tap" }],
+      ["tapOn", { selector: { testTag: "settings" } }],
+    ] as const) {
+      test(`${toolName} ${JSON.stringify(args)} has no replayable element target`, () => {
+        const edge = interactionEdge(toolName, { ...args });
+
+        expect(resolveEdgeTarget([homeTab(), openSettings()], edge).status).toBe("not-validatable");
+      });
+    }
   });
 });

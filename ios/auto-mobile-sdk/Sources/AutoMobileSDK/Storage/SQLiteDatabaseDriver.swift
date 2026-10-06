@@ -8,7 +8,18 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private let lock = NSLock()
     private let operationLock = NSLock()
     private let searchPaths: [String]
-    private var openDatabases: [String: OpaquePointer] = [:]
+    private var openDatabases: [String: CachedConnection] = [:]
+
+    /// `st_dev` + `st_ino` of the database file a connection was opened on.
+    private struct FileIdentity: Equatable {
+        let device: UInt64
+        let inode: UInt64
+    }
+
+    private struct CachedConnection {
+        let db: OpaquePointer
+        let identity: FileIdentity
+    }
 
     public init() {
         searchPaths = [
@@ -253,24 +264,39 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
     // MARK: - Internal Helpers
 
+    /// Returns the cached connection for `path` while the file at `path` is still the file it was
+    /// opened on. A deleted or replaced file (#10164) closes both cached connections for the path and
+    /// takes the normal open path, so reads and writes reach the file that is there now.
     private func openDatabase(path: String, readOnly: Bool) -> OpaquePointer? {
         lock.lock()
-        let cacheKey = "\(path):\(readOnly ? "ro" : "rw")"
+        defer { lock.unlock() }
+
+        // Stat before opening: a replacement during open must not give an old handle a newer identity.
+        // Only the main file identifies the database; a replaced main file also replaces its -wal/-shm.
+        let identityBeforeOpen = Self.fileIdentity(path)
+        evictStaleConnections(path: path, current: identityBeforeOpen)
+
+        let cacheKey = Self.cacheKey(path: path, readOnly: readOnly)
         if let existing = openDatabases[cacheKey] {
-            lock.unlock()
-            return existing
+            return existing.db
         }
-        lock.unlock()
 
         let flags = readOnly
             ? SQLITE_OPEN_READONLY
             : (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK else {
-            if let db = db {
-                sqlite3_close(db)
-            }
+        guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let db else {
+            if let db { sqlite3_close(db) }
+            return nil
+        }
+        // A read-write open may have just created the file, so only a file that existed before the
+        // open must still be the same one.
+        guard let identity = Self.fileIdentity(path),
+              identityBeforeOpen == nil || identityBeforeOpen == identity
+        else {
+            // The file was swapped or removed while opening; the next call sees the file that is there.
+            sqlite3_close(db)
             return nil
         }
 
@@ -278,12 +304,29 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             // Set busy timeout to wait for locks
             sqlite3_busy_timeout(db, 5000)
         }
-
-        lock.lock()
-        openDatabases[cacheKey] = db
-        lock.unlock()
-
+        openDatabases[cacheKey] = CachedConnection(db: db, identity: identity)
         return db
+    }
+
+    private static func cacheKey(path: String, readOnly: Bool) -> String {
+        "\(path):\(readOnly ? "ro" : "rw")"
+    }
+
+    /// Caller holds `lock`.
+    private func evictStaleConnections(path: String, current: FileIdentity?) {
+        for readOnly in [true, false] {
+            let key = Self.cacheKey(path: path, readOnly: readOnly)
+            guard let cached = openDatabases[key], cached.identity != current else { continue }
+            sqlite3_close(cached.db)
+            openDatabases.removeValue(forKey: key)
+        }
+    }
+
+    private static func fileIdentity(_ path: String) -> FileIdentity? {
+        var info = stat()
+        // A missing or inaccessible file has no identity; callers treat that as "not there".
+        guard stat(path, &info) == 0 else { return nil }
+        return FileIdentity(device: UInt64(bitPattern: Int64(info.st_dev)), inode: UInt64(info.st_ino))
     }
 
     static func classifySQL(
@@ -694,8 +737,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         lock.lock()
-        for (_, db) in openDatabases {
-            sqlite3_close(db)
+        for (_, cached) in openDatabases {
+            sqlite3_close(cached.db)
         }
         openDatabases.removeAll()
         lock.unlock()

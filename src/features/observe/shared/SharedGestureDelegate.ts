@@ -14,7 +14,7 @@ import type {
   BaseResult,
   SwipeRequestOptions,
 } from "./types";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 
 /** Default transport budget for coordinate taps and VoiceOver activation. */
 export const DEFAULT_GESTURE_REQUEST_TIMEOUT_MS = 5000;
@@ -23,6 +23,35 @@ interface SharedGestureConfig {
   logTag: string;
   roundCoordinates: boolean;
   includeSwipeTimeoutMs?: boolean;
+}
+
+/** Everything `request_pinch` needs; an object because the positional form is already too wide. */
+export interface PinchRequest {
+  centerX: number;
+  centerY: number;
+  distanceStart: number;
+  distanceEnd: number;
+  rotationDegrees: number;
+  duration?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  displayId?: number;
+  beforeSend?: () => void;
+}
+
+/** Everything `request_tap_coordinates` needs; the tap twin of `PinchRequest`. */
+export interface TapRequest {
+  x: number;
+  y: number;
+  duration: number;
+  timeoutMs: number;
+  perf?: PerformanceTracker;
+  frameContext?: string;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+  displayId?: number;
+  beforeSend?: () => void;
 }
 
 export interface TapDiagnosticParameters {
@@ -82,33 +111,52 @@ export class SharedGestureDelegate {
     displayId?: number,
     beforeSend?: () => void,
   ): Promise<BaseResult> {
-    const displayParams = this.gestureDisplayParams(displayId);
-    return sendCommand<BaseResult>(this.context, {
+    return sendCommand<BaseResult>(
+      this.context,
+      this.tapCommandOptions({
+        x,
+        y,
+        duration,
+        timeoutMs,
+        perf,
+        frameContext,
+        signal,
+        onDispatch,
+        displayId,
+        beforeSend,
+      }),
+    );
+  }
+
+  /** The tap wire request, shared so a platform can wrap its dispatch contract around it. */
+  protected tapCommandOptions(tap: TapRequest): SendCommandOptions<BaseResult> {
+    const displayParams = this.gestureDisplayParams(tap.displayId);
+    return {
       idPrefix: "tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
       params: this.gestureParams("request_tap_coordinates", {
-        x: this.coord(x),
-        y: this.coord(y),
-        duration,
-        frameContext,
+        x: this.coord(tap.x),
+        y: this.coord(tap.y),
+        duration: tap.duration,
+        frameContext: tap.frameContext,
         ...displayParams,
         ...this.tapDiagnosticParams(),
       }),
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",
-      timeoutMs,
-      perf,
+      timeoutMs: tap.timeoutMs,
+      perf: tap.perf,
       errorLabel: "Tap",
       // The caller's own outer deadline may already have fired while
       // `ensureConnected()` was resolving a reconnect/auto-setup (which is
       // not itself cancellable) -- `sendCommand` checks this right after that
       // await and before dispatch, so an already-abandoned tap is never sent
       // to the device after the caller has given up (issue #6306 review).
-      abortSignal: signal,
-      beforeSend,
-      onDispatch,
-    });
+      abortSignal: tap.signal,
+      beforeSend: tap.beforeSend,
+      onDispatch: tap.onDispatch,
+    };
   }
 
   /** Normalize the existing string slot and keep the lock-screen opt-in iOS-only. */
@@ -126,6 +174,20 @@ export class SharedGestureDelegate {
     };
   }
 
+  /**
+   * Transport seam for the single-finger swipe. iOS overrides it to report a dispatched but
+   * unconfirmed swipe, while every other consumer keeps the plain request/response contract.
+   *
+   * Unlike `tapCommandOptions`/`pinchCommandOptions` this wraps the send rather than building the
+   * request: `requestSwipe` builds its options inline and post-processes the reply (iOS perf
+   * timing), so a builder seam would force iOS to re-implement the 12-argument `requestSwipe`.
+   */
+  protected sendSwipeCommand(
+    options: SendCommandOptions<GestureTimingResult>,
+  ): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(this.context, options);
+  }
+
   async requestSwipe(
     x1: number,
     y1: number,
@@ -141,7 +203,7 @@ export class SharedGestureDelegate {
     beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
-    const result = await sendCommand<GestureTimingResult>(this.context, {
+    const result = await this.sendSwipeCommand({
       idPrefix: "swipe",
       responseType: "swipe",
       messageType: "request_swipe",
@@ -229,8 +291,41 @@ export class SharedGestureDelegate {
     displayId?: number,
     beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
+    return sendCommand<GestureTimingResult>(
+      this.context,
+      this.pinchCommandOptions({
+        centerX,
+        centerY,
+        distanceStart,
+        distanceEnd,
+        rotationDegrees,
+        duration,
+        timeoutMs,
+        perf,
+        signal,
+        displayId,
+        beforeSend,
+      }),
+    );
+  }
+
+  /** The wire request for a pinch; platform delegates reuse it to wrap their own dispatch contract. */
+  protected pinchCommandOptions(request: PinchRequest): SendCommandOptions<GestureTimingResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration = 300,
+      timeoutMs = 5000,
+      perf,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
     const displayParams = this.gestureDisplayParams(displayId);
-    return sendCommand<GestureTimingResult>(this.context, {
+    return {
       idPrefix: "pinch",
       responseType: "pinch",
       messageType: "request_pinch",
@@ -250,6 +345,6 @@ export class SharedGestureDelegate {
       errorLabel: "Pinch",
       abortSignal: signal,
       beforeSend,
-    });
+    };
   }
 }

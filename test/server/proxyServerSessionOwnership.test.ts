@@ -464,6 +464,83 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
+  test("keeps discovery working, unbound, after a result-minted session is released (#9997)", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map<string, unknown>([
+        ["tools/list", { tools: [{ name: "getApple", inputSchema: { type: "object" } }] }],
+        ["resources/list", { resources: [{ uri: "automobile:devices/booted", name: "booted" }] }],
+        ["resources/list-templates", { resourceTemplates: [] }],
+      ]),
+      toolResultFor: (toolName) =>
+        toolName === "getApple"
+          ? { content: [{ type: "text", text: JSON.stringify({ sessionId: "minted-session" }) }] }
+          : undefined,
+    });
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        clientFactory: () => fakeClient,
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const listChanged: string[] = [];
+    proxy.onListChanged((kind) => listChanged.push(kind));
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "result-mint-discovery-client", version: "0.0.1" });
+    const listCalls = () =>
+      fakeClient.callDaemonMethodCalls.filter((call) => call.method.includes("list"));
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      await client.callTool({ name: "getApple", arguments: {} });
+      listChanged.length = 0;
+      fakeClient.callDaemonMethodCalls.length = 0;
+
+      fakeClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "minted-session",
+        "device-killed",
+      );
+      // The connection is unbound now, so the client is prompted to re-list.
+      expect(listChanged).toEqual(["tools"]);
+
+      const tools = await client.listTools();
+      const resources = await client.listResources();
+      const templates = await client.listResourceTemplates();
+      expect(tools.tools.map((tool) => tool.name)).toEqual(["getApple"]);
+      expect(resources.resources.map((resource) => resource.uri)).toEqual([
+        "automobile:devices/booted",
+      ]);
+      expect(templates.resourceTemplates).toEqual([]);
+      // Forwarded without a session, so the daemon serves the unbound surface.
+      expect(listCalls()).toEqual([
+        { method: "tools/list", params: {} },
+        { method: "resources/list", params: {} },
+        { method: "resources/list-templates", params: {} },
+      ]);
+
+      // Recovery stays in-band: re-acquiring binds again and discovery is scoped.
+      await client.callTool({ name: "getApple", arguments: {} });
+      fakeClient.callDaemonMethodCalls.length = 0;
+      await client.listTools();
+      await client.listResources();
+      expect(listCalls()).toEqual([
+        { method: "tools/list", params: { sessionUuid: "minted-session" } },
+        { method: "resources/list", params: { sessionUuid: "minted-session" } },
+      ]);
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
   test("reconnects and reclaims the same iOS session across a daemon-shutdown handoff (#6724)", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     const originalClient = new FakeDaemonClient({

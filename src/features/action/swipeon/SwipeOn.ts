@@ -9,6 +9,8 @@ import { executeAndroidSearchDrag } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
+import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
+import { isDeviceLostError } from "../../../models/DeviceLostError";
 import {
   withStaleDisplay,
   StaleDisplayError,
@@ -16,7 +18,12 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { BaseVisualChange, ProgressCallback, type DisplayFence } from "../BaseVisualChange";
+import {
+  BaseVisualChange,
+  INTERMEDIATE_OBSERVATION_OPTIONS,
+  ProgressCallback,
+  type DisplayFence,
+} from "../BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -110,6 +117,11 @@ const DISPLAY_SWIPE_OPTIONS = [
 type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+/** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
+function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
+  return result.success || result.outcomeIndeterminate === true;
+}
+
 function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
   if (!warning || result.warnings?.includes(warning)) {
     return result;
@@ -301,6 +313,7 @@ export class SwipeOn extends BaseVisualChange {
     ) {
       throwIfAborted(signal);
       observeResult = await this.observeScreen.execute({
+        ...INTERMEDIATE_OBSERVATION_OPTIONS,
         freshness: staleCachedRefetch ? "fresh" : "cached-ok",
         timeoutMs: DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
         skipStaleWindowRecovery: true,
@@ -312,6 +325,7 @@ export class SwipeOn extends BaseVisualChange {
       observeResult,
       (timeoutMs) =>
         this.observeScreen.execute({
+          ...INTERMEDIATE_OBSERVATION_OPTIONS,
           freshness: "fresh",
           timeoutMs,
           skipStaleWindowRecovery: true,
@@ -386,6 +400,7 @@ export class SwipeOn extends BaseVisualChange {
         resolutionObservation,
         (timeoutMs) =>
           this.observeScreen.execute({
+            ...INTERMEDIATE_OBSERVATION_OPTIONS,
             display: target.observation.display.key,
             freshness: "fresh",
             timeoutMs,
@@ -431,26 +446,43 @@ export class SwipeOn extends BaseVisualChange {
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
     let totalDuration = duration;
     if (boomerang) {
-      if (boomerang.apexPauseMs > 0) {
-        await this.timer.sleep(boomerang.apexPauseMs);
-      }
-      target.assertCurrent();
-      throwIfAborted(signal);
       const returnDuration = getReturnDuration({
         forwardDuration: duration,
         returnSpeed: boomerang.returnSpeed,
       });
-      await this.dispatchDisplaySwipeLeg({
-        x1: x2,
-        y1: y2,
-        x2: x1,
-        y2: y1,
-        duration: returnDuration,
-        target,
-        useCtrlProxy,
-        signal,
-      });
       totalDuration += boomerang.apexPauseMs + returnDuration;
+      // The forward leg landed: a pause cancel, a failed return leg or a throw must say so (#9973).
+      const returnResult = await runBoomerangReturnLeg({
+        timer: this.timer,
+        apexPauseMs: boomerang.apexPauseMs,
+        signal,
+        returnSwipe: () =>
+          this.dispatchDisplayReturnLeg({
+            x1: x2,
+            y1: y2,
+            x2: x1,
+            y2: y1,
+            duration: returnDuration,
+            target,
+            useCtrlProxy,
+            signal,
+          }),
+      });
+      if (!returnResult.success) {
+        return this.withAutoTargetDecision({
+          result: {
+            ...returnResult,
+            targetType,
+            x1,
+            y1,
+            x2,
+            y2,
+            duration: totalDuration,
+            warning,
+          },
+          decision,
+        });
+      }
     }
     return this.withAutoTargetDecision({
       result: {
@@ -857,6 +889,31 @@ export class SwipeOn extends BaseVisualChange {
       target.assertCurrent();
     }
     return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
+  }
+
+  /**
+   * Return leg of a display-addressed boomerang as a SwipeResult, so a plain dispatch failure
+   * reaches `runBoomerangReturnLeg` as a result it can mark partially applied. Cancellation, device
+   * loss and stale-display errors stay thrown: the callers branch on those types.
+   */
+  private async dispatchDisplayReturnLeg(
+    options: Parameters<SwipeOn["dispatchDisplaySwipeLeg"]>[0],
+  ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2, duration, signal } = options;
+    try {
+      await this.dispatchDisplaySwipeLeg(options);
+      return { success: true, x1, y1, x2, y2, duration };
+    } catch (error) {
+      throwIfAborted(signal);
+      if (isDeviceLostError(error) || error instanceof StaleDisplayError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      logger.warn(`swipeOn display return leg failed: ${errorMessage(error)}`, error);
+      return { success: false, error: errorMessage(error), x1, y1, x2, y2, duration };
+    }
   }
 
   private async dispatchDisplaySwipeLeg(options: {
@@ -1451,7 +1508,8 @@ export class SwipeOn extends BaseVisualChange {
           throw new ActionableError(swipeResult.error ?? "iOS lock-screen swipe failed");
         }
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }
@@ -1506,6 +1564,7 @@ export class SwipeOn extends BaseVisualChange {
           observeResult,
           (timeoutMs) =>
             this.observeScreen.execute({
+              ...INTERMEDIATE_OBSERVATION_OPTIONS,
               freshness: "fresh",
               timeoutMs,
               skipStaleWindowRecovery: true,
@@ -1571,7 +1630,8 @@ export class SwipeOn extends BaseVisualChange {
               ),
         );
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }

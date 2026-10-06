@@ -5,7 +5,14 @@
  * the same device/app/file.
  */
 export interface AndroidSharedPreferencesMutationCoordinator {
-  run<T>(deviceId: string, appId: string, fileName: string, mutation: () => Promise<T>): Promise<T>;
+  /** `userId` defaults to 0 so the unscoped (`run-as` without `--user`) path shares user 0's queue. */
+  run<T>(
+    deviceId: string,
+    appId: string,
+    fileName: string,
+    mutation: () => Promise<T>,
+    userId?: number,
+  ): Promise<T>;
 }
 
 export class PerFileAndroidSharedPreferencesMutationCoordinator implements AndroidSharedPreferencesMutationCoordinator {
@@ -16,8 +23,11 @@ export class PerFileAndroidSharedPreferencesMutationCoordinator implements Andro
     appId: string,
     fileName: string,
     mutation: () => Promise<T>,
+    userId = 0,
   ): Promise<T> {
-    const key = JSON.stringify([deviceId, appId, fileName]);
+    const key = JSON.stringify(
+      userId === 0 ? [deviceId, appId, fileName] : [deviceId, appId, fileName, userId],
+    );
     const prior = this.tails.get(key) ?? Promise.resolve();
     const result = prior.then(mutation, mutation);
     const tail = result.then(

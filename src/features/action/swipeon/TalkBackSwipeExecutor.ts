@@ -3,6 +3,7 @@ import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
 } from "../../talkback/TalkBackTapStrategy";
+import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
 import { StaleDisplayError } from "../../../models/StaleDisplayError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
@@ -204,25 +205,18 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       perf,
       signal,
     );
-    throwIfAborted(signal);
     if (!forwardResult.success) {
+      throwIfAborted(signal);
       return forwardResult;
     }
 
-    if (boomerang.apexPauseMs > 0) {
-      await this.timer.sleep(boomerang.apexPauseMs);
-    }
-
-    throwIfAborted(signal);
-    const returnResult = await this.executeGesture.swipe(
-      x2,
-      y2,
-      x1,
-      y1,
-      returnOptions,
-      perf,
+    // The forward swipe landed: a pause cancel, a throw or a failed return must say so (#9973).
+    const returnResult = await runBoomerangReturnLeg({
+      timer: this.timer,
+      apexPauseMs: boomerang.apexPauseMs,
       signal,
-    );
+      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf, signal),
+    });
     if (!returnResult.success) {
       return {
         ...returnResult,

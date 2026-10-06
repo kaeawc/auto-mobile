@@ -978,6 +978,131 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // Issue #9995: stdio passes heartbeatTimeoutMs=10s, so the tick interval (5s)
+  // equals the fence threshold (leash - min(interval, leash/2) = 5s). A socket that
+  // merely closed (no reconnect started) must get its bounded attempt before fencing.
+  describe("stdio cadence (interval == fence threshold, issue #9995)", () => {
+    const STDIO_HEARTBEAT_TIMEOUT_MS = 10_000;
+
+    function stdioProxy(
+      clients: DaemonClientLike[],
+      fallbackFactory?: () => DaemonClientLike,
+    ): DaemonMcpProxy {
+      return new DaemonMcpProxy({
+        initialSessionUuid: BOUND_SESSION,
+        clientFactory: () => clients.shift() ?? fallbackFactory!(),
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        heartbeatTimeoutMs: STDIO_HEARTBEAT_TIMEOUT_MS,
+        timer,
+      });
+    }
+
+    function heartbeats(client: FakeDaemonClient): number {
+      return client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat")
+        .length;
+    }
+
+    test("the first tick after a dropped socket reconnects and heartbeats instead of fencing", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const recoveredClient = heartbeatForwardingClient(sessionManager);
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = stdioProxy([firstClient, recoveredClient]);
+
+      try {
+        await proxy.ensureConnected();
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(5_000);
+
+        expect(heartbeats(recoveredClient)).toBeGreaterThanOrEqual(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+
+        // The successful heartbeat on the new connection cleared the miss: the
+        // keeper keeps the session alive well past the original leash.
+        await timer.advanceTimeAsync(5_000);
+        await timer.advanceTimeAsync(5_000);
+        await monitor.tick();
+        expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
+        expect(reaped).toEqual([]);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a daemon that stays unreachable is fenced by the leash after one reconnect attempt", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      const unreachableClient = heartbeatForwardingClient(sessionManager);
+      let connectAttempts = 0;
+      let finishConnect!: () => void;
+      unreachableClient.connect = async () => {
+        connectAttempts++;
+        await new Promise<void>((resolve) => {
+          finishConnect = resolve;
+        });
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = stdioProxy([firstClient, unreachableClient]);
+
+      try {
+        await proxy.ensureConnected();
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(5_000);
+        // The first tick attempted the reconnect rather than fencing.
+        expect(connectAttempts).toBe(1);
+
+        // Worst case: tick (5s) + its deadline (leash - elapsed - 1 = 4_999ms), so
+        // the fence lands 1ms before the leash instead of at the first tick.
+        await timer.advanceTimeAsync(4_998);
+        await timer.advanceTimeAsync(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
+          reason: "heartbeat-unreachable",
+          message: expect.stringContaining("start a new transport"),
+        });
+        expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
+      } finally {
+        finishConnect?.();
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("a reconnect that fails fast at the last safe attempt fences the session", async () => {
+      await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+      const firstClient = heartbeatForwardingClient(sessionManager);
+      let connectAttempts = 0;
+      const makeRefusingClient = (): FakeDaemonClient => {
+        const client = heartbeatForwardingClient(sessionManager);
+        client.connect = async () => {
+          connectAttempts++;
+          throw new DaemonUnavailableError("connection refused");
+        };
+        return client;
+      };
+      const clients: DaemonClientLike[] = [firstClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = stdioProxy(clients, makeRefusingClient);
+
+      try {
+        await proxy.ensureConnected();
+        firstClient.emitConnectionClosed();
+        await timer.advanceTimeAsync(5_000);
+        // At interval == threshold the first tick is the last safe attempt: it
+        // tried to reconnect, failed, and no later tick can save the lease.
+        expect(connectAttempts).toBeGreaterThanOrEqual(1);
+        await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
+          reason: "heartbeat-unreachable",
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+  });
+
   test("a connected socket with unanswered heartbeats fences before the leash", async () => {
     await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
     let attempts = 0;

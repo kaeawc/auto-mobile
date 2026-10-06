@@ -1,6 +1,10 @@
 import { ensureAndroidRoot } from "../../../utils/android-cmdline-tools/ensureAndroidRoot";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  AndroidUserTargetResolver,
+  AndroidUserTargetUnavailableError,
+} from "../../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { shellQuote } from "../../../utils/shellQuote";
@@ -194,7 +198,11 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       );
     }
 
-    const targetUserId = await this.resolveTargetUserId(appId);
+    const target = await this.resolveTargetUserId(appId);
+    if ("error" in target) {
+      return { success: false, languageTag, error: target.error };
+    }
+    const targetUserId = target.userId;
     const previousLanguageTag = await this.getAppLocaleTag(appId, targetUserId);
 
     try {
@@ -237,28 +245,32 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     };
   }
 
-  private async resolveTargetUserId(appId: string): Promise<number> {
+  /**
+   * Resolve the user for an app-scoped locale change with the shared resolver
+   * (foreground instance, then the running user where the package is
+   * installed). Unreadable or ambiguous device state is a typed failure rather
+   * than a silent fallback to a user the app may not be installed in.
+   */
+  private async resolveTargetUserId(
+    appId: string,
+  ): Promise<{ userId: number } | { error: string }> {
     try {
-      const foregroundApp = await this.adb.getForegroundApp();
-      if (foregroundApp?.packageName === appId) {
-        return foregroundApp.userId;
-      }
+      const target = await new AndroidUserTargetResolver(this.adb).resolve({
+        packageName: appId,
+        installedOnly: true,
+      });
+      return { userId: target.userId };
     } catch (error) {
-      logger.debug(
-        `[SystemConfigurationManager] Failed to resolve foreground Android app user for ${appId}: ${error}`,
+      logger.warn(
+        `[SystemConfigurationManager] Failed to resolve Android user for ${appId}: ${errorMessage(error)}`,
+        error,
       );
-    }
-
-    try {
-      const workProfile = (await this.adb.listUsers()).find(
-        (user) => user.userId > 0 && user.running,
-      );
-      return workProfile?.userId ?? 0;
-    } catch (error) {
-      logger.debug(
-        `[SystemConfigurationManager] Failed to list Android users for ${appId}: ${error}`,
-      );
-      return 0;
+      return {
+        error:
+          error instanceof AndroidUserTargetUnavailableError
+            ? error.message
+            : `Failed to resolve Android user for ${appId}: ${errorMessage(error)}`,
+      };
     }
   }
 

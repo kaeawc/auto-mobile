@@ -146,6 +146,8 @@ describe("CtrlProxy command support", () => {
         "show_overlay",
         "update_overlay",
         "dismiss_overlay",
+        // Newer than the old-APK fixture: no older APK advertises it.
+        "overlay_display_id_v1",
         "put_overlay_asset",
         "remove_overlay_asset",
       ]),

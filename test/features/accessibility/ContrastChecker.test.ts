@@ -147,8 +147,9 @@ describe("ContrastChecker", function () {
         text: "Large",
       };
 
-      const smallResult = await checker.checkContrast(screenshotPath, smallTextElement, "AA");
-      const largeResult = await checker.checkContrast(screenshotPath, largeTextElement, "AA");
+      // Density 160 (mdpi): 1px == 1dp, so the 24dp large-text cutoff is 24px.
+      const smallResult = await checker.checkContrast(screenshotPath, smallTextElement, "AA", 160);
+      const largeResult = await checker.checkContrast(screenshotPath, largeTextElement, "AA", 160);
 
       expect(smallResult).not.toBeNull();
       expect(largeResult).not.toBeNull();
@@ -213,7 +214,7 @@ describe("ContrastChecker", function () {
         text: "Large Text",
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AA");
+      const result = await checker.checkContrast(screenshotPath, element, "AA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toEqual(3.0);
@@ -239,7 +240,7 @@ describe("ContrastChecker", function () {
         text: "Large Text",
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AAA");
+      const result = await checker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toEqual(4.5);
@@ -270,7 +271,7 @@ describe("ContrastChecker", function () {
         text: "Large Text",
       };
 
-      const result = await checker.checkContrast(screenshotPath, element, "AAA");
+      const result = await checker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.ratio).toBeLessThan(4.5);
@@ -431,7 +432,7 @@ describe("ContrastChecker", function () {
         text: "Shadow",
       };
 
-      const result = await shadowChecker.checkContrast(screenshotPath, element, "AAA");
+      const result = await shadowChecker.checkContrast(screenshotPath, element, "AAA", 160);
 
       expect(result).not.toBeNull();
       expect(result!.shadowDetected).toBe(true);
@@ -481,7 +482,8 @@ describe("ContrastChecker", function () {
   });
 
   describe("Required ratio (parameterized)", function () {
-    // getRequiredContrastRatio keys off isLargeText (height >= 24) and the level.
+    // getRequiredContrastRatio keys off isLargeText (height >= 24dp, density 160
+    // here so 1px == 1dp) and the level.
     // 23/24/25 straddle the large-text boundary; level "A" falls through to the
     // same ratios as AA. requiredRatio is independent of the sampled contrast,
     // so a uniform fake image is sufficient and keeps this fast.
@@ -512,10 +514,67 @@ describe("ContrastChecker", function () {
         syntheticScreenshotPath,
         element,
         level as "A" | "AA" | "AAA",
+        160,
       );
 
       expect(result).not.toBeNull();
       expect(result!.requiredRatio).toBe(expected as number);
+    });
+
+    // #10039: bounds are physical px. A 50px-tall label is large text at mdpi
+    // (50dp) but only ~16.7dp on xxhdpi (480), where it must get the strict ratio.
+    // The 71/72 rows straddle the cutoff: 24dp * 480/160 = 72px.
+    it.each([
+      [50, 160, "AA", 3.0],
+      [50, 480, "AA", 4.5],
+      [50, 420, "AA", 4.5],
+      [71, 480, "AA", 4.5],
+      [72, 480, "AA", 3.0],
+      [50, 480, "AAA", 7.0],
+      [72, 480, "AAA", 4.5],
+      [50, undefined, "AA", 4.5],
+      [50, 0, "AA", 4.5],
+      [500, undefined, "AAA", 7.0],
+    ])(
+      "height %ipx at density %s, level %s requires %f:1",
+      async function (height, density, level, expected) {
+        const element: Element = {
+          bounds: { left: 0, top: 0, right: 100, bottom: height as number },
+          text: "Sample",
+        };
+        const result = await ratioChecker().checkContrast(
+          syntheticScreenshotPath,
+          element,
+          level as "A" | "AA" | "AAA",
+          density as number | undefined,
+        );
+
+        expect(result).not.toBeNull();
+        expect(result!.requiredRatio).toBe(expected as number);
+      },
+    );
+
+    it("does not reuse a cached result across different densities", async function () {
+      const element: Element = {
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        text: "Sample",
+      };
+      const sharedChecker = ratioChecker();
+      const mdpi = await sharedChecker.checkContrastBatch(
+        syntheticScreenshotPath,
+        [element],
+        "AA",
+        160,
+      );
+      const xxhdpi = await sharedChecker.checkContrastBatch(
+        syntheticScreenshotPath,
+        [element],
+        "AA",
+        480,
+      );
+
+      expect(mdpi.get(element)!.requiredRatio).toBe(3.0);
+      expect(xxhdpi.get(element)!.requiredRatio).toBe(4.5);
     });
   });
 

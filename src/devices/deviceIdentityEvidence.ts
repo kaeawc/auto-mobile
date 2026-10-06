@@ -71,3 +71,19 @@ export function deriveEvidenceFromPooledDevice(pooled: {
     unresolved: pooled.identityUnresolved === true,
   };
 }
+
+/**
+ * The identity that survives adb-serial reuse, mirroring the pool's
+ * `stableDeviceIdFor`: an emulator's resolved AVD name, or the serial itself for
+ * any other transport (a handset's serial is never reassigned). `undefined` when
+ * an emulator's AVD name could not be resolved, so callers must treat "same
+ * serial" as unproven and fail closed rather than assume it.
+ */
+export function stableDeviceIdentityOf(
+  device: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+): string | undefined {
+  if (device.platform !== "android" || !isAndroidEmulatorSerial(device.deviceId)) {
+    return device.deviceId;
+  }
+  return deriveEvidenceFromBootedDevice(device, isUnresolvedAndroidEmulatorName(device)).stableId;
+}

@@ -5,6 +5,7 @@ import type {
   LockCredentialStore,
   WakeAndUnlockResult,
 } from "../../models/WakeAndUnlock";
+import { stableDeviceIdentityOf } from "../../devices/deviceIdentityEvidence";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { defaultAdbClientFactory, type AdbClientFactory } from "./AdbClientFactory";
@@ -75,7 +76,7 @@ export class AndroidWakeAndUnlock {
           "Could not read device lock state (dumpsys window policy unavailable); the device was woken but its lock status is unknown",
       };
     }
-    if (!lock.locked) {
+    if (!lock.keyguardShowing) {
       return {
         success: true,
         platform: "android",
@@ -83,6 +84,25 @@ export class AndroidWakeAndUnlock {
         wasLocked: false,
         secure: lock.secure,
         unlocked: true,
+      };
+    }
+    if (!lock.locked) {
+      // Showing but occluded (#10064): a show-when-locked activity (call, alarm,
+      // secure camera) sits in front of a keyguard that is still up, and it is
+      // back as soon as that activity finishes. Not unlocked, and no blind
+      // dismissal or credential input into someone else's foreground activity.
+      logger.warn("[WakeAndUnlock] keyguard is showing but occluded; unlock not attempted");
+      return {
+        success: false,
+        platform: "android",
+        wasAsleep,
+        wasLocked: true,
+        secure: lock.secure,
+        unlocked: false,
+        error:
+          "Keyguard is showing but occluded by a foreground show-when-locked activity " +
+          "(for example an incoming call, alarm or secure camera); the device is still locked " +
+          "behind it. Finish or dismiss that activity, then call wakeAndUnlock again",
       };
     }
 
@@ -287,14 +307,18 @@ export class AndroidWakeAndUnlock {
     return commands;
   }
 
-  /** Poll the lock state until the keyguard clears or the budget expires. */
+  /**
+   * Poll the lock state until the keyguard clears or the budget expires. Cleared
+   * means the keyguard is no longer *showing*: an occluded keyguard (an alarm or
+   * call arriving mid-poll) is still up and must not count as unlocked (#10064).
+   */
   private async pollUnlocked(signal?: AbortSignal): Promise<boolean> {
     throwIfAborted(signal);
     let elapsed = 0;
     while (elapsed < UNLOCK_POLL_MAX_MS) {
       throwIfAborted(signal);
       const lock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
-      if (lock && !lock.locked) {
+      if (lock && !lock.keyguardShowing) {
         return true;
       }
       throwIfAborted(signal);
@@ -303,7 +327,7 @@ export class AndroidWakeAndUnlock {
     }
     throwIfAborted(signal);
     const finalLock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
-    return !!finalLock && !finalLock.locked;
+    return !!finalLock && !finalLock.keyguardShowing;
   }
 
   /** Best-effort recorded-credential lookup: a store failure degrades to "none". */
@@ -315,7 +339,10 @@ export class AndroidWakeAndUnlock {
     try {
       throwIfAborted(signal);
       return await awaitWhileRequestIsLive(
-        this.credentialStore.getRecordedCredential(this.device.deviceId),
+        this.credentialStore.getRecordedCredential(
+          this.device.deviceId,
+          stableDeviceIdentityOf(this.device),
+        ),
         signal,
       );
     } catch (error) {
@@ -339,7 +366,12 @@ export class AndroidWakeAndUnlock {
     try {
       throwIfAborted(signal);
       await awaitWhileRequestIsLive(
-        this.credentialStore.rememberLock(this.device.deviceId, lockType, credential),
+        this.credentialStore.rememberLock(
+          this.device.deviceId,
+          lockType,
+          credential,
+          stableDeviceIdentityOf(this.device),
+        ),
         signal,
       );
     } catch (error) {

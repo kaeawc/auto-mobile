@@ -170,11 +170,10 @@ describe("StorageEventRepository", () => {
     expect(events[0].previousValue).toBeNull();
   });
 
-  test("recordStorageEvent picks the max-timestamp prior row regardless of insertion order", async () => {
+  test("recordStorageEvent picks the most recently stored prior row regardless of device timestamp order", async () => {
     // Insert out of timestamp order: the newest row (timestamp 3000) is inserted
-    // in the middle. The lookup must return its value by MAX(timestamp), not by
-    // insertion/rowid order — this is exactly what the trailing timestamp column
-    // of idx_storage_events_key_lookup guarantees.
+    // in the middle. The lookup must return the most recently STORED row (insertion
+    // id), not MAX(timestamp): `timestamp` is the device clock and can lag or reset.
     await recordStorageEvent(
       {
         deviceId: "d1",
@@ -217,7 +216,7 @@ describe("StorageEventRepository", () => {
       },
       db,
     );
-    // A fourth event whose auto-lookup should see "newest" as the previous value.
+    // A fourth event whose auto-lookup should see "middle" (last stored) as the previous value.
     await recordStorageEvent(
       {
         deviceId: "d1",
@@ -234,7 +233,7 @@ describe("StorageEventRepository", () => {
     );
     const events = await getStorageEvents({ deviceId: "d1", limit: 10 }, db);
     expect(events[0].value).toBe("current");
-    expect(events[0].previousValue).toBe("newest");
+    expect(events[0].previousValue).toBe("middle");
   });
 
   test("recordStorageEvent scopes the previous-value lookup by file_name and key", async () => {

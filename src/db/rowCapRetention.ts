@@ -15,6 +15,7 @@
 
 import type { Kysely } from "kysely";
 import type { Database } from "./types";
+import type { EVENT_TABLES } from "./eventTables";
 import {
   createAmortizedRetentionState,
   runAmortizedRetentionGate,
@@ -43,8 +44,73 @@ export type RowCapTable =
   | "anrs";
 
 /**
- * Trim `table` to at most `maxRows` rows, keeping the newest by
- * (`timestamp` desc, `id` desc) and returning the number of rows deleted.
+ * Tables whose `timestamp` is stamped by the DEVICE (CtrlProxy / SDK events),
+ * not by the daemon, and whose `id` is an autoincrement integer. A device clock
+ * can sit behind rows already stored (emulator snapshot restore, host sleep), so
+ * "keep the newest N" for these means the N most recently STORED rows, i.e. by
+ * `id` (#10044). The other {@link RowCapTable}s are stamped by the daemon clock
+ * (`tool_calls`/`test_executions`/`performance_audit_results`/`failure_occurrences`)
+ * and keep timestamp ordering; `failure_occurrences.id` is a text UUID, so it
+ * could not be ordered by insertion anyway.
+ */
+export type InsertionOrderedTable = Extract<RowCapTable, "crashes" | "anrs">;
+
+function isInsertionOrderedTable(table: RowCapTable): table is InsertionOrderedTable {
+  return table === "crashes" || table === "anrs";
+}
+
+/** Tables {@link pruneTableByInsertionOrder} can trim: any with an autoincrement integer `id`. */
+export type InsertionOrderedPruneTable = InsertionOrderedTable | (typeof EVENT_TABLES)[number];
+
+/**
+ * Trim `table` to at most `maxRows` rows, keeping the most recently INSERTED by
+ * `id` (the autoincrement primary key) and returning the number of rows deleted.
+ *
+ * Unlike {@link pruneTableByRowCap} this never consults a `timestamp`, so rows
+ * from a device whose clock is behind the stored rows are not pruned right after
+ * they are stored (#10044). Same cost profile as the timestamp form: a cheap
+ * `count(*)` gates the `LIMIT 1 OFFSET maxRows-1` probe, which here walks the
+ * primary key rather than a timestamp index. The threshold is the `maxRows`-th
+ * newest `id`; deleting `id < threshold` leaves exactly `maxRows` rows, with no
+ * tie-break needed because `id` is unique.
+ */
+export async function pruneTableByInsertionOrder(
+  db: Kysely<Database>,
+  table: InsertionOrderedPruneTable,
+  maxRows: number,
+): Promise<number> {
+  const count = await db
+    .selectFrom(table)
+    .select(db.fn.countAll().as("count"))
+    .executeTakeFirstOrThrow();
+
+  if (Number(count.count) <= maxRows) {
+    return 0;
+  }
+
+  const threshold = await db
+    .selectFrom(table)
+    .select("id")
+    .orderBy("id", "desc")
+    .limit(1)
+    .offset(maxRows - 1)
+    .executeTakeFirst();
+
+  if (!threshold) {
+    return 0;
+  }
+
+  const deleted = await db.deleteFrom(table).where("id", "<", threshold.id).executeTakeFirst();
+
+  return Number(deleted.numDeletedRows ?? 0);
+}
+
+/**
+ * Trim `table` to at most `maxRows` rows and return the number of rows deleted.
+ *
+ * Device-stamped tables ({@link InsertionOrderedTable}) keep the most recently
+ * inserted rows by `id` (#10044). The daemon-stamped tables keep the newest by
+ * (`timestamp` desc, `id` desc).
  *
  * A cheap `count(*)` gates the expensive `LIMIT 1 OFFSET maxRows-1` threshold
  * probe, so the index walk only runs when actually over cap. The delete breaks
@@ -57,6 +123,10 @@ export async function pruneTableByRowCap(
   table: RowCapTable,
   maxRows: number,
 ): Promise<number> {
+  if (isInsertionOrderedTable(table)) {
+    return pruneTableByInsertionOrder(db, table, maxRows);
+  }
+
   const count = await db
     .selectFrom(table)
     .select(db.fn.countAll().as("count"))

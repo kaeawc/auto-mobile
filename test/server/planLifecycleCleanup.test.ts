@@ -11,6 +11,7 @@ import {
   type AppCleanupService,
 } from "../../src/server/AppCleanupService";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import * as deviceLabelMapping from "../../src/server/deviceLabelMapping";
 import {
   DefaultPlanLifecycleManager,
   PLAN_APP_CLEANUP_CAP_MS,
@@ -86,6 +87,7 @@ describe("executePlan cleans every acquired device before release", () => {
   let events: string[];
   let cleanup: FakeAppCleanupService;
   let log: FakeLogger;
+  let timer: FakeTimer;
   let poolTimer: FakeTimer;
   const restores: Array<() => void> = [];
   const lifecycle = new DefaultPlanLifecycleManager();
@@ -98,7 +100,7 @@ describe("executePlan cleans every acquired device before release", () => {
       const spy = spyOn(logger, level).mockImplementation(log[level].bind(log));
       restores.push(() => spy.mockRestore());
     }
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     poolTimer = timer;
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceManager = new FakeDeviceUtils();
@@ -179,6 +181,47 @@ describe("executePlan cleans every acquired device before release", () => {
     }
     expect(sessionManager.getSession("base")).toBeNull();
   };
+
+  test("nested executePlan retains the outer session and assigned device without cleanup", async () => {
+    await acquire([devices[0]], false);
+    pool.getDevice("device-A")!.sessionId = "base";
+    const session = sessionManager.getSession("base");
+
+    await lifecycle.afterExecution(input({ nestedInPlan: true }));
+
+    expect(sessionManager.getSession("base")).toBe(session);
+    expect(pool.getDevice("device-A")!.sessionId).toBe("base");
+    expect(cleanup.calls).toEqual([]);
+    expect(events).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("outermost executePlan still cleans and releases without a nested flag", async () => {
+    await acquire([devices[0]], false);
+
+    await lifecycle.afterExecution(input());
+
+    expectCleanupBeforeRelease([devices[0]]);
+    expect(events.filter((event) => event.startsWith("release:"))).toEqual(["release:device-A"]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("nested executePlan leaves every label session for the outer lifecycle", async () => {
+    await acquire(devices.slice(0, 3));
+    const releaseLabels = spyOn(deviceLabelMapping, "releaseDeviceLabelSessions");
+    restores.push(() => releaseLabels.mockRestore());
+
+    await lifecycle.afterExecution(input({ nestedInPlan: true, sessionUuid: "base:B" }));
+
+    expect(releaseLabels).not.toHaveBeenCalled();
+    for (const id of ["base", "base:B", "base:C"]) {
+      expect(sessionManager.getSession(id)).not.toBeNull();
+    }
+    expect(sessionManager.getDeviceLabels("base")).toEqual({ A: "base", B: "base:B", C: "base:C" });
+    expect(cleanup.calls).toEqual([]);
+    expect(events).toEqual([]);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
 
   test.each([2, 3])("cleans all %s devices once before any release", async (count) => {
     const targets = devices.slice(0, count);

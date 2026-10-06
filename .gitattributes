@@ -12,6 +12,7 @@ test/fixtures/android-launcher/*.txt text eol=lf
 test/fixtures/android-launcher/*.json text eol=lf
 test/fixtures/android-adb/*.txt text eol=lf
 test/fixtures/android-getevent/*.txt text eol=lf
+test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf

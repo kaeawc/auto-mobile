@@ -21,7 +21,10 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 import type { DaemonOptions } from "./daemon/types";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  resolveActionsCompactMetadata,
+} from "./utils/outputReductionFlags";
 import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
@@ -283,6 +286,12 @@ async function main() {
     if (runnerReadinessTimeoutMs !== undefined) {
       serverConfig.setRunnerReadinessTimeoutMs(runnerReadinessTimeoutMs);
     }
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(
+        outputReduction.actionsCompactMetadata,
+        serverConfig.isActionsCompactMetadataEnabled(),
+      ),
+    );
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
@@ -379,15 +388,10 @@ async function main() {
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
       ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-        (spec) =>
-          !spec.disableCli ||
-          rawArgs.includes(spec.cli) ||
-          rawArgs.includes(spec.disableCli) ||
-          process.env[spec.env] === "0" ||
-          process.env[spec.env] === "1",
+        (spec) => !spec.disableCli || outputReduction[spec.field] !== undefined,
       ).map((spec): CliFeatureFlagOverride => [
         spec.featureFlagKey,
-        outputReduction[spec.field],
+        outputReduction[spec.field] === true,
         spec.label,
         undefined,
       ]),
@@ -411,9 +415,12 @@ async function main() {
         logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
       }
 
-      // Preserve a persisted feature-flag opt-out in the daemon relay as well.
-      outputReduction.actionsCompactMetadata = featureFlagService.isEnabled(
-        "actions-compact-metadata",
+      // Resolve local behavior after persistence is loaded; keep the relay tri-state.
+      serverConfig.setActionsCompactMetadataEnabled(
+        resolveActionsCompactMetadata(
+          outputReduction.actionsCompactMetadata,
+          featureFlagService.isEnabled("actions-compact-metadata"),
+        ),
       );
 
       if (!navigationScreenshots) {

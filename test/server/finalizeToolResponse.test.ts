@@ -1,4 +1,7 @@
-import { parseOutputReductionFlags } from "../../src/utils/outputReductionFlags";
+import {
+  parseOutputReductionFlags,
+  resolveActionsCompactMetadata,
+} from "../../src/utils/outputReductionFlags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -4805,7 +4808,7 @@ describe("actions-compact-metadata", () => {
   });
   test("default compact: first full; identical second omits each block; changed block alone reappears", () => {
     serverConfig.setActionsCompactMetadataEnabled(
-      parseOutputReductionFlags([], {}).actionsCompactMetadata,
+      resolveActionsCompactMetadata(parseOutputReductionFlags([], {}).actionsCompactMetadata),
     );
     expectFull(emit());
     const repeated = observation(emit());

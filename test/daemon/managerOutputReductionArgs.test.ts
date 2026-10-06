@@ -11,13 +11,13 @@ import {
  * This is the forward half of the MCP-process -> daemon-process hand-off.
  */
 describe("parseDaemonArgs output-reduction flags", () => {
-  test("compact metadata defaults on; other options are undefined", () => {
+  test("unspecified output-reduction options remain undefined", () => {
     const options = parseDaemonArgs([]);
     expect(options.observeResultIncludeElements).toBeUndefined();
     expect(options.toolResultsNoStructuredContent).toBeUndefined();
     expect(options.actionsDiffObserve).toBeUndefined();
     expect(options.actionsNoObserve).toBeUndefined();
-    expect(options.actionsCompactMetadata).toBe(true);
+    expect(options.actionsCompactMetadata).toBeUndefined();
   });
 
   test("--observe-result-include-elements sets observeResultIncludeElements", () => {

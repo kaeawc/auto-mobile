@@ -7,14 +7,13 @@ import {
 } from "../../src/utils/outputReductionFlags";
 
 describe("parseOutputReductionFlags", () => {
-  test("defaults only compact action metadata on", () => {
+  test("leaves compact metadata unspecified; other flags default off", () => {
     const flags = parseOutputReductionFlags([], {});
     expect(flags).toEqual({
       observeResultIncludeElements: false,
       toolResultsNoStructuredContent: false,
       actionsDiffObserve: false,
       actionsNoObserve: false,
-      actionsCompactMetadata: true,
     });
   });
 
@@ -37,7 +36,9 @@ describe("parseOutputReductionFlags", () => {
       const flags = parseOutputReductionFlags([], { [spec.env]: "0" });
       expect(flags[spec.field]).toBe(false);
       const flagsTrue = parseOutputReductionFlags([], { [spec.env]: "true" });
-      expect(flagsTrue[spec.field]).toBe(spec.field === "actionsCompactMetadata");
+      expect(flagsTrue[spec.field]).toBe(
+        spec.field === "actionsCompactMetadata" ? undefined : false,
+      );
     }
   });
 

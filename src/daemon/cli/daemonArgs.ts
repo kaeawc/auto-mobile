@@ -215,7 +215,10 @@ export function parseDaemonArgs(
   const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
     ? { skipCtrlProxyDownload: true }
     : {};
-  options.actionsCompactMetadata = parseOutputReductionFlags(args, env).actionsCompactMetadata;
+  const compactMetadata = parseOutputReductionFlags(args, env).actionsCompactMetadata;
+  if (compactMetadata !== undefined) {
+    options.actionsCompactMetadata = compactMetadata;
+  }
   options.toolOutputsDir = parseToolOutputsDirConfig(
     [],
     env,

@@ -13,7 +13,14 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // Derive the full-record generator from the spec list itself, so adding a flag
 // grows the generator automatically rather than silently under-testing it.
 const flagsArb = fc.record(
-  Object.fromEntries(OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => [spec.field, fc.boolean()])),
+  Object.fromEntries(
+    OUTPUT_REDUCTION_FLAG_SPECS.map((spec) => [
+      spec.field,
+      spec.field === "actionsCompactMetadata"
+        ? fc.option(fc.boolean(), { nil: undefined })
+        : fc.boolean(),
+    ]),
+  ),
 ) as fc.Arbitrary<OutputReductionFlags>;
 
 const spec = fc.constantFrom(...OUTPUT_REDUCTION_FLAG_SPECS);
@@ -24,12 +31,12 @@ const fieldsEqual = (a: OutputReductionFlags, b: OutputReductionFlags): boolean 
   OUTPUT_REDUCTION_FLAG_SPECS.every((s) => a[s.field] === b[s.field]);
 
 describe("parseOutputReductionFlags (property-based)", () => {
-  test("with no CLI args and no env, only compact metadata defaults on", () => {
+  test("with no CLI args and no env, compact metadata is unspecified and other flags default off", () => {
     fc.assert(
       fc.property(fc.constant(null), () => {
         const flags = parseOutputReductionFlags([], {});
         return OUTPUT_REDUCTION_FLAG_SPECS.every(
-          (s) => flags[s.field] === (s.field === "actionsCompactMetadata"),
+          (s) => flags[s.field] === (s.field === "actionsCompactMetadata" ? undefined : false),
         );
       }),
       RUN_OPTIONS,
@@ -43,7 +50,11 @@ describe("parseOutputReductionFlags (property-based)", () => {
         return OUTPUT_REDUCTION_FLAG_SPECS.every(
           (other) =>
             flags[other.field] ===
-            (other.field === s.field || other.field === "actionsCompactMetadata"),
+            (other.field === s.field
+              ? true
+              : other.field === "actionsCompactMetadata"
+                ? undefined
+                : false),
         );
       }),
       RUN_OPTIONS,
@@ -60,7 +71,13 @@ describe("parseOutputReductionFlags (property-based)", () => {
           (other) =>
             flags[other.field] ===
             (other.field === "actionsCompactMetadata"
-              ? other.field !== s.field || value !== "0"
+              ? other.field !== s.field
+                ? undefined
+                : value === "0"
+                  ? false
+                  : value === "1"
+                    ? true
+                    : undefined
               : other.field === s.field && value === "1"),
         );
       }),
@@ -88,7 +105,7 @@ describe("outputReductionFlagsToArgs (property-based)", () => {
       fc.property(flagsArb, (flags) => {
         const args = outputReductionFlagsToArgs(flags);
         const expected = OUTPUT_REDUCTION_FLAG_SPECS.flatMap((s) =>
-          flags[s.field] ? [s.cli] : s.disableCli ? [s.disableCli] : [],
+          flags[s.field] ? [s.cli] : flags[s.field] === false && s.disableCli ? [s.disableCli] : [],
         );
         return args.length === expected.length && args.every((a, i) => a === expected[i]);
       }),

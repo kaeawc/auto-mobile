@@ -2270,4 +2270,8 @@ A duplicate top-level `element` is omitted when identical to
 `selectedElement.matchedElement` and not required by the output schema.
 Use `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`,
 or feature flag `actions-compact-metadata=false` to restore full metadata.
+`--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
+wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
+Unset or other env values express no preference: proxies relay no compact-metadata
+option and reuse the daemon's effective setting without restarting it.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).

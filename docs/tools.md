@@ -584,6 +584,24 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
+`show`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
+that uploads images before the overlay is sent, so no separate upload step is
+needed. `path` is an absolute path the daemon can read (relative paths are
+rejected); the type is detected from the file's signature and must be PNG, JPEG
+or WebP, up to 4 MiB per asset, 16 MiB and 32 assets per call, with unique ids.
+Image nodes reference an `id` (`image.asset`; nav items use `image`); the spec
+never carries paths or bytes. Every file is read and checked first, so an
+unreadable file, unsupported format or exceeded cap fails the call with nothing
+sent. Uploads then run one at a time. Any failure (a device refusal, an old
+CtrlProxy without asset support, a cancelled request, or a write that was never
+answered, reported as indeterminate) fails the call before the overlay is shown
+or updated; the error and `uploadedAssets` name the assets already stored, which
+stay on the device until the overlay session ends and are replaced if the call is
+repeated. On success `uploadedAssets` lists each `{ id, mimeType, bytes }`. The
+MCP request deadline grows by 15 s per asset plus the request's `timeoutMs`
+(default 5000 ms) and 30 s of headroom. Prior-screenshot references are not
+accepted yet; pass the screenshot's file path.
+
 `status` performs no device request. It reports only overlays successfully
 shown by this host in the current session and device, with their last action,
 result, and host timestamp in milliseconds. It also returns the last attempted

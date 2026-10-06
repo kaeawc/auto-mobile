@@ -22,6 +22,10 @@ import {
   DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
 } from "../../src/features/overlay/overlayEventTimeout";
+import {
+  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+  MAX_OVERLAY_ASSET_COUNT,
+} from "../../src/features/overlay/overlayAssets";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1551,6 +1555,27 @@ describe("argument budget deadline gaps", () => {
         expect(resolve({ action, timeoutMs: 60_000 })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       }
       expect(resolve({ action: "awaitEvent", timeoutMs: 60_000 }, 1_000_000)).toBe(1_000_000);
+    });
+    test("show and update with assets budget one upload timeout per asset plus the request", () => {
+      const assets = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: `a${i}`, path: `/x/${i}.png` }));
+      const perAsset = DEFAULT_OVERLAY_ASSET_TIMEOUT_MS;
+      for (const action of ["show", "update"]) {
+        expect(resolve({ action, assets: assets(1) })).toBe(perAsset + 5_000 + headroom);
+        expect(resolve({ action, assets: assets(4) })).toBe(4 * perAsset + 5_000 + headroom);
+        expect(resolve({ action, assets: assets(4), timeoutMs: 20_000 })).toBe(
+          4 * perAsset + 20_000 + headroom,
+        );
+      }
+      // The tool rejects more than the contract maximum, so the budget stops growing there.
+      expect(resolve({ action: "show", assets: assets(500) })).toBe(
+        MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000 + headroom,
+      );
+    });
+    test("show without usable assets keeps the default deadline", () => {
+      for (const assets of [undefined, [], "x", null, {}]) {
+        expect(resolve({ action: "show", assets })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
     });
     test("hostile tool names never reach a resolver", () => {
       for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {

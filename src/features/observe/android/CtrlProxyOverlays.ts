@@ -4,6 +4,7 @@ import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { actionSchema, overlaySpecSchema, type OverlaySpec } from "../../overlay/overlaySpec";
 import {
+  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
   overlayAssetIdProblem,
   overlayAssetUploadProblem,
   type OverlayAssetUpload,
@@ -25,9 +26,6 @@ import {
   type PutOverlayAssetMessage,
   type RemoveOverlayAssetMessage,
 } from "./ctrlProxyProtocol";
-
-/** A 4 MiB asset is about 5.6 MB of base64 over adb forward, so allow more than a plain request. */
-export const DEFAULT_OVERLAY_ASSET_TIMEOUT_MS = 15000;
 
 /** Transport controls shared by asset upload and removal. */
 export interface OverlayAssetRequestOptions {

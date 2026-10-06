@@ -219,6 +219,13 @@ replacement and a temporary lock-screen hide keep them. Decoding, `contentScale`
 and the placeholder are not part of this slice: an `image` node still renders a plain
 gray box, and a nav item shows its built-in icon or a gray square.
 
+Host surface: the `overlay` tool's `show` and `update` (with `spec`) take
+`assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
+reads and validates every file first (signature-detected MIME type, the contract
+limits, unique ids), then uploads sequentially before the overlay request; any
+failure fails the call before the overlay changes and names the assets already
+stored. See `docs/tools.md` for the result and deadline model.
+
 ## Actions and state
 
 | Action `type` | Properties                                                                                                                                        |

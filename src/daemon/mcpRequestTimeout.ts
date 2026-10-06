@@ -10,6 +10,10 @@ import {
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
 } from "../features/overlay/overlayEventTimeout";
 import {
+  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+  MAX_OVERLAY_ASSET_COUNT,
+} from "../features/overlay/overlayAssets";
+import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
@@ -396,10 +400,33 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
+/** Default device request timeout of a show/update, mirrored from the overlay tool. */
+const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
+
+function resolveOverlayAssetUploadBudgetMs(args: Record<string, unknown>): number {
+  // Uploads run one at a time, each with its own transport timeout, before the show/update
+  // request itself. Count entries without visiting them, capped at the tool's maximum.
+  const count = Array.isArray(args.assets)
+    ? Math.min(args.assets.length, MAX_OVERLAY_ASSET_COUNT)
+    : 0;
+  if (count === 0) {
+    return 0;
+  }
+  return resolveArgumentTimeoutBudgetMs(
+    count * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS +
+      (positiveFiniteNumber(args.timeoutMs) ?? OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS),
+    DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
+  );
+}
+
 function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits; every other overlay action keeps the default deadline. The
-  // tool's own maximum bounds the wait, so a larger value (rejected by its schema anyway)
-  // cannot inflate the deadline past that maximum plus headroom.
+  // Only `awaitEvent` waits and only `show`/`update` with `assets` upload; every other overlay
+  // action keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
+  // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
+  if (args.action === "show" || args.action === "update") {
+    return resolveOverlayAssetUploadBudgetMs(args);
+  }
   if (args.action !== "awaitEvent") {
     return 0;
   }

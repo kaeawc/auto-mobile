@@ -396,12 +396,21 @@ class CtrlProxyMessageHandler(
         }
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
       is RequestAction ->
-        actions.requestAction(
-          request.requestId,
-          request.action,
-          request.resourceId,
-          request.selector,
-        )
+        if (request.focusedInput) {
+          actions.requestFocusedInputAction(
+            request.requestId,
+            request.action,
+            request.selectionStart,
+            request.selectionEnd,
+          )
+        } else {
+          actions.requestAction(
+            request.requestId,
+            request.action,
+            request.resourceId,
+            request.selector,
+          )
+        }
       is RequestActivateAccessibilityLink ->
         actions.requestActivateAccessibilityLink(
           request.requestId,

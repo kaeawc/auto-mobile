@@ -109,13 +109,18 @@ type KeyboardDetection = {
   windowInfoAvailable?: boolean;
   /** True when an IME window (type 2) is present, even without usable bounds. */
   imeWindowPresent?: boolean;
+  /**
+   * True when the IME window bounds reach past the screen edge, which the show animation does
+   * while it slides in. Only set when the hierarchy reported the screen size.
+   */
+  boundsOffScreen?: boolean;
 };
 
 /**
- * The slice of the CtrlProxy client `open` needs to show the IME without a touch:
- * a node `click` (the framework shows the keyboard for the focused field without
- * a touch position, so the caret and selection stay put) and the caret read used
- * to report a moved caret when the tap fallback has to run.
+ * The slice of the CtrlProxy client `open` needs to show the IME without a touch: a node
+ * `click` by selector, or on the input-focused node when the field has no selector (the
+ * framework shows the keyboard without a touch position, so the caret should stay put), plus
+ * the caret read and `set_selection` restore that back the claim up.
  */
 export interface KeyboardOpenClient {
   supportsNodeActionSelectors(perf?: undefined, signal?: AbortSignal): Promise<boolean>;
@@ -126,13 +131,45 @@ export interface KeyboardOpenClient {
     perf?: undefined,
     signal?: AbortSignal,
   ): Promise<A11yActionResult>;
+  /** `click` or `set_selection` on the input-focused editable node; needs no selector. */
+  requestFocusedInputAction(
+    action: "click" | "set_selection",
+    selection?: { start: number; end: number },
+    timeoutMs?: number,
+    perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
   requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
 }
 
+/**
+ * `unavailable`: nothing was sent, so the next route is safe. `refused`: the runner acknowledged
+ * and rejected the click. `sent`: the runner accepted it. `unconfirmed`: dispatched but never
+ * acknowledged, so a second activation would be unsafe.
+ */
 type NodeClickOutcome =
   | { kind: "unavailable" }
+  | { kind: "refused" }
   | { kind: "sent" }
   | { kind: "unconfirmed"; error?: string };
+
+/** How the keyboard was shown, for the caret note. */
+type ShowRoute = "click" | "tap";
+
+const KEYBOARD_BOUNDS_NOT_SETTLED =
+  " (the keyboard's bounds were still past the screen edge while it animated in, so none are reported; run keyboard detect for them)";
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function sameSelection(a: InsertTextState, b: InsertTextState): boolean {
+  return a.selectionStart === b.selectionStart && a.selectionEnd === b.selectionEnd;
+}
+
+function selectionRange(state: InsertTextState): string {
+  return `${state.selectionStart}-${state.selectionEnd}`;
+}
 
 function keyboardOpenIndeterminateMessage(dispatched: string, reason?: string): string {
   return `Keyboard open outcome is indeterminate: the ${dispatched} was dispatched but no result was confirmed (${reason ?? "request cancelled"}). The keyboard may have opened. Do not retry automatically; observe before retrying.`;
@@ -423,8 +460,11 @@ export class Keyboard {
       };
     }
 
+    // The caret is recorded first so any route that moves it can be detected and undone.
+    const caretBefore = await this.readCaret(signal);
+
     // Show the IME without a touch first: a coordinate tap lands inside the field
-    // and moves the caret into existing text (#9942).
+    // and moves the caret into existing text (#9942, #10152).
     const click = await this.showWithoutTouch(focusedInput, hierarchy, signal);
     // Once a click reached the device the field may already be activated (a read-only
     // picker would toggle twice), so a tap is only a fallback when no click was sent.
@@ -433,13 +473,28 @@ export class Keyboard {
       return { success: false, open: false, message, error: message };
     }
     if (click.kind === "sent") {
-      return this.openResult(await this.waitForKeyboardState(true, signal), "Keyboard opened");
+      return this.finishOpen(caretBefore, "click", signal);
     }
 
-    const caretBefore = await this.readCaret(signal);
+    const offScreen = this.offScreenTapError(focusedInput, hierarchy);
+    if (offScreen) {
+      return { success: false, open: false, message: offScreen, error: offScreen };
+    }
     await this.tapOnElement(focusedInput, signal);
+    return this.finishOpen(caretBefore, "tap", signal);
+  }
+
+  /**
+   * Confirm the IME is up, then check the caret. Showing the keyboard must not move it; when it
+   * did, it is put back and the read-back decides what the result says.
+   */
+  private async finishOpen(
+    caretBefore: InsertTextState | undefined,
+    route: ShowRoute,
+    signal?: AbortSignal,
+  ): Promise<KeyboardResult> {
     const afterState = await this.waitForKeyboardState(true, signal);
-    const caretNote = afterState.open ? await this.caretMovedNote(caretBefore, signal) : "";
+    const caretNote = afterState.open ? await this.reconcileCaret(caretBefore, route, signal) : "";
     return this.openResult(afterState, "Keyboard opened", caretNote);
   }
 
@@ -449,17 +504,41 @@ export class Keyboard {
     caretNote: string = "",
   ): KeyboardResult {
     const success = afterState.open && !afterState.error;
+    // Bounds still past the screen edge after the settle window are mid-animation values, not
+    // where the keyboard ends up, so they are withheld rather than reported.
+    const boundsNote = success && afterState.boundsOffScreen ? KEYBOARD_BOUNDS_NOT_SETTLED : "";
     const message = success
-      ? `${openedMessage}${caretNote}`
+      ? `${openedMessage}${caretNote}${boundsNote}`
       : (afterState.error ?? "Failed to open keyboard");
 
     return {
       success,
       open: afterState.open,
-      bounds: afterState.bounds,
+      ...(afterState.boundsOffScreen ? {} : { bounds: afterState.bounds }),
       message,
       ...(afterState.error ? { error: afterState.error } : {}),
     };
+  }
+
+  /**
+   * A tap lands at the field's centre, so a centre outside the display would hit another window
+   * or nothing. Fail instead of sending it; scrolling the field into view is the caller's call.
+   */
+  private offScreenTapError(
+    element: Element,
+    hierarchy: ViewHierarchyResult | null,
+  ): string | undefined {
+    const width = hierarchy?.screenWidth;
+    const height = hierarchy?.screenHeight;
+    if (!isPositiveNumber(width) || !isPositiveNumber(height)) {
+      return undefined;
+    }
+    const center = this.geometry.getElementCenter(element);
+    if (center.x >= 0 && center.y >= 0 && center.x < width && center.y < height) {
+      return undefined;
+    }
+    const b = element.bounds;
+    return `The focused text input is off screen (bounds [${b.left},${b.top}][${b.right},${b.bottom}] on a ${width}x${height} screen), so no tap was sent and the keyboard was not opened. Scroll the field into view (swipeOn) and call keyboard open again.`;
   }
 
   private getOpenClient(): KeyboardOpenClient {
@@ -468,14 +547,27 @@ export class Keyboard {
   }
 
   /**
-   * Ask CtrlProxy to `click` the focused editable node, which makes the framework
-   * show the IME for that field without a touch position. `unavailable` means no
-   * click was sent and the tap fallback is allowed (no stable selector, the selector
-   * does not resolve to exactly this field, the runner is too old, or it refused the
-   * action); `sent` means the runner accepted it; `unconfirmed` means it was
-   * dispatched but never acknowledged, so a second activation would be unsafe.
+   * Show the IME without a touch position. A field with a stable selector is clicked through
+   * it; any field, including a Compose text field that has no selector, can instead be clicked
+   * as the input-focused node. `unavailable` means no click was sent and the tap fallback is
+   * allowed; `refused` means the runner declined a selector click (the tap is still allowed);
+   * `sent` means the runner accepted it; `unconfirmed` means it was dispatched but never
+   * acknowledged, so a second activation would be unsafe.
+   *
+   * Android offers an accessibility service no call that shows the IME on demand
+   * (`SoftKeyboardController` only sets the show mode, and `ACTION_FOCUS` does nothing to a
+   * field that already has focus), so a click is the least intrusive route on API 29-36.
    */
   private async showWithoutTouch(
+    element: Element,
+    hierarchy: ViewHierarchyResult | null,
+    signal?: AbortSignal,
+  ): Promise<NodeClickOutcome> {
+    const bySelector = await this.clickBySelector(element, hierarchy, signal);
+    return bySelector.kind === "unavailable" ? this.clickFocusedInput(signal) : bySelector;
+  }
+
+  private async clickBySelector(
     element: Element,
     hierarchy: ViewHierarchyResult | null,
     signal?: AbortSignal,
@@ -501,18 +593,38 @@ export class Keyboard {
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
       return { kind: "unavailable" };
     }
-    return this.dispatchNodeClick(client, selector, signal);
+    return this.dispatchNodeClick(
+      () => client.requestNodeAction("click", selector, undefined, undefined, signal),
+      signal,
+    );
+  }
+
+  /** Click the input-focused node; the runner finds it, so no selector is needed. */
+  private async clickFocusedInput(signal?: AbortSignal): Promise<NodeClickOutcome> {
+    let client: KeyboardOpenClient;
+    try {
+      client = this.getOpenClient();
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: focused input click errored: ${errorMessage(error)}`, error);
+      return { kind: "unavailable" };
+    }
+    const outcome = await this.dispatchNodeClick(
+      () => client.requestFocusedInputAction("click", undefined, undefined, undefined, signal),
+      signal,
+    );
+    // A refused focused-input click changed nothing, exactly like one that was never sent.
+    return outcome.kind === "refused" ? { kind: "unavailable" } : outcome;
   }
 
   private async dispatchNodeClick(
-    client: KeyboardOpenClient,
-    selector: AccessibilityNodeSelector,
+    send: () => Promise<A11yActionResult>,
     signal?: AbortSignal,
   ): Promise<NodeClickOutcome> {
     throwIfAborted(signal);
     let result: A11yActionResult;
     try {
-      result = await client.requestNodeAction("click", selector, undefined, undefined, signal);
+      result = await send();
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
@@ -528,7 +640,7 @@ export class Keyboard {
       return { kind: "sent" };
     }
     logger.warn(`Keyboard open: node click failed (${result.error ?? "unknown error"})`);
-    return unacknowledged ? { kind: "unconfirmed", error: result.error } : { kind: "unavailable" };
+    return unacknowledged ? { kind: "unconfirmed", error: result.error } : { kind: "refused" };
   }
 
   /** Best-effort caret read; undefined when the runner cannot report it. */
@@ -547,23 +659,61 @@ export class Keyboard {
     }
   }
 
-  /** Non-empty only when both caret reads succeeded and the selection differs. */
-  private async caretMovedNote(
+  /**
+   * Empty when the caret is where it was (or either read is unavailable, so nothing can be
+   * said). When it moved, restore it with `set_selection` and report from a read-back, never
+   * from the restore's own success: a restored caret is confirmed, anything else says it moved.
+   */
+  private async reconcileCaret(
     before: InsertTextState | undefined,
+    route: ShowRoute,
     signal?: AbortSignal,
   ): Promise<string> {
     if (!before) {
       return "";
     }
     const after = await this.readCaret(signal);
-    if (
-      !after ||
-      (after.selectionStart === before.selectionStart && after.selectionEnd === before.selectionEnd)
-    ) {
+    if (!after || sameSelection(before, after)) {
       return "";
     }
-    const range = (state: InsertTextState) => `${state.selectionStart}-${state.selectionEnd}`;
-    return ` (the tap used to show it moved the caret from ${range(before)} to ${range(after)})`;
+    const moved = `the ${route} used to show it moved the caret from ${selectionRange(before)} to ${selectionRange(after)}`;
+    const failure = await this.restoreSelection(before, signal);
+    if (failure) {
+      return ` (${moved}; restoring it failed: ${failure})`;
+    }
+    const verified = await this.readCaret(signal);
+    if (!verified) {
+      return ` (${moved}; restore was sent but the caret could not be read back to confirm it)`;
+    }
+    return sameSelection(before, verified)
+      ? ` (${moved}; restored to ${selectionRange(before)})`
+      : ` (${moved}; restoring it did not hold, the caret is at ${selectionRange(verified)})`;
+  }
+
+  /** Why the selection could not be restored, or undefined once the runner accepted it. */
+  private async restoreSelection(
+    before: InsertTextState,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    throwIfAborted(signal);
+    try {
+      const result = await awaitWhileRequestIsLive(
+        this.getOpenClient().requestFocusedInputAction(
+          "set_selection",
+          { start: before.selectionStart, end: before.selectionEnd },
+          undefined,
+          undefined,
+          signal,
+        ),
+        signal,
+      );
+      throwIfAborted(signal);
+      return result.success ? undefined : (result.error ?? "the runner refused set_selection");
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Keyboard open: caret restore errored: ${errorMessage(error)}`, error);
+      return errorMessage(error);
+    }
   }
 
   private async close(signal?: AbortSignal): Promise<KeyboardResult> {
@@ -639,8 +789,12 @@ export class Keyboard {
   ): Promise<KeyboardDetection> {
     const deadline = this.timer.now() + Keyboard.STATE_CONFIRMATION_TIMEOUT_MS;
 
+    // An open IME whose window still reaches past the screen is mid slide-in (#10152): its
+    // bounds are not where it ends up, so keep sampling until they settle or time runs out.
+    const unsettled = (state: KeyboardDetection) =>
+      state.error || state.open !== expectedOpen || (expectedOpen && state.boundsOffScreen);
     let lastState = await this.readKeyboardStateBefore(deadline, signal);
-    while (lastState.error || lastState.open !== expectedOpen) {
+    while (unsettled(lastState)) {
       const remainingMs = deadline - this.timer.now();
       throwIfAborted(signal);
       if (remainingMs <= 0) {
@@ -710,6 +864,7 @@ export class Keyboard {
         source: "window",
         windowInfoAvailable,
         imeWindowPresent: true,
+        boundsOffScreen: this.reachesPastScreen(windowBounds, viewHierarchy),
       };
     }
 
@@ -742,6 +897,20 @@ export class Keyboard {
       }
     }
     return null;
+  }
+
+  /** False when the screen size is unknown: nothing can then be said about the bounds. */
+  private reachesPastScreen(bounds: ElementBounds, viewHierarchy: ViewHierarchyResult): boolean {
+    const { screenWidth, screenHeight } = viewHierarchy;
+    if (!isPositiveNumber(screenWidth) || !isPositiveNumber(screenHeight)) {
+      return false;
+    }
+    return (
+      bounds.left < 0 ||
+      bounds.top < 0 ||
+      bounds.right > screenWidth ||
+      bounds.bottom > screenHeight
+    );
   }
 
   private isValidBounds(bounds: ElementBounds): boolean {

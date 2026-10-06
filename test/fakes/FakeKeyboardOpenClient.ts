@@ -10,9 +10,22 @@ export interface RecordedNodeAction {
   selector: AccessibilityNodeSelector;
 }
 
+export interface RecordedFocusedInputAction {
+  action: "click" | "set_selection";
+  selection?: { start: number; end: number };
+}
+
 /** Scriptable CtrlProxy slice for Keyboard.open: node click plus caret reads. */
 export class FakeKeyboardOpenClient implements KeyboardOpenClient {
   readonly nodeActions: RecordedNodeAction[] = [];
+  /** `click` / `set_selection` calls on the input-focused node, in call order. */
+  readonly focusedInputActions: RecordedFocusedInputAction[] = [];
+  readonly focusedInputSignals: Array<AbortSignal | undefined> = [];
+  /** Scripted replies for the input-focused node; both succeed by default. */
+  focusedClickResult: A11yActionResult = { success: true, action: "click", totalTimeMs: 1 };
+  restoreResult: A11yActionResult = { success: true, action: "set_selection", totalTimeMs: 1 };
+  /** Runs while a focused-input action is in flight. */
+  onFocusedInputAction: ((action: "click" | "set_selection") => void) | undefined;
   /** Signals handed to each CtrlProxy call, in call order. */
   readonly selectorSupportSignals: Array<AbortSignal | undefined> = [];
   readonly nodeActionSignals: Array<AbortSignal | undefined> = [];
@@ -49,6 +62,21 @@ export class FakeKeyboardOpenClient implements KeyboardOpenClient {
     this.nodeActionSignals.push(signal);
     this.onNodeAction?.();
     return this.actionResult;
+  }
+
+  async requestFocusedInputAction(
+    action: "click" | "set_selection",
+    selection?: { start: number; end: number },
+    timeoutMs?: number,
+    perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    void timeoutMs;
+    void perf;
+    this.focusedInputActions.push({ action, ...(selection ? { selection } : {}) });
+    this.focusedInputSignals.push(signal);
+    this.onFocusedInputAction?.(action);
+    return action === "click" ? this.focusedClickResult : this.restoreResult;
   }
 
   async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {

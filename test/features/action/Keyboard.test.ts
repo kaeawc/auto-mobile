@@ -122,6 +122,18 @@ describe("Keyboard", () => {
     },
   });
 
+  // The runner declined the focused-input click, so no click reached the field.
+  const refuseFocusedInputClick = () => {
+    fakeClient.focusedClickResult = {
+      success: false,
+      action: "click",
+      totalTimeMs: 1,
+      error: "Accessibility action is unavailable: click",
+      dispatched: true,
+      acknowledged: true,
+    };
+  };
+
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
     fakeAdbFactory = { create: () => fakeAdb };
@@ -210,6 +222,7 @@ describe("Keyboard", () => {
         },
       },
     };
+    refuseFocusedInputClick();
     fakeHierarchy.setResults([closedHierarchy, closedHierarchy, keyboardWindowHierarchy()]);
     const keyboard = newKeyboard();
 
@@ -226,6 +239,7 @@ describe("Keyboard", () => {
   });
 
   test("open taps focused input when keyboard is closed", async () => {
+    refuseFocusedInputClick();
     fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
     const keyboard = newKeyboard();
 
@@ -287,6 +301,7 @@ describe("Keyboard", () => {
 
     test("falls back to the tap when the runner lacks node selectors", async () => {
       fakeClient.supportsSelectors = false;
+      refuseFocusedInputClick();
       fakeHierarchy.setResults([
         selectorField({ "resource-id": "", "test-tag": "notes-field" }),
         keyboardWindowHierarchy(),
@@ -300,6 +315,7 @@ describe("Keyboard", () => {
     });
 
     test("falls back to the tap when the resource-id is shared by another node", async () => {
+      refuseFocusedInputClick();
       const shared: ViewHierarchyResult = {
         hierarchy: {
           node: {
@@ -421,6 +437,7 @@ describe("Keyboard", () => {
         ["unique-id", { "unique-id": "notes-unique" }],
       ])("taps instead of clicking when the %s is shared by another node", async (_, ids) => {
         const field = { "resource-id": "", ...ids };
+        refuseFocusedInputClick();
         fakeHierarchy.setResults([withDuplicate(field, ids), keyboardWindowHierarchy()]);
 
         const result = await newKeyboard().execute("open");
@@ -428,6 +445,21 @@ describe("Keyboard", () => {
         expect(result.success).toBe(true);
         expect(fakeClient.nodeActions).toEqual([]);
         expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
+      });
+
+      test.each([
+        ["test-tag", { "test-tag": "notes-field" }],
+        ["unique-id", { "unique-id": "notes-unique" }],
+      ])("clicks the focused input when the %s is shared by another node", async (_, ids) => {
+        const field = { "resource-id": "", ...ids };
+        fakeHierarchy.setResults([withDuplicate(field, ids), keyboardWindowHierarchy()]);
+
+        const result = await newKeyboard().execute("open");
+
+        expect(result.success).toBe(true);
+        expect(fakeClient.nodeActions).toEqual([]);
+        expect(fakeClient.focusedInputActions).toEqual([{ action: "click" }]);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
       });
 
       test("clicks when the full collection-indexed selector is unique although the tag repeats", async () => {
@@ -449,6 +481,7 @@ describe("Keyboard", () => {
       });
 
       test("taps instead of clicking when the hierarchy is incomplete", async () => {
+        refuseFocusedInputClick();
         fakeHierarchy.setResults([
           { ...selectorField(), ctrlProxyIncomplete: true },
           keyboardWindowHierarchy(),
@@ -461,10 +494,12 @@ describe("Keyboard", () => {
       });
     });
 
-    test("reports a moved caret when only the tap fallback can show the keyboard", async () => {
+    test("restores and confirms the caret when only the tap fallback can show the keyboard", async () => {
+      refuseFocusedInputClick();
       fakeClient.queueInsertStates(
         { isShowingHintText: false, selectionStart: 30, selectionEnd: 30 },
         { isShowingHintText: false, selectionStart: 12, selectionEnd: 12 },
+        { isShowingHintText: false, selectionStart: 30, selectionEnd: 30 },
       );
       fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
 
@@ -472,12 +507,17 @@ describe("Keyboard", () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toBe(
-        "Keyboard opened (the tap used to show it moved the caret from 30-30 to 12-12)",
+        "Keyboard opened (the tap used to show it moved the caret from 30-30 to 12-12; restored to 30-30)",
       );
+      expect(fakeClient.focusedInputActions.at(-1)).toEqual({
+        action: "set_selection",
+        selection: { start: 30, end: 30 },
+      });
     });
 
     test("stays quiet when the tap fallback leaves the caret where it was", async () => {
       const state = { isShowingHintText: false, selectionStart: 5, selectionEnd: 9 };
+      refuseFocusedInputClick();
       fakeClient.queueInsertStates(state, state);
       fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
 
@@ -587,6 +627,7 @@ describe("Keyboard", () => {
 
       test("an abort that lands on a started tap fallback is indeterminate", async () => {
         const controller = live();
+        refuseFocusedInputClick();
         fakeHierarchy.setResults([focusedInputHierarchy()]);
         fakeHierarchy.setDefaultResult(baseHierarchy());
         // adb terminates the started process on abort and rejects once it has settled.
@@ -615,6 +656,7 @@ describe("Keyboard", () => {
       });
 
       test("a tap fallback failure without an abort still propagates unchanged", async () => {
+        refuseFocusedInputClick();
         fakeHierarchy.setResults([focusedInputHierarchy()]);
         fakeAdb.setCommandError("shell input tap", new Error("adb offline"));
 

@@ -282,6 +282,14 @@ export interface RequestActionMessage {
     collectionRow?: number;
     collectionColumn?: number;
   };
+  /**
+   * Address the input-focused editable node (no selector needed). Additive: a runner that predates
+   * it ignores the field and rejects the request for lacking a selector, so nothing runs.
+   */
+  focusedInput?: boolean;
+  /** `set_selection` range on the focused input. */
+  selectionStart?: number;
+  selectionEnd?: number;
 }
 
 /** `@SerialName("request_activate_accessibility_link")` → `RequestActivateAccessibilityLink` */
@@ -1117,6 +1125,9 @@ export const ctrlProxyRequests = {
     action: string;
     resourceId?: string;
     selector?: RequestActionMessage["selector"];
+    focusedInput?: boolean;
+    selectionStart?: number;
+    selectionEnd?: number;
   }): RequestActionMessage {
     return {
       type: "request_action",
@@ -1124,6 +1135,9 @@ export const ctrlProxyRequests = {
       action: args.action,
       resourceId: args.resourceId,
       selector: args.selector,
+      ...(args.focusedInput ? { focusedInput: true } : {}),
+      ...(args.selectionStart === undefined ? {} : { selectionStart: args.selectionStart }),
+      ...(args.selectionEnd === undefined ? {} : { selectionEnd: args.selectionEnd }),
     };
   },
 

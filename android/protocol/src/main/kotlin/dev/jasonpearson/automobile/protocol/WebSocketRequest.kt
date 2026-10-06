@@ -297,6 +297,15 @@ data class RequestAction(
   val boundsTop: Int? = null,
   val boundsRight: Int? = null,
   val boundsBottom: Int? = null,
+  /**
+   * Address the input-focused editable node instead of a selector or resource id. A runner that
+   * predates this field ignores it and rejects the request for lacking a selector, so the host
+   * falls back without any action having run.
+   */
+  val focusedInput: Boolean = false,
+  /** Range for `set_selection` on the focused input. */
+  val selectionStart: Int? = null,
+  val selectionEnd: Int? = null,
 ) : WebSocketRequest()
 
 /**

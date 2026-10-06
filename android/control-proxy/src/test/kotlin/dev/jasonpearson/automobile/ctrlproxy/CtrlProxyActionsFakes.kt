@@ -100,6 +100,13 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) {}
 
+  override fun requestFocusedInputAction(
+    requestId: String?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  ) {}
+
   override fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
@@ -424,6 +431,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     resourceId: String?,
     selector: dev.jasonpearson.automobile.protocol.NodeSelector?,
   ) = record("requestAction", requestId, action, resourceId, selector)
+
+  override fun requestFocusedInputAction(
+    requestId: String?,
+    action: String,
+    selectionStart: Int?,
+    selectionEnd: Int?,
+  ) = record("requestFocusedInputAction", requestId, action, selectionStart, selectionEnd)
 
   override fun requestActivateAccessibilityLink(
     requestId: String?,

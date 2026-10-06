@@ -15,6 +15,12 @@
         let contentType: String
     }
 
+    /// A mock rule the device's regex engine refused, with its reason (issue #10101).
+    struct RejectedMockRule: Codable, Equatable, Sendable {
+        let mockId: String
+        let reason: String
+    }
+
     struct NetworkErrorSimulationDTO: Codable, Equatable, Sendable {
         let enabled: Bool
         let errorType: String?
@@ -200,7 +206,13 @@
         /// Replace the rule list. The host re-sends its whole list on every change and reconnect, so a rule
         /// this store already holds keeps its use counter instead of being re-armed from the incoming
         /// `remaining` (issue #10060). A changed rule, or a new app process, starts with a fresh counter.
-        func setRules(_ dtos: [NetworkMockRuleDTO]) {
+        ///
+        /// Returns the rules `NSRegularExpression` refused (the host validates with a different regex engine,
+        /// so it cannot know), each with the compiler's reason, so the host can report them as not installed
+        /// instead of assuming every pushed rule took (issue #10101).
+        @discardableResult
+        func setRules(_ dtos: [NetworkMockRuleDTO]) -> [RejectedMockRule] {
+            var rejected: [RejectedMockRule] = []
             let compiled = dtos.compactMap { dto -> CompiledRule? in
                 do {
                     let host = try NSRegularExpression(pattern: dto.host)
@@ -219,6 +231,10 @@
                     )
                 } catch {
                     InternalLogger.debug("[NetworkMockRuleStore] Skipping invalid regex for \(dto.mockId): \(error)")
+                    rejected.append(RejectedMockRule(
+                        mockId: dto.mockId,
+                        reason: "invalid regex: \(error.localizedDescription)"
+                    ))
                     return nil
                 }
             }
@@ -234,6 +250,7 @@
                     return carried
                 }
             }
+            return rejected
         }
 
         public func setFaultRules(_ dtos: [NetworkFaultRuleDTO]) {

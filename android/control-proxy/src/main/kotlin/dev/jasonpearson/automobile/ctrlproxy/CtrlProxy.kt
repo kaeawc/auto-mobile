@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
@@ -110,6 +111,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -2951,7 +2953,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       occlusionEnabled = occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = broadcastNetworkMockRules(rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    broadcastNetworkMockRules(requestId, rulesJson)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
@@ -3167,16 +3170,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private fun broadcastNetworkMockRules(rulesJson: String) {
+  private fun broadcastNetworkMockRules(requestId: String?, rulesJson: String) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_MOCK_RULES).apply {
           putExtra(NetworkMockRuleStore.EXTRA_RULES_JSON, rulesJson)
         }
-      sendBroadcast(intent)
-      Log.d(TAG, "Broadcast network mock rules")
+      if (requestId == null) {
+        sendBroadcast(intent)
+        Log.d(TAG, "Broadcast network mock rules")
+        return
+      }
+      // The app's rule store answers an ordered broadcast through its result data (which rules the
+      // device's regex engine rejected); forward that to the host as the correlated reply. An SDK
+      // that predates the reply leaves the data null and the host reports "not confirmed".
+      sendOrderedBroadcast(
+        intent,
+        null,
+        object : BroadcastReceiver() {
+          override fun onReceive(context: Context?, intent: Intent?) {
+            replyNetworkMockRules(networkMockRulesResult(requestId, resultData))
+          }
+        },
+        null,
+        Activity.RESULT_OK,
+        null,
+        null,
+      )
+      Log.d(TAG, "Broadcast network mock rules (awaiting report)")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        replyNetworkMockRules(
+          networkMockRulesFailure(requestId, "Failed to broadcast network mock rules: ${e.message}")
+        )
+      }
+    }
+  }
+
+  private fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      serviceScope.launch { webSocketServer.broadcast(result) }
     }
   }
 

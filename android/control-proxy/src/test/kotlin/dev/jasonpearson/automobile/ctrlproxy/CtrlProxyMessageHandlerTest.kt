@@ -709,6 +709,17 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `set_network_mock_rules passes its requestId so the rejected-rule report can be routed`() =
+    runTest {
+      dispatch("""{"type":"set_network_mock_rules","requestId":"mock-7","rules":[]}""")
+      assertEquals("setNetworkMockRules", lastCall.first)
+      assertEquals("mock-7", lastCall.second[1])
+
+      dispatch("""{"type":"set_network_mock_rules","rules":[]}""")
+      assertEquals(null, lastCall.second[1])
+    }
+
+  @Test
   fun `dispatches set_network_error_simulation`() = runTest {
     dispatch(
       """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":5,"expiresAtEpochMs":99999}"""

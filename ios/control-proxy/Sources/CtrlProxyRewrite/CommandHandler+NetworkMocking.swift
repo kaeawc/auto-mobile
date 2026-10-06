@@ -9,15 +9,17 @@ extension CommandHandler {
     )
         async -> SetNetworkMockRulesResponse
     {
-        let succeeded = if await sdkServerInfoForTrackedForegroundApp() != nil {
-            await sdkHierarchyClient?.setMockRules(request.rules) ?? false
+        let outcome = if await sdkServerInfoForTrackedForegroundApp() != nil {
+            await sdkHierarchyClient?.pushMockRules(request.rules) ?? SdkMockRulesOutcome(ok: false)
         } else {
-            false
+            SdkMockRulesOutcome(ok: false)
         }
         return SetNetworkMockRulesResponse(
             requestId: request.requestId,
-            ok: succeeded,
-            totalTimeMs: totalTimeMs(from: startTime)
+            ok: outcome.ok,
+            totalTimeMs: totalTimeMs(from: startTime),
+            rejectedMockIds: outcome.rejectedMockIds,
+            rejectedReasons: outcome.rejectedReasons
         )
     }
 

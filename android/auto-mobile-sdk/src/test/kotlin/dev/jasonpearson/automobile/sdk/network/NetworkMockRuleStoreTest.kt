@@ -249,6 +249,36 @@ class NetworkMockRuleStoreTest {
     )
   }
 
+  // Issue #10101: the device compiles with its own regex engine, so the host cannot know what it
+  // will refuse. applyRules reports exactly the rules it skipped, with the compiler's reason.
+  @Test
+  fun `applyRules returns the ids and reasons of the rules the device engine rejected`() {
+    val store = createStore()
+
+    val rejected =
+      store.applyRules(
+        listOf(
+          rule(mockId = "ok"),
+          rule(mockId = "brace", path = "/items/{id}"),
+          rule(mockId = "bracket", host = "[invalid"),
+        )
+      )
+
+    assertEquals(listOf("brace", "bracket"), rejected.map { it.mockId })
+    assertTrue(rejected.all { it.reason.startsWith("invalid regex: ") })
+    assertEquals(1, store.getRuleCount())
+    assertEquals("ok", store.findMatchingRule("api.example.com", "/users", "GET")?.mockId)
+    assertNull(store.findMatchingRule("api.example.com", "/items/{id}", "GET"))
+  }
+
+  @Test
+  fun `applyRules reports nothing when every rule compiles`() {
+    val store = createStore()
+
+    assertTrue(store.applyRules(listOf(rule(mockId = "a"), rule(mockId = "b"))).isEmpty())
+    assertTrue(store.applyRules(emptyList()).isEmpty())
+  }
+
   // Issue #10060: the host re-sends its whole list on every change and reconnect; an exhausted
   // rule must stay exhausted when the same rule (same mockId and definition) is re-sent.
   @Test

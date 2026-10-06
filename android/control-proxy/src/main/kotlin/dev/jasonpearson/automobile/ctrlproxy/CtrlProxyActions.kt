@@ -316,7 +316,12 @@ interface CtrlProxyActions {
     occlusionEnabled: Boolean,
   )
 
-  fun setNetworkMockRules(rulesJson: String)
+  /**
+   * Pushes the rule list to the app's rule store. A non-null [requestId] asks for a
+   * `set_network_mock_rules_result` reply reporting the rules the device engine rejected
+   * (issue #10101); null keeps the fire-and-forget broadcast.
+   */
+  fun setNetworkMockRules(requestId: String?, rulesJson: String)
 
   fun setNetworkErrorSimulation(
     enabled: Boolean,

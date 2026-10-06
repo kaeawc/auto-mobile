@@ -9,7 +9,12 @@ import {
   type SimulatedErrorType,
   type SimulationConfig,
 } from "./NetworkState";
-import { buildNetworkMockRules } from "./networkMockRules";
+import {
+  buildNetworkMockRules,
+  type NetworkMockRuleSync,
+  type NetworkMockSyncReport,
+  type RejectedMockRule,
+} from "./networkMockRules";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -139,19 +144,62 @@ type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
 const NETWORK_GRAPH_MAX_EVENTS = 10_000;
 
-type DeviceSyncResult = { synced: true } | { synced: false; warning: string };
+/**
+ * `report` is what the device said about a pushed mock-rule list (#10101); absent for pushes that
+ * carry no rule report (error simulation, or a platform without one).
+ */
+type DeviceSyncResult =
+  | { synced: true; report?: NetworkMockSyncReport }
+  | { synced: false; warning: string };
 
-function deviceSyncFields(result: DeviceSyncResult): { deviceSynced?: false; warning?: string } {
-  return result.synced ? {} : { deviceSynced: false, warning: result.warning };
+interface DeviceSyncFields {
+  deviceSynced?: false;
+  warning?: string;
+  /** Rules the device's regex engine refused: stored on the host but NOT installed. */
+  notInstalled?: RejectedMockRule[];
+  /** False when the rules were sent but the device did not report what it installed. */
+  deviceConfirmed?: false;
+  note?: string;
 }
+
+const MOCK_RULES_UNCONFIRMED_NOTE =
+  "Mock rules were sent to the device, but it did not report which it installed " +
+  "(an older SDK or CtrlProxy, or no reply in time). A rule its regex engine rejects would be skipped silently.";
+
+function rejectedRulesFields(rejected: RejectedMockRule[]): DeviceSyncFields {
+  const listed = rejected.map((rule) => `${rule.mockId} (${rule.reason})`).join("; ");
+  return {
+    deviceSynced: false,
+    notInstalled: rejected,
+    warning:
+      `${rejected.length} mock rule(s) are stored but were NOT installed: the device's regex ` +
+      `engine rejected them: ${listed}. Fix the host/path pattern and add the rule again, or ` +
+      "clear it with clearMockNetwork.",
+  };
+}
+
+function deviceSyncFields(result: DeviceSyncResult): DeviceSyncFields {
+  if (!result.synced) {
+    return { deviceSynced: false, warning: result.warning };
+  }
+  if (result.report?.status === "unconfirmed") {
+    return { deviceConfirmed: false, note: MOCK_RULES_UNCONFIRMED_NOTE };
+  }
+  if (result.report?.status === "reported" && result.report.rejected.length > 0) {
+    return rejectedRulesFields(result.report.rejected);
+  }
+  return {};
+}
+
+const ANDROID_NOT_SYNCED_WARNING =
+  "Network state is stored but was not synced to the device; it will be applied when the " +
+  "device connection is restored (error simulation keeps its original expiry).";
 
 function syncAndroidNetworkMessage(
   device: BootedDevice,
   message: Record<string, unknown>,
 ): DeviceSyncResult {
-  const warning =
-    "Network state is stored but was not synced to the device; it will be applied when the " +
-    "device connection is restored (error simulation keeps its original expiry).";
+  const warning = ANDROID_NOT_SYNCED_WARNING;
   try {
     if (AndroidCtrlProxyClient.getInstance(device).sendMessage(JSON.stringify(message))) {
       return { synced: true };
@@ -227,15 +275,28 @@ async function syncMockRulesToDevice(
   if (device.platform === "android") {
     // This device's rules only (#10061). Device-side stores keep consumption per
     // mockId across a re-push (#10060), so resending the full list is safe.
-    return syncAndroidNetworkMessage(device, {
-      type: "set_network_mock_rules",
-      rules: buildNetworkMockRules(state, device.deviceId),
-    });
+    return syncAndroidMockRules(device, buildNetworkMockRules(state, device.deviceId));
   }
   if (device.platform !== "ios") {
     return { synced: true };
   }
   return syncIosMockRules(device);
+}
+
+async function syncAndroidMockRules(
+  device: BootedDevice,
+  rules: NetworkMockRuleSync[],
+): Promise<DeviceSyncResult> {
+  try {
+    const push = await AndroidCtrlProxyClient.getInstance(device).pushNetworkMockRules(rules);
+    if (push.delivered) {
+      return { synced: true, report: push.report };
+    }
+    logger.warn(`[networkTools] ${ANDROID_NOT_SYNCED_WARNING} (${push.error})`);
+  } catch (error) {
+    logger.warn(`[networkTools] Failed to sync network state: ${errorMessage(error)}`, error);
+  }
+  return { synced: false, warning: ANDROID_NOT_SYNCED_WARNING };
 }
 
 const IOS_MOCK_SYNC_PENDING = "will be applied when the device connection is restored";
@@ -258,9 +319,10 @@ const IOS_MOCK_SYNC_WARNINGS: Record<Exclude<IosMockRuleSyncOutcome, "sent">, st
 
 async function syncIosMockRules(device: BootedDevice): Promise<DeviceSyncResult> {
   try {
-    const outcome = await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
+    const { outcome, report } =
+      await IOSCtrlProxyClient.getInstance(device).syncNetworkMockRulesIfAvailable();
     if (outcome === "sent") {
-      return { synced: true };
+      return { synced: true, report };
     }
     const warning = IOS_MOCK_SYNC_WARNINGS[outcome];
     logger.warn(`[networkTools] ${warning}`);

@@ -457,7 +457,8 @@ class CtrlProxyMessageHandler(
         )
       is SetNetworkMockRules ->
         actions.setNetworkMockRules(
-          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules)
+          request.requestId,
+          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules),
         )
       is SetNetworkErrorSimulation ->
         actions.setNetworkErrorSimulation(

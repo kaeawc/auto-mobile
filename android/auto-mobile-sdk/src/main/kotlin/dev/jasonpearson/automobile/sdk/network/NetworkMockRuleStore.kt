@@ -4,7 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
+import dev.jasonpearson.automobile.protocol.RejectedNetworkMockRule
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.ControlBroadcastReply
 import dev.jasonpearson.automobile.sdk.NetworkControlReceiverRegistrar
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.builtins.ListSerializer
@@ -101,8 +104,8 @@ constructor(
   @Volatile private var errorSimulation: ErrorSimulationConfig? = null
 
   private val json = Json { ignoreUnknownKeys = true }
-  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent ->
-    handleControlBroadcast(intent)
+  private val controlReceiverRegistrar = NetworkControlReceiverRegistrar { _, intent, reply ->
+    handleControlBroadcast(intent, reply)
   }
 
   val ruleMatcher: RuleMatcher =
@@ -128,7 +131,17 @@ constructor(
    * with a fresh counter.
    */
   fun setRules(dtos: List<NetworkMockRuleDto>) {
+    applyRules(dtos)
+  }
+
+  /**
+   * [setRules] that also returns the rules this device's regex engine refused (ICU on Android
+   * differs from the host's JavaScript engine), each with the compiler's message, so the host can
+   * report them as not installed instead of assuming every pushed rule took (issue #10101).
+   */
+  fun applyRules(dtos: List<NetworkMockRuleDto>): List<RejectedNetworkMockRule> {
     val previousById = rules.associateBy { it.mockId }
+    val rejected = mutableListOf<RejectedNetworkMockRule>()
     val compiledRules = buildList {
       for (dto in dtos) {
         try {
@@ -150,14 +163,15 @@ constructor(
             )
           )
         } catch (e: Exception) {
-          AutoMobileSDK.logger.w(TAG) {
-            "Skipping mock rule ${dto.mockId}: invalid regex: ${e.message}"
-          }
+          val reason = "invalid regex: ${e.message}"
+          AutoMobileSDK.logger.w(TAG) { "Skipping mock rule ${dto.mockId}: $reason" }
+          rejected += RejectedNetworkMockRule(dto.mockId, reason)
         }
       }
     }
     rules = compiledRules
     AutoMobileSDK.logger.d(TAG) { "Updated mock rules: ${compiledRules.size} active" }
+    return rejected
   }
 
   private fun CompiledMockRule.isSameDefinitionAs(dto: NetworkMockRuleDto): Boolean =
@@ -265,7 +279,8 @@ constructor(
     controlReceiverRegistrar.unregister(context)
   }
 
-  private fun handleControlBroadcast(intent: Intent?) {
+  /** Visible to tests: applies one control broadcast and answers it when it is ordered. */
+  internal fun handleControlBroadcast(intent: Intent?, reply: ControlBroadcastReply? = null) {
     if (intent == null) return
     when (intent.action) {
       ACTION_NETWORK_MOCK_RULES -> {
@@ -276,7 +291,12 @@ constructor(
               ListSerializer(NetworkMockRuleDto.serializer()),
               rulesJson,
             )
-          setRules(dtos)
+          val rejected = applyRules(dtos)
+          // Only an ordered broadcast has a reply channel; a plain one (an older CtrlProxy, or a
+          // reconnect resync) cannot be answered and nothing waits for it.
+          if (reply != null && reply.isOrdered) {
+            reply.resultData = NetworkMockRuleReportContract.append(reply.resultData, rejected)
+          }
         } catch (e: Exception) {
           AutoMobileSDK.logger.e(TAG) { "Failed to parse mock rules: ${e.message}" }
         }

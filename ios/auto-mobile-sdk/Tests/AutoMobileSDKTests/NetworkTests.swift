@@ -397,6 +397,61 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "GET"))
         }
 
+        private func mockRule(_ mockId: String, host: String = ".*", path: String) -> NetworkMockRuleDTO {
+            NetworkMockRuleDTO(
+                mockId: mockId,
+                host: host,
+                path: path,
+                method: "*",
+                limit: nil,
+                remaining: nil,
+                statusCode: 500,
+                responseHeaders: [:],
+                responseBody: "",
+                contentType: "application/json"
+            )
+        }
+
+        /// Issue #10101: NSRegularExpression decides what compiles, so the store reports what it skipped.
+        func testNetworkMockRuleStoreReportsTheRulesItRejected() {
+            let store = NetworkMockRuleStore()
+
+            let rejected = store.setRules([
+                mockRule("ok", path: "^/ok$"),
+                mockRule("bad-path", path: "[unterminated"),
+                mockRule("bad-host", host: "(", path: "^/ok$"),
+            ])
+
+            XCTAssertEqual(rejected.map(\.mockId), ["bad-path", "bad-host"])
+            XCTAssertTrue(rejected.allSatisfy { $0.reason.hasPrefix("invalid regex: ") })
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/ok", method: "GET"))
+        }
+
+        func testNetworkMockRuleStoreReportsNothingWhenEveryRuleCompiles() {
+            let store = NetworkMockRuleStore()
+
+            XCTAssertTrue(store.setRules([mockRule("a", path: "/a"), mockRule("b", path: "/b")]).isEmpty)
+            XCTAssertTrue(store.setRules([]).isEmpty)
+        }
+
+        func testSetMockRulesResponseBodyListsRejectedRulesForTheRunner() throws {
+            let body = SdkHierarchyServer.setMockRulesResponseBody(rejected: [
+                RejectedMockRule(mockId: "m1", reason: "invalid regex: x"),
+            ])
+
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["status"] as? String, "ok")
+            let rejected = try XCTUnwrap(json["rejected"] as? [[String: String]])
+            XCTAssertEqual(rejected, [["mockId": "m1", "reason": "invalid regex: x"]])
+        }
+
+        func testSetMockRulesResponseBodyReportsAnEmptyListWhenNothingWasRejected() throws {
+            let body = SdkHierarchyServer.setMockRulesResponseBody(rejected: [])
+
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual((json["rejected"] as? [Any])?.count, 0)
+        }
+
         func testNetworkMockRuleStoreHonorsLimit() {
             let store = NetworkMockRuleStore()
             store.setRules([

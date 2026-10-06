@@ -136,7 +136,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     occlusionEnabled: Boolean,
   ) {}
 
-  override fun setNetworkMockRules(rulesJson: String) {}
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) {}
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
@@ -481,7 +481,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = record("setNetworkMockRules", rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    record("setNetworkMockRules", rulesJson, requestId)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,

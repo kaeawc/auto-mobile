@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient, type IosMockRuleSyncOutcome } from "../../src/features/observe/ios";
+import {
+  IOSCtrlProxyClient,
+  type IosMockRuleSyncOutcome,
+  type IosMockRuleSyncResult,
+} from "../../src/features/observe/ios";
 import type { BootedDevice } from "../../src/models";
 import { NetworkState } from "../../src/server/NetworkState";
+import type { NetworkMockSyncReport } from "../../src/server/networkMockRules";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   isIosNetworkErrorSimulationAvailable,
@@ -34,11 +39,12 @@ describe("network tool schema", () => {
   let androidMessages: string[];
   let iosErrorSimulations: unknown[];
   let iosMockRuleSyncCalls: number;
-  let iosMockRuleSyncResult: IosMockRuleSyncOutcome | Error;
+  let iosMockRuleSyncResult: IosMockRuleSyncOutcome | IosMockRuleSyncResult | Error;
   let iosGetInstanceSpy: ReturnType<typeof spyOn>;
   let androidGetInstanceSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
   let androidSendResult: boolean | Error;
+  let androidMockReport: NetworkMockSyncReport;
   let originalIosBundlePath: string | undefined;
   let originalIosIpaPath: string | undefined;
   let originalSkipDownload: string | undefined;
@@ -72,6 +78,7 @@ describe("network tool schema", () => {
     iosMockRuleSyncResult = "sent";
     androidMessages = [];
     androidSendResult = true;
+    androidMockReport = { status: "reported", rejected: [] };
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
@@ -87,7 +94,9 @@ describe("network tool schema", () => {
         if (iosMockRuleSyncResult instanceof Error) {
           throw iosMockRuleSyncResult;
         }
-        return iosMockRuleSyncResult;
+        return typeof iosMockRuleSyncResult === "string"
+          ? { outcome: iosMockRuleSyncResult }
+          : iosMockRuleSyncResult;
       },
     } as IOSCtrlProxyClient);
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
@@ -97,6 +106,17 @@ describe("network tool schema", () => {
           throw androidSendResult;
         }
         return androidSendResult;
+      },
+      // The real client waits for the device's report; here the send result stands in for the
+      // delivery and androidMockReport for what the device said (#10101).
+      pushNetworkMockRules: async (rules: unknown[]) => {
+        androidMessages.push(JSON.stringify({ type: "set_network_mock_rules", rules }));
+        if (androidSendResult instanceof Error) {
+          throw androidSendResult;
+        }
+        return androidSendResult
+          ? { delivered: true as const, report: androidMockReport }
+          : { delivered: false as const, error: "not connected" };
       },
     } as AndroidCtrlProxyClient);
     registerNetworkTools();
@@ -914,6 +934,105 @@ describe("network tool schema", () => {
     );
     expect(payload).not.toHaveProperty("deviceSynced");
     expect(payload).not.toHaveProperty("warning");
+  });
+
+  // Issue #10101: the device compiles host/path with its own regex engine, so a rule the host
+  // accepted can still be skipped. The device's report decides what the tool says was installed.
+  describe("device rule report (#10101)", () => {
+    const rejectedReport: NetworkMockSyncReport = {
+      status: "reported",
+      rejected: [{ mockId: "mock-1", reason: "invalid regex: Illegal repetition" }],
+    };
+    const unconfirmedReport: NetworkMockSyncReport = { status: "unconfirmed" };
+
+    const platforms = [
+      {
+        name: "Android",
+        device: androidDevice,
+        report: (report: NetworkMockSyncReport) => {
+          androidMockReport = report;
+        },
+      },
+      {
+        name: "iOS",
+        device: iosDevice,
+        report: (report: NetworkMockSyncReport) => {
+          iosMockRuleSyncResult = { outcome: "sent", report };
+        },
+      },
+    ];
+
+    for (const platform of platforms) {
+      test(`mockNetwork lists a ${platform.name} rule the device rejected as NOT installed`, async () => {
+        platform.report(rejectedReport);
+        const payload = parseToolJson(
+          await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+            host: "api.example.com",
+            path: "/items/{id}",
+          }),
+        );
+
+        expect(payload.deviceSynced).toBe(false);
+        expect(payload.notInstalled).toEqual(rejectedReport.rejected);
+        expect(payload.warning).toContain("NOT installed");
+        expect(payload.warning).toContain("mock-1 (invalid regex: Illegal repetition)");
+        expect(payload).not.toHaveProperty("deviceConfirmed");
+      });
+
+      test(`mockNetwork reports ${platform.name} rules as sent but not confirmed, without failing`, async () => {
+        platform.report(unconfirmedReport);
+        const payload = parseToolJson(
+          await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+            host: "api.example.com",
+            path: "/one",
+          }),
+        );
+
+        expect(payload.deviceConfirmed).toBe(false);
+        expect(payload.note).toContain("did not report which it installed");
+        expect(payload).not.toHaveProperty("deviceSynced");
+        expect(payload).not.toHaveProperty("warning");
+        expect(payload).not.toHaveProperty("notInstalled");
+        expect(payload.mockId).toBe("mock-1");
+      });
+
+      test(`mockNetwork says nothing extra when the ${platform.name} device installed every rule`, async () => {
+        platform.report({ status: "reported", rejected: [] });
+        const payload = parseToolJson(
+          await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+            host: "api.example.com",
+            path: "/one",
+          }),
+        );
+
+        expect(Object.keys(payload).sort()).toEqual(["mockId", "mocked"]);
+      });
+
+      test(`clearMockNetwork also lists ${platform.name} rules the device still rejects`, async () => {
+        await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+          host: "api.example.com",
+          path: "/one",
+        });
+        await ToolRegistry.getTool("mockNetwork")!.deviceAwareHandler!(platform.device, {
+          host: "api.example.com",
+          path: "/two/{id}",
+        });
+        platform.report({
+          status: "reported",
+          rejected: [{ mockId: "mock-2", reason: "invalid regex: Illegal repetition" }],
+        });
+        const payload = parseToolJson(
+          await ToolRegistry.getTool("clearMockNetwork")!.deviceAwareHandler!(platform.device, {
+            mockId: "mock-1",
+          }),
+        );
+
+        expect(payload.notInstalled).toEqual([
+          { mockId: "mock-2", reason: "invalid regex: Illegal repetition" },
+        ]);
+        expect(payload.cleared).toBe(1);
+      });
+    }
   });
 
   test("clearMockNetwork supports iOS and re-syncs remaining rules", async () => {

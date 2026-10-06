@@ -3557,14 +3557,22 @@ export class DaemonMcpProxy {
     const lastSafeAttemptMs =
       this.heartbeatLeashMs -
       Math.min(this.heartbeatIntervalMs, Math.floor(this.heartbeatLeashMs / 2));
-    // A reconnect already in progress (this tick's own, or another caller's: an
-    // idempotent tool's retry, the close handler's resource-subscription
-    // reconnect) is shared by ensureConnected(), so this tick joins it under the
-    // same bounded deadline below instead of fencing without an attempt. A
-    // daemon that restarted just before the tick would otherwise be fenced with
-    // most of the lease left and a reconnect about to finish (#9995). The
-    // deadline's onTimeout and the fast-failure catch fence before the lease
-    // lapses when the shared reconnect cannot recover.
+    // A reconnect already in progress is shared by ensureConnected(). If it has
+    // consumed the safe retry window, stop claiming ownership before the daemon
+    // can reap it silently while all later ticks wait on the same connection.
+    // Only an in-flight reconnect qualifies: a socket that merely closed (no
+    // reconnect started) must get its bounded attempt below first. At the stdio
+    // cadence the threshold equals one interval, so fencing on `!connected`
+    // alone would fence the first tick without ever trying to reconnect (#9995).
+    if (
+      !this.connected &&
+      this.connecting !== null &&
+      this.boundSessionUuidAt !== undefined &&
+      this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+      throw this.boundSessionExpiredError();
+    }
 
     let abandoned = false;
     const elapsedMs =

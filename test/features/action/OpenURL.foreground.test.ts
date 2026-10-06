@@ -17,6 +17,7 @@ const observation = (appId: string, isFresh = true): ObserveResult => ({
 });
 
 const safari = "com.apple.mobilesafari";
+const springboard = "com.apple.springboard";
 const playground = "com.example.Playground";
 const simulator = {
   name: "iPhone",
@@ -71,7 +72,7 @@ test("https from Playground confirms Safari", async () => {
 test("https universal link confirms as soon as another app is foreground", async () => {
   const { result, timer, observe } = await openWithForeground(
     "https://example.com/item/5",
-    "com.apple.springboard",
+    "com.example.Other",
     [playground],
   );
   expect(result).toEqual({ success: true, url: "https://example.com/item/5" });
@@ -155,7 +156,7 @@ test("any other verified app confirms when a previous app is given", async () =>
     { read: async () => observation(playground) },
     timer,
     undefined,
-    "com.apple.springboard",
+    "com.example.Other",
   );
   expect(confirmed).toBe(true);
   expect(timer.now()).toBe(0);
@@ -185,8 +186,30 @@ test("a stale other-app snapshot does not confirm even with a previous app", asy
     { read: async () => snapshots[reads++]! },
     timer,
     undefined,
-    "com.apple.springboard",
+    "com.example.Other",
   );
   expect(confirmed).toBe(true);
   expect(reads).toBe(2);
+});
+
+test("https universal link: SpringBoard then the app confirms on the app", async () => {
+  const { result, observe, timer } = await openWithForeground(
+    "https://example.com/item/5",
+    "com.example.Other",
+    [springboard, playground],
+  );
+  expect(result).toEqual({ success: true, url: "https://example.com/item/5" });
+  expect(observe.getExecuteCallCount()).toBe(2);
+  expect(timer.getSleepHistory()).toEqual([100]);
+});
+
+test("https universal link: SpringBoard only waits the full timeout and warns", async () => {
+  const { result, timer } = await openWithForeground("https://example.com/item/5", playground, [
+    springboard,
+  ]);
+  expect(result.success).toBe(true);
+  expect(result.warnings).toEqual([
+    expect.stringContaining("foreground app change was not confirmed"),
+  ]);
+  expect(timer.now()).toBe(5_000);
 });

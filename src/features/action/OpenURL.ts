@@ -28,6 +28,16 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
+/**
+ * iOS system-shell bundle ids. SpringBoard owns the launch transition and
+ * system sheets/alerts, so it in the foreground right after an open means "not
+ * handled yet", never "another app handled the link". The repo has no shared
+ * constant for this (the id is a literal at each use site).
+ */
+const IOS_SYSTEM_SHELL_BUNDLE_IDS: ReadonlySet<string> = new Set(["com.apple.springboard"]);
+const isSystemShellApp = (appId: string): boolean =>
+  IOS_SYSTEM_SHELL_BUNDLE_IDS.has(appId.toLowerCase());
+
 const foregroundPollBackoff = sequenceBackoff([100, 200, 400]);
 const FOREGROUND_CHANGE_WARNING =
   "URL was accepted, but an iOS foreground app change was not confirmed; observe before acting on the screen.";
@@ -48,12 +58,34 @@ const foregroundAppId = (observation: ObserveResult): string | undefined => {
   );
 };
 
+const confirmsForegroundChange = (
+  observation: ObserveResult,
+  currentApp: string | undefined,
+  expectedAppId: string,
+  previousApp: string | undefined,
+): currentApp is string => {
+  if (observation.freshness?.isFresh === false || observation.freshness?.verified === false) {
+    return false;
+  }
+  if (!currentApp) {
+    return false;
+  }
+  if (currentApp === expectedAppId) {
+    return true;
+  }
+  return Boolean(previousApp) && currentApp !== previousApp && !isSystemShellApp(currentApp);
+};
+
 /**
  * Poll fresh observations until the foreground app is `expectedAppId`. When
- * `previousApp` is given, any other verified foreground app also confirms: an
- * http(s) universal link is routed to its owning app instead of Safari, so
- * "something other than what was in the foreground before the open" is the
- * plausible-handler signal (issue #9978).
+ * `previousApp` is given, any other verified non-system-shell foreground app
+ * also confirms: an http(s) universal link is routed to its owning app instead
+ * of Safari, so "an app other than what was in the foreground before the open"
+ * is the plausible-handler signal (issue #9978). SpringBoard never confirms; the
+ * poll continues. `previousApp` comes from the pre-action observation, which the
+ * shared action base already refetches when it is flagged stale; forcing a fresh
+ * read here would add an extra observe to every open and need
+ * `skipCallerDisplayFence`, which has unrelated semantics.
  */
 export async function waitForIosForegroundChange(
   expectedAppId: string,
@@ -76,12 +108,7 @@ export async function waitForIosForegroundChange(
       );
       throwIfAborted(signal);
       const currentApp = foregroundAppId(observation);
-      if (
-        observation.freshness?.isFresh !== false &&
-        observation.freshness?.verified !== false &&
-        currentApp &&
-        (currentApp === expectedAppId || (previousApp && currentApp !== previousApp))
-      ) {
+      if (confirmsForegroundChange(observation, currentApp, expectedAppId, previousApp)) {
         logger.info(`[OpenURL] Foreground app after open: ${currentApp}`);
         return true;
       }

@@ -164,24 +164,34 @@ export class MemoryThresholdManager {
     unreachableObjectsThreshold: number;
   }> {
     const db = this.db;
-    const run = async (executor: Kysely<Database>) => {
-      // Try to get existing weighted thresholds
+    // Reads only. A transaction is BEGIN IMMEDIATE (#10042) and takes the writer
+    // lock, so the common "thresholds already exist" path stays outside one.
+    const readExisting = async (executor: Kysely<Database>) => {
       const existingThresholds = await this.getValidThresholdsWith(executor, deviceId, packageName);
-
-      if (existingThresholds.length > 0) {
-        const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
-        if (weighted) {
-          logger.info(
-            `[MemoryThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for ${packageName}`,
-          );
-          return {
-            heapGrowthThresholdMb: weighted.heap_growth_threshold_mb,
-            nativeHeapGrowthThresholdMb: weighted.native_heap_growth_threshold_mb,
-            gcCountThreshold: weighted.gc_count_threshold,
-            gcDurationThresholdMs: weighted.gc_duration_threshold_ms,
-            unreachableObjectsThreshold: weighted.unreachable_objects_threshold,
-          };
-        }
+      if (existingThresholds.length === 0) {
+        return null;
+      }
+      const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
+      if (!weighted) {
+        return null;
+      }
+      logger.info(
+        `[MemoryThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for ${packageName}`,
+      );
+      return {
+        heapGrowthThresholdMb: weighted.heap_growth_threshold_mb,
+        nativeHeapGrowthThresholdMb: weighted.native_heap_growth_threshold_mb,
+        gcCountThreshold: weighted.gc_count_threshold,
+        gcDurationThresholdMs: weighted.gc_duration_threshold_ms,
+        unreachableObjectsThreshold: weighted.unreachable_objects_threshold,
+      };
+    };
+    // Re-checks under the writer lock: a peer may have created thresholds since the
+    // unlocked read, and creating a second set would skew the weighted average.
+    const createIfMissing = async (executor: Kysely<Database>) => {
+      const existing = await readExisting(executor);
+      if (existing) {
+        return existing;
       }
 
       // Try to create adaptive thresholds from baseline
@@ -208,9 +218,10 @@ export class MemoryThresholdManager {
     };
 
     if (db.isTransaction) {
-      return run(db);
+      return createIfMissing(db);
     }
-    return db.transaction().execute(run);
+    const existing = await readExisting(db);
+    return existing ?? db.transaction().execute(createIfMissing);
   }
 
   /**

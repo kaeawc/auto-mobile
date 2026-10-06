@@ -183,7 +183,7 @@ describe("descendant-labelled clickable containers still get contrast-checked", 
     expect(required.get("Typography")).toBe(3);
   });
 
-  test("the same child text becomes large text when the density says it is 49dp tall", async () => {
+  test("child text in a tap-target-sized (49dp) box stays normal text when no text size is reported", async () => {
     const result = await audit(
       auditorWithCaptureFor("7de81117-a1b0-487a-b61d-c59a73e8747d"),
       playgroundButtonsObservation(160),
@@ -192,7 +192,7 @@ describe("descendant-labelled clickable containers still get contrast-checked", 
     expect(countOf(result, "missing-content-description")).toBe(0);
     const required = contrastRequirements(result);
     for (const label of buttonLabels) {
-      expect(required.get(label)).toBe(3);
+      expect(required.get(label)).toBe(4.5);
     }
   });
 });

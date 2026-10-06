@@ -941,12 +941,14 @@ export class DaemonMcpProxy {
   /**
    * Handovers awaiting delivery, per affected session. The first tool call that names the session
    * (or reaches it implicitly) returns the structured error; naming it again attempts an
-   * observation-only resume and retains the handover until the daemon acknowledges the UUID.
+   * observation-only resume until a definitive daemon answer ends the handover.
    */
   private readonly stallHandovers = new Map<
     string,
     { handover: LivenessHandover; delivered: boolean }
   >();
+  /** Definitively lost sessions awaiting one tool-call delivery; these do not fence lifecycle. */
+  private readonly pendingSessionLosses = new Map<string, LivenessHandover>();
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
   /** Tool calls currently awaiting an answer on each daemon connection. */
   private readonly toolCallsInFlight = new WeakMap<DaemonClientLike, number>();
@@ -1171,13 +1173,24 @@ export class DaemonMcpProxy {
       return;
     }
 
-    const allowsLifecycle = this.connectionAllowsLifecycle();
+    try {
+      const connecting = this.connectSingleFlight(this.connectionAllowsLifecycle());
+      try {
+        await connecting;
+      } finally {
+        this.clearConnectionAttempt(connecting);
+      }
+    } catch (error) {
+      await this.handleConnectionFailure(error);
+    }
+  }
+
+  private connectSingleFlight(allowsLifecycle: boolean): Promise<void> {
     this.assertConnectionPlanCompatible(allowsLifecycle);
     // Serialize socket publication, but never let observation-only work ride a lifecycle attempt.
     if (this.connecting) {
       return this.connecting;
     }
-
     const attempt = this.doConnect(allowsLifecycle);
     const connecting = new Promise<void>((resolve, reject) => {
       this.connectionCloseReject = reject;
@@ -1185,15 +1198,15 @@ export class DaemonMcpProxy {
     });
     this.connecting = connecting;
     this.connectingAllowsLifecycle = allowsLifecycle;
-    try {
-      await connecting;
-    } catch (error) {
-      await this.handleConnectionFailure(error);
-    } finally {
-      if (this.connecting === connecting) {
-        this.connecting = null;
-        this.connectionCloseReject = null;
-      }
+    return connecting;
+  }
+
+  private clearConnectionAttempt(connecting: Promise<void>): void {
+    // Unpublish the settled attempt before originators or joiners await shared recovery.
+    if (this.connecting === connecting) {
+      this.connecting = null;
+      this.connectionCloseReject = null;
+      this.connectingAllowsLifecycle = false;
     }
   }
 
@@ -1238,12 +1251,16 @@ export class DaemonMcpProxy {
     }
   }
 
-  private async waitForLivenessRecovery(): Promise<void> {
+  private async waitForLivenessRecovery(signal?: AbortSignal): Promise<void> {
     if (
       daemonLifecycleAllowed() &&
       this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
     ) {
-      await this.livenessRecovery.settled();
+      await raceWithDeadline(this.livenessRecovery.settled(), {
+        timer: this.timer,
+        signal,
+        label: "Daemon liveness recovery",
+      });
     }
   }
 
@@ -1766,6 +1783,7 @@ export class DaemonMcpProxy {
     if (!releasedSessionUuid) {
       return;
     }
+    this.endLostSessionHandover(releasedSessionUuid);
     const isRecoverableHandoff =
       notification.reason !== undefined && isRecoverableDaemonReleaseReason(notification.reason);
     if (notification.reason === "daemon-shutdown") {
@@ -3114,8 +3132,9 @@ export class DaemonMcpProxy {
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
     if (this.hasLivenessLifecycleFence()) {
-      await this.waitForLivenessRecovery();
+      await this.waitForLivenessRecovery(signal);
     }
+    this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.reportStalledSessionNamedBy(callerArgs);
     }
@@ -4114,6 +4133,12 @@ export class DaemonMcpProxy {
         this.dropHeldSession(sessionUuid, true);
       }
     }
+    if (handover.code === PROXY_STALLED_CODE) {
+      // Recovery already received a definitive missing-session or superseded-owner answer.
+      for (const { sessionUuid } of handover.sessions) {
+        this.endLostSessionHandover(sessionUuid);
+      }
+    }
     for (const listener of this.livenessHandoverListeners) {
       try {
         listener(handover);
@@ -4127,7 +4152,7 @@ export class DaemonMcpProxy {
   /**
    * A tool call names a session this proxy gave up on (#10053). The first one returns the
    * structured handover; naming it again attempts an observation-only claim with the same token.
-   * The fence survives failed resumes and lifts only once the daemon acknowledges the UUID.
+   * Unreachable resumes retain the fence; a definitive loss queues one structured loss delivery.
    */
   private async reportStalledSessionNamedBy(args: Record<string, unknown>): Promise<void> {
     const sessionUuid = this.sessionUuidFromArgs(args);
@@ -4157,6 +4182,11 @@ export class DaemonMcpProxy {
         ),
       );
     } catch (error) {
+      if (this.isDefinitiveSessionLoss(error)) {
+        this.endLostSessionHandover(sessionUuid);
+        this.reportPendingSessionLoss(args);
+        return;
+      }
       logger.warn(
         "[DaemonMcpProxy] Handed-over session was not acknowledged; retaining lifecycle fence",
         error,
@@ -4166,6 +4196,69 @@ export class DaemonMcpProxy {
     this.stallHandovers.delete(sessionUuid);
     if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
       this.terminalBoundSession = undefined;
+    }
+  }
+
+  private isDefinitiveSessionLoss(error: unknown): boolean {
+    return (
+      (error !== null &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === DAEMON_SESSION_NOT_FOUND_CODE) ||
+      isLivenessOwnerSupersededError(error) ||
+      isLivenessOwnerConflictError(error)
+    );
+  }
+
+  private endLostSessionHandover(sessionUuid: string): void {
+    const record = this.stallHandovers.get(sessionUuid);
+    if (!record) {
+      return;
+    }
+    // A delivered proxy_stalled already reported this definitive loss. daemon_stalled did not.
+    if (record.handover.code !== PROXY_STALLED_CODE || !record.delivered) {
+      this.pendingSessionLosses.set(sessionUuid, {
+        ...record.handover,
+        code: PROXY_STALLED_CODE,
+        sessions: record.handover.sessions.filter((session) => session.sessionUuid === sessionUuid),
+        lastAcknowledgedHeartbeatAt:
+          record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)
+            ?.lastAcknowledgedHeartbeatAt ?? record.handover.lastAcknowledgedHeartbeatAt,
+        action: "reacquire_lost_sessions",
+      });
+    }
+    this.forgetSessionLivenessState(sessionUuid);
+    this.ownedDeviceSessions.delete(sessionUuid);
+    if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
+      this.terminalBoundSession.reason = "session-not-found";
+    }
+  }
+
+  private reportToolSessionLoss(name: string, args: Record<string, unknown>): void {
+    if (this.pendingSessionLosses.size === 0) {
+      return;
+    }
+    const sessionless =
+      isDeviceSessionAcquisitionTool(name) ||
+      isDeviceInventoryTool(name) ||
+      name === SET_TOOL_ENABLED_TOOL_NAME;
+    const usesDeviceSelector =
+      this.toolTargetsDevice(name) &&
+      this.hasImplicitDeviceSelector(args, name === "setActiveDevice");
+    this.reportPendingSessionLoss(
+      args,
+      !sessionless && !this.canUseSurvivingSession(args, usesDeviceSelector),
+    );
+  }
+
+  private reportPendingSessionLoss(args: Record<string, unknown>, terminalRouted = true): void {
+    const sessionUuid =
+      this.sessionUuidFromArgs(args) ??
+      (terminalRouted ? this.terminalBoundSession?.sessionUuid : undefined);
+    const loss = sessionUuid ? this.pendingSessionLosses.get(sessionUuid) : undefined;
+    if (sessionUuid && loss) {
+      this.pendingSessionLosses.delete(sessionUuid);
+      throw new DaemonSessionStalledError(sessionUuid, loss);
     }
   }
 
@@ -5102,13 +5195,30 @@ export class DaemonMcpProxy {
     };
   }
 
+  private throwIfResourceSessionHandedOver(uri: string): void {
+    if (!this.connected || !this.client) {
+      this.throwIfLivenessHandedOver();
+    }
+    if (isToolOutputResourceUri(uri)) {
+      return;
+    }
+    const sessionUuid =
+      sessionScopedObservationUriSessionUuid(uri) ??
+      this.boundSessionUuid ??
+      this.terminalBoundSession?.sessionUuid;
+    const record = sessionUuid ? this.stallHandovers.get(sessionUuid) : undefined;
+    if (sessionUuid && record) {
+      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+    }
+  }
+
   /**
    * Read a resource from the daemon
    */
   async readResource(uri: string, { signal }: { signal?: AbortSignal } = {}): Promise<any> {
     signal?.throwIfAborted();
-    await this.waitForLivenessRecovery();
-    this.throwIfLivenessHandedOver();
+    await this.waitForLivenessRecovery(signal);
+    this.throwIfResourceSessionHandedOver(uri);
     signal?.throwIfAborted();
     const terminalSessionUuid = this.terminalBoundSession?.sessionUuid;
     // A tool-output artifact read is session-independent, so it survives a
@@ -5193,6 +5303,7 @@ export class DaemonMcpProxy {
     this.livenessAcks.clear();
     this.sessionDeviceIds.clear();
     this.stallHandovers.clear();
+    this.pendingSessionLosses.clear();
     this.livenessHandoverListeners.clear();
     this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;

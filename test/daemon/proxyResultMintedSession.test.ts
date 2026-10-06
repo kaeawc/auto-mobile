@@ -4,7 +4,11 @@ import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_VERSION,
+  DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
+} from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -774,14 +778,55 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
       expect(replacementDaemon.nextIndex()).toBe(0);
 
       manager.statusResult = { running: false };
-      for (let elapsed = 0; elapsed < 40_000 && !settled; elapsed += 250) {
-        await timer.advanceTimeAsync(250);
-      }
+      const boundMs = DAEMON_SHUTDOWN_TIMEOUT_MS + DAEMON_RESTART_HANDOFF_TIMEOUT_MS;
+      await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS - 1);
+      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeInstanceOf(Promise);
+      await timer.advanceTimeAsync(1);
+      await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS);
+      expect(timer.now()).toBe(boundMs);
+      expect(Reflect.get(proxy, "daemonShutdownDisconnect")).toBeNull();
       expect(settled).toBe(true);
       expect(error).toMatchObject({ reason: "daemon_stalled", handover: { attempts: 3 } });
       expect(manager.startCallCount).toBe(0);
       expect(manager.restartCallCount).toBe(0);
       expect(replacementDaemon.nextIndex()).toBe(0);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("a session-less healthy proxy bounds missing EOF then auto-starts and reacquires (#6336)", async () => {
+    const oldDaemon = new FakeDaemonClient();
+    const replacement = acquiringClient(sessionManager, ["healthy-replacement"]);
+    const manager = matchingDaemonManager();
+    isAvailableSpy!.mockResolvedValueOnce(true).mockResolvedValue(false);
+    const clients = [oldDaemon, replacement.client];
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => clients.shift()!,
+      daemonManager: manager,
+      autoStartDaemon: true,
+      timer,
+    });
+    try {
+      await proxy.ensureConnected();
+      oldDaemon.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "unbound-shutdown",
+        "daemon-shutdown",
+      );
+      const acquisition = proxy.callTool("getAndroid", {});
+      manager.statusResult = { running: false };
+      await timer.advanceTimeAsync(DAEMON_SHUTDOWN_TIMEOUT_MS - 1);
+      expect(manager.startCalled).toBe(false);
+      expect(replacement.nextIndex()).toBe(0);
+      await timer.advanceTimeAsync(1);
+      await timer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS - 1);
+      expect(manager.startCalled).toBe(false);
+      expect(replacement.nextIndex()).toBe(0);
+      await timer.advanceTimeAsync(1);
+      await expect(acquisition).resolves.toEqual(deviceStartResult("healthy-replacement"));
+      expect(manager.startCalled).toBe(true);
+      expect(replacement.nextIndex()).toBe(1);
     } finally {
       await proxy.close();
     }

@@ -339,8 +339,14 @@ handover on calls/reads and by notification. Discovery does not wait for recover
 report the handover: it serves cached/static lists when unreachable, and uncached
 direct lists may observe the daemon unbound. Discovery never starts or restarts the
 daemon during an episode or handover. A named resume uses an observation-only connection
-and retains the handover until the daemon acknowledges the same UUID and owner
-token; a failed resume returns the same error. Recovery cannot join a pending
+and ends the handover on a definitive daemon answer: acknowledgement of the same
+UUID and owner token resumes it; `daemon_session_not_found`, `liveness_owner_superseded`,
+or `liveness_owner_conflict` confirms it was released or taken by another owner
+after the ownership grace window. A `session-released` notification also ends it,
+regardless of the current binding. A definitive loss delivers `proxy_stalled` once
+on the next tool call for that session, naming the sessions and devices to
+reacquire, then normal lifecycle behavior returns. An unreachable daemon retains
+the handover and the no-start fence; the harness must restart it. Recovery cannot join a pending
 connection allowed to start or restart the daemon. Healthy proxies and proxies
 without device sessions retain normal auto-start and skew reconciliation.
 

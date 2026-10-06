@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy, DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -17,7 +17,11 @@ import {
   recoveryAttemptSlotMs,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
-import { DAEMON_SESSION_SUSPECT_CODE } from "../../src/daemon/types";
+import {
+  DAEMON_SESSION_SUSPECT_CODE,
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+} from "../../src/daemon/types";
 import { declaresDeviceSessionSuspect } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { SessionSuspectError } from "../../src/daemon/sessionManager";
@@ -26,6 +30,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
 
@@ -108,6 +113,7 @@ describe("proxy liveness stalls (#10053)", () => {
   let hangObserveFor: string | undefined;
   /** Daemon connections the proxy opened: one more for every time it replaced its socket. */
   let clientsCreated: number;
+  let androidAcquisitionSession: string;
   let latestClient: FakeDaemonClient;
   let heartbeatsSeen: number;
   let handovers: LivenessHandover[];
@@ -125,7 +131,7 @@ describe("proxy liveness stalls (#10053)", () => {
       ]),
       toolResultFor: (name, params) =>
         name === "getAndroid"
-          ? deviceStartResult("android-session", DEVICES["android-session"])
+          ? deviceStartResult(androidAcquisitionSession, DEVICES["android-session"])
           : name === "getApple"
             ? deviceStartResult("ios-session", DEVICES["ios-session"])
             : name === "observe" && suspectObserve
@@ -223,6 +229,7 @@ describe("proxy liveness stalls (#10053)", () => {
     hangUntil = 0;
     hangObserveFor = undefined;
     clientsCreated = 0;
+    androidAcquisitionSession = "android-session";
     suspectObserve = false;
     heartbeatsSeen = 0;
     handovers = [];
@@ -464,7 +471,11 @@ describe("proxy liveness stalls (#10053)", () => {
               await baseTimer.advanceTimeAsync(250);
             }
             expect(settled).toBe(true);
-            expect(error).toBeInstanceOf(DaemonSessionStalledError);
+            if (_name === "tool output read" && phase === "recovering" && available) {
+              expect(error).toBeUndefined();
+            } else {
+              expect(error).toBeInstanceOf(DaemonSessionStalledError);
+            }
             if (error instanceof DaemonSessionStalledError) {
               expect(error.toPayload().error).toMatchObject({
                 code: "daemon_stalled",
@@ -597,6 +608,7 @@ describe("proxy liveness stalls (#10053)", () => {
         },
       );
       await baseTimer.advanceTimeAsync(1);
+      await new Promise<void>((resolve) => setImmediate(resolve));
       const settledBeforeProbe = recoverySettled;
       daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
       finishProbe(false);
@@ -721,13 +733,12 @@ describe("proxy liveness stalls (#10053)", () => {
       });
     });
 
-    test("lost-session handover fences repeated tool and resource reads without lifecycle changes", async () => {
+    test("unreachable daemon retains handover across repeated tool and resource reads", async () => {
       const proxy = createProxy(2_000, true);
       await acquire(proxy, "getAndroid");
-      timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
-      await sessionManager.releaseSession("android-session", "heartbeat-timeout");
-      await baseTimer.advanceTimeAsync(4_000);
-      expect(handovers[0]?.code).toBe("proxy_stalled");
+      hangHeartbeats = Number.POSITIVE_INFINITY;
+      await advanceUntilHandover();
+      expect(handovers[0]?.code).toBe("daemon_stalled");
       await expect(
         proxy.callTool("observe", { sessionUuid: "android-session" }),
       ).rejects.toBeInstanceOf(DaemonSessionStalledError);
@@ -739,9 +750,9 @@ describe("proxy liveness stalls (#10053)", () => {
       for (let step = 0; step < 24; step += 1) {
         await baseTimer.advanceTimeAsync(250);
       }
-      expect(await namedCall).toMatchObject({ handover: { code: "proxy_stalled" } });
+      expect(await namedCall).toMatchObject({ handover: { code: "daemon_stalled" } });
       await expect(proxy.readResource("automobile:devices/booted")).rejects.toMatchObject({
-        handover: { code: "proxy_stalled" },
+        handover: { code: "daemon_stalled" },
       });
       await expect(proxy.listAdvertisedTools()).resolves.toBeArray();
       expect(daemonManager.startCallCount).toBe(0);
@@ -761,6 +772,307 @@ describe("proxy liveness stalls (#10053)", () => {
         warnSpy.mock.calls.some(([message]) => String(message).includes("tick fired more than")),
       ).toBe(false);
     });
+  });
+
+  describe("delta findings F1-F6", () => {
+    function recoveryOf(proxy: DaemonMcpProxy): LivenessRecovery {
+      const recovery = Reflect.get(proxy, "livenessRecovery");
+      if (!(recovery instanceof LivenessRecovery)) {
+        throw new Error("Missing liveness recovery seam");
+      }
+      return recovery;
+    }
+
+    function handoverCount(proxy: DaemonMcpProxy): number {
+      const map = Reflect.get(proxy, "stallHandovers");
+      if (!(map instanceof Map)) {
+        throw new Error("Missing handover seam");
+      }
+      return map.size;
+    }
+
+    async function stallAndroid(proxy: DaemonMcpProxy): Promise<void> {
+      hangSessions.add("android-session");
+      await advanceUntilHandover();
+      hangSessions.clear();
+    }
+
+    test("F1 ack removes the handover entry", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      await stallAndroid(proxy);
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toBeInstanceOf(DaemonSessionStalledError);
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).resolves.toBeDefined();
+      expect(handoverCount(proxy)).toBe(0);
+    });
+
+    test.each(["not-found", "notification", "foreign-token", "foreign-conflict"])(
+      "F1 definitive %s ends a non-latest handover and delivers loss exactly once",
+      async (answer) => {
+        const proxy = createProxy(2_000, true);
+        await acquire(proxy, "getAndroid");
+        await acquire(proxy, "getApple");
+        await stallAndroid(proxy);
+        if (answer === "not-found") {
+          await expect(
+            proxy.callTool("observe", { sessionUuid: "android-session" }),
+          ).rejects.toMatchObject({ reason: "daemon_stalled" });
+          await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+          const result = await handleDaemonRequest(
+            {
+              id: "typed-missing",
+              type: "daemon_request",
+              method: "daemon/heartbeat",
+              params: { sessionId: "android-session" },
+            },
+            daemonStateFor(sessionManager),
+          );
+          expect(result.code).toBe(DAEMON_SESSION_NOT_FOUND_CODE);
+        } else if (answer === "notification") {
+          latestClient.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            "android-session",
+            "heartbeat-timeout",
+          );
+          latestClient.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            "android-session",
+            "heartbeat-timeout",
+          );
+          expect(handoverCount(proxy)).toBe(0);
+        } else {
+          await expect(
+            proxy.callTool("observe", { sessionUuid: "android-session" }),
+          ).rejects.toMatchObject({ reason: "daemon_stalled" });
+          timer.stall(2_000);
+          expect(
+            await sessionManager.claimLivenessOwnership("android-session", "other-owner"),
+          ).toBe("claimed");
+          if (answer === "foreign-conflict") {
+            // A rehydrated daemon can reject the old token without its processed-claim history.
+            spyOn(latestClient, "callDaemonMethod").mockRejectedValueOnce(
+              Object.assign(new Error("Typed refusal without session-loss prose"), {
+                code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+              }),
+            );
+          }
+        }
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "android-session" }),
+        ).rejects.toMatchObject({
+          reason: "proxy_stalled",
+          handover: {
+            action: "reacquire_lost_sessions",
+            sessions: [{ sessionUuid: "android-session", deviceId: "emulator-5554" }],
+          },
+        });
+        expect(handoverCount(proxy)).toBe(0);
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "android-session" }),
+        ).resolves.toBeDefined();
+        await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+        await expect(proxy.readResource("automobile:tool-output/kept")).resolves.toBeDefined();
+        expect(await proxy.listAdvertisedResources()).toEqual([
+          { uri: "automobile:devices/booted", name: "booted" },
+        ]);
+        expect(await proxy.listAdvertisedResourceTemplates()).toEqual([]);
+        expect(await proxy.listAdvertisedTools()).toBeArray();
+        if (answer === "foreign-token" || answer === "foreign-conflict") {
+          expect(sessionManager.getSession("android-session")?.livenessOwnerToken).toBe(
+            "other-owner",
+          );
+        }
+      },
+    );
+
+    test.each(["notification", "not-found"])(
+      "F1 only-session %s lifts the fence, delivers once, and allows getAndroid auto-start",
+      async (answer) => {
+        const proxy = createProxy(2_000, true);
+        await acquire(proxy, "getAndroid");
+        await stallAndroid(proxy);
+        await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+        if (answer === "notification") {
+          latestClient.emitNotification(
+            SESSION_RELEASED_NOTIFICATION_METHOD,
+            "android-session",
+            "heartbeat-timeout",
+          );
+          expect(handoverCount(proxy)).toBe(0);
+          await expect(proxy.callTool("listDevices", {})).resolves.toBeDefined();
+        } else {
+          await expect(
+            proxy.callTool("observe", { sessionUuid: "android-session" }),
+          ).rejects.toMatchObject({ reason: "daemon_stalled" });
+        }
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "android-session" }),
+        ).rejects.toMatchObject({ reason: "proxy_stalled" });
+        await expect(
+          proxy.callTool("observe", { sessionUuid: "android-session" }),
+        ).rejects.toMatchObject({
+          reason: answer === "notification" ? "heartbeat-timeout" : "session-not-found",
+        });
+        expect(handoverCount(proxy)).toBe(0);
+        latestClient.emitConnectionClosed();
+        isAvailableSpy.mockResolvedValue(false);
+        daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+        androidAcquisitionSession = "fresh-android-session";
+        await sessionManager.createSession(
+          androidAcquisitionSession,
+          DEVICES["android-session"],
+          "android",
+          60_000,
+          LEASE_MS,
+        );
+        const acquisition = acquire(proxy, "getAndroid");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await baseTimer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 250);
+        await acquisition;
+        expect(daemonManager.startCallCount).toBe(1);
+        await expect(proxy.readResource("automobile:devices/booted")).resolves.toBeDefined();
+        expect(await proxy.listAdvertisedResources()).toHaveLength(1);
+      },
+    );
+
+    test("F1 proxy_stalled loss is delivered once and getAndroid can auto-start", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      timer.stall(LEASE_MS + SUSPECT_GRACE_MS + 5_000);
+      await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+      await baseTimer.advanceTimeAsync(4_000);
+      expect(handoverCount(proxy)).toBe(0);
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ reason: "proxy_stalled" });
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ reason: "session-not-found" });
+      expect(handoverCount(proxy)).toBe(0);
+      androidAcquisitionSession = "fresh-android-session";
+      await sessionManager.createSession(
+        androidAcquisitionSession,
+        DEVICES["android-session"],
+        "android",
+        60_000,
+        LEASE_MS,
+      );
+      latestClient.emitConnectionClosed();
+      isAvailableSpy.mockResolvedValue(false);
+      daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
+      const acquisition = acquire(proxy, "getAndroid");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await baseTimer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 250);
+      await acquisition;
+      expect(daemonManager.startCallCount).toBe(1);
+      await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
+    });
+
+    test("F1 unreachable resume retains its entry and no-start fence", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      await stallAndroid(proxy);
+      await expect(
+        proxy.callTool("observe", { sessionUuid: "android-session" }),
+      ).rejects.toMatchObject({ reason: "daemon_stalled" });
+      latestClient.emitConnectionClosed();
+      isAvailableSpy.mockResolvedValue(false);
+      const resume = proxy
+        .callTool("observe", { sessionUuid: "android-session" })
+        .catch((error: unknown) => error);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (let step = 0; step < 100; step += 1) {
+        await baseTimer.advanceTimeAsync(250);
+      }
+      expect(await resume).toBeInstanceOf(DaemonSessionStalledError);
+      expect(handoverCount(proxy)).toBe(1);
+      latestClient.emitConnectionClosed();
+      await expect(proxy.readResource("automobile:tool-output/fenced")).rejects.toMatchObject({
+        reason: "daemon_stalled",
+      });
+      expect(daemonManager.startCallCount).toBe(0);
+      expect(daemonManager.restartCallCount).toBe(0);
+    });
+
+    test("F3 connected healthy binding and tool-output reads survive an unrelated handover", async () => {
+      const proxy = createProxy(2_000, true);
+      await acquire(proxy, "getAndroid");
+      await acquire(proxy, "getApple");
+      await stallAndroid(proxy);
+      await expect(
+        proxy.readResource("automobile:device-session/ios-session/screenshot"),
+      ).resolves.toBeDefined();
+      await expect(proxy.readResource("automobile:tool-output/saved")).resolves.toBeDefined();
+      await expect(
+        proxy.readResource("automobile:device-session/android-session/screenshot"),
+      ).rejects.toMatchObject({ reason: "daemon_stalled" });
+      latestClient.emitConnectionClosed();
+      await expect(proxy.readResource("automobile:tool-output/saved")).rejects.toMatchObject({
+        reason: "daemon_stalled",
+      });
+      expect(daemonManager.startCallCount).toBe(0);
+    });
+
+    test.each([true, false])(
+      "F2 settled connect releases recovery and gives joiners structured failures, reachable=%s",
+      async (reachable) => {
+        const proxy = createProxy(2_000, true, "android-session");
+        const probe = Promise.withResolvers<boolean>();
+        isAvailableSpy.mockImplementationOnce(() => probe.promise);
+        const originator = proxy.ensureConnected().catch((error: unknown) => error);
+        const joiner = proxy.ensureConnected().catch((error: unknown) => error);
+        recoveryOf(proxy).begin("android-session", "daemon_stalled");
+        isAvailableSpy.mockResolvedValue(reachable);
+        probe.reject(new DaemonUnavailableError("Failed lifecycle connect"));
+        await baseTimer.advanceTimeAsync(20_000);
+        if (reachable) {
+          expect(await originator).toBeUndefined();
+          expect(await joiner).toBeUndefined();
+          expect(handovers).toEqual([]);
+          expect(heartbeatsSeen).toBeGreaterThan(0);
+        } else {
+          expect(await originator).toBeInstanceOf(DaemonSessionStalledError);
+          expect(await joiner).toBeInstanceOf(DaemonSessionStalledError);
+        }
+        expect(daemonManager.startCallCount).toBe(0);
+        expect(daemonManager.restartCallCount).toBe(0);
+      },
+    );
+
+    test.each(["tool", "resource"])(
+      "F6 aborted %s wait preserves shared recovery",
+      async (kind) => {
+        const proxy = createProxy(2_000);
+        await acquire(proxy, "getAndroid");
+        hangHeartbeats = 1;
+        recoveryOf(proxy).begin("android-session", "daemon_stalled");
+        const controller = new AbortController();
+        const reason = new Error("Caller cancelled recovery wait");
+        const cancelled = (
+          kind === "tool"
+            ? proxy.callTool(
+                "observe",
+                { sessionUuid: "android-session" },
+                undefined,
+                undefined,
+                controller.signal,
+              )
+            : proxy.readResource("automobile:devices/booted", { signal: controller.signal })
+        ).catch((error: unknown) => error);
+        const sibling = proxy.callTool("observe", { sessionUuid: "android-session" });
+        controller.abort(reason);
+        await baseTimer.advanceTimeAsync(1);
+        expect(await cancelled).toBe(reason);
+        expect(recoveryOf(proxy).isRecovering("android-session")).toBe(true);
+        await baseTimer.advanceTimeAsync(10_000);
+        await expect(sibling).resolves.toBeDefined();
+        expect(handovers).toEqual([]);
+      },
+    );
   });
 
   describe("review fixes (PR 10115)", () => {

@@ -32,6 +32,7 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
+import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
@@ -496,7 +497,7 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     writer,
     new FakeFileSystem(),
     () => "/fake",
-    undefined,
+    new FakeAndroidPhysicalDisplayIdResolver(),
     false,
     { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );

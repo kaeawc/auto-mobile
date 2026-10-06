@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { migratePlan } from "../../../src/utils/plan/PlanMigrator";
+import { migratePlan, migratePlanStep } from "../../../src/utils/plan/PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../../../src/utils/mcpVersion";
 
 describe("PlanMigrator", () => {
@@ -1050,5 +1050,33 @@ describe("PlanMigrator field precedence", () => {
       { message: "Mapped step description to label.", stepIndex: 0 },
       { message: "Removed deprecated step description field.", stepIndex: 0 },
     ]);
+  });
+
+  describe("migratePlanStep (criticalSection sub-steps, #9927)", () => {
+    test("wraps a legacy tapOn { text } under selector without mutating the input", () => {
+      const input = { tool: "tapOn", params: { device: "A", text: "Sync" } };
+      expect(migratePlanStep(input, 0)).toEqual({
+        tool: "tapOn",
+        params: { device: "A", action: "tap", selector: { text: "Sync" } },
+      });
+      expect(input).toEqual({ tool: "tapOn", params: { device: "A", text: "Sync" } });
+    });
+
+    test("is idempotent on an already-migrated step", () => {
+      const migrated = migratePlanStep({ tool: "tapOn", params: { device: "A", text: "Sync" } }, 0);
+      expect(migratePlanStep(migrated, 0)).toEqual(migrated);
+    });
+
+    test("resolves the inputText operation from the supplied platform", () => {
+      const step = { tool: "inputText", params: { device: "A", text: "hi" } };
+      expect(migratePlanStep(step, 0, { platform: "ios" })).toMatchObject({
+        tool: "sendKeys",
+        params: { commands: [{ action: "type", text: "hi", operation: "insert" }] },
+      });
+    });
+
+    test("returns a non-object step unchanged", () => {
+      expect(migratePlanStep("nope", 0)).toBe("nope");
+    });
   });
 });

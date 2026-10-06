@@ -11,6 +11,13 @@ import type {
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import {
+  formatTimelineBucketLabel,
+  timelineBucketMs,
+  timelineBucketShiftMs,
+  timelineBucketStart,
+  timelineBucketStartFromIndex,
+} from "./failureTimelineBuckets";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
@@ -469,8 +476,11 @@ export class FailureAnalyticsRepository {
     const db = this.getDb();
     const { startTime, endTime, aggregation } = query;
 
-    // Get bucket duration in ms
-    const bucketMs = this.getAggregationMs(aggregation);
+    // Buckets and labels share one basis, UTC (see failureTimelineBuckets.ts): the
+    // quotient below indexes buckets that start on the boundary the label names
+    // (Monday 00:00 UTC for weeks), so `shiftMs` is added before dividing.
+    const bucketMs = timelineBucketMs(aggregation);
+    const shiftMs = timelineBucketShiftMs(aggregation);
     const periodDuration = endTime - startTime;
 
     // Aggregate occurrences per (bucket, type) in SQL rather than transferring
@@ -478,7 +488,7 @@ export class FailureAnalyticsRepository {
     // constant here, so integer-dividing the timestamp yields the bucket index;
     // CAST(... AS INTEGER) makes the truncation explicit regardless of how the
     // bound value types. Only O(buckets * types) rows transfer.
-    const bucketIndex = sql<number>`cast(failure_occurrences.timestamp / ${bucketMs} as integer)`;
+    const bucketIndex = sql<number>`cast((failure_occurrences.timestamp + ${shiftMs}) / ${bucketMs} as integer)`;
     const bucketedCounts = await db
       .selectFrom("failure_occurrences")
       .innerJoin("failure_groups", "failure_occurrences.group_id", "failure_groups.id")
@@ -495,8 +505,8 @@ export class FailureAnalyticsRepository {
     // Pre-create all buckets for the time range with zero values, then fill from
     // the aggregate so empty buckets still appear as zeros.
     const buckets = new Map<number, PeriodTotals>();
-    const firstBucketStart = Math.floor(startTime / bucketMs) * bucketMs;
-    const lastBucketStart = Math.floor(endTime / bucketMs) * bucketMs;
+    const firstBucketStart = timelineBucketStart(startTime, aggregation);
+    const lastBucketStart = timelineBucketStart(endTime, aggregation);
 
     for (
       let bucketStart = firstBucketStart;
@@ -507,7 +517,7 @@ export class FailureAnalyticsRepository {
     }
 
     for (const row of bucketedCounts) {
-      const bucketStart = Number(row.bucket) * bucketMs;
+      const bucketStart = timelineBucketStartFromIndex(Number(row.bucket), aggregation);
       const bucket = buckets.get(bucketStart);
       if (!bucket) {
         continue;
@@ -521,7 +531,7 @@ export class FailureAnalyticsRepository {
 
     for (const [bucketStart, counts] of sortedBuckets) {
       dataPoints.push({
-        label: this.formatBucketLabel(bucketStart, aggregation),
+        label: formatTimelineBucketLabel(bucketStart, aggregation),
         crashes: counts.crashes,
         anrs: counts.anrs,
         toolFailures: counts.toolFailures,
@@ -1153,80 +1163,6 @@ export class FailureAnalyticsRepository {
       parameterVariants,
       durationStats,
     };
-  }
-
-  private getAggregationMs(aggregation: "minute" | "hour" | "day" | "week"): number {
-    switch (aggregation) {
-      case "minute":
-        return 60 * 1000;
-      case "hour":
-        return 60 * 60 * 1000;
-      case "day":
-        return 24 * 60 * 60 * 1000;
-      case "week":
-        return 7 * 24 * 60 * 60 * 1000;
-    }
-  }
-
-  private formatBucketLabel(
-    timestamp: number,
-    aggregation: "minute" | "hour" | "day" | "week",
-  ): string {
-    const date = new Date(timestamp);
-
-    switch (aggregation) {
-      case "minute": {
-        const hours = date.getHours();
-        const minutes = date.getMinutes();
-        const ampm = hours >= 12 ? "PM" : "AM";
-        const displayHours = hours % 12 || 12;
-        return `${displayHours}:${minutes.toString().padStart(2, "0")} ${ampm}`;
-      }
-      case "hour": {
-        const hours = date.getHours();
-        const ampm = hours >= 12 ? "PM" : "AM";
-        const displayHours = hours % 12 || 12;
-        return `${displayHours} ${ampm}`;
-      }
-      case "day": {
-        const months = [
-          "Jan",
-          "Feb",
-          "Mar",
-          "Apr",
-          "May",
-          "Jun",
-          "Jul",
-          "Aug",
-          "Sep",
-          "Oct",
-          "Nov",
-          "Dec",
-        ];
-        return `${months[date.getMonth()]} ${date.getDate()}`;
-      }
-      case "week": {
-        // Get Monday of the week
-        const day = date.getDay();
-        const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-        const monday = new Date(date.setDate(diff));
-        const months = [
-          "Jan",
-          "Feb",
-          "Mar",
-          "Apr",
-          "May",
-          "Jun",
-          "Jul",
-          "Aug",
-          "Sep",
-          "Oct",
-          "Nov",
-          "Dec",
-        ];
-        return `${months[monday.getMonth()]} ${monday.getDate()}`;
-      }
-    }
   }
 
   private async cleanupRetention(): Promise<void> {

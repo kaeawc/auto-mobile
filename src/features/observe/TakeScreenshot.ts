@@ -69,7 +69,6 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const SCREENSHOT_CLEANUP_TIMEOUT_MS = 1500;
-const initialCleanupDirectories = new Set<string>();
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -317,18 +316,7 @@ export class TakeScreenshot implements ScreenshotService {
   }
 
   private cleanupCacheOnce(): void {
-    const cacheDir = this.cacheDirResolver();
-    if (initialCleanupDirectories.has(cacheDir)) {
-      return;
-    }
-    initialCleanupDirectories.add(cacheDir);
-    void this.cleanupCache().catch((error: unknown) => {
-      logger.warn(`[SCREENSHOT] Initial cache cleanup failed: ${errorMessage(error)}`);
-    });
-  }
-
-  private async cleanupCache(): Promise<void> {
-    await this.pathProtection.sweep(this.cacheDirResolver(), this.fileSystem);
+    void this.pathProtection.sweepOnce(this.cacheDirResolver(), this.fileSystem);
   }
 
   private async writeScreenshot(filePath: string, bytes: Buffer): Promise<void> {

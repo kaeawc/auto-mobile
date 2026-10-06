@@ -16,6 +16,7 @@ import {
   type HostProcessExecutor,
 } from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
+import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import {
@@ -1086,7 +1087,11 @@ export class SimCtlClient implements SimCtl {
           )
         ).some((simulator) => simulator.deviceId === udid);
         if (simulatorStillBooted) {
-          throw new ActionableError(`iOS simulator ${udid} is already running`);
+          throw new DeviceAlreadyRunningError(
+            `iOS simulator ${udid} is already running`,
+            "ios",
+            udid,
+          );
         }
         lease.state.lastBootSucceeded = false;
         lease.state.ownerToken = undefined;
@@ -1263,7 +1268,11 @@ export class SimCtlClient implements SimCtl {
         lease.state.ownerToken = undefined;
       }
       if (lease.state.lastBootSucceeded && ownsBoot) {
-        throw new ActionableError(`iOS simulator ${udid} is already running`);
+        throw new DeviceAlreadyRunningError(
+          `iOS simulator ${udid} is already running`,
+          "ios",
+          udid,
+        );
       }
       const result = ownsBoot ? await this.runOwnedBoot(udid, operation) : await operation();
       lease.state.lastBootSucceeded = true;

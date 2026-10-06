@@ -8,6 +8,7 @@ import {
 } from "./coldBootProcessTermination";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -1166,6 +1167,7 @@ export class DeviceBootService {
   private async findRunningImageAfterLease(
     image: DeviceInfo,
     context: BootDeadlineContext,
+    boundedIosRecheck = true,
   ): Promise<BootedDevice | undefined> {
     const phase = "re-checking the running device after the shared lifecycle lease settled";
     if (image.platform === "android") {
@@ -1178,14 +1180,18 @@ export class DeviceBootService {
     // Bypass the simulator-list cache: the cached list is what made this image
     // look stopped, and `startDevice` itself bypasses it before refusing a boot.
     // The image is a simctl simulator, so devicectl discovery cannot answer for its UDID.
+    const discoverSimulators = (signal: AbortSignal) =>
+      this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
+        bypassIosDeviceListCache: true,
+        skipPhysicalIosDiscovery: true,
+        signal,
+      });
+    // The boot path's own "already running" refusal means the list already
+    // answered within the boot budget, so that follow-up read is not bounded.
     const discovery = await this.runPhase(context, phase, (signal) =>
-      this.boundedIosRecheck(phase, signal, (recheckSignal) =>
-        this.dependencies.deviceManager.getBootedDevicesDetailed(image.platform, {
-          bypassIosDeviceListCache: true,
-          skipPhysicalIosDiscovery: true,
-          signal: recheckSignal,
-        }),
-      ),
+      boundedIosRecheck
+        ? this.boundedIosRecheck(phase, signal, discoverSimulators)
+        : discoverSimulators(signal),
     );
     // An unanswered inventory proves nothing; fall through to the boot path,
     // whose own running-state check reports an unreadable simulator list.
@@ -1248,15 +1254,9 @@ export class DeviceBootService {
       async () => await this.revalidateImageIdentity(image, context),
     );
     if (adoptRunningAfterLease) {
-      const running = await this.findRunningImageAfterLease(image, context);
-      if (running) {
-        const adopted = await this.waitForRunningDevice(
-          enrichBootedDevice(running, image),
-          context,
-          progress,
-        );
-        // Another launch for this device may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
-        return { ...adopted, sourceImage: image };
+      const adopted = await this.adoptRunningImageAfterLease(image, context, progress);
+      if (adopted) {
+        return adopted;
       }
     }
     // This outer marker spans every bootImageOnce invocation made by this
@@ -1271,11 +1271,69 @@ export class DeviceBootService {
     try {
       return await this.bootRecovery.run(
         image,
-        async () => this.bootImageOnce(image, context, progress, provisioned),
+        async () =>
+          this.bootImageAdoptingAlreadyRunning(
+            image,
+            context,
+            progress,
+            provisioned,
+            adoptRunningAfterLease,
+          ),
         context.signal,
       );
     } finally {
       releaseInFlightAndroidColdBoot?.();
+    }
+  }
+
+  private async adoptRunningImageAfterLease(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    boundedIosRecheck = true,
+  ): Promise<DeviceBootResult | undefined> {
+    const running = await this.findRunningImageAfterLease(image, context, boundedIosRecheck);
+    if (!running) {
+      return undefined;
+    }
+    const adopted = await this.waitForRunningDevice(
+      enrichBootedDevice(running, image),
+      context,
+      progress,
+    );
+    // Another launch for this device may have just finished, so preserve the shared-boot marker for downstream session-conflict detection.
+    return { ...adopted, sourceImage: image };
+  }
+
+  /**
+   * An iOS post-lease re-check that timed out falls through to the boot path,
+   * whose own running-state check can then find a sibling's simulator booted
+   * and refuse with a typed error. Adopt it exactly as the re-check would have.
+   * This runs inside the recovery callback so a recovery policy never mistakes
+   * a sibling's boot for a failed one.
+   */
+  private async bootImageAdoptingAlreadyRunning(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+    progress: DeviceBootProgress | undefined,
+    provisioned: boolean,
+    adoptRunningAfterLease: boolean,
+  ): Promise<DeviceBootResult> {
+    try {
+      return await this.bootImageOnce(image, context, progress, provisioned);
+    } catch (error) {
+      if (
+        !adoptRunningAfterLease ||
+        image.platform !== "ios" ||
+        !(error instanceof DeviceAlreadyRunningError)
+      ) {
+        throw error;
+      }
+      const adopted = await this.adoptRunningImageAfterLease(image, context, progress, false);
+      if (!adopted) {
+        throw error;
+      }
+      return adopted;
     }
   }
 

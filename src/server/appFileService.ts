@@ -78,6 +78,17 @@ export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeou
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
 /** Printed by the write script only when it saved the previous content of an overwritten file. */
 const APP_FILE_BACKUP_MARKER = "AUTOMOBILE_APP_FILE_BACKUP";
+/** Backups removed per device command, matching the other batched file commands. */
+const APP_FILE_BACKUP_DISCARD_CHUNK = 64;
+
+function batchWarning(warnings: Array<string | undefined>): { warning?: string } {
+  const unique = [...new Set(warnings.filter((warning): warning is string => !!warning))];
+  return unique.length > 0 ? { warning: unique.join(" ") } : {};
+}
+
+function leftoverBackupsWarning(paths: string[]): string {
+  return `The write succeeded, but these hidden backups of overwritten files could not be removed: ${paths.join(", ")}.`;
+}
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -142,6 +153,8 @@ interface AppFileProviderWriteResult {
   appRunning?: boolean;
   effects?: PutAppFileWriteResult["effects"];
   resourceUserId?: number;
+  /** Non-fatal note for the caller, e.g. backups that could not be cleaned up. */
+  warning?: string;
 }
 
 export interface AppFileListProvider {
@@ -547,12 +560,13 @@ class DefaultAppFileService implements AppFileService {
         platform: request.device.platform,
         target,
         files: results,
-        ...(target.domain === "app_containers" &&
-        providerResults.some((entry) => entry?.appRunning === true)
-          ? {
-              warning: `App ${target.appId} is running and may not see the change until it re-reads the file or is relaunched.`,
-            }
-          : {}),
+        ...batchWarning([
+          target.domain === "app_containers" &&
+          providerResults.some((entry) => entry?.appRunning === true)
+            ? `App ${target.appId} is running and may not see the change until it re-reads the file or is relaunched.`
+            : undefined,
+          ...providerResults.map((entry) => entry?.warning),
+        ]),
       };
       if (!legacy) {
         return result;
@@ -875,33 +889,41 @@ class AndroidAppFileProvider
         { cause: error },
       );
     }
-    await this.discardBackups(adb, appTarget, userId, [...backups.values()]);
+    const leftover = await this.discardBackups(adb, appTarget, userId, [...backups.values()]);
     await this.confirmRunningState(adb, request, appTarget, userId, results);
+    if (leftover.length > 0) {
+      results[0] = { ...results[0], warning: leftoverBackupsWarning(leftover) };
+    }
     return results;
   }
 
-  /** The whole batch committed, so the saved previous contents are no longer needed. */
+  /**
+   * The whole batch committed, so the saved previous contents are no longer needed. Returns the
+   * backups that could not be removed (the write already succeeded; they must not fail it).
+   */
   private async discardBackups(
     adb: AdbExecutor,
     appTarget: AppContainersTarget,
     userId: number,
     backups: string[],
-  ): Promise<void> {
-    if (backups.length === 0) {
-      return;
-    }
-    const failures: string[] = [];
+  ): Promise<string[]> {
+    const leftover: string[] = [];
     const prefix = androidAppFilePrefix(appTarget, userId);
-    await this.cleanupStaging(
-      adb,
-      [`${prefix} rm -f ${backups.map(shellQuote).join(" ")}`],
-      "previous-content backups",
-      failures,
-    );
-    if (failures.length > 0) {
-      // The write already succeeded; stray hidden backups must not fail it.
-      logger.warn(`Left Android app-file backups behind: ${failures.join("; ")}`);
+    for (let offset = 0; offset < backups.length; offset += APP_FILE_BACKUP_DISCARD_CHUNK) {
+      const chunk = backups.slice(offset, offset + APP_FILE_BACKUP_DISCARD_CHUNK);
+      const failures: string[] = [];
+      await this.cleanupStaging(
+        adb,
+        [`${prefix} rm -f ${chunk.map(shellQuote).join(" ")}`],
+        "previous-content backups",
+        failures,
+      );
+      if (failures.length > 0) {
+        logger.warn(`Left Android app-file backups behind: ${failures.join("; ")}`);
+        leftover.push(...chunk);
+      }
     }
+    return leftover;
   }
 
   private async confirmRunningState(
@@ -1015,10 +1037,14 @@ class AndroidAppFileProvider
       userId,
       access: target.kind === "external" ? ("externalFiles" as const) : ("run-as" as const),
     };
-    // Save the previous content before it is replaced so a failed batch can restore it.
+    // Save the previous content before it is replaced so a failed batch can restore it. The copy
+    // goes to a `.part` file and is renamed into place, so the backup path only ever exists
+    // complete: a failed or killed `cp` leaves the original untouched and at most a `.part`.
+    const backupPart = `${backup}.part`;
     const saveBackup = keepPrevious
       ? `{ if [ -f ${shellQuote(destination)} ]; then ` +
-        `cp ${shellQuote(destination)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
+        `cp ${shellQuote(destination)} ${shellQuote(backupPart)} && ` +
+        `mv -f ${shellQuote(backupPart)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
       : "";
     const cleanupCommands = [
       ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),
@@ -1057,11 +1083,15 @@ class AndroidAppFileProvider
       onWritten(output.stdout.includes(APP_FILE_BACKUP_MARKER) ? backup : undefined);
     } finally {
       if (restoreOnFailure) {
-        // An ambiguous failure (e.g. a deadline after the rename) must not strand the original
-        // content in the backup; restoring is a no-op when the destination was never replaced.
+        // The failure's stdout is lost, so whether the backup completed is read from the device:
+        // the backup path exists only after a complete copy. An ambiguous failure (e.g. a deadline
+        // after the rename) must not strand the original in the backup, and restoring a complete
+        // backup is a no-op when the destination was never replaced. A partial copy never reaches
+        // the backup path, so the intact destination is left alone and only the `.part` is removed.
         cleanupCommands.push(
           `${prefix} sh -c ${shellQuote(
-            `if [ -f ${shellQuote(backup)} ]; then mv -f ${shellQuote(backup)} ${shellQuote(destination)}; fi`,
+            `rm -f ${shellQuote(backupPart)}; ` +
+              `if [ -f ${shellQuote(backup)} ]; then mv -f ${shellQuote(backup)} ${shellQuote(destination)}; fi`,
           )}`,
         );
       }
@@ -1777,7 +1807,7 @@ class IosSimulatorAppFileProvider
       }
       targets.push(join(root, normalizeAppFileRelativePath(request.destinationPath)));
     }
-    await this.writeBatch(requests, targets);
+    const leftoverBackups = await this.writeBatch(requests, targets);
     // Keep confirmation separate from container resolution and atomic writes.
     const runningStates = new Map<string, boolean | undefined>();
     for (const request of requests) {
@@ -1812,10 +1842,13 @@ class IosSimulatorAppFileProvider
         runningStates.set(key, undefined);
       }
     }
-    return requests.map((request) => ({
+    const warning =
+      leftoverBackups.length > 0 ? leftoverBackupsWarning(leftoverBackups) : undefined;
+    return requests.map((request, index) => ({
       appRunning: runningStates.get(
         JSON.stringify([request.device.deviceId, requireAppContainersTarget(request.target).appId]),
       ),
+      ...(index === 0 && warning !== undefined ? { warning } : {}),
     }));
   }
 
@@ -1826,7 +1859,7 @@ class IosSimulatorAppFileProvider
   private async writeBatch(
     requests: PutAppFileProviderRequest[],
     targets: string[],
-  ): Promise<void> {
+  ): Promise<string[]> {
     const outcomes = await Promise.allSettled(
       // A single-file write has no earlier file to roll back, so it needs no backup.
       requests.map((request, index) =>
@@ -1844,8 +1877,7 @@ class IosSimulatorAppFileProvider
       }
     }
     if (failure === undefined) {
-      await this.discardBackups(written);
-      return;
+      return await this.discardBackups(written);
     }
     if (written.length === 0) {
       // Nothing was committed, so there is nothing to undo; keep the original error.
@@ -1893,7 +1925,9 @@ class IosSimulatorAppFileProvider
     return { rolledBack, leftModified, failures };
   }
 
-  private async discardBackups(written: IosWrittenFile[]): Promise<void> {
+  /** Returns the backup paths that could not be removed. */
+  private async discardBackups(written: IosWrittenFile[]): Promise<string[]> {
+    const leftover: string[] = [];
     for (const file of written) {
       if (file.backup === undefined) {
         continue;
@@ -1901,6 +1935,7 @@ class IosSimulatorAppFileProvider
       try {
         await this.fileSystem.rm(file.backup);
       } catch (error) {
+        leftover.push(file.backup);
         // The write already succeeded; a stray hidden backup must not fail it.
         logger.warn(
           `Failed to remove iOS app file backup ${file.backup}: ${errorMessage(error)}`,
@@ -1908,6 +1943,7 @@ class IosSimulatorAppFileProvider
         );
       }
     }
+    return leftover;
   }
 
   private async writeFile(

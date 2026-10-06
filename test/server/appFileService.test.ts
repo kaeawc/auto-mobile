@@ -364,11 +364,16 @@ describe("AppFileService", () => {
       } as const;
 
       /** Fake adb whose write of `existing` reports a saved backup and whose write of `failing` fails. */
-      function createOverwriteAdb(options: { existing: string[]; failing: string }) {
+      function createOverwriteAdb(options: {
+        existing: string[];
+        failing: string;
+        beforeCommand?: (command: string, signal: AbortSignal | undefined) => void;
+      }) {
         const adb = new FakeAdbExecutor();
         const execute = adb.executeCommand.bind(adb);
         spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-          const [command] = args;
+          const [command, , , , signal] = args;
+          options.beforeCommand?.(command, signal);
           if (command.includes(" cp ") && command.includes(options.failing)) {
             throw new Error("copy failed");
           }
@@ -431,7 +436,7 @@ describe("AppFileService", () => {
         // The write that failed after saving its backup puts the original back as well.
         expect(commands).toContain(
           `shell run-as 'com.example.app' sh -c ${shellQuote(
-            `if [ -f 'files/.automobile-tmp-3.bak' ]; then mv -f 'files/.automobile-tmp-3.bak' 'files/c.txt'; fi`,
+            `rm -f 'files/.automobile-tmp-3.bak.part'; if [ -f 'files/.automobile-tmp-3.bak' ]; then mv -f 'files/.automobile-tmp-3.bak' 'files/c.txt'; fi`,
           )}`,
         );
       });
@@ -483,6 +488,109 @@ describe("AppFileService", () => {
             .getExecutedCommands()
             .filter((command) => command.includes(".bak'") && command.includes(" rm -f ")),
         ).toEqual([]);
+      });
+
+      const restoreOrDrop = (token: string, name: string) =>
+        `rm -f 'files/.automobile-${token}.bak.part'; ` +
+        `if [ -f 'files/.automobile-${token}.bak' ]; then ` +
+        `mv -f 'files/.automobile-${token}.bak' 'files/${name}'; fi`;
+
+      test("copies the previous content to a .part file so the backup path is only ever complete", async () => {
+        const adb = createOverwriteAdb({ existing: ["a.txt"], failing: "never.txt" });
+        await serviceFor(adb).putFile({
+          device,
+          userId: 0,
+          target,
+          files: files("a.txt", "b.txt"),
+        });
+        const script =
+          `mkdir -p 'files' && cp '/data/local/tmp/automobile-tmp-1-a.txt' 'files/.automobile-tmp-1.tmp' && ` +
+          `chmod 600 'files/.automobile-tmp-1.tmp' && ` +
+          `{ if [ -f 'files/a.txt' ]; then cp 'files/a.txt' 'files/.automobile-tmp-1.bak.part' && ` +
+          `mv -f 'files/.automobile-tmp-1.bak.part' 'files/.automobile-tmp-1.bak' && echo ${BACKUP_MARKER}; fi; } && ` +
+          `mv -f 'files/.automobile-tmp-1.tmp' 'files/a.txt'`;
+        expect(adb.getExecutedCommands()).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(script)}`,
+        );
+      });
+
+      test("a backup copy that fails part-way does not replace the original and drops the partial copy", async () => {
+        const adb = createOverwriteAdb({ existing: [], failing: "a.txt" });
+        const error = await serviceFor(adb)
+          .putFile({ device, userId: 0, target, files: files("a.txt", "b.txt") })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+        // Nothing was committed, so nothing is rolled back; the failed write's own cleanup runs.
+        expect((error as Error).message).toEndWith("Rolled back: none. Rollback failures: none.");
+        const commands = adb.getExecutedCommands();
+        expect(commands).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(restoreOrDrop("tmp-1", "a.txt"))}`,
+        );
+        // The partial `.part` never reaches the backup path, and the original is never rewritten.
+        expect(commands.filter((command) => command.includes("rm -f 'files/a.txt'"))).toEqual([]);
+        expect(commands.filter((command) => command.includes("rc=0"))).toEqual([]);
+      });
+
+      test("a cancelled backup copy still removes the partial copy with a detached cleanup", async () => {
+        const controller = new AbortController();
+        const cleanupSignals: Array<AbortSignal | undefined> = [];
+        const adb = createOverwriteAdb({
+          existing: [],
+          failing: "never.txt",
+          beforeCommand: (command, signal) => {
+            if (command.includes("echo " + BACKUP_MARKER) && command.includes("files/b.txt")) {
+              controller.abort(new Error("request cancelled"));
+              controller.signal.throwIfAborted();
+            }
+            if (command.includes("sh -c 'rm -f ")) {
+              cleanupSignals.push(signal);
+            }
+          },
+        });
+        const error = await runWithAbortSignal(controller.signal, () =>
+          serviceFor(adb).putFile({
+            device,
+            userId: 0,
+            target,
+            files: files("a.txt", "b.txt"),
+            signal: controller.signal,
+          }),
+        ).then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+        expect((error as Error).message).toContain("request cancelled");
+        expect(adb.getExecutedCommands()).toContain(
+          `shell run-as 'com.example.app' sh -c ${shellQuote(restoreOrDrop("tmp-2", "b.txt"))}`,
+        );
+        expect(cleanupSignals.length).toBeGreaterThan(0);
+        expect(cleanupSignals.every((signal) => signal?.aborted === false)).toBe(true);
+      });
+
+      test("removes backups in chunks and reports the ones it could not remove", async () => {
+        const names = Array.from({ length: 70 }, (_, index) => `f${index}.txt`);
+        const adb = createOverwriteAdb({ existing: names, failing: "never.txt" });
+        adb.setCommandError("rm -f 'files/.automobile-tmp-1.bak'", new Error("cleanup denied"));
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await serviceFor(adb).putFile({
+            device,
+            userId: 0,
+            target,
+            files: files(...names),
+          });
+          const discards = adb
+            .getExecutedCommands()
+            .filter((command) => command.includes(" rm -f ") && command.includes(".bak'"));
+          expect(discards.map((command) => command.split(".bak'").length - 1)).toEqual([64, 6]);
+          expect(result.warning).toContain("could not be removed: files/.automobile-tmp-1.bak,");
+          expect(result.warning).toContain("files/.automobile-tmp-64.bak");
+          expect(result.warning).not.toContain("files/.automobile-tmp-65.bak");
+        } finally {
+          warn.mockRestore();
+        }
       });
 
       test("a single-file write skips the backup step entirely", async () => {
@@ -2081,8 +2189,21 @@ describe("AppFileService", () => {
         failing = "";
         delayed = "";
         delayTicks = 0;
+        failBackupCopy = false;
+        failBackupRemoval = false;
+
+        override async rm(path: string): Promise<void> {
+          if (this.failBackupRemoval && path.endsWith(".bak")) {
+            throw new Error("rm denied");
+          }
+          await super.rm(path);
+        }
 
         override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+          if (this.failBackupCopy && destinationPath.endsWith(".bak")) {
+            await this.writeFileBuffer(destinationPath, Buffer.from("partial"));
+            throw new Error("backup copy failed");
+          }
           if (this.failing && destinationPath.includes(`.${this.failing}.`)) {
             throw new Error(`copy failed for ${this.failing}`);
           }
@@ -2175,6 +2296,44 @@ describe("AppFileService", () => {
         expect(error!.message).toContain("Rolled back: none.");
         expect(error!.message).toContain("Left modified (previous content not restored): a.txt.");
         expect(fileSystem.removedPaths).not.toContain(join(documents, "a.txt"));
+      });
+
+      test("a backup copy that fails part-way leaves the original untouched and removes the partial copy", async () => {
+        const { fileSystem, put } = createFailureHarness();
+        await fileSystem.writeFileBuffer(join(documents, "a.txt"), Buffer.from("original"));
+        fileSystem.failBackupCopy = true;
+        const error = await put("a.txt", "b.txt");
+        expect(error!.message).toContain("backup copy failed");
+        expect(await fileSystem.readText(join(documents, "a.txt"))).toBe("original");
+        expect(await fileSystem.readdir(documents)).toEqual([{ name: "a.txt" }]);
+      });
+
+      test("reports backups it could not remove after a successful batch", async () => {
+        const fileSystem = new SelectiveFailureFileSystem();
+        const simctl = new FakeSimCtlClient();
+        simctl.setCommandResult(command, dataRoot);
+        const service = createAppFileServiceForTesting({
+          simctlFactory: () => simctl as unknown as SimCtlClient,
+          fileSystem,
+        });
+        await fileSystem.writeFileBuffer(join(documents, "a.txt"), Buffer.from("original"));
+        fileSystem.failBackupRemoval = true;
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await service.putFile({
+            device: iosSimulatorDevice,
+            target,
+            files: ["a.txt", "b.txt"].map((destinationPath) => ({
+              contentText: "new",
+              destinationPath,
+            })),
+          });
+          expect(result.warning).toContain("could not be removed");
+          expect(result.warning).toContain(".a.txt.");
+          expect(await fileSystem.readText(join(documents, "a.txt"))).toBe("new");
+        } finally {
+          warn.mockRestore();
+        }
       });
 
       test("rethrows the original error when nothing was committed", async () => {

@@ -198,6 +198,7 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
+  setVideoRecordingManagerDependencies,
   stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -3623,6 +3624,7 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
+      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );

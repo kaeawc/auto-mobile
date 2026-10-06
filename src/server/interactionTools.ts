@@ -48,6 +48,12 @@ import {
   PINCH_DURATION_MAX_MS,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
+import {
+  SHAKE_DURATION_MAX_MS,
+  SHAKE_DURATION_MIN_MS,
+  SHAKE_INTENSITY_MAX,
+  SHAKE_INTENSITY_MIN,
+} from "../models/ShakeOptions";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { DaemonState } from "../daemon/daemonState";
@@ -237,8 +243,25 @@ export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotifica
 export const shakeSchema = addDeviceTargetingToSchema(
   z
     .object({
-      duration: z.number().optional().describe("Shake duration ms (default 1000)"),
-      intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
+      duration: z
+        .number()
+        .finite()
+        .int()
+        .min(SHAKE_DURATION_MIN_MS)
+        .max(SHAKE_DURATION_MAX_MS)
+        .optional()
+        .describe(
+          `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
+        ),
+      intensity: z
+        .number()
+        .finite()
+        .min(SHAKE_INTENSITY_MIN)
+        .max(SHAKE_INTENSITY_MAX)
+        .optional()
+        .describe(
+          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
+        ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -931,7 +954,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Use full screen including status/nav bars"),
-        container: nestedElementContainerSchema.optional().describe("Scope search to a container"),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
+          ),
         autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -3102,6 +3129,7 @@ export function registerInteractionTools() {
       let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
+      let notificationsListedBeforeClear = false;
       if (device.platform === "android" && notification.appId) {
         const attributionLabel = await resolveClearAllAttributionLabel(
           device,
@@ -3123,6 +3151,7 @@ export function registerInteractionTools() {
           "before",
           signal,
         );
+        notificationsListedBeforeClear = listed.notifications.length > 0;
         // All correlated rows' content text lets the existing row matcher
         // isolate them, whether ownership comes from a header or dumpsys.
         clearMatchTexts = [
@@ -3139,7 +3168,13 @@ export function registerInteractionTools() {
           device,
           notification,
           clearMatchTexts,
-          500,
+          // The list pass collapses the shade; reopening may take longer than
+          // the short drain wait used after a swipe (#10249).
+          device.platform === "android" &&
+            i === 0 &&
+            (notificationsListedBeforeClear || !notification.appId)
+            ? awaitTimeoutMs
+            : 500,
           progress,
           signal,
         );

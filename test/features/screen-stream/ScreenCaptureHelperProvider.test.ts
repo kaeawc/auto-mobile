@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -23,6 +23,9 @@ describe("ScreenCaptureHelperProvider cache metadata", () => {
   let downloader: FakeFileDownloader;
   let checksumCalculator: FakeChecksumCalculator;
   let timer: FakeTimer;
+  let archiveBytes: Buffer;
+  let rootDir: string;
+  let nextCacheDir = 0;
 
   function makeProvider(): ScreenCaptureHelperProvider {
     return new ScreenCaptureHelperProvider({
@@ -37,21 +40,54 @@ describe("ScreenCaptureHelperProvider cache metadata", () => {
     });
   }
 
-  beforeEach(async () => {
-    // Reuse only the harness's tracked temp-dir primitive; no DB is opened.
-    tempDirs = createFileBackedDbHarness({ env: {} });
-    cacheDir = await tempDirs.makeTempDbDir("screen-capture-helper-unit-");
-    downloader = new FakeFileDownloader();
+  beforeAll(async () => {
+    // Build once so compression cost is outside each measured test.
     const archive = new AdmZip();
     archive.addFile(SCREEN_CAPTURE_HELPER_CACHE_FILENAME, HELPER_CONTENT);
-    downloader.payload = archive.toBuffer();
+    archiveBytes = archive.toBuffer();
+
+    // Reuse only the harness's tracked temp-dir primitive; no DB is opened.
+    tempDirs = createFileBackedDbHarness({ env: {} });
+    rootDir = await tempDirs.makeTempDbDir("screen-capture-helper-unit-");
+
+    // Bun excludes beforeAll from per-test timing; exercise first-use fs/zlib/AdmZip paths here.
+    const warmupDir = path.join(rootDir, "warmup");
+    await fs.mkdir(warmupDir);
+    const warmupDownloader = new FakeFileDownloader();
+    warmupDownloader.payload = archiveBytes;
+    const warmupChecksumCalculator = new FakeChecksumCalculator();
+    warmupChecksumCalculator.checksum = EXPECTED_SHA;
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      await new ScreenCaptureHelperProvider({
+        cacheDir: warmupDir,
+        downloader: warmupDownloader,
+        checksumCalculator: warmupChecksumCalculator,
+        timer: new FakeTimer(),
+        expectedChecksum: EXPECTED_SHA,
+        releaseUrl: RELEASE_URL,
+        env: { AUTOMOBILE_VERSION: "0.0.82" },
+        platform: "win32",
+      }).ensure();
+    } finally {
+      debug.mockRestore();
+      info.mockRestore();
+    }
+  });
+
+  beforeEach(async () => {
+    cacheDir = path.join(rootDir, `test-${nextCacheDir++}`);
+    await fs.mkdir(cacheDir);
+    downloader = new FakeFileDownloader();
+    downloader.payload = archiveBytes;
     checksumCalculator = new FakeChecksumCalculator();
     checksumCalculator.checksum = EXPECTED_SHA;
     timer = new FakeTimer();
     await fs.writeFile(path.join(cacheDir, SCREEN_CAPTURE_HELPER_CACHE_FILENAME), HELPER_CONTENT);
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await tempDirs.cleanup();
   });
 

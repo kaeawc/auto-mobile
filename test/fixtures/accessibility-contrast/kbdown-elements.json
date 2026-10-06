@@ -1,0 +1,104 @@
+[
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "Tap",
+  "visible-to-user": true,
+  "view-id": "s2-c82c8126970901ee",
+  "bounds": [
+   58,
+   519,
+   122,
+   572
+  ]
+ },
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "INPUT TEXT SCREEN",
+  "visible-to-user": true,
+  "view-id": "s2-35b8629645a1100b",
+  "bounds": [
+   42,
+   694,
+   1038,
+   779
+  ]
+ },
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "Discover",
+  "visible-to-user": true,
+  "view-id": "s2-dc109018a50b997d-1",
+  "bounds": [
+   43,
+   314,
+   319,
+   398
+  ]
+ },
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "Discover",
+  "visible-to-user": true,
+  "view-id": "s2-dc109018a50b997d-2",
+  "bounds": [
+   58,
+   2253,
+   197,
+   2295
+  ]
+ },
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "Demos",
+  "visible-to-user": true,
+  "view-id": "s2-2c6781e1ff871668",
+  "bounds": [
+   349,
+   2253,
+   456,
+   2295
+  ]
+ },
+ {
+  "actions": [
+   "next_at_movement_granularity",
+   "previous_at_movement_granularity",
+   "accessibility_focus",
+   "set_selection"
+  ],
+  "text": "Settings",
+  "visible-to-user": true,
+  "view-id": "s2-c199deada1f9a3bc",
+  "bounds": [
+   885,
+   2253,
+   1020,
+   2295
+  ]
+ }
+]

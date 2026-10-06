@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   SessionManager,
@@ -168,6 +169,11 @@ describe("CLI-owned session liveness (#6870)", () => {
 
     // The 12.4 s gap from the issue report.
     timer.advanceTime(12_367);
+    await monitor.tick();
+    // The default-policy session is suspect past its lease (#10051), not yet reaped.
+    expect(reaped).toEqual([]);
+
+    timer.advanceTime(SUSPECT_GRACE_MS);
     await monitor.tick();
 
     expect(reaped).toEqual([{ sessionId: "mcp", reason: "heartbeat-timeout" }]);
@@ -423,7 +429,7 @@ describe("CLI-owned session liveness (#6870)", () => {
 
       const reaped: Array<{ sessionId: string; reason: string }> = [];
       const monitor = monitorWith(reaped);
-      timer.advanceTime(12_367);
+      timer.advanceTime(12_367 + SUSPECT_GRACE_MS);
       await monitor.tick();
 
       expect(reaped).toEqual([{ sessionId: "cli", reason: "heartbeat-timeout" }]);

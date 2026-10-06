@@ -1,3 +1,4 @@
+import { deviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
@@ -1207,7 +1208,7 @@ async function releaseShutdownSessionOwnership(
 
   await executionTracker.cancelSessionUuidExecutions(
     sessionId,
-    `device-disconnected:${device.deviceId}`,
+    deviceLossCancellationReason(device.deviceId),
     { excludeExecutionId: getShutdownInitiatingExecutionId() },
   );
   const release = sessionManager.releaseSessionIfOwned(

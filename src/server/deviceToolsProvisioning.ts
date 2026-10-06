@@ -1,3 +1,4 @@
+import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
@@ -2491,10 +2492,16 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         ? serverConfig.getRunnerReadinessTimeoutMs()
         : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
-    return deps.deviceResourceControllerFactory().setResources({
+    const resourceDeadlineMs = deadlineMs - completionBudgetMs;
+    const configured = await deps.deviceResourceControllerFactory().setResources({
       device,
       resources: args.resources,
-      deadlineMs: deadlineMs - completionBudgetMs,
+      deadlineMs: resourceDeadlineMs,
+      signal,
+    });
+    return observeConfiguredDeviceResources(deps, configured, {
+      device,
+      deadlineMs: resourceDeadlineMs,
       signal,
     });
   }

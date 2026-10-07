@@ -139,6 +139,32 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         }
     }
 
+    /// Deliver a host trigger to the SDK's `POST /trigger` route (#1580). Any HTTP reply,
+    /// including a structured 4xx, is returned; nil means the bridge was unreachable.
+    public func sendTrigger(_ body: Data) async -> SdkTriggerReply? {
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: "/trigger", body: body), transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse else { return nil }
+            let payload = try? JSONDecoder().decode(SdkTriggerReplyPayload.self, from: data)
+            return SdkTriggerReply(
+                statusCode: http.statusCode,
+                error: payload?.error,
+                reason: payload?.reason,
+                registeredModules: payload?.registeredModules,
+                supportedTriggers: payload?.supportedTriggers
+            )
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .debug("SDK trigger bridge unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     // MARK: - Private
 
     private func fetchDecoded(path: String) async -> SdkViewHierarchy? {
@@ -250,6 +276,13 @@ private struct SetNetworkFaultRulesBody: Encodable {
 private struct AddHighlightBody: Encodable {
     let id: String
     let shape: HighlightShape
+}
+
+private struct SdkTriggerReplyPayload: Decodable {
+    let error: String?
+    let reason: String?
+    let registeredModules: [String]?
+    let supportedTriggers: [String]?
 }
 
 private struct MagicTapPayload: Decodable {

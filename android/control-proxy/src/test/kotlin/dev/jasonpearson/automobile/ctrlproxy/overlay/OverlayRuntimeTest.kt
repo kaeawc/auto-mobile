@@ -331,4 +331,34 @@ class OverlayRuntimeTest {
     runtime.dismiss()
     assertTrue(events.isEmpty())
   }
+
+  @Test
+  fun `toggle and increment step state silently and ignore keys of the wrong type`() = runTest {
+    val runtime =
+      runtime(
+        spec(
+          state =
+            mapOf(
+              "flag" to OverlayScalar.BooleanValue(false),
+              "count" to OverlayScalar.Numeric(1.0),
+              "label" to OverlayScalar.Text("x"),
+            )
+        )
+      )
+    runtime.handle(
+      tap(
+        OverlayToggleAction("flag"),
+        OverlayIncrementAction("count"),
+        OverlayIncrementAction("count", by = -3.5),
+        OverlayToggleAction("count"),
+        OverlayIncrementAction("label"),
+        OverlayIncrementAction("count", by = Double.MAX_VALUE),
+        OverlayIncrementAction("count", by = Double.MAX_VALUE),
+      )
+    )
+    assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
+    assertEquals(OverlayScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])
+    assertEquals(OverlayScalar.Text("x"), runtime.current.state["label"])
+    assertTrue(events.isEmpty())
+  }
 }

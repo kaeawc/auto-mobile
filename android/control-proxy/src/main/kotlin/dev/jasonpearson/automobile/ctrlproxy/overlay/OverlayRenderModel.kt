@@ -163,7 +163,7 @@ private fun mapOverlayNode(
     role,
     text,
     node.testTag,
-    node.visibleWhen?.let { localState[it.key] == it.equals } ?: true,
+    node.visibleWhen?.holds(localState) ?: true,
     mapOverlayStyle(node.style ?: OverlayStyle()),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,

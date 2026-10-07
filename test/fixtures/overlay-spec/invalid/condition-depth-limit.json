@@ -1,0 +1,38 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "key": "a",
+                        "equals": 1
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "state": {
+      "a": 1
+    }
+  },
+  "expectedPath": "root.visibleWhen.not.not.not.not.not.not.not.not"
+}

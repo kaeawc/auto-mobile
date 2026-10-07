@@ -111,6 +111,22 @@ test.each([
   expect(mapStorageSdkError(new Error(message), { operation: "database" })).toBe(foregroundMessage);
 });
 
+test.each([
+  "database busy - the app is holding a lock on this database; retry shortly: busy_lock",
+  `${sdkPrefix}: busy_lock`,
+])("maps a locked database to a retryable busy message: %s", (message) => {
+  const mapped = iosSqlErrorMessage(new Error(message), "/app/notes.db");
+  expect(mapped).toContain("busy_lock");
+  expect(mapped).toContain("retry in a moment");
+  expect(mapped).not.toContain("Ensure the app embeds");
+  expect(mapped).not.toContain("unrecognized error code");
+  expect(mapStorageSdkError(new Error(message), { operation: "database" })).toBe(mapped);
+});
+
+test("busy_lock is not a key-value storage code", () => {
+  expect(mapStorageSdkError(new Error("busy_lock"), { operation: "storage" })).toBeNull();
+});
+
 test("capability absence lists foreground and SDK setup as possible causes", () => {
   expect(
     iosSqlErrorMessage(
@@ -129,6 +145,40 @@ test.each([
   expect(iosSqlErrorMessage(new Error(message), "/app/notes.db")).toBe(
     "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).",
   );
+});
+
+// Verbatim `SdkDatabaseError.indeterminateMessage` from ios/control-proxy (the runner pins the same text).
+const runnerNoAnswerMessage =
+  "database request was sent but no answer arrived in time; the outcome is indeterminate (a write may still have been applied). Do not retry automatically; query the data to confirm first";
+
+describe("an unanswered SQL request", () => {
+  test("keeps the runner's do-not-retry wording when the host sent a mutation", () => {
+    expect(iosSqlErrorMessage(new Error(runnerNoAnswerMessage), "/app/notes.db")).toBe(
+      `Failed to execute SQL on iOS: ${runnerNoAnswerMessage}`,
+    );
+    expect(
+      iosSqlErrorMessage(new Error(runnerNoAnswerMessage), "/app/notes.db", {
+        readOnlyQuery: false,
+      }),
+    ).toContain("Do not retry automatically");
+  });
+
+  test("words a timed-out read as a plain timeout that is safe to retry", () => {
+    const mapped = iosSqlErrorMessage(new Error(runnerNoAnswerMessage), "/app/notes.db", {
+      readOnlyQuery: true,
+    });
+    expect(mapped).toContain("safe to retry");
+    expect(mapped).not.toContain("indeterminate");
+    expect(mapped).not.toContain("Do not retry");
+    expect(mapped).not.toContain("embed the AutoMobile SDK");
+  });
+
+  test("a read keeps every other failure's wording", () => {
+    const message = "Failed to connect to CtrlProxy";
+    expect(iosSqlErrorMessage(new Error(message), "/app/notes.db", { readOnlyQuery: true })).toBe(
+      iosSqlErrorMessage(new Error(message), "/app/notes.db"),
+    );
+  });
 });
 
 test("preserves wrong-simulator advice", () => {

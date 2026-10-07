@@ -67,10 +67,14 @@ internal fun OverlayRuntimeContent(
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  Box(Modifier.semantics { testTagsAsResourceId = true }) {
-    RenderOverlayNode(root, interact)
-    modalOverlaySheets(root).forEach { node ->
-      key(node.identity) { RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact) }
+  OverlayTheme(root) {
+    Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      RenderOverlayNode(root, interact)
+      modalOverlaySheets(root).forEach { node ->
+        key(node.identity) {
+          RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact)
+        }
+      }
     }
   }
 }
@@ -300,7 +304,7 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(node.style.background ?: Color.White)
+        .background(node.style.background ?: MaterialTheme.colorScheme.surface)
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
             onDragStart = { drag = 0.0 },
@@ -363,10 +367,13 @@ private fun overlayNodeModifier(
     if (node.role != "textField") text = AnnotatedString(node.text)
     this[OverlayRole] = node.role
     if (node.role == "icon" || node.role == "image") role = Role.Image
-    // Compose has no native role for text or layout containers. Preserve the node kind as a
-    // label for empty primitives as well as a custom semantic role; no button role implies tap
-    // support.
-    contentDescription = node.text.ifEmpty { node.role }
+    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+    overlayContentDescription(node.role, node.text, node.iconName, tappable)?.let {
+      contentDescription = it
+    }
+    overlayStateDescription(node.role, node.page, node.children.size)?.let {
+      stateDescription = it
+    }
     node.testTag?.let { testTag = it }
   }
   val insetFloor = LocalOverlayInsetFloor.current
@@ -408,6 +415,31 @@ private fun overlayNodeModifier(
   }
   return modifier
 }
+
+private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")
+
+/**
+ * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
+ * its icon name. Layout containers with neither text nor actions get none, so they stay out of the
+ * skeleton instead of being labelled by their node kind ("box", "row"). Every other node keeps its
+ * kind as the label.
+ */
+internal fun overlayContentDescription(
+  role: String,
+  text: String,
+  iconName: String?,
+  tappable: Boolean,
+): String? =
+  when {
+    text.isNotEmpty() -> text
+    tappable && !iconName.isNullOrEmpty() -> iconName
+    !tappable && role in SEMANTICS_FREE_CONTAINERS -> null
+    else -> role
+  }
+
+/** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
+internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =
+  if (role == "pager" && pageCount > 0) "Page ${page + 1} of $pageCount" else null
 
 private fun dimensionModifier(
   modifier: Modifier,

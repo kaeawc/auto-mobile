@@ -144,7 +144,7 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
         }),
       );
 
-      await expect(resultPromise).resolves.toBeUndefined();
+      await expect(resultPromise).resolves.toEqual({ alreadySatisfied: false });
     } finally {
       await client.close();
     }
@@ -176,7 +176,100 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
         }),
       );
 
-      await expect(resultPromise).resolves.toBeUndefined();
+      await expect(resultPromise).resolves.toEqual({ alreadySatisfied: false });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("setAccessibilityFocus on an already-focused node resolves as alreadySatisfied (#10148)", async function () {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+
+      const baseCount = socket!.sentMessages.length;
+      const resultPromise = client.setAccessibilityFocus("com.example:id/title");
+      await waitForSentMessages(socket, baseCount + 1);
+
+      const sent = findSentMessage(socket!, "request_action");
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "action_result",
+          requestId: sent.requestId,
+          action: "focus",
+          success: true,
+          alreadySatisfied: true,
+          totalTimeMs: 1,
+        }),
+      );
+
+      await expect(resultPromise).resolves.toEqual({ alreadySatisfied: true });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("clearAccessibilityFocus on an unfocused node resolves as alreadySatisfied (#10148)", async function () {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+
+      const baseCount = socket!.sentMessages.length;
+      const resultPromise = client.clearAccessibilityFocus("com.example:id/title");
+      await waitForSentMessages(socket, baseCount + 1);
+
+      const sent = findSentMessage(socket!, "request_action");
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "action_result",
+          requestId: sent.requestId,
+          action: "clear_focus",
+          success: true,
+          alreadySatisfied: true,
+          totalTimeMs: 1,
+        }),
+      );
+
+      await expect(resultPromise).resolves.toEqual({ alreadySatisfied: true });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("an old runner's 'unavailable' refusal for focus is still surfaced as a failure", async function () {
+    // Pre-#10148 runners refuse focus on an already-focused node with this text. The text is the
+    // same one a node that genuinely cannot take accessibility focus produces, so the host cannot
+    // tell the two apart and must not guess.
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+
+      const baseCount = socket!.sentMessages.length;
+      const resultPromise = client.setAccessibilityFocus("com.example:id/title");
+      await waitForSentMessages(socket, baseCount + 1);
+
+      const sent = findSentMessage(socket!, "request_action");
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "action_result",
+          requestId: sent.requestId,
+          action: "focus",
+          success: false,
+          error: "Accessibility action is unavailable: focus",
+          totalTimeMs: 1,
+        }),
+      );
+
+      await expect(resultPromise).rejects.toThrow(/unavailable: focus/);
     } finally {
       await client.close();
     }

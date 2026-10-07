@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { Element } from "../../../models/Element";
 import type { LayoutWarning, LayoutWarningsScope } from "../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
@@ -215,16 +216,7 @@ export function projectSanitizedObserveSkeleton(
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
-  // Cache structuredClone and full-output JSON cloning discard the collector's
-  // provenance. Restore the complete candidate set and ancestry together from
-  // the capture, just as diff replay does, without mutating the cached result.
-  const elements =
-    source.elements && !getSearchableEntries(source.elements) && source.viewHierarchy
-      ? new DefaultObserveElementCollector().collect(
-          source.viewHierarchy,
-          isIosObservation(source) ? "ios" : "android",
-        )
-      : source.elements;
+  const elements = skeletonElementsForProjection(source);
   const { skeleton, context, keyboard } = elements
     ? projectSkeleton(elements, source.screenSize)
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
@@ -259,6 +251,39 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   }
   delete out.viewHierarchy;
   delete out.elements;
+}
+
+function skeletonElementsForProjection(source: ObserveResult): ObserveResult["elements"] {
+  // Cache structuredClone and full-output JSON cloning discard the collector's
+  // provenance. Restore it only when recollection reproduces the supplied
+  // categories and descriptors: elements remain authoritative for output.
+  const elements = source.elements;
+  if (!elements || getSearchableEntries(elements) || !source.viewHierarchy) {
+    return elements;
+  }
+  const collected = new DefaultObserveElementCollector().collect(
+    source.viewHierarchy,
+    isIosObservation(source) ? "ios" : "android",
+  );
+  return isDeepStrictEqual(skeletonElementShape(elements), skeletonElementShape(collected))
+    ? collected
+    : elements;
+}
+
+/** Normalize only the existing lossless wire transforms before comparing collections. */
+function skeletonElementShape(elements: ObserveResult["elements"]): ObserveResult["elements"] {
+  if (!elements) {
+    return undefined;
+  }
+  const shape = JSON.parse(JSON.stringify(elements)) as NonNullable<ObserveResult["elements"]>;
+  const referencedViewIds = new Set<string>();
+  for (const category of [shape.clickable, shape.scrollable, shape.text]) {
+    for (const element of category) {
+      trimHierarchyNodeAttributes(element, referencedViewIds);
+    }
+  }
+  compactObserveBounds(shape);
+  return shape;
 }
 
 /**
@@ -405,7 +430,7 @@ function trimHierarchyNodes(
 }
 
 function trimHierarchyNodeAttributes(
-  node: ViewHierarchyNode,
+  node: ViewHierarchyNode | Element,
   referencedOccluderViewIds: ReadonlySet<string>,
 ): void {
   const attrs: Record<string, unknown> = node;

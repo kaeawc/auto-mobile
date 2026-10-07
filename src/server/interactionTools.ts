@@ -123,6 +123,7 @@ import {
 import { defaultTimer } from "../utils/SystemTimer";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   withIsErrorOnFailure,
   awaitWhileRequestIsLive,
@@ -3167,10 +3168,26 @@ export function registerInteractionTools() {
         const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
         // Use statusbar commands directly: an unreadable hierarchy must not
         // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
-        restoreFailedClearAll = () => {
+        restoreFailedClearAll = async () => {
+          // Mark cleanup done before starting it, including when it throws or times out.
+          restoreFailedClearAll = undefined;
           // Cleanup must still run after request cancellation.
-          const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
-          return initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray();
+          try {
+            const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
+            await raceWithDeadline(
+              () => (initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray()),
+              {
+                timer: getSystemTrayDependencies().timer,
+                timeoutMs: awaitTimeoutMs,
+                label: "Notification shade restoration",
+              },
+            );
+          } catch (restoreError) {
+            logger.warn(
+              `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+              restoreError,
+            );
+          }
         };
       }
 
@@ -3235,17 +3252,20 @@ export function registerInteractionTools() {
         expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
       );
       if (drained.stalled) {
-        result.success = false;
+        // The app inventory is authoritative even if UI/text fallback still matches a row.
+        if (remainingKeys === undefined || remainingKeys.length > 0) {
+          result.success = false;
+        }
         result.message =
           expectedKeys === undefined
             ? `Cleared ${drained.dismissedCount} matching notification(s).`
             : result.message;
-        result.message +=
-          " A matching notification remains; dismissal was not confirmed or the swipe limit was reached.";
+        result.message += result.success
+          ? " Warning: a matching notification remains in the UI, but the app notification inventory is empty."
+          : " A matching notification remains; dismissal was not confirmed or the swipe limit or deadline was reached.";
       }
       if (!result.success && restoreFailedClearAll) {
         await restoreFailedClearAll();
-        restoreFailedClearAll = undefined;
       }
 
       const { observeScreenFactory } = getSystemTrayDependencies();
@@ -3282,14 +3302,7 @@ export function registerInteractionTools() {
       throw toActionableError(error, `systemTray failed`);
     } finally {
       if (restoreFailedClearAll) {
-        try {
-          await restoreFailedClearAll();
-        } catch (restoreError) {
-          logger.warn(
-            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
-            restoreError,
-          );
-        }
+        await restoreFailedClearAll();
       }
     }
   };

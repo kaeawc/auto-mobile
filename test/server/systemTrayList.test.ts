@@ -22,6 +22,7 @@ import { getIosInstalledAppBundleId } from "../../src/utils/ios-cmdline-tools/io
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 
 const device: BootedDevice = {
@@ -1480,6 +1481,72 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
   });
 
+  for (const restoreThrows of [false, true]) {
+    test(`failed clearAll restores exactly once when restore ${restoreThrows ? "throws" : "succeeds"}`, async () => {
+      const { adb, commands, timer } = setupClearAllShade(true);
+      const restoreError = new Error("statusbar restore failed");
+      if (restoreThrows) {
+        adb.setCommandError("shell cmd statusbar expand-notifications", restoreError);
+      }
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const response = await handler()(device, {
+          action: "clearAll",
+          notification: { title: "Shell notification" },
+          awaitTimeout: 625,
+        });
+        expect(JSON.parse(response.content[0].text)).toMatchObject({
+          success: false,
+          dismissedCount: 0,
+        });
+        expect(response.isError).toBe(true);
+        expect(commands().filter((command) => command.includes("shell cmd statusbar"))).toEqual([
+          "shell cmd statusbar expand-notifications",
+        ]);
+        expect(timer.getSleepHistory()).toEqual([250, 250, 125]);
+        if (restoreThrows) {
+          expect(warnSpy).toHaveBeenCalledWith(
+            "Failed to restore notification shade: Failed to expand system tray: statusbar restore failed",
+            expect.objectContaining({ cause: restoreError }),
+          );
+        } else {
+          expect(warnSpy).not.toHaveBeenCalled();
+        }
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  }
+
+  test("empty app inventory succeeds despite a leftover text-fallback match", async () => {
+    const { adb, commands, timer } = setupClearAllShade(true);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Shell notification", "Body"))),
+      execResult(dumpsys()),
+    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      const response = await clearAll();
+      const payload = JSON.parse(response.content[0].text);
+      expect(payload).toMatchObject({ success: true, remainingCount: 0, dismissedCount: 1 });
+      expect(payload.message).toContain("Warning: a matching notification remains");
+      expect(response.isError).not.toBe(true);
+      expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(
+        1,
+      );
+      // The list pass closes and reopens the tray; success adds no restore.
+      expect(commands().filter((command) => command.includes("shell cmd statusbar"))).toEqual([
+        "shell cmd statusbar collapse",
+        "shell cmd statusbar expand-notifications",
+        "shell cmd statusbar collapse",
+        "shell cmd statusbar expand-notifications",
+      ]);
+      expect(timer.getSleepHistory()).toEqual(Array(20).fill(250));
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
   for (const unreadable of ["missing", "closed"] as const) {
     test(`clearAll names unreadable shade (${unreadable}) instead of remaining-count failure`, async () => {
       const { commands } = setupClearAllShade(false, unreadable);
@@ -1704,6 +1771,73 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
+  test("text-filtered clearAll drains offscreen matches without an app inventory", async () => {
+    const { adb, timer } = setup(
+      [
+        page(identifiedRow("Match Alpha"), identifiedRow("Match Beta")),
+        page(identifiedRow("Match Beta"), identifiedRow("Match Gamma")),
+        page(identifiedRow("Match Gamma")),
+        page(),
+      ],
+      false,
+    );
+    installClearAllDependencies(timer, adb);
+    const response = await handler()(device, {
+      action: "clearAll",
+      notification: { title: "Match" },
+    });
+    expect(JSON.parse(response.content[0].text)).toMatchObject({
+      success: true,
+      dismissedCount: 3,
+    });
+    expect(response.isError).not.toBe(true);
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")),
+    ).toHaveLength(3);
+    expect(
+      adb.getExecutedCommands().some((command) => command.includes("dumpsys notification")),
+    ).toBe(false);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("text-filtered clearAll retains the 25-swipe safety cap", async () => {
+    const { adb, timer } = setup(
+      Array.from({ length: 26 }, (_, index) => page(identifiedRow(`Match ${index}`))),
+      false,
+    );
+    installClearAllDependencies(timer, adb);
+    const response = await handler()(device, {
+      action: "clearAll",
+      notification: { title: "Match" },
+    });
+    expect(JSON.parse(response.content[0].text)).toMatchObject({
+      success: false,
+      dismissedCount: 25,
+    });
+    expect(response.isError).toBe(true);
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")),
+    ).toHaveLength(25);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("text-filtered clearAll shares its deadline across confirmed dismissals", async () => {
+    const { timer, swipes } = setupDelayedClear(0, 250);
+    const response = await handler()(device, {
+      action: "clearAll",
+      notification: { body: "Body of" },
+      awaitTimeout: 375,
+    });
+    expect(JSON.parse(response.content[0].text)).toMatchObject({
+      success: false,
+      dismissedCount: 1,
+    });
+    expect(response.isError).toBe(true);
+    expect(swipes()).toHaveLength(2);
+    expect(timer.getSleepHistory()).toEqual([250, 125]);
+    expect(timer.now()).toBe(375);
+  });
+
   test("new matching arrivals cannot raise the initial dismissal budget", async () => {
     const { adb, observer, swipes } = setupDelayedClear(0);
     observer.setObserveResult(() => {
@@ -1890,6 +2024,61 @@ describe("systemTray clearAll dumpsys ownership", () => {
       ).toHaveLength(0);
     } finally {
       installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("cancellation bounds a hung restore and attempts it only once", async () => {
+    const { adb, observer, timer, swipes } = setupDelayedClear(0);
+    const controller = new AbortController();
+    const observe = observer.execute.bind(observer);
+    const execute = adb.executeCommand.bind(adb);
+    let restoreCalls = 0;
+    const executeSpy = spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      const result = await execute(...args);
+      if (args[0] === "shell cmd statusbar collapse" && controller.signal.aborted) {
+        restoreCalls++;
+        return new Promise<never>(() => {});
+      }
+      return result;
+    });
+    const observeSpy = spyOn(observer, "execute").mockImplementation((options) => {
+      if (
+        adb.getExecutedCommands().filter((command) => command.endsWith("expand-notifications"))
+          .length >= 2
+      ) {
+        controller.abort(new Error("cancel clear"));
+      }
+      return observe(options);
+    });
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        handler()(
+          device,
+          {
+            action: "clearAll",
+            notification: { appId: SHELL },
+            awaitTimeout: 625,
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(restoreCalls).toBe(1);
+      expect(timer.now()).toBe(625);
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Failed to restore notification shade: Notification shade restoration timed out after 625ms",
+        expect.any(Error),
+      );
+      expect(swipes()).toHaveLength(0);
+    } finally {
+      installedAppsSpy.mockRestore();
+      warnSpy.mockRestore();
+      observeSpy.mockRestore();
+      executeSpy.mockRestore();
     }
   });
 

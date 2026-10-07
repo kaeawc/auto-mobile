@@ -2469,7 +2469,7 @@ const waitForReadableClearAllMatch = async (
   }
 };
 
-/** Android drain: one dismissal per initial match, with readable post-swipe evidence. */
+/** Android drain: confirm each dismissal, bounded by inventory or the safety cap. */
 export const clearMatchingSystemTrayNotifications = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
@@ -2482,6 +2482,7 @@ export const clearMatchingSystemTrayNotifications = async (
     return { swipeCount: 0, dismissedCount: 0, stalled: false };
   }
   const { timer } = getSystemTrayDependencies();
+  const deadlineMs = timer.now() + awaitTimeoutMs;
   let current = await waitForReadableClearAllMatch(
     device,
     criteria,
@@ -2489,20 +2490,20 @@ export const clearMatchingSystemTrayNotifications = async (
     awaitTimeoutMs,
     { progress, signal },
   );
-  const initialCount = current.observation.viewHierarchy
-    ? findNotificationMatches(current.observation.viewHierarchy, criteria, appMatchTexts).length
-    : 0;
   // The initial app inventory includes rows below the viewport that move into
-  // view as siblings leave. Without that inventory, bound by the UI matches.
-  const maxSwipes = Math.min(options.maxSwipes ?? initialCount, SYSTEM_TRAY_CLEAR_MAX_ITERATIONS);
+  // view as siblings leave. Without it, drain newly visible matches up to the cap.
+  const maxSwipes = Math.min(
+    options.maxSwipes ?? SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
+    SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
+  );
   let swipeCount = 0;
   let dismissedCount = 0;
-  while (current.match && swipeCount < maxSwipes) {
+  while (current.match && swipeCount < maxSwipes && timer.now() < deadlineMs) {
     const expanded = await expandAndRematchIfCollapsed(
       device,
       criteria,
       appMatchTexts,
-      timer.now() + awaitTimeoutMs,
+      deadlineMs,
       progress,
       { observation: current.observation, match: current.match, signal },
     );
@@ -2525,7 +2526,7 @@ export const clearMatchingSystemTrayNotifications = async (
       baseline,
       criteria,
       appMatchTexts,
-      awaitTimeoutMs,
+      Math.max(0, deadlineMs - timer.now()),
       signal,
     );
     if (!verified.dismissed) {

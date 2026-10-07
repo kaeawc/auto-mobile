@@ -1675,6 +1675,8 @@ which the app reads with `consumeOverride()`; `ttlMs` and `errorCode` apply as o
 Android. On the Simulator, `match` and `fail` also post the BiometricKit event so a
 pending system prompt completes. Without the SDK, the Simulator falls back to
 BiometricKit events (`match` and `fail` only) and a physical device is unsupported.
+On iOS, `cancel` and `error` only arm the SDK override; the app must read it via
+`consumeOverride()`, as no system prompt is completed for them.
 `enroll` and `unenroll` always use the Simulator.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
@@ -2014,6 +2016,10 @@ accept the recording `display` argument.
 
 `accessibilityFocus.resourceId` targets a resource ID. `contentDesc` matches the
 exact content description or accessible label, distinct from visible `text`.
+
+Setting focus on a node that already holds accessibility focus, or clearing focus
+on one that does not, succeeds without sending an action and reports
+`alreadySatisfied: true`.
 
 Before acquiring a device, read `automobile:tools` for every tool's default discovery state. Startup enable/disable settings also affect discovery only, not direct `tools/call` by name.
 

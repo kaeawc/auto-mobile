@@ -218,6 +218,16 @@ describe("Telephony", () => {
       ]);
     });
 
+    test("sendSms rejects bodies the Android console path rejects, without reaching the SDK", async () => {
+      for (const message of ["", "a\nb", "a\rb", "a\0b", "x".repeat(1025)]) {
+        const result = await telephony.sendSms({ phoneNumber: "555", message });
+        expect(result.success).toBe(false);
+        expect(result.supported).toBe(true);
+        expect(result.error).toContain("SMS message");
+      }
+      expect(sender.requests).toEqual([]);
+    });
+
     test("an app without the SDK returns an actionable unsupported error", async () => {
       sender.result = {
         success: false,

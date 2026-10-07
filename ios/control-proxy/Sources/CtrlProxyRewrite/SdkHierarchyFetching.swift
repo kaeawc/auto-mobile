@@ -15,6 +15,8 @@ public protocol SdkHierarchyFetching: Sendable {
     func isAvailable() async -> Bool
     /// Replace network mock rules in the in-app SDK.
     func setMockRules(_ rules: [NetworkMockRuleDTO]) async -> Bool
+    /// `setMockRules` that also returns the rules the SDK's regex engine rejected (issue #10101).
+    func pushMockRules(_ rules: [NetworkMockRuleDTO]) async -> SdkMockRulesOutcome
     func setNetworkFaultRules(_ rules: [NetworkFaultRuleDTO]) async -> Bool
     /// Replace active network error simulation in the in-app SDK.
     func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) async -> Bool
@@ -26,7 +28,27 @@ public protocol SdkHierarchyFetching: Sendable {
     func addHighlight(id: String, shape: HighlightShape) async -> SdkHighlightOutcome
 }
 
+/// What the in-app SDK did with a pushed mock-rule list (issue #10101). `rejectedMockIds` is nil when the
+/// SDK did not report (it predates the report): the host then says "sent, not confirmed" rather than
+/// claiming every rule was installed. An empty list is a report that nothing was rejected.
+public struct SdkMockRulesOutcome: Sendable, Equatable {
+    public let ok: Bool
+    public let rejectedMockIds: [String]?
+    public let rejectedReasons: [String: String]?
+
+    public init(ok: Bool, rejectedMockIds: [String]? = nil, rejectedReasons: [String: String]? = nil) {
+        self.ok = ok
+        self.rejectedMockIds = rejectedMockIds
+        self.rejectedReasons = rejectedReasons
+    }
+}
+
 extension SdkHierarchyFetching {
+    /// Fetchers that cannot see the SDK's reply body (stubs, older conformers) report only success.
+    public func pushMockRules(_ rules: [NetworkMockRuleDTO]) async -> SdkMockRulesOutcome {
+        SdkMockRulesOutcome(ok: await setMockRules(rules))
+    }
+
     /// Older implementations have no Magic Tap bridge.
     public func performMagicTap() async -> Bool? { nil }
     /// Older implementations have no trigger bridge.

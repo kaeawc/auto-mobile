@@ -1,6 +1,9 @@
 #if DEBUG && !os(watchOS)
     import Foundation
     import os
+    #if canImport(UserNotifications)
+        import UserNotifications
+    #endif
     #if canImport(CallKit) && os(iOS)
         import CallKit
     #endif
@@ -108,13 +111,19 @@
 
     /// `messages` trigger module: `sms` posts an SMS-style local notification titled with the
     /// sender's number, with the same `phoneNumber` and `message` fields as the host `sendSms` tool.
-    /// Delivery is asynchronous: `handled` means the notification was handed to the system.
+    /// `handled` means the system accepted the notification; a scheduling failure or timeout is
+    /// reported as `failed` so the host does not claim a message that never appeared.
     struct SdkMessagesTriggerModule: SdkTriggerModule {
         static let moduleName = "messages"
 
-        private let post: @Sendable (_ title: String, _ body: String) -> Void
+        /// How long the route waits for the notification to be scheduled; the runner's request to
+        /// the SDK times out after 2 seconds.
+        static let postTimeout: DispatchTimeInterval = .milliseconds(1500)
 
-        init(post: @escaping @Sendable (_ title: String, _ body: String) -> Void = Self.postLocalNotification) {
+        /// Posts the notification and returns nil on success or a short failure reason.
+        private let post: @Sendable (_ title: String, _ body: String) -> String?
+
+        init(post: @escaping @Sendable (_ title: String, _ body: String) -> String? = Self.postLocalNotification) {
             self.post = post
         }
 
@@ -130,21 +139,48 @@
             guard let message = payload["message"] as? String else {
                 return .invalidPayload("missing_message")
             }
-            post(phoneNumber, message)
+            if let failure = post(phoneNumber, message) {
+                return .failed(failure)
+            }
             return .handled
         }
 
-        // `@Sendable` so the default `post` argument converts without a data-race warning; the
-        // body only captures its `String` parameters into a `Task`.
-        @Sendable
-        static func postLocalNotification(title: String, body: String) {
-            #if canImport(UserNotifications)
-                Task {
-                    let posted = await AutoMobileNotifications.shared.post(title: title, body: body)
-                    if !posted {
-                        InternalLogger.warning("[AutoMobileSDK] SMS trigger notification was not scheduled")
+        #if canImport(UserNotifications)
+            /// Retains the delegate that presents notifications while the app is foregrounded.
+            /// `UNUserNotificationCenter.delegate` is weak, and `/trigger` only runs while the app is
+            /// active, where iOS shows nothing unless a delegate opts in. The handler chains to any
+            /// delegate the app already installed.
+            private static let presentationHandler = OSAllocatedUnfairLock<UNUserNotificationCenterDelegate?>(
+                initialState: nil
+            )
+
+            private static func installPresentationHandlerIfNeeded() {
+                presentationHandler.withLock {
+                    if $0 == nil {
+                        $0 = AutoMobileNotifications.shared.installActionHandler()
                     }
                 }
+            }
+        #endif
+
+        // `@Sendable` so the default `post` argument converts without a data-race warning.
+        @Sendable
+        static func postLocalNotification(title: String, body: String) -> String? {
+            #if canImport(UserNotifications)
+                installPresentationHandlerIfNeeded()
+                let semaphore = DispatchSemaphore(value: 0)
+                let posted = OSAllocatedUnfairLock(initialState: false)
+                Task {
+                    let result = await AutoMobileNotifications.shared.post(title: title, body: body)
+                    posted.withLock { $0 = result }
+                    semaphore.signal()
+                }
+                guard semaphore.wait(timeout: .now() + postTimeout) == .success else {
+                    return "notification_timeout"
+                }
+                return posted.withLock { $0 } ? nil : "notification_not_scheduled"
+            #else
+                return "notifications_unavailable"
             #endif
         }
     }

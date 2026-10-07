@@ -13,7 +13,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Buffer
 
 /**
  * OkHttp Application-level Interceptor that captures HTTP request/response metadata and enforces
@@ -43,6 +42,14 @@ internal class AutoMobileNetworkInterceptor(
   private val policyProvider: (() -> SdkCapturePolicy)? = null,
   private val networkControlProvider: (() -> Boolean)? = null,
 ) : Interceptor {
+
+  /**
+   * Schedules the deadline after which an unread, never-closed response body is reported with what
+   * was captured so far; returns a cancel handle. Null uses the event buffer's shared scheduler. A
+   * seam for deterministic tests; a property rather than a constructor parameter so the existing
+   * constructor signature stays unchanged.
+   */
+  internal var scheduleCaptureDeadline: ((Runnable, Long) -> (() -> Unit)?)? = null
 
   companion object {
     private const val TAG = "AutoMobileNetwork"
@@ -166,40 +173,83 @@ internal class AutoMobileNetworkInterceptor(
       throw e
     }
 
-    observe {
-      val durationMs = System.currentTimeMillis() - startMs
-      val responseContentType = response.header("Content-Type")
-      val finalReqHeaders =
-        if (headersEnabled) response.request.headers.toHeaderMap() else reqHeaders
-      val respHeaders = if (headersEnabled) response.headers.toHeaderMap() else null
-      val respBody =
-        if (bodiesEnabled && isTextContentType(responseContentType)) {
-          response.peekBody(maxBodyBytes).string()
-        } else null
-
-      buffer.add(
-        SdkNetworkRequestEvent(
-          timestamp = startMs,
-          applicationId = applicationId,
-          url = request.url.toString(),
-          method = request.method,
-          statusCode = response.code,
-          durationMs = durationMs,
-          requestBodySize = request.body?.contentLength() ?: -1,
-          responseBodySize = response.body?.contentLength() ?: -1,
-          protocol = response.protocol.toString(),
-          host = request.url.host,
-          path = request.url.encodedPath,
-          requestHeaders = finalReqHeaders,
-          responseHeaders = respHeaders,
-          requestBody = reqBody,
-          responseBody = respBody,
-          contentType = responseContentType,
-        )
+    return observeOrNull {
+      recordResponse(
+        request = request,
+        response = response,
+        startMs = startMs,
+        headersEnabled = headersEnabled,
+        bodiesEnabled = bodiesEnabled,
+        reqHeaders = reqHeaders,
+        reqBody = reqBody,
       )
-    }
+    } ?: response
+  }
 
-    return response
+  /**
+   * Emit the event for a completed exchange and return the response to hand to the app.
+   *
+   * Response bodies are never read here: reading would put body download time into time-to-headers
+   * and would block forever on a streaming response. When a body is captured, the returned response
+   * wraps the original body so bytes are copied as the app reads them, and the event is emitted
+   * when the app finishes (or abandons) the body. See [NetworkBodyCapture.CapturingResponseBody].
+   */
+  private fun recordResponse(
+    request: okhttp3.Request,
+    response: Response,
+    startMs: Long,
+    headersEnabled: Boolean,
+    bodiesEnabled: Boolean,
+    reqHeaders: Map<String, String>?,
+    reqBody: String?,
+  ): Response {
+    val durationMs = System.currentTimeMillis() - startMs
+    val responseContentType = response.header("Content-Type")
+    val finalReqHeaders = if (headersEnabled) response.request.headers.toHeaderMap() else reqHeaders
+    val respHeaders = if (headersEnabled) response.headers.toHeaderMap() else null
+    val responseBodySize = response.body?.contentLength() ?: -1
+    fun event(respBody: String?) =
+      SdkNetworkRequestEvent(
+        timestamp = startMs,
+        applicationId = applicationId,
+        url = request.url.toString(),
+        method = request.method,
+        statusCode = response.code,
+        durationMs = durationMs,
+        requestBodySize = request.body?.contentLength() ?: -1,
+        responseBodySize = responseBodySize,
+        protocol = response.protocol.toString(),
+        host = request.url.host,
+        path = request.url.encodedPath,
+        requestHeaders = finalReqHeaders,
+        responseHeaders = respHeaders,
+        requestBody = reqBody,
+        responseBody = respBody,
+        contentType = responseContentType,
+      )
+
+    val body = response.body
+    val capture =
+      bodiesEnabled &&
+        isTextContentType(responseContentType) &&
+        !NetworkBodyCapture.isStreamingContentType(responseContentType)
+    if (!capture || body == null) {
+      buffer.add(event(null))
+      return response
+    }
+    if (responseBodySize == 0L) {
+      buffer.add(event(""))
+      return response
+    }
+    val capturing =
+      NetworkBodyCapture.CapturingResponseBody(
+        delegate = body,
+        maxBytes = maxBodyBytes,
+        onComplete = { text -> observe { buffer.add(event(text)) } },
+        scheduleDeadline =
+          scheduleCaptureDeadline ?: { task, delayMs -> buffer.scheduleDelivery(task, delayMs) },
+      )
+    return response.newBuilder().body(capturing).build()
   }
 
   private fun buildMockResponse(
@@ -297,16 +347,8 @@ internal class AutoMobileNetworkInterceptor(
 
   private fun captureRequestBody(request: okhttp3.Request): String? {
     val body = request.body ?: return null
-    val contentType = body.contentType()?.toString()
-    if (!isTextContentType(contentType)) return null
-    return try {
-      val buffer = Buffer()
-      body.writeTo(buffer)
-      val bytes = minOf(buffer.size, maxBodyBytes)
-      buffer.readUtf8(bytes)
-    } catch (_: Exception) {
-      null
-    }
+    if (!isTextContentType(body.contentType()?.toString())) return null
+    return NetworkBodyCapture.captureRequestBody(body, maxBodyBytes)
   }
 
   private fun observe(block: () -> Unit) {

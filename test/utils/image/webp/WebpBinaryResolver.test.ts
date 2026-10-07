@@ -1,50 +1,36 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
+import { describe, expect, spyOn, test } from "bun:test";
 import * as path from "node:path";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { FileDownloader } from "../../../../src/utils/FileDownloader";
-import { WebpBinaryResolver } from "../../../../src/utils/image/webp/WebpBinaryResolver";
-import { defaultTimer } from "../../../../src/utils/SystemTimer";
+import {
+  defaultWebpBinaryFileSystem,
+  WebpBinaryResolver,
+  type WebpBinaryResolverOptions,
+} from "../../../../src/utils/image/webp/WebpBinaryResolver";
 import { FakeArchiveExtractor } from "../../../fakes/FakeArchiveExtractor";
 import { FakeChecksumCalculator } from "../../../fakes/FakeChecksumCalculator";
 import { FakeChildProcess } from "../../../fakes/FakeChildProcess";
-import { FakeFileDownloader } from "../../../fakes/FakeFileDownloader";
 import { FakeProcessExecutor } from "../../../fakes/FakeProcessExecutor";
+import { FakeWebpBinaryFileSystem } from "../../../fakes/FakeWebpBinaryFileSystem";
 
-const tempDirs: string[] = [];
 const hostSupportsPosixExecuteBits = process.platform !== "win32";
 const MAC_ARM64_ARCHIVE_SHA256 = "bc6bf84cc70f3f8574fba797d1e4a7dea4feebe9fa4be919f202413ea2b3b8f2";
+const ROOT = path.join(path.sep, "virtual", "webp-root");
+const CACHE_DIR = path.join(ROOT, "cache");
+const MAC_ARM64_ARCHIVE = path.join(CACHE_DIR, "libwebp-1.6.0-mac-arm64.tar.gz");
+const MAC_ARM64_CWEBP = path.join(CACHE_DIR, "libwebp-1.6.0-mac-arm64", "bin", "cwebp");
+const MAC_ARM64_DWEBP = path.join(CACHE_DIR, "libwebp-1.6.0-mac-arm64", "bin", "dwebp");
 
-async function makeTempDir(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-webp-resolver-"));
-  tempDirs.push(dir);
-  return dir;
-}
-
-async function writeExecutable(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, "fake");
-  await fs.chmod(filePath, 0o755);
-}
-
-async function writeNonExecutable(filePath: string): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, "fake");
-  await fs.chmod(filePath, 0o644);
-}
-
+/** Records downloads without touching the disk; optionally blocks on a gate. */
 class CountingFileDownloader implements FileDownloader {
   readonly downloadedUrls: string[] = [];
   readonly entered = Promise.withResolvers<void>();
   gate?: Promise<void>;
 
-  async download(url: string, destination: string): Promise<void> {
+  async download(url: string): Promise<void> {
     this.downloadedUrls.push(url);
     this.entered.resolve();
     await this.gate;
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-    await fs.writeFile(destination, "fake archive");
   }
 }
 
@@ -56,27 +42,46 @@ function fakeArchiveChecksumCalculator(
   return checksumCalculator;
 }
 
-afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
+function resolverFor(
+  fileSystem: FakeWebpBinaryFileSystem,
+  options: WebpBinaryResolverOptions = {},
+): WebpBinaryResolver {
+  return new WebpBinaryResolver({ projectRoot: ROOT, fileSystem, ...options });
+}
+
+function macArm64Options(
+  fileSystem: FakeWebpBinaryFileSystem,
+  extractedBinaries: string[],
+  checksum?: string,
+) {
+  const archiveExtractor = new FakeArchiveExtractor();
+  archiveExtractor.onExtract = () => {
+    for (const binary of extractedBinaries) {
+      fileSystem.addExecutable(binary);
+    }
+  };
+  return {
+    cacheDir: CACHE_DIR,
+    platform: "darwin" as const,
+    arch: "arm64" as const,
+    env: { PATH: "" },
+    archiveExtractor,
+    checksumCalculator: fakeArchiveChecksumCalculator(checksum),
+  };
+}
 
 describe("WebpBinaryResolver", () => {
   test("prefers cwebp and dwebp environment overrides", async () => {
-    const root = await makeTempDir();
-    const cwebp = path.join(root, "override", "cwebp.exe");
-    const dwebp = path.join(root, "override", "dwebp.exe");
-    await writeExecutable(cwebp);
-    await writeExecutable(dwebp);
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const cwebp = path.join(ROOT, "override", "cwebp.exe");
+    const dwebp = path.join(ROOT, "override", "dwebp.exe");
+    fileSystem.addExecutable(cwebp);
+    fileSystem.addExecutable(dwebp);
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
+    const resolver = resolverFor(fileSystem, {
       platform: "win32",
       arch: "x64",
-      env: {
-        AUTOMOBILE_CWEBP_PATH: cwebp,
-        AUTOMOBILE_DWEBP_PATH: dwebp,
-        PATH: "",
-      },
+      env: { AUTOMOBILE_CWEBP_PATH: cwebp, AUTOMOBILE_DWEBP_PATH: dwebp, PATH: "" },
     });
 
     await expect(resolver.resolveCwebp()).resolves.toBe(cwebp);
@@ -84,15 +89,13 @@ describe("WebpBinaryResolver", () => {
   });
 
   test("uses PATH before the bundled Windows copy", async () => {
-    const root = await makeTempDir();
-    const pathDir = path.join(root, "path-bin");
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const pathDir = path.join(ROOT, "path-bin");
     const pathCwebp = path.join(pathDir, "cwebp.exe");
-    const bundledCwebp = path.join(root, "vendor", "libwebp", "win32-x64", "cwebp.exe");
-    await writeExecutable(pathCwebp);
-    await writeExecutable(bundledCwebp);
+    fileSystem.addExecutable(pathCwebp);
+    fileSystem.addExecutable(path.join(ROOT, "vendor", "libwebp", "win32-x64", "cwebp.exe"));
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
+    const resolver = resolverFor(fileSystem, {
       platform: "win32",
       arch: "x64",
       env: { PATH: pathDir },
@@ -101,60 +104,40 @@ describe("WebpBinaryResolver", () => {
     await expect(resolver.resolveCwebp()).resolves.toBe(pathCwebp);
   });
 
-  test.skipIf(!hostSupportsPosixExecuteBits)(
-    "skips non-executable PATH candidates on POSIX platforms",
-    async () => {
-      const root = await makeTempDir();
-      const firstPathDir = path.join(root, "first-bin");
-      const secondPathDir = path.join(root, "second-bin");
-      const nonExecutableCwebp = path.join(firstPathDir, "cwebp");
-      const executableCwebp = path.join(secondPathDir, "cwebp");
-      await writeNonExecutable(nonExecutableCwebp);
-      await writeExecutable(executableCwebp);
+  test("skips non-executable PATH candidates", async () => {
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const executableCwebp = path.join(ROOT, "second-bin", "cwebp");
+    fileSystem.addExecutable(executableCwebp);
 
-      const resolver = new WebpBinaryResolver({
-        projectRoot: root,
-        platform: "darwin",
-        arch: "arm64",
-        env: { PATH: `${firstPathDir}:${secondPathDir}` },
-      });
+    const resolver = resolverFor(fileSystem, {
+      platform: "darwin",
+      arch: "arm64",
+      env: { PATH: `${path.join(ROOT, "first-bin")}:${path.join(ROOT, "second-bin")}` },
+    });
 
-      await expect(resolver.resolveCwebp()).resolves.toBe(executableCwebp);
-    },
-  );
+    await expect(resolver.resolveCwebp()).resolves.toBe(executableCwebp);
+  });
 
-  test.skipIf(!hostSupportsPosixExecuteBits)(
-    "rejects non-executable environment overrides on POSIX platforms",
-    async () => {
-      const root = await makeTempDir();
-      const cwebp = path.join(root, "override", "cwebp");
-      await writeNonExecutable(cwebp);
+  test("rejects non-executable environment overrides", async () => {
+    const resolver = resolverFor(new FakeWebpBinaryFileSystem(), {
+      platform: "darwin",
+      arch: "arm64",
+      env: { AUTOMOBILE_CWEBP_PATH: path.join(ROOT, "override", "cwebp"), PATH: "" },
+    });
 
-      const resolver = new WebpBinaryResolver({
-        projectRoot: root,
-        platform: "darwin",
-        arch: "arm64",
-        env: {
-          AUTOMOBILE_CWEBP_PATH: cwebp,
-          PATH: "",
-        },
-      });
+    const thrown = await resolver.resolveCwebp().catch((error) => error);
 
-      const thrown = await resolver.resolveCwebp().catch((error) => error);
-
-      expect(thrown).toBeInstanceOf(ActionableError);
-      expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
-      expect(thrown.message).toContain("not executable");
-    },
-  );
+    expect(thrown).toBeInstanceOf(ActionableError);
+    expect(thrown.message).toContain("AUTOMOBILE_CWEBP_PATH");
+    expect(thrown.message).toContain("not executable");
+  });
 
   test("falls back to the bundled Windows copy", async () => {
-    const root = await makeTempDir();
-    const bundledDwebp = path.join(root, "vendor", "libwebp", "win32-x64", "dwebp.exe");
-    await writeExecutable(bundledDwebp);
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const bundledDwebp = path.join(ROOT, "vendor", "libwebp", "win32-x64", "dwebp.exe");
+    fileSystem.addExecutable(bundledDwebp);
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
+    const resolver = resolverFor(fileSystem, {
       platform: "win32",
       arch: "x64",
       env: { PATH: "" },
@@ -164,88 +147,51 @@ describe("WebpBinaryResolver", () => {
   });
 
   test("downloads and extracts off-platform binaries on demand", async () => {
-    const root = await makeTempDir();
-    const cacheDir = path.join(root, "cache");
-    const downloader = new FakeFileDownloader();
-    const archiveExtractor = new FakeArchiveExtractor();
-    const checksumCalculator = fakeArchiveChecksumCalculator();
-    archiveExtractor.onExtract = async () => {
-      await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
-    };
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const downloader = new CountingFileDownloader();
+    const options = macArm64Options(fileSystem, [MAC_ARM64_CWEBP]);
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
-      cacheDir,
-      platform: "darwin",
-      arch: "arm64",
-      env: { PATH: "" },
-      fileDownloader: downloader,
-      archiveExtractor,
-      checksumCalculator,
-    });
+    const resolver = resolverFor(fileSystem, { ...options, fileDownloader: downloader });
 
     const resolved = await resolver.resolveCwebp();
 
-    expect(resolved).toBe(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
+    expect(resolved).toBe(MAC_ARM64_CWEBP);
     expect(downloader.downloadedUrls).toEqual([
       "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0-mac-arm64.tar.gz",
     ]);
-    expect(checksumCalculator.computedFiles).toEqual([
-      path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz"),
-    ]);
-    expect(archiveExtractor.requests).toHaveLength(1);
-    expect(archiveExtractor.requests[0]).toMatchObject({
-      archivePath: path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz"),
-      destinationDir: cacheDir,
+    expect(options.checksumCalculator.computedFiles).toEqual([MAC_ARM64_ARCHIVE]);
+    expect(fileSystem.ensuredDirectories).toEqual([CACHE_DIR]);
+    expect(options.archiveExtractor.requests).toHaveLength(1);
+    expect(options.archiveExtractor.requests[0]).toMatchObject({
+      archivePath: MAC_ARM64_ARCHIVE,
+      destinationDir: CACHE_DIR,
     });
   });
 
   test("rejects downloaded archives with mismatched SHA-256 before extraction", async () => {
-    const root = await makeTempDir();
-    const cacheDir = path.join(root, "cache");
-    const downloader = new FakeFileDownloader();
-    const archiveExtractor = new FakeArchiveExtractor();
-    const checksumCalculator = fakeArchiveChecksumCalculator("0".repeat(64));
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const options = macArm64Options(fileSystem, [], "0".repeat(64));
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
-      cacheDir,
-      platform: "darwin",
-      arch: "arm64",
-      env: { PATH: "" },
-      fileDownloader: downloader,
-      archiveExtractor,
-      checksumCalculator,
+    const resolver = resolverFor(fileSystem, {
+      ...options,
+      fileDownloader: new CountingFileDownloader(),
     });
 
     const thrown = await resolver.resolveCwebp().catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect(thrown.message).toContain("checksum verification failed");
-    expect(checksumCalculator.computedFiles).toEqual([
-      path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz"),
-    ]);
-    expect(archiveExtractor.requests).toHaveLength(0);
+    expect(options.checksumCalculator.computedFiles).toEqual([MAC_ARM64_ARCHIVE]);
+    expect(options.archiveExtractor.requests).toHaveLength(0);
   });
 
   test("a failed provision is not cached — the .finally clears the in-flight map so a retry re-downloads (#3623)", async () => {
-    const root = await makeTempDir();
-    const cacheDir = path.join(root, "cache");
+    const fileSystem = new FakeWebpBinaryFileSystem();
     const downloader = new CountingFileDownloader();
-    const archiveExtractor = new FakeArchiveExtractor();
     // A mismatching checksum makes every provisionArchive attempt throw.
-    const checksumCalculator = fakeArchiveChecksumCalculator("0".repeat(64));
+    const options = macArm64Options(fileSystem, [], "0".repeat(64));
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
-      cacheDir,
-      platform: "darwin",
-      arch: "arm64",
-      env: { PATH: "" },
-      fileDownloader: downloader,
-      archiveExtractor,
-      checksumCalculator,
-    });
+    const resolver = resolverFor(fileSystem, { ...options, fileDownloader: downloader });
 
     await resolver.resolveCwebp().catch(() => undefined);
     await resolver.resolveCwebp().catch(() => undefined);
@@ -258,71 +204,32 @@ describe("WebpBinaryResolver", () => {
   });
 
   test("provisions the shared off-platform archive once when resolving both binaries", async () => {
-    const root = await makeTempDir();
-    const cacheDir = path.join(root, "cache");
+    const fileSystem = new FakeWebpBinaryFileSystem();
     const downloader = new CountingFileDownloader();
-    const archiveExtractor = new FakeArchiveExtractor();
-    const checksumCalculator = fakeArchiveChecksumCalculator();
-    let extractionCount = 0;
-    archiveExtractor.onExtract = async () => {
-      extractionCount += 1;
-      await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
-      await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "dwebp"));
-    };
+    const options = macArm64Options(fileSystem, [MAC_ARM64_CWEBP, MAC_ARM64_DWEBP]);
 
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
-      cacheDir,
-      platform: "darwin",
-      arch: "arm64",
-      env: { PATH: "" },
-      fileDownloader: downloader,
-      archiveExtractor,
-      checksumCalculator,
-    });
+    const resolver = resolverFor(fileSystem, { ...options, fileDownloader: downloader });
 
     const resolved = await resolver.resolve();
 
-    expect(resolved).toEqual({
-      cwebp: path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"),
-      dwebp: path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "dwebp"),
-    });
+    expect(resolved).toEqual({ cwebp: MAC_ARM64_CWEBP, dwebp: MAC_ARM64_DWEBP });
     expect(downloader.downloadedUrls).toHaveLength(1);
-    expect(checksumCalculator.computedFiles).toEqual([
-      path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz"),
-    ]);
-    expect(extractionCount).toBe(1);
+    expect(options.checksumCalculator.computedFiles).toEqual([MAC_ARM64_ARCHIVE]);
+    expect(options.archiveExtractor.requests).toHaveLength(1);
   });
 
   test("shares off-platform archive provisioning across resolver instances", async () => {
-    const root = await makeTempDir();
-    const cacheDir = path.join(root, "cache");
+    const fileSystem = new FakeWebpBinaryFileSystem();
     const downloader = new CountingFileDownloader();
     const downloadGate = Promise.withResolvers<void>();
     downloader.gate = downloadGate.promise;
-    const archiveExtractor = new FakeArchiveExtractor();
-    const checksumCalculator = fakeArchiveChecksumCalculator();
-    let extractionCount = 0;
-    archiveExtractor.onExtract = async () => {
-      extractionCount += 1;
-      await writeExecutable(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
-    };
+    const options = macArm64Options(fileSystem, [MAC_ARM64_CWEBP]);
 
-    const resolverOptions = {
-      projectRoot: root,
-      cacheDir,
-      platform: "darwin" as const,
-      arch: "arm64" as const,
-      env: { PATH: "" },
-      fileDownloader: downloader,
-      archiveExtractor,
-      checksumCalculator,
-    };
-
-    const firstResolver = new WebpBinaryResolver(resolverOptions);
-    const secondResolver = new WebpBinaryResolver(resolverOptions);
+    const resolverOptions = { ...options, fileDownloader: downloader };
+    const firstResolver = resolverFor(fileSystem, resolverOptions);
+    const secondResolver = resolverFor(fileSystem, resolverOptions);
     // Observe the second caller entering the shared in-flight map, rather than
-    // assuming its filesystem probes finish before a fixed download delay.
+    // assuming its probes finish before a fixed download delay.
     const secondProvisionStarted = Promise.withResolvers<void>();
     const secondProvisioner = secondResolver as unknown as {
       provisionArchiveOnce(archive: unknown): Promise<void>;
@@ -350,19 +257,15 @@ describe("WebpBinaryResolver", () => {
       provisionSpy.mockRestore();
     }
 
-    expect(first).toBe(path.join(cacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"));
+    expect(first).toBe(MAC_ARM64_CWEBP);
     expect(second).toBe(first);
     expect(downloader.downloadedUrls).toHaveLength(1);
-    expect(checksumCalculator.computedFiles).toEqual([
-      path.join(cacheDir, "libwebp-1.6.0-mac-arm64.tar.gz"),
-    ]);
-    expect(extractionCount).toBe(1);
+    expect(options.checksumCalculator.computedFiles).toEqual([MAC_ARM64_ARCHIVE]);
+    expect(options.archiveExtractor.requests).toHaveLength(1);
   });
 
   test("throws an actionable error when no binary can be resolved", async () => {
-    const root = await makeTempDir();
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
+    const resolver = resolverFor(new FakeWebpBinaryFileSystem(), {
       platform: "win32",
       arch: "x64",
       env: { PATH: "" },
@@ -376,12 +279,47 @@ describe("WebpBinaryResolver", () => {
   });
 });
 
+describe("defaultWebpBinaryFileSystem", () => {
+  test("treats a missing path as not executable without throwing", async () => {
+    const missing = path.join(ROOT, "definitely", "missing", "cwebp");
+
+    await expect(defaultWebpBinaryFileSystem.isExecutableFile(missing, "darwin")).resolves.toBe(
+      false,
+    );
+  });
+
+  test.skipIf(!hostSupportsPosixExecuteBits)(
+    "accepts an executable file and rejects a directory on POSIX hosts",
+    async () => {
+      // process.execPath is a real executable file on every host; its parent is a directory.
+      await expect(
+        defaultWebpBinaryFileSystem.isExecutableFile(process.execPath, "darwin"),
+      ).resolves.toBe(true);
+      await expect(
+        defaultWebpBinaryFileSystem.isExecutableFile(path.dirname(process.execPath), "darwin"),
+      ).resolves.toBe(false);
+    },
+  );
+
+  test.skipIf(!hostSupportsPosixExecuteBits)(
+    "rejects a non-executable regular file on POSIX hosts",
+    async () => {
+      // package.json is a checked-in regular file (mode 0644), never executable.
+      const nonExecutable = path.join(import.meta.dir, "../../../../package.json");
+
+      await expect(
+        defaultWebpBinaryFileSystem.isExecutableFile(nonExecutable, "darwin"),
+      ).resolves.toBe(false);
+    },
+  );
+});
+
 /**
  * Drive a FakeChildProcess once the codec has written stdin and attached its
- * listeners. Keying off `stdin` finish makes ordering deterministic regardless
- * of how long the real filesystem resolution ahead of the spawn takes. Data is
- * pushed synchronously; `close` fires on a later macrotask so the readable
- * `data` events flush first.
+ * listeners. Keying off `stdin` finish makes ordering deterministic. Output is
+ * pushed synchronously and `close` is emitted only after both readable streams
+ * have ended, so no timer is involved and every `data` event is guaranteed to
+ * have flushed before the exit is observed.
  */
 function driveChild(
   child: FakeChildProcess,
@@ -391,6 +329,10 @@ function driveChild(
     exitCode = 0,
   }: { stdout?: Buffer; stderr?: string; exitCode?: number } = {},
 ): void {
+  const drained = Promise.all([
+    new Promise<void>((resolve) => child.stdout.once("end", resolve)),
+    new Promise<void>((resolve) => child.stderr.once("end", resolve)),
+  ]);
   child.stdin.on("finish", () => {
     if (stdout.length > 0) {
       child.stdout.push(stdout);
@@ -400,24 +342,23 @@ function driveChild(
       child.stderr.push(Buffer.from(stderr));
     }
     child.stderr.push(null);
-    defaultTimer.setTimeout(() => {
-      child.exitCode = exitCode;
-      child.emit("exit", exitCode, null);
-      child.emit("close", exitCode, null);
-    }, 0);
+  });
+  void drained.then(() => {
+    child.exitCode = exitCode;
+    child.emit("exit", exitCode, null);
+    child.emit("close", exitCode, null);
   });
 }
 
-async function resolverWithExecutable(
+function resolverWithExecutable(
   binary: "cwebp" | "dwebp",
   processExecutor: FakeProcessExecutor,
-): Promise<WebpBinaryResolver> {
-  const root = await makeTempDir();
-  const binaryPath = path.join(root, "bin", binary);
-  await writeExecutable(binaryPath);
+): WebpBinaryResolver {
+  const fileSystem = new FakeWebpBinaryFileSystem();
+  const binaryPath = path.join(ROOT, "bin", binary);
+  fileSystem.addExecutable(binaryPath);
   const envVar = binary === "cwebp" ? "AUTOMOBILE_CWEBP_PATH" : "AUTOMOBILE_DWEBP_PATH";
-  return new WebpBinaryResolver({
-    projectRoot: root,
+  return resolverFor(fileSystem, {
     platform: "darwin",
     arch: "arm64",
     env: { [envVar]: binaryPath, PATH: "" },
@@ -431,7 +372,7 @@ describe("WebpBinaryResolver codec execution", () => {
     const child = new FakeChildProcess();
     driveChild(child, { stdout: Buffer.from("RIFFxxxxWEBPencoded") });
     processExecutor.setNextSpawnProcess(child);
-    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+    const resolver = resolverWithExecutable("cwebp", processExecutor);
     const input = Buffer.from("png-data");
 
     const output = await resolver.runCwebp(["-q", "60", "-o", "-", "--", "-"], input);
@@ -449,7 +390,7 @@ describe("WebpBinaryResolver codec execution", () => {
     const child = new FakeChildProcess();
     driveChild(child, { stdout: Buffer.from("png-output") });
     processExecutor.setNextSpawnProcess(child);
-    const resolver = await resolverWithExecutable("dwebp", processExecutor);
+    const resolver = resolverWithExecutable("dwebp", processExecutor);
 
     const output = await resolver.runDwebp(["-o", "-", "--", "-"], Buffer.from("RIFFxxxxWEBPdata"));
 
@@ -462,7 +403,7 @@ describe("WebpBinaryResolver codec execution", () => {
     const child = new FakeChildProcess();
     driveChild(child, { stderr: "bad webp", exitCode: 1 });
     processExecutor.setNextSpawnProcess(child);
-    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+    const resolver = resolverWithExecutable("cwebp", processExecutor);
 
     const thrown = await resolver
       .runCwebp(["-o", "-", "--", "-"], Buffer.from("png"))
@@ -479,7 +420,7 @@ describe("WebpBinaryResolver codec execution", () => {
     const child = new FakeChildProcess();
     child.setStdinError("write EPIPE");
     processExecutor.setNextSpawnProcess(child);
-    const resolver = await resolverWithExecutable("cwebp", processExecutor);
+    const resolver = resolverWithExecutable("cwebp", processExecutor);
 
     const thrown = await resolver
       .runCwebp(["-o", "-", "--", "-"], Buffer.from("png"))
@@ -492,10 +433,8 @@ describe("WebpBinaryResolver codec execution", () => {
   });
 
   test("propagates missing-binary resolution failures before spawning", async () => {
-    const root = await makeTempDir();
     const processExecutor = new FakeProcessExecutor();
-    const resolver = new WebpBinaryResolver({
-      projectRoot: root,
+    const resolver = resolverFor(new FakeWebpBinaryFileSystem(), {
       platform: "win32",
       arch: "x64",
       env: { PATH: "" },

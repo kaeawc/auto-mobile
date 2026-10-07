@@ -34,6 +34,7 @@ extension HingeAngleResponse: WebSocketResponsePayload {}
 extension CurrentFocusResponse: WebSocketResponsePayload {}
 extension TraversalOrderResponse: WebSocketResponsePayload {}
 extension MagicTapResponse: WebSocketResponsePayload {}
+extension SdkTriggerResponse: WebSocketResponsePayload {}
 extension VoiceOverStateResponse: WebSocketResponsePayload {}
 extension VoiceOverSetResponse: WebSocketResponsePayload {}
 extension StorageFilesResponse: WebSocketResponsePayload {}

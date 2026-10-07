@@ -497,6 +497,7 @@ interface WsInsertTextResultMessage extends WsRequestBase {
 interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
   action: string;
+  approximated?: boolean;
 }
 
 interface WsSelectAllResultMessage extends WsRequestBase {
@@ -5576,6 +5577,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         action: message.action,
         totalTimeMs: message.totalTimeMs,
         error: message.error,
+        ...(message.approximated === undefined ? {} : { approximated: message.approximated }),
         perfTiming: message.perfTiming,
       })),
 

@@ -1,5 +1,6 @@
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
-import type { CtrlProxyMagicTapResult } from "./types";
+import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
+import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
@@ -652,6 +653,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<CtrlProxyMagicTapResult>;
+
+  requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult>;
 
   requestActivateAccessibilityLink(
     text: string,
@@ -4181,6 +4184,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, options);
+  }
+
+  /** Deliver a host trigger to a module in the foreground app's in-app SDK (#1580). */
+  async requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult> {
+    return requestSdkTrigger(this.createDelegateContext(), request);
   }
 
   /** Invoke Magic Tap directly through the foreground app's in-app SDK. */

@@ -215,6 +215,14 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return false
         }
 
+        /// Whether SpringBoard hosts a keyboard the app's own tree omits, using the same
+        /// non-waiting `exists` query as `GesturePerformer.isKeyboardVisible`.
+        private func springBoardKeyboardVisible() -> Bool {
+            catchingObjCExceptionNonThrowing({
+                springboard.keyboards.firstMatch.exists
+            }, fallback: false)
+        }
+
         // MARK: - View Hierarchy
 
         /// Detect a usable keyboard in the captured tree without additional IPC.
@@ -270,7 +278,9 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         let focus: KeyboardFocus?
                         switch Self.keyboardFocusDecision(
                             textInputCandidates: typedInputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) },
-                            keyboardVisibleInSnapshot: Self.keyboardVisibleInSnapshot(snap)
+                            keyboardVisibleInSnapshot: Self.keyboardVisibleInSnapshot(snap),
+                            keyboardVisibleInSpringBoard: bundleId != "com.apple.springboard"
+                                && self.springBoardKeyboardVisible()
                         ) {
                         case .skip:
                             focus = nil

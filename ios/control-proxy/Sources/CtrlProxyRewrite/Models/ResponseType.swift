@@ -34,6 +34,7 @@ public enum ResponseType: String, Sendable {
     case traversalOrderResult = "traversal_order_result"
     case highlightResponse = "highlight_response"
     case magicTapResult = "magic_tap_result"
+    case sdkTriggerResult = "sdk_trigger_result"
     case voiceOverStateResult = "voiceover_state_result"
     case voiceOverSetResult = "voiceover_set_result"
     case connected

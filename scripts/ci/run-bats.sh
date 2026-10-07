@@ -24,6 +24,15 @@
 #      (test/scripts/batsSerialTags.test.ts) fails if a new real-tree mutator
 #      lands without the tag.
 #
+#   1b. Within-file pass — files tagged `parallel-within-file` opt in to running
+#      their own tests concurrently (`bats --jobs N`). Only files whose every
+#      test builds its state in a per-test `mktemp -d` (no `setup_file`, fixed
+#      /tmp paths, shared ports/sockets/HOME or writes into the source tree) may
+#      carry it. The policy never oversubscribes: outer file jobs times inner
+#      test jobs is at most the core count (see within_file_jobs). Set
+#      AUTOMOBILE_BATS_WITHIN_FILE_JOBS=1 to disable the pass and run tagged
+#      files like any other parallel-pass file.
+#
 # The orthogonal `integration` file tag selects real network/process/timing or
 # host-tool tests. The default `unit` lane excludes those files.
 #
@@ -100,11 +109,38 @@ has_file_tag() {
   ' "$bats_file"
 }
 
+# Inner (per-file) test concurrency for `parallel-within-file` files. Defaults to
+# 4 capped at the core count; AUTOMOBILE_BATS_WITHIN_FILE_JOBS overrides it, and
+# the result is always clamped to the outer job budget so files x tests <= cores.
+within_file_jobs() {
+  local cores="$1"
+  local requested="${AUTOMOBILE_BATS_WITHIN_FILE_JOBS:-4}"
+  if ! [[ "$requested" =~ ^[1-9][0-9]*$ ]]; then
+    return 1
+  fi
+  if [[ "$requested" -gt "$cores" ]]; then
+    requested="$cores"
+  fi
+  printf '%s\n' "$requested"
+}
+
+# Outer file concurrency for the within-file pass: floor(cores / inner), min 1.
+within_file_outer_jobs() {
+  local cores="$1"
+  local inner="$2"
+  local outer=$((cores / inner))
+  if [[ "$outer" -lt 1 ]]; then
+    outer=1
+  fi
+  printf '%s\n' "$outer"
+}
+
 classify_files() {
   local bats_dir="$1"
   local lane="$2"
   local parallel_list="$3"
   local serial_list="$4"
+  local within_list="${5:-}"
   local bats_file is_integration
 
   while IFS= read -r -d '' bats_file; do
@@ -122,6 +158,8 @@ classify_files() {
 
     if has_file_tag "$bats_file" serial; then
       printf '%s\0' "$bats_file" >> "$serial_list"
+    elif [[ -n "$within_list" ]] && has_file_tag "$bats_file" parallel-within-file; then
+      printf '%s\0' "$bats_file" >> "$within_list"
     else
       printf '%s\0' "$bats_file" >> "$parallel_list"
     fi
@@ -147,6 +185,8 @@ run_parallel_files() {
   local list_file="$1"
   local jobs="$2"
   local joblog="$3"
+  local inner_jobs="${4:-1}"
+  local bats_flags=""
   local max_seconds="${AUTOMOBILE_BATS_MAX_FILE_SECONDS:-240}"
   local output_dir sequence=0 bats_file output_file job_status exitval signal
   local parallel_status=0 rc=0
@@ -154,6 +194,10 @@ run_parallel_files() {
     return 0
   fi
 
+  if [[ "$inner_jobs" -gt 1 ]]; then
+    # The file stays $1 and the flags follow it; bats accepts options anywhere.
+    bats_flags="--jobs ${inner_jobs}"
+  fi
   output_dir="$(mktemp -d)"
   parallel \
     --jobs "$jobs" \
@@ -163,7 +207,7 @@ run_parallel_files() {
     --halt never \
     --joblog "$joblog" \
     -0 \
-    "bash -o pipefail -c 'bats \"\$1\" 2>&1 | tee \"\$2\"' _ {} \"${output_dir}\"/{#}.out" < "$list_file" || parallel_status=$?
+    "bash -o pipefail -c 'bats \"\$1\" ${bats_flags} 2>&1 | tee \"\$2\"' _ {} \"${output_dir}\"/{#}.out" < "$list_file" || parallel_status=$?
 
   while IFS= read -r -d '' bats_file; do
     sequence=$((sequence + 1))
@@ -313,17 +357,31 @@ main() {
     return 2
   fi
 
-  local temp_dir parallel_list serial_list joblog
+  local inner_jobs outer_jobs
+  if ! inner_jobs="$(within_file_jobs "$jobs")"; then
+    log "ERROR: AUTOMOBILE_BATS_WITHIN_FILE_JOBS must be a positive integer"
+    return 2
+  fi
+  outer_jobs="$(within_file_outer_jobs "$jobs" "$inner_jobs")"
+
+  local temp_dir parallel_list serial_list within_list joblog within_joblog
   temp_dir="$(mktemp -d)"
   parallel_list="$temp_dir/parallel-files"
   serial_list="$temp_dir/serial-files"
+  within_list="$temp_dir/within-files"
   joblog="${AUTOMOBILE_BATS_JOBLOG:-scratch/bats-${lane}-joblog.tsv}"
+  within_joblog="${joblog%.tsv}-within.tsv"
   : > "$parallel_list"
   : > "$serial_list"
+  : > "$within_list"
   mkdir -p "$(dirname "$joblog")"
-  rm -f "$joblog"
-  classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list"
-  if [[ ! -s "$parallel_list" && ! -s "$serial_list" ]]; then
+  rm -f "$joblog" "$within_joblog"
+  if [[ "$inner_jobs" -gt 1 ]]; then
+    classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list" "$within_list"
+  else
+    classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list"
+  fi
+  if [[ ! -s "$parallel_list" && ! -s "$serial_list" && ! -s "$within_list" ]]; then
     log "ERROR: no BATS files selected for ${lane} lane in ${bats_dir}"
     rm -rf "$temp_dir"
     return 1
@@ -344,6 +402,11 @@ main() {
   log "Parallel ${lane} pass: one BATS file per GNU Parallel job (${jobs} jobs)"
   run_parallel_files "$parallel_list" "$jobs" "$joblog" || rc=1
 
+  if [[ -s "$within_list" ]]; then
+    log "Within-file ${lane} pass: files tagged parallel-within-file (${outer_jobs} files x ${inner_jobs} tests <= ${jobs} cores)"
+    run_parallel_files "$within_list" "$outer_jobs" "$within_joblog" "$inner_jobs" || rc=1
+  fi
+
   log "Serial ${lane} pass: files tagged serial"
   run_serial_files "$serial_list" "$file_budget" || rc=1
 
@@ -352,6 +415,7 @@ main() {
   if [[ "$lane" == "unit" ]]; then
     if [[ -n "$file_budget" ]]; then
       enforce_parallel_file_budget "$joblog" "$file_budget" "$parallel_list" || rc=1
+      enforce_parallel_file_budget "$within_joblog" "$file_budget" "$within_list" || rc=1
     fi
     enforce_unit_budget "$elapsed" || rc=1
   fi

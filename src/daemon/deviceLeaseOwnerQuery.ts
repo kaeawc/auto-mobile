@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { createConnection, type Socket } from "node:net";
+import { Socket } from "node:net";
 import { z } from "zod";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -122,19 +122,9 @@ export const rawDaemonSocketExchange: DaemonSocketExchange = (
       settle({ kind: "connect-failed", detail: "ENOENT" });
       return;
     }
-    let connection: Socket;
-    try {
-      connection = createConnection(socketPath, () => {
-        connected = true;
-        connection.write(frame);
-      });
-    } catch (error) {
-      settle({
-        kind: "connect-failed",
-        detail: (error as NodeJS.ErrnoException).code ?? errorMessage(error),
-      });
-      return;
-    }
+    // Attach listeners before connecting: Bun on Windows raises a missing-pipe
+    // error synchronously inside connect(), which is uncaught with no listener.
+    const connection = new Socket();
     held.socket = connection;
     connection.setEncoding("utf8");
     connection.on("data", (chunk: string) => {
@@ -152,4 +142,15 @@ export const rawDaemonSocketExchange: DaemonSocketExchange = (
     connection.on("close", () => {
       settle(connected ? { kind: "timeout" } : { kind: "connect-failed", detail: "closed" });
     });
+    try {
+      connection.connect(socketPath, () => {
+        connected = true;
+        connection.write(frame);
+      });
+    } catch (error) {
+      settle({
+        kind: "connect-failed",
+        detail: (error as NodeJS.ErrnoException).code ?? errorMessage(error),
+      });
+    }
   });

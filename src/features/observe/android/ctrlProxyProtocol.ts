@@ -927,6 +927,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
   "frame_context_validation_result",
   "device_info_result",
   "keystore_discovery",
+  "sdk_capabilities",
   "preference_files",
   "preferences",
   "subscribe_storage_result",

@@ -297,7 +297,9 @@ describe("sendKeys Android focus read routing", () => {
           expect(h.clientCalls).toContain("ime");
         } else if (command.action === "type") {
           expect(
-            h.adb.getExecutedCommands().some((command) => command.includes("input keyevent")),
+            h.adb
+              .getExecutedCommands()
+              .some((command) => /^shell input (keyevent|text) /.test(command)),
           ).toBe(true);
         }
       });

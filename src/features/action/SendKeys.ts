@@ -55,6 +55,7 @@ import {
   imeCommitExceptionResult,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
   LEGACY_IME_PASSWORD_REFUSAL,
+  passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
   withImeFailure,
@@ -131,7 +132,9 @@ function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
+  buildAndroidInputTextCommand,
   buildAsciiKeyEventPlan,
+  canJoinAndroidInputText,
   type KeyEventPlan,
 } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
@@ -164,6 +167,27 @@ export function segmentGraphemes(text: string): string[] {
     new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text),
     ({ segment }) => segment,
   );
+}
+
+function hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
+  const parser = new DefaultElementParser();
+  const detector = new FieldTypeDetector();
+  for (const root of parser.extractRootNodes(hierarchy)) {
+    let password = false;
+    parser.traverseNode(root, (node) => {
+      const element = parser.extractNodeProperties(node);
+      if (
+        (element.focused === true || element.focused === "true") &&
+        detector.isPasswordField(element)
+      ) {
+        password = true;
+      }
+    });
+    if (password) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function graphemeCodePoints(graphemes: string[]): string {
@@ -1208,24 +1232,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       // Replace still dispatches; distinguish absent focus from a focused non-password field.
       return undefined;
     }
-    const parser = new DefaultElementParser();
-    const detector = new FieldTypeDetector();
-    for (const root of parser.extractRootNodes(hierarchy)) {
-      let password = false;
-      parser.traverseNode(root, (node) => {
-        const element = parser.extractNodeProperties(node);
-        if (
-          (element.focused === true || element.focused === "true") &&
-          detector.isPasswordField(element)
-        ) {
-          password = true;
-        }
-      });
-      if (password) {
-        return true;
-      }
-    }
-    return false;
+    return hasFocusedPasswordField(hierarchy);
   }
 
   private async executeIosType(
@@ -2499,6 +2506,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (!focusResult.success) {
         return focusResult;
       }
+      // An explicit eventAll skips auto routing's password check; keep a password's text out of
+      // batched adb command lines and error messages all the same.
+      this.typingPasswordField ||= hasFocusedPasswordField(focusResult.hierarchy);
     }
 
     const { result: clearResult, unchangedWarning } = await this.clearForReplace(
@@ -2568,7 +2578,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     display?: string,
     before = "",
   ): Promise<TextActionResult> {
-    if (!typed.success || text.toLowerCase() === text.toUpperCase()) {
+    // A password's text and read-back must never reach a warning or log.
+    if (!typed.success || this.typingPasswordField || text.toLowerCase() === text.toUpperCase()) {
       return typed;
     }
     try {
@@ -2625,21 +2636,31 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const plan = await this.getEventAllKeyEventPlan(graphemes[index] ?? "");
       if (plan) {
         await this.captureEventAllBaseline(graphemes, index, progress);
-        const eventFailure = await this.executeKeyEventPlanSafely(plan, progress.mutated, signal);
+        const run = graphemes.slice(
+          index,
+          (await this.eventAllKeyEventRunEnd(graphemes, index)) + 1,
+        );
+        const eventFailure = await this.executeEventAllKeyRunSafely(
+          run,
+          plan,
+          progress.mutated,
+          signal,
+        );
         if (eventFailure) {
           return this.withTextWarnings(
             {
               ...eventFailure,
-              error: `eventAll could not deliver grapheme ${this.describeGraphemes([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
+              error: `eventAll could not deliver grapheme${run.length > 1 ? "s" : ""} ${this.describeGraphemes(run)}: ${eventFailure.error ?? "unknown error"}`,
               committedGraphemes: progress.committedGraphemes,
             },
             progress.warnings,
           );
         }
         progress.mutated = true;
-        progress.committedGraphemes++;
-        progress.pendingKeyText += graphemes[index];
+        progress.committedGraphemes += run.length;
+        progress.pendingKeyText += run.join("");
         progress.sinceLastInsertEvents = true;
+        index += run.length - 1;
         continue;
       }
       const runStart = index;
@@ -2693,6 +2714,43 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
     return false;
+  }
+
+  /**
+   * Last index of the key-event run starting at `index`. Consecutive printable ASCII goes to
+   * the device in one `input text` process: one process per character let the keyboard
+   * re-capitalise letters after a space (#9888). A password field keeps one key event per
+   * character, so its text never appears in a single adb command line, log or error.
+   */
+  private async eventAllKeyEventRunEnd(graphemes: string[], index: number): Promise<number> {
+    if (this.typingPasswordField) {
+      return index;
+    }
+    while (
+      index + 1 < graphemes.length &&
+      canJoinAndroidInputText(graphemes[index] ?? "", graphemes[index + 1] ?? "") &&
+      (await this.getEventAllKeyEventPlan(graphemes[index + 1] ?? ""))
+    ) {
+      index++;
+    }
+    return index;
+  }
+
+  private async executeEventAllKeyRunSafely(
+    run: string[],
+    plan: KeyEventPlan,
+    previouslyMutated: boolean,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult | undefined> {
+    if (run.length === 1) {
+      return this.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+    }
+    // The process may have typed part of the run before failing, so any failure is partial.
+    return this.executeKeyEventPlanSafely(
+      { commands: [buildAndroidInputTextCommand(run.join(""))] },
+      true,
+      signal,
+    );
   }
 
   private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {
@@ -2777,7 +2835,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private describeGraphemes(graphemes: string[]): string {
     return this.typingPasswordField
-      ? `(${graphemes.length} password character(s))`
+      ? passwordTextPlaceholder(graphemes.join(""))
       : graphemeCodePoints(graphemes);
   }
 
@@ -2831,10 +2889,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return undefined;
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn("[SendKeys] Android key event dispatch failed", error);
-      const failure = { success: false, error: errorMessage(error) };
+      const failure = { success: false, error: this.keyEventFailureMessage(error) };
       return previouslyMutated ? markPartialAfterMutation(failure) : failure;
     }
+  }
+
+  /**
+   * A key-event failure can quote the adb command line, which names the key codes typed. For a
+   * password field, log and report only the error class, never the message.
+   */
+  private keyEventFailureMessage(error: unknown): string {
+    if (!this.typingPasswordField) {
+      logger.warn("[SendKeys] Android key event dispatch failed", error);
+      return errorMessage(error);
+    }
+    const kind = error instanceof Error ? error.name : typeof error;
+    const message = `Android key event dispatch failed for a password field (${kind}; details withheld)`;
+    logger.warn(`[SendKeys] ${message}`);
+    return message;
   }
 
   /**
@@ -3015,7 +3087,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {
     for (const command of plan.commands) {
       signal?.throwIfAborted();
-      await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+      if (this.typingPasswordField && command.startsWith("shell ")) {
+        // The command names the key code typed; adb logs and errors show only the label.
+        await this.adb.execute(["shell", command.slice("shell ".length)], {
+          signal,
+          logLabel: "shell input <password key event>",
+        });
+      } else {
+        await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+      }
     }
   }
 

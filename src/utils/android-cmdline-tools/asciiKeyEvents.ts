@@ -13,6 +13,8 @@
  * any device I/O.
  */
 
+import { shellQuote } from "../shellQuote";
+
 /** A sequence of `adb shell input ...` commands that types a single character. */
 export interface KeyEventPlan {
   commands: string[];
@@ -120,4 +122,36 @@ export function buildAsciiKeyEventPlan(
   }
 
   return null;
+}
+
+/**
+ * Whether `input text` can carry `next` right after `previous` in one argument.
+ *
+ * `input text` decodes `%s` to a space and has no escape for a literal `%s`, so a
+ * literal `%` followed by `s` must be split across two `input text` calls. Any
+ * other `%` is kept literally, including `%` before an encoded space (`%%s` → `% `).
+ */
+export function canJoinAndroidInputText(previous: string, next: string): boolean {
+  return !(previous.endsWith("%") && next.startsWith("s"));
+}
+
+/**
+ * Build one `adb shell input text ...` command that types `text` in a single device
+ * process, so the keyboard sees one continuous stream instead of one process per
+ * character (#9888).
+ *
+ * Spaces are encoded as `%s` (the form `input text` decodes back to a space), so the
+ * argument has no whitespace for adb or the device shell to split on, and the whole
+ * argument is single-quoted for the device shell, which keeps quotes, `$`, backticks
+ * and backslashes literal.
+ *
+ * @param text - Printable ASCII text that never contains a literal `%s`; split
+ *   such text with {@link canJoinAndroidInputText} first.
+ * @throws Error when `text` is empty or contains a literal `%s`.
+ */
+export function buildAndroidInputTextCommand(text: string): string {
+  if (!text || text.includes("%s")) {
+    throw new Error("input text cannot carry an empty value or a literal %s");
+  }
+  return `shell input text ${shellQuote(text.replaceAll(" ", "%s"))}`;
 }

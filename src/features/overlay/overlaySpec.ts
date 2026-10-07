@@ -99,6 +99,24 @@ const borderSchema = z
     color: z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
   })
   .strict();
+/** Material 3 type roles a text node's `textStyle` can name. */
+const TEXT_STYLE_ROLES = [
+  "displayLarge",
+  "displayMedium",
+  "displaySmall",
+  "headlineLarge",
+  "headlineMedium",
+  "headlineSmall",
+  "titleLarge",
+  "titleMedium",
+  "titleSmall",
+  "bodyLarge",
+  "bodyMedium",
+  "bodySmall",
+  "labelLarge",
+  "labelMedium",
+  "labelSmall",
+] as const;
 const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
@@ -137,6 +155,7 @@ const styleSchema = z
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
+    textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();
 const itemSchema = z
@@ -427,10 +446,25 @@ const themeColorsSchema = z
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);
+const themeTypographySchema = z
+  .object({
+    scale: z.number().finite().min(0.75).max(1.5).optional(),
+    fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeShapesSchema = z
+  .object({
+    corner: z.enum(["none", "small", "medium", "large", "full"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const themeSchema = z
   .object({
     mode: z.enum(["light", "dark", "system"]).optional(),
     colors: themeColorsSchema.optional(),
+    typography: themeTypographySchema.optional(),
+    shapes: themeShapesSchema.optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);

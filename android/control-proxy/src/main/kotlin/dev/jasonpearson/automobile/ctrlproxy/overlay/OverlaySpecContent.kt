@@ -27,6 +27,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
@@ -111,18 +112,24 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
       ) {
         node.children.forEach { RenderOverlayNode(it, interact) }
       }
-    "text" ->
+    "text" -> {
+      val source = node.style.source
+      val role = overlayTextRole(MaterialTheme.typography, source.textStyle)
       Text(
         node.text,
         modifier,
         color = node.style.color,
         // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
-        fontSize = (node.style.source.textSize ?: 14.0).toFloat().sp,
-        fontWeight = node.style.fontWeight,
-        fontFamily = node.style.fontFamily,
+        // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+        fontSize =
+          source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+        fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+        fontFamily = if (role == null || source.fontFamily != null) node.style.fontFamily else null,
         textAlign = node.style.textAlign,
-        maxLines = node.style.source.maxLines ?: Int.MAX_VALUE,
+        maxLines = source.maxLines ?: Int.MAX_VALUE,
+        style = role ?: LocalTextStyle.current,
       )
+    }
     "icon" -> {
       val icon = overlayIcon(node.iconName)
       if (icon != null)

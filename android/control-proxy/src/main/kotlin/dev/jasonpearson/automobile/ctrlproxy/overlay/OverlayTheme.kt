@@ -3,8 +3,11 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import android.content.Context
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -14,7 +17,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.isSpecified
 import dev.jasonpearson.automobile.protocol.OverlaySpecTheme
+import dev.jasonpearson.automobile.protocol.OverlaySpecThemeShapes
+import dev.jasonpearson.automobile.protocol.OverlaySpecThemeTypography
 
 /**
  * The overlay's own Material scheme: the window has no app theme, so without one every Material
@@ -189,7 +198,92 @@ internal fun OverlayTheme(
       val theme = overlayThemeSpec(root, systemDark, explicit)
       overlayColorScheme(theme, overlayDynamicScheme(context, theme))
     }
-  MaterialTheme(colorScheme = scheme, content = content)
+  val typography = remember(explicit) { overlayTypography(explicit?.typography) }
+  val shapes = remember(explicit) { overlayShapes(explicit?.shapes) }
+  MaterialTheme(colorScheme = scheme, typography = typography, shapes = shapes, content = content)
+}
+
+/**
+ * The Material 3 type scale with every role's size and line height multiplied by `scale`, and the
+ * family replaced when the spec names one. No typography keeps the stock scale.
+ */
+internal fun overlayTypography(spec: OverlaySpecThemeTypography?): Typography {
+  val base = Typography()
+  if (spec == null) return base
+  val scale = (spec.scale ?: 1.0).toFloat()
+  val family =
+    when (spec.fontFamily) {
+      "sans" -> FontFamily.SansSerif
+      "serif" -> FontFamily.Serif
+      "mono" -> FontFamily.Monospace
+      else -> null
+    }
+
+  fun TextStyle.themed() =
+    copy(
+      fontSize = if (fontSize.isSpecified) fontSize * scale else fontSize,
+      lineHeight = if (lineHeight.isSpecified) lineHeight * scale else lineHeight,
+      fontFamily = family ?: fontFamily,
+    )
+  return Typography(
+    displayLarge = base.displayLarge.themed(),
+    displayMedium = base.displayMedium.themed(),
+    displaySmall = base.displaySmall.themed(),
+    headlineLarge = base.headlineLarge.themed(),
+    headlineMedium = base.headlineMedium.themed(),
+    headlineSmall = base.headlineSmall.themed(),
+    titleLarge = base.titleLarge.themed(),
+    titleMedium = base.titleMedium.themed(),
+    titleSmall = base.titleSmall.themed(),
+    bodyLarge = base.bodyLarge.themed(),
+    bodyMedium = base.bodyMedium.themed(),
+    bodySmall = base.bodySmall.themed(),
+    labelLarge = base.labelLarge.themed(),
+    labelMedium = base.labelMedium.themed(),
+    labelSmall = base.labelSmall.themed(),
+  )
+}
+
+/** The Material type role a `textStyle` token names, or null for no (or an unknown) token. */
+internal fun overlayTextRole(typography: Typography, token: String?): TextStyle? =
+  when (token) {
+    "displayLarge" -> typography.displayLarge
+    "displayMedium" -> typography.displayMedium
+    "displaySmall" -> typography.displaySmall
+    "headlineLarge" -> typography.headlineLarge
+    "headlineMedium" -> typography.headlineMedium
+    "headlineSmall" -> typography.headlineSmall
+    "titleLarge" -> typography.titleLarge
+    "titleMedium" -> typography.titleMedium
+    "titleSmall" -> typography.titleSmall
+    "bodyLarge" -> typography.bodyLarge
+    "bodyMedium" -> typography.bodyMedium
+    "bodySmall" -> typography.bodySmall
+    "labelLarge" -> typography.labelLarge
+    "labelMedium" -> typography.labelMedium
+    "labelSmall" -> typography.labelSmall
+    else -> null
+  }
+
+/**
+ * The Material corner families for a `corner` choice. `medium` is the stock Material 3 scale; the
+ * others shift every step of it, `full` making every family a pill.
+ */
+internal fun overlayShapes(spec: OverlaySpecThemeShapes?): Shapes {
+  val steps =
+    when (spec?.corner) {
+      "none" -> listOf(0, 0, 0, 0, 0)
+      "small" -> listOf(2, 4, 6, 8, 12)
+      "large" -> listOf(8, 12, 20, 28, 40)
+      "full" -> null
+      else -> return Shapes()
+    }
+  if (steps == null) {
+    val pill = RoundedCornerShape(percent = FULL_CORNER_PERCENT)
+    return Shapes(pill, pill, pill, pill, pill)
+  }
+  val (xs, s, m, l, xl) = steps.map { RoundedCornerShape(it.dp) }
+  return Shapes(extraSmall = xs, small = s, medium = m, large = l, extraLarge = xl)
 }
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */
@@ -198,6 +292,7 @@ private fun overlayDynamicScheme(context: Context, theme: OverlayThemeSpec): Col
     if (theme.dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
   } else null
 
+private const val FULL_CORNER_PERCENT = 50
 private const val DEVICE_COLOR_SOURCE = "device"
 private const val DEGREES = 360f
 private const val TERTIARY_HUE_ROTATION = 60f

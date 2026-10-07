@@ -18003,7 +18003,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\"), optional state, root. window.opacity is 0-100, default 100.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge), optional state, root. window.opacity is 0-100, default 100.",
           "type": "object",
           "properties": {
             "id": {
@@ -18116,6 +18116,31 @@
                     "source": {
                       "type": "string",
                       "enum": ["device"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "typography": {
+                  "type": "object",
+                  "properties": {
+                    "scale": {
+                      "type": "number",
+                      "minimum": 0.75,
+                      "maximum": 1.5
+                    },
+                    "fontFamily": {
+                      "type": "string",
+                      "enum": ["sans", "serif", "mono"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "shapes": {
+                  "type": "object",
+                  "properties": {
+                    "corner": {
+                      "type": "string",
+                      "enum": ["none", "small", "medium", "large", "full"]
                     }
                   },
                   "additionalProperties": false
@@ -18358,6 +18383,26 @@
                         "fontFamily": {
                           "type": "string",
                           "enum": ["default", "sansSerif", "serif", "monospace"]
+                        },
+                        "textStyle": {
+                          "type": "string",
+                          "enum": [
+                            "displayLarge",
+                            "displayMedium",
+                            "displaySmall",
+                            "headlineLarge",
+                            "headlineMedium",
+                            "headlineSmall",
+                            "titleLarge",
+                            "titleMedium",
+                            "titleSmall",
+                            "bodyLarge",
+                            "bodyMedium",
+                            "bodySmall",
+                            "labelLarge",
+                            "labelMedium",
+                            "labelSmall"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -19409,6 +19454,26 @@
                           "fontFamily": {
                             "type": "string",
                             "enum": ["default", "sansSerif", "serif", "monospace"]
+                          },
+                          "textStyle": {
+                            "type": "string",
+                            "enum": [
+                              "displayLarge",
+                              "displayMedium",
+                              "displaySmall",
+                              "headlineLarge",
+                              "headlineMedium",
+                              "headlineSmall",
+                              "titleLarge",
+                              "titleMedium",
+                              "titleSmall",
+                              "bodyLarge",
+                              "bodyMedium",
+                              "bodySmall",
+                              "labelLarge",
+                              "labelMedium",
+                              "labelSmall"
+                            ]
                           }
                         },
                         "additionalProperties": false

@@ -79,6 +79,31 @@ const executePlanDebugSchema = z.object({
     .optional(),
 });
 
+const executePlanHealthSummarySchema = z
+  .object({
+    success: z.boolean(),
+    totalSteps: z.number().int(),
+    executedSteps: z.number().int(),
+    failedSteps: z.number().int(),
+    skippedSteps: z.number().int(),
+    warningCount: z.number().int(),
+    durationMs: z.number().int(),
+    slowestStep: z
+      .object({ stepIndex: z.number().int(), tool: z.string(), durationMs: z.number().int() })
+      .optional(),
+    tools: z.array(
+      z.object({
+        tool: z.string(),
+        count: z.number().int(),
+        failed: z.number().int(),
+        skipped: z.number().int(),
+        totalMs: z.number().int(),
+        maxMs: z.number().int(),
+      }),
+    ),
+  })
+  .describe("End-of-run aggregate of per-tool step latency, failures and skips");
+
 const executePlanResultSchema = z
   .object({
     success: z.boolean(),
@@ -112,6 +137,7 @@ const executePlanResultSchema = z
     deviceId: z.string().optional(),
     deviceMapping: z.record(z.string(), z.string()).optional(),
     debug: executePlanDebugSchema.optional(),
+    healthSummary: executePlanHealthSummarySchema.optional(),
     videoFilePaths: z.array(z.string()).optional(),
     videoRecordingIds: z.array(z.string()).optional(),
     videoWarnings: z

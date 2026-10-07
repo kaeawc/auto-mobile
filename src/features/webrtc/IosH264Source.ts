@@ -159,6 +159,9 @@ export const IOS_ENCODED_FORCED_KEYFRAME_MIN_INTERVAL_MS = 500;
  * ({@link IOS_HELPER_STOP_GRACE_MS}).
  */
 export const IOS_ENCODER_RESTART_GRACE_MS = 2_000;
+/** Helper stderr lines kept for the exit report. */
+const HELPER_STDERR_TAIL_LINES = 5;
+
 /**
  * Bounded reconnect attempts for a *running-phase* capture failure before the
  * source finally surfaces `onError`. A long-lived automation stream should
@@ -462,7 +465,8 @@ export class IosH264Source implements H264CaptureSource {
   private cancelFirstFrameWait: (() => void) | null = null;
   private cancelFirstAudioWait: (() => void) | null = null;
   private rejectFirstAudioWait: ((error: Error) => void) | null = null;
-  private lastHelperStderr: string | null = null;
+  /** Bounded tail of the helper's non-metrics stderr lines, newest last. */
+  private helperStderrTail: string[] = [];
   private lastReadinessPhase: IosScreenCaptureReadinessPhase | null = null;
   private lastEncoderStderr: string | null = null;
   private lastForcedKeyFrameMs = Number.NEGATIVE_INFINITY;
@@ -568,7 +572,7 @@ export class IosH264Source implements H264CaptureSource {
     this.phase = "starting";
     this.startupComplete = false;
     this.deferredHelperFailure = null;
-    this.lastHelperStderr = null;
+    this.helperStderrTail = [];
     this.lastReadinessPhase = null;
     this.helperFrameMetrics = null;
     this.nativeFrameMetrics = null;
@@ -1166,11 +1170,7 @@ export class IosH264Source implements H264CaptureSource {
         if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
-        const stderr =
-          this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
-        const error = new Error(
-          `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
-        );
+        const error = new Error(this.describeHelperExit(info, "exited"));
         if (firstFrameSeen) {
           this.failIfCurrentHelper(helper, generation, error);
           return;
@@ -1223,13 +1223,7 @@ export class IosH264Source implements H264CaptureSource {
       });
       helper.on("exit", (info) => {
         if (this.isCurrentHelper(helper, generation) && this.isActive()) {
-          finish(() =>
-            reject(
-              new Error(
-                `screen-capture-helper exited before audio (code=${info.code}, signal=${info.signal})`,
-              ),
-            ),
-          );
+          finish(() => reject(new Error(this.describeHelperExit(info, "exited before audio"))));
         }
       });
     });
@@ -1307,11 +1301,7 @@ export class IosH264Source implements H264CaptureSource {
         if (!this.isCurrentHelper(helper, generation) || !this.isActive()) {
           return;
         }
-        const stderr =
-          this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
-        const error = new Error(
-          `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
-        );
+        const error = new Error(this.describeHelperExit(info, "exited"));
         if (firstRecordSeen) {
           this.failIfCurrentHelper(helper, generation, error);
           return;
@@ -1447,10 +1437,15 @@ export class IosH264Source implements H264CaptureSource {
         return;
       }
       if (line.length > 0) {
-        this.lastHelperStderr = line.slice(-2_048);
         if (line.startsWith(NATIVE_FRAME_METRICS_PREFIX)) {
           logNativeFrameMetricsStderr(line);
         } else {
+          // Periodic metrics lines must not displace the crash diagnostics a
+          // SIGTRAP/SIGABRT exit report needs (#7604).
+          this.helperStderrTail.push(line.slice(-2_048));
+          if (this.helperStderrTail.length > HELPER_STDERR_TAIL_LINES) {
+            this.helperStderrTail.shift();
+          }
           // The helper runs in a separate process. Preserve its diagnostics in the
           // daemon log: a SIGABRT otherwise leaves CI with only an exit signal.
           logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
@@ -1972,6 +1967,18 @@ export class IosH264Source implements H264CaptureSource {
         resolve(true);
       };
     });
+  }
+
+  /** Exit code/signal plus the helper's last stderr lines, for the stream failure. */
+  private describeHelperExit(
+    info: { code: number | null; signal: NodeJS.Signals | null },
+    what: string,
+  ): string {
+    const tail =
+      this.helperStderrTail.length === 0
+        ? ""
+        : `; last stderr: ${this.helperStderrTail.join(" | ")}`;
+    return `screen-capture-helper ${what} (code=${info.code}, signal=${info.signal})${tail}`;
   }
 
   private failIfCurrentHelper(

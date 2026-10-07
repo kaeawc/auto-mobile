@@ -73,6 +73,7 @@ import {
   DeviceServiceClient,
   ObserverPendingRequestTimeoutError,
   WebSocketFactory,
+  rethrowRealCtrlProxyWebSocketInTestError,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
 import { sendCommand } from "../DeviceServiceUtils";
@@ -1690,6 +1691,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.resetConnectionBudget();
       return await this.reconnectAfterSetup(perf);
     } catch (error) {
+      // A unit test reached the real WebSocket factory; surface it, never mask it as setup failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn(`[IOSCtrlProxyClient] Auto-setup error: ${error}`);
       this.lastConnectFailure = { reason: "auto_setup_failed", detail: String(error) };
       return false;

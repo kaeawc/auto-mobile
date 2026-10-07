@@ -380,6 +380,7 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
+import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
@@ -911,7 +912,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ...request,
       params: {
         ...request.params,
-        arguments: stripInternalToolParams(request.params.arguments),
+        // Typed text is redacted: nobody knows yet whether the target is a password field.
+        arguments: redactTypedTextArguments(
+          request.params.name,
+          stripInternalToolParams(request.params.arguments),
+        ),
       },
     });
   };

@@ -133,6 +133,9 @@ tasks.withType<Test> {
   environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", apkPath)
   systemProperty("automobile.ctrl.proxy.apk.path", apkPath)
   systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
+  // The forced restart is skipped for a daemon started after this build's run start
+  // (automobile.junit.runStartedAtMs, set once per build by automobile.test-defaults), so
+  // parallel forks do not restart each other's daemon (#10170).
   systemProperty("automobile.daemon.force.restart", "true")
   systemProperty("automobile.daemon.local.project.path", repoRootPath)
 

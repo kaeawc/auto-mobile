@@ -39,6 +39,7 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
+import { redactTypedTextArguments } from "../redactTypedTextArguments";
 import {
   type DeviceLostError,
   isDeviceLostError,
@@ -716,7 +717,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
         ScreenshotJobTracker.cancelJob(context.deviceId);
       }
 
-      const paramsPreview = JSON.stringify(parsedParams).substring(0, 200);
+      const paramsPreview = JSON.stringify(
+        redactTypedTextArguments(step.tool, parsedParams),
+      ).substring(0, 200);
       if (context.debugLog) {
         logger.debug(`${context.logPrefix} Executing ${step.tool} with params: ${paramsPreview}`);
       } else {

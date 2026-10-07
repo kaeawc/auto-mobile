@@ -136,33 +136,27 @@ describe("criteria allocation rollback on thrown errors", () => {
     }
   });
 
-  test("rollback preserves a live session reused through an idle candidate", async () => {
+  test("a live session whose held device misses its criteria fails fast and is preserved", async () => {
     await pool.bindOrReuseDeviceSession("plan:a", "device-a", "android");
     const heldSession = manager.getSession("plan:a");
-    // The allocator claims idle b, createSession returns the existing a session,
-    // and claimSelectedDeviceForSession restores b and omits result.session.
+    // plan:a holds device-a but asks for device-b. It must not be moved to (or
+    // reused through) idle b (#10153); the allocation fails before any claim.
     const reuseRequests: DeviceAllocationRequest[] = [
       { sessionId: "plan:a", criteria: { platform: "android", simulatorType: "device-b" } },
       requests[1],
       requests[2],
     ];
-    const originalError = new Error("third session rejected after reuse");
-    const createSession = manager.createSession.bind(manager);
-    const create = spyOn(manager, "createSession").mockImplementation(async (...args) => {
-      if (args[0] === "plan:c") {
-        throw originalError;
-      }
-      return createSession(...args);
-    });
+    const create = spyOn(manager, "createSession");
     const release = spyOn(manager, "releaseSession");
     try {
-      await expect(pool.assignMultipleDevicesByCriteria(reuseRequests, 10_000)).rejects.toBe(
-        originalError,
+      await expect(pool.assignMultipleDevicesByCriteria(reuseRequests, 10_000)).rejects.toThrow(
+        "Session 'plan:a' already holds device 'device-a', but it does not match the requested criteria",
       );
       expect(manager.getSession("plan:a")).toBe(heldSession);
       expect(pool.getDevice("device-a")).toMatchObject({ status: "busy", sessionId: "plan:a" });
       expectReleased(["b", "c"]);
-      expect(release.mock.calls.map(([sessionId]) => sessionId)).toEqual(["plan:b"]);
+      expect(create.mock.calls).toEqual([]);
+      expect(release.mock.calls).toEqual([]);
     } finally {
       create.mockRestore();
       release.mockRestore();

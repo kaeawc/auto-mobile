@@ -760,6 +760,9 @@ The device subscription ends when no nonterminal overlays remain.
 `validate`, or `hybrid` (default), and `packageName` limits exploration to a package.
 `getNavigationGraph.appId` scopes the graph to that app instead of the foreground app.
 
+`explore`, `navigateTo`, and `getNavigationGraph` are listed without `--debug`. They remain
+off by default and require embedded SDK mode (`--embedded-sdk`).
+
 `identifyInteractions.filter` accepts `types` (`navigation`, `input`, `action`,
 `scroll`, `toggle`), `minConfidence` from 0 to 1, and a positive integer `limit`.
 

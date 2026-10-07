@@ -7,7 +7,6 @@ import { toSearchable } from "../utility/SearchableNode";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { TextActionResult } from "./SendKeys";
 import {
-  imeCommitSegmentCount,
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
 } from "../observe/android/CtrlProxyText";
@@ -31,6 +30,29 @@ export interface ImeFailureDiagnostic {
   committedUnits?: number;
   /** Present only when the backend supplied verified progress. */
   verifiedGraphemes?: number;
+}
+
+/** Whether the observation's focused editable field is a password field. */
+export function focusedFieldIsPassword(observation: ObserveResult): boolean {
+  const detector = new FieldTypeDetector();
+  const focused = observation.focusedElement;
+  if (focused && String(focused.focused) === "true" && detector.isPasswordField(focused)) {
+    return true;
+  }
+  if (!observation.viewHierarchy) {
+    return false;
+  }
+  const parser = new DefaultElementParser();
+  let password = false;
+  for (const root of parser.extractRootNodes(observation.viewHierarchy)) {
+    parser.traverseNode(root, (node) => {
+      const element = parser.extractNodeProperties(node);
+      if (String(element.focused) === "true" && detector.isPasswordField(element)) {
+        password = true;
+      }
+    });
+  }
+  return password;
 }
 
 /** Uses the existing typed hierarchy parser; never reconstructs an editor from error prose. */
@@ -74,6 +96,33 @@ const BINDING_FAILURES = new Set([
   "No active input connection within timeout",
   "No active input connection",
 ]);
+
+/** The refusal an older CtrlProxy (without `ime_password_commit_v1`) returns for password fields. */
+export const LEGACY_IME_PASSWORD_REFUSAL = "Cannot commit text into a password field";
+
+export const IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR =
+  "IME typing into a password field needs the CtrlProxy ime_password_commit_v1 capability. " +
+  'Update the CtrlProxy APK, then retry, or use mode: "auto" to type through key events or accessibility.';
+
+/** Stands in for password text wherever typed input would otherwise reach a log or diagnostic. */
+export function passwordTextPlaceholder(text: string): string {
+  return `<password, ${Array.from(text).length} characters>`;
+}
+
+/** Keep the failure shape for a password field, but never carry the typed or read-back value. */
+export function redactPasswordImeFailure<T extends TextActionResult>(result: T, text: string): T {
+  if (!result.imeFailure) {
+    return result;
+  }
+  return {
+    ...result,
+    imeFailure: {
+      ...result.imeFailure,
+      expectedText: passwordTextPlaceholder(text),
+      observedText: null,
+    },
+  };
+}
 
 export function withImeFailure<T extends TextActionResult>(
   result: T,
@@ -171,6 +220,10 @@ interface ImeVerification {
   lacksRequiredFocus(observation: ObserveResult): boolean;
   focusedText(observation: ObserveResult): string | undefined;
   focusError: string;
+  /** A password field's value is masked, and the typed text must never appear in diagnostics. */
+  passwordField?: boolean;
+  /** Detects a focused password field in a read-back observation (explicit modes). */
+  isPasswordField?(observation: ObserveResult): boolean;
 }
 
 /** Preserve existing bounded verification semantics, adding the final read-back evidence. */
@@ -179,7 +232,26 @@ export async function verifyImeCommitResult(
   text: string,
   verification: ImeVerification,
 ): Promise<TextActionResult> {
-  const multiSegment = imeCommitSegmentCount(text) > 1;
+  let sawPassword = verification.passwordField === true;
+  const verified = await verifyImeCommitReadBack(result, text, {
+    ...verification,
+    observe: async () => {
+      const observation = await verification.observe();
+      sawPassword ||= verification.isPasswordField?.(observation) === true;
+      return observation;
+    },
+    get passwordField() {
+      return sawPassword;
+    },
+  });
+  return sawPassword ? redactPasswordImeFailure(verified, text) : verified;
+}
+
+async function verifyImeCommitReadBack(
+  result: TextActionResult,
+  text: string,
+  verification: ImeVerification,
+): Promise<TextActionResult> {
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       verification.checkAbort();
@@ -203,10 +275,9 @@ export async function verifyImeCommitResult(
         return result;
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
-      if (
-        suffixMatches === undefined ||
-        (multiSegment ? suffixMatches : imeCommitSubsequenceMatches(observedText, text))
-      ) {
+      // Editors can consume markers or add prefixes across multiple segments.
+      // Pre-existing insert content can satisfy this check; replace clears the field first.
+      if (suffixMatches !== false || imeCommitSubsequenceMatches(observedText, text)) {
         return result;
       }
       if (attempt === 2) {
@@ -215,7 +286,9 @@ export async function verifyImeCommitResult(
             ...result,
             success: false,
             partialApplication: true,
-            error: `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(observedText)}`,
+            error: verification.passwordField
+              ? `IME partial commit: sent ${passwordTextPlaceholder(text)} but the focused field holds a different value`
+              : `IME partial commit: sent ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(observedText)}`,
           },
           text,
           "verification",

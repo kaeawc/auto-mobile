@@ -310,7 +310,7 @@ request deadline for such a call is the show stage (with `assets`, the upload-an
 budget of `show`) plus the 30 s wait plus 30 s of headroom. Whether
 the Kotlin renderer resolves `{page}`/`{pageCount}` inside a pager and emits the
 static payload is not verified without a device. See
-[tool inputs and results](../../../tools.md#overlay) for the complete helper surface.
+[tool inputs and results](../../../tools.md#prototype) for the complete helper surface.
 
 ## Anchors
 

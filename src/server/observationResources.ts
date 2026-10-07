@@ -425,7 +425,7 @@ function resourceErrorText(content: ResourceContent): string {
 
 /**
  * Reads the bytes behind `automobile:observation/{deviceId}/{observationId}/screenshot` for host
- * consumers such as the overlay tool. It runs the same handler as the resource read, so the
+ * consumers such as the prototype tool. It runs the same handler as the resource read, so the
  * observation must still be the device's current one, a pending capture is awaited, and the file
  * is read through the same retention lease. That resource is readable by any client without
  * session ownership, so this exposes nothing a client could not already read.

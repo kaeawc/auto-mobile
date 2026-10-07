@@ -59,6 +59,7 @@ import type { ExecResult } from "../../../src/models";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -5731,6 +5732,37 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function () {
+    test("readiness forwards cancellation to the hierarchy request without retrying", async () => {
+      const caller = new AbortController();
+      const reason = new Error("readiness deadline exceeded");
+      let received: AbortSignal | undefined;
+      const gate = Promise.withResolvers<null>();
+      const request = spyOn(accessibilityServiceClient, "requestHierarchySync").mockImplementation(
+        async (_perf, _filter, signal) => {
+          received = signal;
+          await gate.promise;
+          signal?.throwIfAborted();
+          return null;
+        },
+      );
+      const pending = runWithAbortSignal(caller.signal, () =>
+        accessibilityServiceClient.verifyServiceReady(1, 0),
+      );
+      const failure = pending.catch((error: unknown) => error);
+      try {
+        await flushMicrotasks();
+        expect(received).toBe(caller.signal);
+        caller.abort(reason);
+        gate.resolve(null);
+        expect(await failure).toBe(reason);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        gate.resolve(null);
+        await failure;
+        request.mockRestore();
+      }
+    });
     // Follow-up to #3062. That surfaced the runner's structured error text to verifyServiceReady
     // via diagnostics, but the method still retried to exhaustion even when every attempt failed
     // with the SAME deterministic runner handler error. #3097 short-circuits the retry loop once

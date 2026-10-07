@@ -135,6 +135,26 @@ function formatCriticalSectionError(result: Record<string, unknown>, tool: strin
   );
 }
 
+function assertCriticalSectionStepSucceeded(
+  toolResult: Record<string, unknown> | undefined,
+  tool: string,
+): void {
+  if (toolResult?.success === false) {
+    const errorMsg = formatCriticalSectionError(toolResult, tool);
+    throw new ActionableError(errorMsg);
+  }
+  const timeoutError = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, tool);
+  if (timeoutError) {
+    throw new ActionableError(timeoutError);
+  }
+  const unsupportedError = unsupportedToolResultError(
+    getStructuredPayload(toolResult) ?? toolResult,
+  );
+  if (unsupportedError) {
+    throw new ActionableError(unsupportedError);
+  }
+}
+
 // PlanExecutor treats failed tool lookup as fatal even for optional steps.
 class CriticalSectionToolNotFoundError extends ActionableError {}
 
@@ -230,6 +250,9 @@ async function executeCriticalSectionSteps(
         tool.schema,
         stripUndeclaredDeviceLabel(step.params, tool.schema),
       );
+      if (step.tool === "tapAt" && step.geometry) {
+        params.__tapAtPlanContext = { geometry: step.geometry };
+      }
       const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,
@@ -238,23 +261,7 @@ async function executeCriticalSectionSteps(
       // Internal tool calls can return an MCP envelope whose JSON payload
       // contains the actual success/error fields.
       const toolResult = unwrapCriticalSectionResult(result, step.tool);
-      if (toolResult?.success === false) {
-        const errorMsg = formatCriticalSectionError(toolResult, step.tool);
-        throw new ActionableError(errorMsg);
-      }
-      const timeoutError = waitForTimeoutError(
-        getStructuredPayload(toolResult) ?? toolResult,
-        step.tool,
-      );
-      if (timeoutError) {
-        throw new ActionableError(timeoutError);
-      }
-      const unsupportedError = unsupportedToolResultError(
-        getStructuredPayload(toolResult) ?? toolResult,
-      );
-      if (unsupportedError) {
-        throw new ActionableError(unsupportedError);
-      }
+      assertCriticalSectionStepSucceeded(toolResult, step.tool);
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
       // Nothing evaluates step-level `expectations` yet (#9925); say so rather than

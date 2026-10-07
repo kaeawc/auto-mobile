@@ -137,6 +137,9 @@ export interface WebSocketMessage {
   id?: number;
   supportedCommands?: string[];
   supportedFeatures?: string[];
+  handled?: boolean;
+  unsupported?: boolean;
+  requiresVoiceOver?: boolean;
   available?: boolean;
   bundleId?: string;
   capabilities?: string[];
@@ -423,4 +426,13 @@ export interface HierarchyDelegateContext extends DelegateContext {
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
   /** Prevent the response for this request from being forwarded to the observation stream. */
   suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
+}
+
+/** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */
+export interface CtrlProxyMagicTapResult extends BaseResult {
+  /** Undefined if the runner could not reply; false means SDK support is absent. */
+  available?: boolean;
+  handled?: boolean;
+  unsupported: boolean;
+  requiresVoiceOver: false;
 }

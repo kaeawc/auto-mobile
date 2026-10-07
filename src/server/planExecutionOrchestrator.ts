@@ -316,6 +316,8 @@ export function convertPerDeviceSkippedStepsToRecords(
  * throws) wrap the whole sequence in {@link execute}.
  */
 export class PlanExecutionOrchestrator {
+  // Capture before planTools installs this invocation's own planRequest context.
+  private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
@@ -499,10 +501,18 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);
+    if (
+      this.nestedInPlan &&
+      (this.request.devices?.length || this.request.device || this.normalizedDevices.labels.length)
+    ) {
+      throw new ActionableError(
+        "Nested executePlan cannot use devices/device labels. Remove the labels; nested plans run on the enclosing plan's session/device.",
+      );
+    }
     this.reconcileDeviceLists();
     return plan;
   }

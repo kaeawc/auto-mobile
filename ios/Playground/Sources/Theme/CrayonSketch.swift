@@ -22,14 +22,16 @@ func crayonNoise(_ seed: UInt64, _ i: Int) -> CGFloat {
 /// closed (the last point repeats the first). Every point is within the box.
 private func roundedRectPerimeter(
     _ width: CGFloat, _ height: CGFloat, _ corner: CGFloat, _ segmentsPerEdge: Int
-) -> [CGPoint] {
+)
+    -> [CGPoint]
+{
     let r = min(max(corner, 0), min(width, height) / 2)
     // At least one straight-edge sample: a zero count skips every edge point and a
     // negative one is a `0..<n` range precondition failure.
     let segs = max(1, segmentsPerEdge)
     var pts: [CGPoint] = []
     func edge(_ x0: CGFloat, _ y0: CGFloat, _ x1: CGFloat, _ y1: CGFloat) {
-        for s in 0..<segs {
+        for s in 0 ..< segs {
             let t = CGFloat(s) / CGFloat(segs)
             pts.append(CGPoint(x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t))
         }
@@ -40,7 +42,7 @@ private func roundedRectPerimeter(
     // supplied by the next segment's start (and the final one by the closing append).
     func arc(_ cx: CGFloat, _ cy: CGFloat, _ startDeg: CGFloat) {
         let steps = 3
-        for s in 0..<steps {
+        for s in 0 ..< steps {
             let ang = (startDeg + 90 * CGFloat(s) / CGFloat(steps)) * .pi / 180
             pts.append(CGPoint(x: cx + r * cos(ang), y: cy + r * sin(ang)))
         }
@@ -67,7 +69,9 @@ func crayonOutlineOffsets(
     seed: UInt64,
     roughness: CGFloat,
     segmentsPerEdge: Int = 6
-) -> [CGPoint] {
+)
+    -> [CGPoint]
+{
     let base = roundedRectPerimeter(width, height, cornerRadius, segmentsPerEdge)
     var jittered = base.enumerated().map { i, p in
         CGPoint(
@@ -114,11 +118,14 @@ struct CrayonBorderModifier: ViewModifier {
     var roughness: CGFloat = 2.5
 
     func body(content: Content) -> some View {
-        content.overlay {
+        content.crayonGrain(cornerRadius: cornerRadius).overlay {
             ZStack {
                 // `.opacity` multiplies (attenuates) the colour's existing alpha.
                 CrayonOutline(cornerRadius: cornerRadius, seed: seed &+ 101, roughness: roughness * 1.2)
-                    .stroke(color.opacity(0.55), style: StrokeStyle(lineWidth: width * 0.8, lineCap: .round, lineJoin: .round))
+                    .stroke(
+                        color.opacity(0.55),
+                        style: StrokeStyle(lineWidth: width * 0.8, lineCap: .round, lineJoin: .round)
+                    )
                 CrayonOutline(cornerRadius: cornerRadius, seed: seed, roughness: roughness)
                     .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
             }
@@ -133,7 +140,15 @@ extension View {
         cornerRadius: CGFloat = 18,
         seed: UInt64 = 0,
         roughness: CGFloat = 2.5
-    ) -> some View {
-        modifier(CrayonBorderModifier(color: color, width: width, cornerRadius: cornerRadius, seed: seed, roughness: roughness))
+    )
+        -> some View
+    {
+        modifier(CrayonBorderModifier(
+            color: color,
+            width: width,
+            cornerRadius: cornerRadius,
+            seed: seed,
+            roughness: roughness
+        ))
     }
 }

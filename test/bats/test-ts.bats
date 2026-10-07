@@ -69,7 +69,12 @@ printf '%s\n' "${STUB_NPROC_CORES:-8}"
 EOF
   cat > "$STUB_BIN/sysctl" <<'EOF'
 #!/usr/bin/env bash
-[[ "$1" == "-n" && "$2" == "hw.ncpu" ]] || exit 1
+[[ "$1" == "-n" ]] || exit 1
+if [[ "$2" == "hw.physicalcpu" ]]; then
+  printf '%s\n' "${STUB_SYSCTL_PHYSICAL_CORES:-4}"
+  exit 0
+fi
+[[ "$2" == "hw.ncpu" ]] || exit 1
 printf '%s\n' "${STUB_SYSCTL_CORES:-8}"
 EOF
   cat > "$STUB_BIN/uname" <<'EOF'
@@ -531,10 +536,37 @@ EOF
       fi
       [ "$status" -eq 0 ]
       [[ "$output" == *"test-ts: unit lane cores=$core_count workers=$worker_count"* ]]
+      [[ "$output" == *"test-ts: unit lane logical_cores=$core_count physical_cores=4 workers=$worker_count shards=$worker_count"* ]]
       [[ "$output" == *"--shards=$worker_count"* ]]
       [ "$(grep -c 'test-ts: unit lane cores=' <<< "$output")" -eq 1 ]
     done
   done
+}
+
+@test "unit shards report wall time and status on success and timeout" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane cores="*" workers=2"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shard 2/2 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=0"* ]]
+
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_BUN_EXIT=124 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"TIMEOUT: unit shard"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=124"* ]]
+  [[ "$output" == *"test-ts: unit shard 2/2 wall="*"s status=124"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=124"* ]]
+
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 STUB_BUN_EXIT=7 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: unit shard"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=7"* ]]
+  [[ "$output" == *"test-ts: unit shard 2/2 wall="*"s status=7"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=1"* ]]
 }
 
 @test "explicit unit worker count bypasses the macOS floor" {

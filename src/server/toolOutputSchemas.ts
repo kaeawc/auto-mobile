@@ -213,7 +213,12 @@ export const elementSchema = z
     bounds: elementBoundsSchema,
     text: z.string().optional(),
     "resource-id": z.string().optional(),
-    "view-id": z.string().optional(),
+    "view-id": z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     "content-desc": z.string().optional(),
     occlusionState: z.string().optional(),
     occludedBy: z.string().optional(),
@@ -636,7 +641,10 @@ export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
       occludedByViewId: z.string().optional(),
       node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional(),
     })
-    .passthrough(),
+    .passthrough()
+    .describe(
+      "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+    ),
 );
 
 const hierarchyNodeField = z
@@ -1157,7 +1165,12 @@ export const deviceLockSchema = z.object({
  */
 export const skeletonElementSchema = z
   .object({
-    elementId: z.string().optional(),
+    elementId: z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     label: z.string().optional(),
     sublabel: z.string().optional(),
     testTag: z.string().optional(),
@@ -1203,7 +1216,12 @@ export const skeletonElementSchema = z
  */
 export const observeDiffSelectorSchema = z
   .object({
-    elementId: z.string().optional(),
+    elementId: z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     label: z.string().optional(),
     index: z
       .number()

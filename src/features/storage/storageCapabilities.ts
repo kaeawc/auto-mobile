@@ -20,6 +20,7 @@ import {
 } from "../../server/appFileService";
 import {
   describeDefaultSharedStorageReadCoverage,
+  IOS_MEDIA_READ_UNSUPPORTED_REASON,
   type SharedStorageReadCoverage,
 } from "../../server/sharedStorageReadService";
 import type { KeystoreDiscoveryState } from "./keystoreDiscovery";
@@ -71,6 +72,7 @@ export interface StorageCapabilityContext {
   providerCoverage?: readonly AppFileProviderCoverage[];
   /** Bounded user-files reads belong to SharedStorageReadService, not app-file providers. */
   sharedStorageReadCoverage?: SharedStorageReadCoverage;
+  mediaLibraryReadCoverage?: SharedStorageReadCoverage;
   platform: "android" | "ios";
   deviceType: StorageDeviceType;
   /** AutoMobile SDK embedded with storage inspection enabled. */
@@ -301,14 +303,14 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
       domain: "user_files",
       portable: false,
       platformScope: "cross-platform",
-      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is not shipped in this repo. Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. No user_files list/read resources are exposed.",
+      note: "iOS Simulator only: managed fixture-app Documents/automobile namespaces. The fixture app is not shipped in this repo. Writes require its installed container; picker visibility is reported separately and unavailable unless verified. Physical iOS is unsupported. Canonical user_files resources list/read only these managed namespaces.",
       operations: [
         physicalReason
           ? deriveOperation("list", physicalReason, [])
-          : unavailableOperation("list", "No iOS user_files listing surface is exposed."),
+          : deriveOperation("list", undefined, []),
         physicalReason
           ? deriveOperation("read", physicalReason, [])
-          : unavailableOperation("read", "No iOS user_files read surface is exposed."),
+          : deriveOperation("read", undefined, []),
         deriveOperation(
           "write",
           physicalReason,
@@ -365,9 +367,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
 }
 
 function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
-  // No AutoMobile tool browses or reads the media library on either platform.
-  // Android writes are intentionally bounded and report MediaStore verification
-  // as part of putAppFile; iOS Simulator imports do not expose MediaScanner indexing.
+  // Android reads are bounded to putAppFile staging; iOS imports have no reader.
   const androidWrite = deriveOperation("write", undefined, [
     req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile),
   ]);
@@ -398,18 +398,20 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
     platformScope: "cross-platform",
     note:
       ctx.platform === "android"
-        ? "Android putAppFile writes bounded media fixtures and verifies MediaStore discovery; browse/read is not exposed."
+        ? "Android putAppFile writes bounded media fixtures and verifies MediaStore discovery; list/read is bounded to Download/automobile-media."
         : ctx.deviceType === "simulator"
           ? "iOS Simulator putAppFile imports image and video fixtures through simctl addmedia; browse/read is not exposed."
           : "iOS physical media-library mutation is not exposed.",
     operations: [
-      unavailableOperation(
-        "list",
-        "No AutoMobile media-library listing surface is currently exposed.",
-      ),
-      unavailableOperation(
-        "read",
-        "No AutoMobile media-library read surface is currently exposed.",
+      ...(["list", "read"] as const).map((operation) =>
+        ctx.platform === "ios"
+          ? unavailableOperation(operation, IOS_MEDIA_READ_UNSUPPORTED_REASON)
+          : deriveOperation(
+              operation,
+              undefined,
+              [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+              "Canonical media_library resources read only Download/automobile-media.",
+            ),
       ),
       ctx.platform === "ios" ? iosWrite : androidWrite,
       indexing,
@@ -501,7 +503,10 @@ function extensionPoints(): StorageExtensionPoint[] {
 }
 
 function absentProviderDescription(domain: StorageDomain, operation: StorageOperation): string {
-  if (domain === "user_files" && (operation === "list" || operation === "read")) {
+  if (
+    (domain === "user_files" || domain === "media_library") &&
+    (operation === "list" || operation === "read")
+  ) {
     return `SharedStorageReadService ${operation} provider`;
   }
   return operation === "namespace_reset" || operation === "media_indexing"
@@ -525,9 +530,12 @@ function applyProviderCoverage(
     namespace_reset: provider.write && provider.namespaceReset,
     media_indexing: provider.write && provider.mediaIndexing,
   };
-  if (domain.domain === "user_files") {
+  if (domain.domain === "user_files" || domain.domain === "media_library") {
     const sharedRead =
-      ctx.sharedStorageReadCoverage ?? describeDefaultSharedStorageReadCoverage(ctx.platform);
+      (domain.domain === "user_files"
+        ? ctx.sharedStorageReadCoverage
+        : ctx.mediaLibraryReadCoverage) ??
+      describeDefaultSharedStorageReadCoverage(ctx.platform, domain.domain);
     coverage.list = sharedRead.list;
     coverage.read = sharedRead.read;
   }

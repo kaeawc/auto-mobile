@@ -107,6 +107,7 @@ async function harness(
     useDefaultAuthenticator?: boolean;
     startGate?: Promise<void>;
     resolveGate?: Promise<void>;
+    onResolve?: (platform?: "android" | "ios") => void;
     outboundStallTimeoutMs?: number;
   } = {},
 ) {
@@ -128,7 +129,8 @@ async function harness(
   let resolveCalls = 0;
   const server = new TestServer(
     {
-      resolveDevice: async () => {
+      resolveDevice: async (_deviceId, platform) => {
+        options.onResolve?.(platform);
         resolveCalls++;
         await options.resolveGate;
         return device;
@@ -1132,3 +1134,12 @@ test.each([false, true])(
     expect(viewer.destroyed).toBe(false);
   },
 );
+
+test("subscribe forwards the platform to video discovery", async () => {
+  const platforms: Array<string | undefined> = [];
+  const { server } = await harness({ onResolve: (platform) => platforms.push(platform) });
+  const socket = new FakeSocket();
+  server.accept(socket);
+  await server.line(socket, { action: "subscribe", sessionUuid: "a", platform: "ios" });
+  expect(platforms).toEqual(["ios"]);
+});

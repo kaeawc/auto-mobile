@@ -38,6 +38,7 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /network/error-simulation", .networkErrorSimulation),
             ("POST /network/fault-rules", .networkFaultRules),
             ("POST /highlight", .highlight),
+            ("POST /accessibility/magic-tap", .magicTap),
             ("POST /db/execute", .dbExecute),
             ("POST /db/list", .dbList),
             ("POST /db/capabilities", .dbCapabilities),
@@ -589,6 +590,132 @@ final class SdkHierarchyServerTests: XCTestCase {
             )
             XCTAssertTrue(response.contains("409 Conflict"), "expected a 409, got: \(response)")
             XCTAssertTrue(response.contains("app_not_active"), "expected app_not_active, got: \(response)")
+        }
+    }
+
+    // MARK: - Storage routes run off the accept queue (#10166)
+
+    /// Database driver whose `executeSQL` waits for `release()`, standing in for a statement blocked on
+    /// the app's write lock. Records the order statements started in.
+    private final class BlockingDatabaseDriver: DatabaseDriver, @unchecked Sendable {
+        static let blockingQuery = "SELECT 'blocking'"
+        let path: String
+        let entered = DispatchSemaphore(value: 0)
+        private let gate = DispatchSemaphore(value: 0)
+        private let stateLock = NSLock()
+        private var started: [String] = []
+
+        init(path: String) {
+            self.path = path
+        }
+
+        var startedQueries: [String] {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return started
+        }
+
+        func release() {
+            gate.signal()
+        }
+
+        func getDatabases() -> [DatabaseDescriptor] {
+            [DatabaseDescriptor(name: "blocking.db", path: path, sizeBytes: 0)]
+        }
+
+        func getTables(databasePath _: String) -> [String] { [] }
+
+        func getTableData(databasePath _: String, table _: String, limit _: Int, offset _: Int) -> TableDataResult {
+            TableDataResult(columns: [], rows: [], totalRows: 0)
+        }
+
+        func getTableStructure(databasePath _: String, table _: String) -> TableStructureResult {
+            TableStructureResult(columns: [])
+        }
+
+        func executeSQL(databasePath _: String, query: String) -> SQLExecutionResult {
+            stateLock.lock()
+            started.append(query)
+            stateLock.unlock()
+            if query == Self.blockingQuery {
+                entered.signal()
+                _ = gate.wait(timeout: .now() + 10)
+            }
+            return SQLExecutionResult(columns: ["v"], rows: [[query]], rowsAffected: 0)
+        }
+    }
+
+    private func installBlockingDriver() -> BlockingDatabaseDriver {
+        let driver = BlockingDatabaseDriver(path: "/tmp/blocking.db")
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(driver)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(allowedDatabasePaths: [driver.path]))
+        DatabaseInspector.shared.setEnabled(true)
+        return driver
+    }
+
+    private func executeRequest(path: String, query: String) -> (head: String, body: String) {
+        let body = "{\"databasePath\":\"\(path)\",\"query\":\"\(query)\"}"
+        let head = "POST /db/execute HTTP/1.1\r\nHost: localhost\r\nContent-Length: \(body.utf8.count)\r\n\r\n"
+        return (head, body)
+    }
+
+    /// Sends a request and returns immediately; the caller cancels the connection.
+    private func sendWithoutWaiting(port: NWEndpoint.Port, head: String, body: String) -> NWConnection {
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        connection.stateUpdateHandler = { state in
+            guard case .ready = state else { return }
+            connection.send(content: Data((head + body).utf8), completion: .contentProcessed { _ in })
+        }
+        connection.start(queue: DispatchQueue(label: "sdk-hierarchy-server-test-pending-client"))
+        return connection
+    }
+
+    func testBlockedDatabaseRequestDoesNotStopHealthFromAnswering() throws {
+        let driver = installBlockingDriver()
+        defer {
+            driver.release()
+            DatabaseInspector.shared.reset()
+        }
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let request = executeRequest(path: driver.path, query: BlockingDatabaseDriver.blockingQuery)
+            let pending = sendWithoutWaiting(port: port, head: request.head, body: request.body)
+            defer { pending.cancel() }
+            XCTAssertEqual(driver.entered.wait(timeout: .now() + 5), .success, "the statement should be running")
+
+            let health = try roundTrip(
+                port: port, head: "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n", body: ""
+            )
+            try assertHealthResponse(health)
+            driver.release()
+        }
+    }
+
+    func testDatabaseRequestsStillRunInArrivalOrder() throws {
+        let driver = installBlockingDriver()
+        defer {
+            driver.release()
+            DatabaseInspector.shared.reset()
+        }
+        try withRunningServer(tracker: FakeHierarchyTracker()) { port in
+            let first = executeRequest(path: driver.path, query: BlockingDatabaseDriver.blockingQuery)
+            let pending = sendWithoutWaiting(port: port, head: first.head, body: first.body)
+            defer { pending.cancel() }
+            XCTAssertEqual(driver.entered.wait(timeout: .now() + 5), .success)
+
+            let second = executeRequest(path: driver.path, query: "SELECT 2")
+            let secondPending = sendWithoutWaiting(port: port, head: second.head, body: second.body)
+            defer { secondPending.cancel() }
+            // The second statement queues behind the blocked first one on the storage queue.
+            Thread.sleep(forTimeInterval: 0.1)
+            XCTAssertEqual(driver.startedQueries, [BlockingDatabaseDriver.blockingQuery])
+
+            driver.release()
+            let deadline = Date().addingTimeInterval(5)
+            while driver.startedQueries.count < 2, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            XCTAssertEqual(driver.startedQueries, [BlockingDatabaseDriver.blockingQuery, "SELECT 2"])
         }
     }
 }

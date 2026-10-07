@@ -28,6 +28,10 @@ const mirrorPortrait = readFileSync(
   join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-portrait.txt"),
   "utf8",
 );
+const twoDisplays = readFileSync(
+  join(__dirname, "..", "observe", "android", "fixtures", "cmd-display-two-displays.txt"),
+  "utf8",
+);
 
 describe("Rotate", () => {
   let rotate: Rotate;
@@ -120,13 +124,25 @@ describe("Rotate", () => {
   });
 
   test("non-default display uses per-display rotation without global settings writes", async () => {
+    fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
     fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
     const result = await rotate.execute("landscape", undefined, true, undefined, 2);
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell cmd display get-displays",
       "shell wm size",
       "shell cmd window user-rotation -d 2 lock 1",
     ]);
+  });
+
+  test("missing non-default display reports available ids without rotating", async () => {
+    fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
+    const error = await rotate
+      .execute("landscape", undefined, true, undefined, 7)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toBe("display 7 not found; available: 0, 2");
+    expect(fakeAdb.getExecutedCommands()).toEqual(["shell cmd display get-displays"]);
   });
 
   test("omitted display keeps the global rotation settings path", async () => {

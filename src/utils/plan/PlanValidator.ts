@@ -2,6 +2,22 @@ import { Plan, PlanStep, PlanDeviceDefinition } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../SystemTimer";
+import {
+  CoordinationEvent,
+  CoordinationTrack,
+  findUnavoidableCoordinationDeadlock,
+  formatCoordinationDeadlock,
+} from "./CoordinationScheduleFeasibility";
+
+const COORDINATION_TOOLS = new Set(["barrier", "criticalSection"]);
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
 
 /**
  * Aggregated usage of a single barrier lock name across a plan, used by the
@@ -344,6 +360,94 @@ export class PlanValidator {
     this.validateBarrierDistinctDeviceCounts(plan);
     this.validateBarrierGenerationCompleteness(plan);
     this.validateBarrierExcessDeviceArrivals(plan);
+    this.validateCoordinationScheduleFeasibility(plan);
+  }
+
+  /**
+   * Validates that at least one arrival order lets every device track get
+   * past all of its barrier/criticalSection steps (issue #6231). Runs last,
+   * after the per-lock count checks, so every lock already has a single
+   * consistent deviceCount and complete generations. See
+   * CoordinationScheduleFeasibility for the model: an exhaustive, bounded
+   * search over arrival interleavings that rejects only plans where EVERY
+   * order deadlocks (cross-lock AB-BA cycles, generations stranded behind
+   * another lock), never plans that can complete under some timing.
+   *
+   * Skipped (accepted) when the model would not match the runtime: any
+   * coordination step marked `optional` (a timed-out optional wait lets the
+   * track continue), a criticalSection whose sub-steps coordinate again
+   * (nested waits under the section mutex), or a coordination step missing
+   * a usable device/lock/deviceCount (reported by the earlier checks).
+   */
+  private static validateCoordinationScheduleFeasibility(plan: Plan): void {
+    const tracks = this.collectCoordinationTracks(plan);
+    if (tracks === null || tracks.length < 2) {
+      return;
+    }
+    const deadlock = findUnavoidableCoordinationDeadlock(tracks);
+    if (deadlock !== null) {
+      throw new ActionableError(formatCoordinationDeadlock(deadlock));
+    }
+  }
+
+  /**
+   * Builds per-device tracks of coordination arrivals in plan order, or
+   * returns null when the plan falls outside the feasibility model.
+   */
+  private static collectCoordinationTracks(plan: Plan): CoordinationTrack[] | null {
+    const tracksByDevice = new Map<string, CoordinationTrack>();
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+      if (!COORDINATION_TOOLS.has(step.tool)) {
+        continue;
+      }
+      const resolved = this.resolveCoordinationEvent(step, i);
+      if (resolved === null) {
+        return null;
+      }
+      const track = tracksByDevice.get(resolved.device) ?? {
+        device: resolved.device,
+        events: [],
+      };
+      track.events.push(resolved.event);
+      tracksByDevice.set(resolved.device, track);
+    }
+
+    return Array.from(tracksByDevice.values());
+  }
+
+  private static resolveCoordinationEvent(
+    step: PlanStep,
+    stepIndex: number,
+  ): { device: string; event: CoordinationEvent } | null {
+    const device = this.effectiveField(step, "device");
+    const lock = this.effectiveField(step, "lock");
+    const deviceCount = this.effectiveField(step, "deviceCount");
+    if (
+      step.optional === true ||
+      !isNonEmptyString(device) ||
+      !isNonEmptyString(lock) ||
+      !isPositiveInteger(deviceCount) ||
+      this.hasNestedCoordination(step)
+    ) {
+      return null;
+    }
+    return { device, event: { tool: step.tool, lock, deviceCount, stepIndex } };
+  }
+
+  private static hasNestedCoordination(step: PlanStep): boolean {
+    const subSteps = this.effectiveField(step, "steps");
+    if (!Array.isArray(subSteps)) {
+      return false;
+    }
+    return subSteps.some(
+      (sub: unknown) =>
+        typeof sub === "object" &&
+        sub !== null &&
+        "tool" in sub &&
+        COORDINATION_TOOLS.has(String(sub.tool)),
+    );
   }
 
   /**
@@ -560,7 +664,9 @@ export class PlanValidator {
   // ---------------------------------------------------------------------
   // Barrier coordination checks below enforce NECESSARY conditions for a
   // barrier plan to be executable — they do not prove full deadlock-freedom.
-  // Specifically NOT checked (tracked in issue #6231):
+  // The per-lock checks below do not reason about ORDER; the two gaps they
+  // leave are covered by validateCoordinationScheduleFeasibility (#6231),
+  // which rejects them only when no arrival order can complete:
   //   - Generation-boundary stranding within one lock: e.g. deviceCount=3
   //     with arrivals A,A/B,B/C/D passes every check below (4 distinct
   //     devices, 6 arrivals divisible by 3, no device exceeds its 2-generation

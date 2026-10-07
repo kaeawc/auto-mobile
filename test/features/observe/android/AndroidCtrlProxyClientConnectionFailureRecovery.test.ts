@@ -18,6 +18,7 @@ import {
   RealCtrlProxyWebSocketInTestError,
   defaultWebSocketFactory,
 } from "../../../../src/features/observe/DeviceServiceClient";
+import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
  * Regression coverage (issue #7532): AndroidCtrlProxyClient never escalated
@@ -36,6 +37,8 @@ afterEach(() => {
 });
 
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
+  maskRealCtrlProxyWebSocketOptIn();
+
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",
     platform: "android",
@@ -167,6 +170,13 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       );
     }
     await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    // The typed-result wrappers must rethrow it too, not resolve a failed action.
+    await expect(client.requestAction("click")).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    await expect(client.requestActivateAccessibilityLink("Terms", 0)).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
     await flushMicrotasks();

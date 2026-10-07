@@ -144,6 +144,7 @@ import {
   ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
+  rethrowRealCtrlProxyWebSocketInTestError,
 } from "../DeviceServiceClient";
 import {
   observationStreamDeviceConnectionLostNotifier,
@@ -3773,6 +3774,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report a failed action.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return {
@@ -3929,6 +3932,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report an unconfirmed activation.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
       return unconfirmed(errorMessage(error));
     } finally {

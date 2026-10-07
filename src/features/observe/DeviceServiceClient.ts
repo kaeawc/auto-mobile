@@ -72,20 +72,47 @@ export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
   }
 }
 
+const TEST_FILE_ENTRYPOINT = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** The running script: the current test file under `bun test`, `dist/src/index.js` (or the compiled binary) otherwise. */
+function currentEntrypoint(): string | undefined {
+  // src/ is type-checked without Bun's globals; read `Bun.main` structurally.
+  const bun = (globalThis as { Bun?: { main?: string } }).Bun;
+  return bun?.main ?? process.argv[1];
+}
+
+/**
+ * Whether this process is the `bun test` runner itself. `NODE_ENV=test` alone is
+ * not enough: it is inherited by every CLI/daemon child a real-device
+ * integration test spawns (`execFile`, `daemonProcessEnvironment`), and those
+ * children must dial the device. Under `bun test`, `Bun.main` is the test file
+ * being run; in a spawned child it is the child's own entrypoint, which no
+ * environment inheritance can turn into a test file.
+ */
+function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | undefined): boolean {
+  return (
+    env.NODE_ENV === "test" && entrypoint !== undefined && TEST_FILE_ENTRYPOINT.test(entrypoint)
+  );
+}
+
 /**
  * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
  * CtrlProxy socket. On a developer machine with an emulator or simulator running,
  * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
- * unstubbed client method sent real taps from a unit test (#10470). Mirrors the
- * real-DB guard (#3067): armed by Bun's test context signal (`NODE_ENV=test`),
- * and it fires only on the default path. Injecting a `WebSocketFactory` (or
- * setting {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
+ * unstubbed client method sent real taps from a unit test (#10470). Like the
+ * real-DB guard (#3067) it needs Bun's test context signal (`NODE_ENV=test`),
+ * but it also requires this process to be the `bun test` runner itself (see
+ * {@link isBunTestRunnerProcess}), so CLI/daemon children of an on-device
+ * integration test are never armed. It fires only on the default path.
+ * Injecting a `WebSocketFactory` (or setting
+ * {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
  */
 export function assertUnitTestRealWebSocketAllowed(
   url: string,
   env: NodeJS.ProcessEnv = process.env,
+  entrypoint: string | undefined = currentEntrypoint(),
 ): void {
-  if (env.NODE_ENV !== "test" || isRealCtrlProxyWebSocketOptInEnabled(env)) {
+  if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
     return;
   }
   throw new RealCtrlProxyWebSocketInTestError(

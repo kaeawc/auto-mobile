@@ -15,6 +15,7 @@ import {
   defaultWebSocketFactory,
 } from "../../../../src/features/observe/DeviceServiceClient";
 import { fixedBackoff } from "../../../../src/utils/Backoff";
+import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
@@ -62,6 +63,8 @@ const testDevice: BootedDevice = {
 };
 
 describe("IOSCtrlProxyClient restart threshold", () => {
+  maskRealCtrlProxyWebSocketOptIn();
+
   let client: IOSCtrlProxyClient | null = null;
 
   afterEach(async () => {

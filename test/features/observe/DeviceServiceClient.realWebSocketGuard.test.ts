@@ -8,12 +8,16 @@ import {
   defaultWebSocketFactory,
   type WebSocketFactory,
 } from "../../../src/features/observe/DeviceServiceClient";
+import { daemonProcessEnvironment } from "../../../src/daemon/daemonOptionScopes";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket";
+import { maskRealCtrlProxyWebSocketOptIn } from "../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 const URL = "ws://127.0.0.1:8765/ws";
+
+maskRealCtrlProxyWebSocketOptIn();
 
 describe("real CtrlProxy WebSocket unit-test guard (#10470)", () => {
   test("the default factory refuses a real socket under bun test", () => {
@@ -51,6 +55,26 @@ describe("real CtrlProxy WebSocket unit-test guard (#10470)", () => {
     "outside a bun test context (NODE_ENV=%p) the guard is disarmed",
     (nodeEnv) => {
       expect(() => assertUnitTestRealWebSocketAllowed(URL, { NODE_ENV: nodeEnv })).not.toThrow();
+    },
+  );
+
+  test.each(["/repo/src/foo.test.ts", "C:\\repo\\test\\bar.spec.tsx", "/repo/x.test.mjs"])(
+    "the bun test runner process (entrypoint %p) is armed",
+    (entrypoint) => {
+      expect(() =>
+        assertUnitTestRealWebSocketAllowed(URL, { NODE_ENV: "test" }, entrypoint),
+      ).toThrow(RealCtrlProxyWebSocketInTestError);
+    },
+  );
+
+  // An on-device integration test runs under bun test and spawns CLI/daemon
+  // children that inherit NODE_ENV=test; those children must still dial the device.
+  test.each(["/repo/dist/src/index.js", "/repo/src/index.ts", "/$bunfs/root/auto-mobile"])(
+    "a spawned daemon/CLI child (entrypoint %p) with the inherited test env is not armed",
+    (entrypoint) => {
+      const daemonEnv = daemonProcessEnvironment({ NODE_ENV: "test" });
+      expect(daemonEnv.NODE_ENV).toBe("test");
+      expect(() => assertUnitTestRealWebSocketAllowed(URL, daemonEnv, entrypoint)).not.toThrow();
     },
   );
 });

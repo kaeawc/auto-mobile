@@ -25,7 +25,7 @@ export function getRemovedToolHint(toolName: string): string | undefined {
  * instead. The tool's own action validation reports the hint, so callers see why the action is gone.
  */
 export const REMOVED_TOOL_ACTIONS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  overlay: {
+  prototype: {
     showVariants:
       "show with one design at a time (describe the alternatives in chat and ask which the user prefers), or one show spec whose pager holds every design",
     update:

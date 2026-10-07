@@ -51,7 +51,7 @@ const panels = [open, closed].map((capture) => ({
 }));
 const commands: SendKeysCommand[] = [
   { action: "type", text: "hello", mode: "a11y" },
-  { action: "clear" },
+  { action: "clear", mode: "a11y" },
   { action: "key", key: "done" },
 ];
 

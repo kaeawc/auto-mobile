@@ -12,6 +12,13 @@ import {
   emulatorConsoleReportsFailure,
   type BiometricEnrollmentState,
 } from "../utility/DeviceState";
+import {
+  defaultIosSdkTriggerSenderFactory,
+  describeIosSdkTriggerFailure,
+  type IosSdkTriggerSenderFactory,
+} from "./IosSdkTrigger";
+import type { SdkTriggerRequest } from "../observe/ios/CtrlProxySdkTrigger";
+import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
@@ -32,6 +39,26 @@ const SDK_BROADCAST_ACTION = "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE
 /** Default TTL for SDK overrides in milliseconds. */
 const DEFAULT_TTL_MS = 5000;
 
+/** iOS SDK trigger module that arms `AutoMobileBiometrics` overrides (#1580). */
+export const IOS_BIOMETRICS_MODULE = "biometrics";
+
+/**
+ * SDK errors meaning the app's SDK predates the biometrics trigger module, so the
+ * call falls back to simctl exactly as if no SDK were embedded.
+ */
+const SDK_TOO_OLD_ERRORS = new Set(["module_not_registered", "unknown_trigger"]);
+
+/**
+ * Outcome of offering a biometric override to the app's in-app iOS SDK:
+ * `armed` (override set), `unreachable` (no SDK route; fall back to simctl) or
+ * `failed` (the SDK answered with an error, or the request timed out after it may
+ * have been delivered, where falling back could double-apply).
+ */
+type IosSdkOverrideOutcome =
+  | { kind: "armed" }
+  | { kind: "unreachable"; reason: string }
+  | { kind: "failed"; error: string };
+
 export class BiometricAuth extends BaseVisualChange {
   /** Darwin notification keys the iOS Simulator's BiometricKit listens on. */
   private static readonly IOS_KEYS = {
@@ -50,6 +77,7 @@ export class BiometricAuth extends BaseVisualChange {
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
     private simctl: BiometricSimctl | null = null,
+    private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
   ) {
     super(device, adb, timer);
     this.device = device;
@@ -170,6 +198,130 @@ export class BiometricAuth extends BaseVisualChange {
   }
 
   /**
+   * iOS biometrics (#1580). match/fail/cancel/error go first to the app's in-app
+   * AutoMobile SDK (`biometrics` trigger module, the counterpart of the Android SDK
+   * broadcast), which arms an `AutoMobileBiometrics` override the app consumes in its
+   * authentication flow. On the Simulator, match/fail also post the BiometricKit event
+   * so a pending system prompt completes, as Android pairs its broadcast with
+   * `emu finger`. Without a reachable SDK the simctl/notifyutil path is used.
+   * enroll/unenroll have no SDK equivalent and always use simctl.
+   */
+  private async executeIos(options: BiometricAuthOptions): Promise<BiometricAuthResult> {
+    const modality = options.modality ?? "any";
+    if (options.action === "enroll" || options.action === "unenroll") {
+      return this.executeIosSimctl(options, modality);
+    }
+
+    const sdk = await this.armIosSdkOverride(options);
+    switch (sdk.kind) {
+      case "armed":
+        return this.completeIosSdkOverride(options, modality);
+      case "failed":
+        return {
+          ...this.iosResultBase(options, modality),
+          success: false,
+          supported: true,
+          error: sdk.error,
+        };
+      case "unreachable":
+        return this.executeIosSimctl(options, modality, sdk.reason);
+    }
+  }
+
+  private iosResultBase(
+    options: BiometricAuthOptions,
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+  ) {
+    return {
+      action: options.action,
+      modality,
+      fingerprintId: options.fingerprintId,
+      errorCode: options.errorCode,
+    };
+  }
+
+  /** Same `result`/`ttlMs`/`errorCode` fields as the Android SDK broadcast. */
+  private iosSdkOverrideRequest(options: BiometricAuthOptions): SdkTriggerRequest {
+    return {
+      module: IOS_BIOMETRICS_MODULE,
+      trigger: "override",
+      payload: {
+        result: this.actionToSdkResult(options.action),
+        ttlMs: options.ttlMs ?? DEFAULT_TTL_MS,
+        ...(options.action === "error" && options.errorCode !== undefined
+          ? { errorCode: options.errorCode }
+          : {}),
+      },
+    };
+  }
+
+  private async armIosSdkOverride(options: BiometricAuthOptions): Promise<IosSdkOverrideOutcome> {
+    const request = this.iosSdkOverrideRequest(options);
+    let result: CtrlProxySdkTriggerResult;
+    try {
+      result = await this.iosSdkTriggers(this.device).requestSdkTrigger(request);
+    } catch (error) {
+      logger.warn(
+        `[BiometricAuth] iOS SDK biometric override failed; falling back to simctl: ${errorMessage(error)}`,
+      );
+      return {
+        kind: "unreachable",
+        reason: `The in-app SDK route failed: ${errorMessage(error)}.`,
+      };
+    }
+    if (result.success) {
+      return { kind: "armed" };
+    }
+    const reason = describeIosSdkTriggerFailure(result, request, "biometricAuth");
+    const sdkTooOld = result.sdkError !== undefined && SDK_TOO_OLD_ERRORS.has(result.sdkError);
+    if (result.unsupported || !result.available || sdkTooOld) {
+      // Expected for apps without the AutoMobile SDK: simctl is the documented fallback.
+      logger.debug(`[BiometricAuth] no iOS SDK biometric route; using simctl: ${reason}`);
+      return { kind: "unreachable", reason };
+    }
+    return { kind: "failed", error: reason };
+  }
+
+  /**
+   * The SDK override is armed. On the Simulator, match/fail also post the BiometricKit
+   * event so a pending system prompt completes; a failure there is reported in the
+   * message rather than failing the call, because the override itself was delivered.
+   */
+  private async completeIosSdkOverride(
+    options: BiometricAuthOptions,
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+  ): Promise<BiometricAuthResult> {
+    const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+    const armed =
+      `AutoMobileBiometrics override armed in the app's AutoMobile SDK ` +
+      `(${this.actionToSdkResult(options.action)}, ttl ${ttlMs} ms). ` +
+      `The app must call AutoMobileBiometrics.shared.consumeOverride() in its authentication flow.`;
+    const base = { ...this.iosResultBase(options, modality), success: true, supported: true };
+    const postsSimulatorEvent =
+      (options.action === "match" || options.action === "fail") &&
+      isIosSimulatorDevice(this.device);
+    if (!postsSimulatorEvent) {
+      return { ...base, message: armed };
+    }
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+    const posted = await this.postIosBiometricResult(
+      options,
+      modality,
+      simctl,
+      new DeviceState(this.device, { simctl }),
+      this.getIosBiometricTargets(options.action, modality),
+      this.device.deviceId,
+    );
+    if (posted.success) {
+      return { ...base, message: `${armed} ${posted.message ?? ""}`.trim() };
+    }
+    return {
+      ...base,
+      message: `${armed} The simulator BiometricKit event was not posted: ${posted.error}`,
+    };
+  }
+
+  /**
    * Simulate a biometric match / non-match on the iOS Simulator by posting BiometricKit
    * Darwin notifications via `xcrun simctl spawn <udid> notifyutil`.
    *
@@ -179,27 +331,31 @@ export class BiometricAuth extends BaseVisualChange {
    * `setDeviceState`; match/fail never silently change it.
    * cancel/error have no simulator notification and return supported:"partial".
    * Physical iOS devices have no public injection API and return supported:false.
+   * `sdkReason` explains why the in-app SDK route was not used.
    */
-  private async executeIos(options: BiometricAuthOptions): Promise<BiometricAuthResult> {
-    const modality = options.modality ?? "any";
-
+  private async executeIosSimctl(
+    options: BiometricAuthOptions,
+    modality: NonNullable<BiometricAuthOptions["modality"]>,
+    sdkReason?: string,
+  ): Promise<BiometricAuthResult> {
+    const sdkNote = sdkReason ? ` ${sdkReason}` : "";
     if (!isIosSimulatorDevice(this.device)) {
       return this.unsupported(
         options,
-        "iOS biometric simulation is only available on the iOS Simulator. " +
-          "There is no public API to inject a biometric result on a physical iOS device.",
+        "iOS biometric simulation without the app's AutoMobile SDK is only available on the iOS Simulator. " +
+          "There is no public API to inject a biometric result on a physical iOS device." +
+          sdkNote,
       );
     }
 
     if (options.action === "cancel" || options.action === "error") {
       return {
+        ...this.iosResultBase(options, modality),
         success: false,
-        action: options.action,
-        modality,
-        fingerprintId: options.fingerprintId,
-        errorCode: options.errorCode,
         supported: "partial",
-        error: `iOS Simulator biometrics support only 'match' and 'fail'; '${options.action}' has no simctl equivalent.`,
+        error:
+          `iOS Simulator biometrics support only 'match' and 'fail' without the app's AutoMobile SDK; ` +
+          `'${options.action}' has no simctl equivalent.${sdkNote}`,
       };
     }
 

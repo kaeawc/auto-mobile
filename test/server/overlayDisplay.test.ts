@@ -62,16 +62,16 @@ describe("overlay display targeting", () => {
   });
 
   async function call(input: Record<string, unknown>) {
-    const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+    const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = await handler(device, input);
     return overlayOutputSchema.parse(response.structuredContent);
   }
 
   /** The registry wraps device-aware handlers in this seam, which injects a session pin. */
   async function callPinned(input: Record<string, unknown>, pin: string | undefined) {
-    const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+    const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
     const response = (await runSessionDisplayPin({
-      name: "overlay",
+      name: "prototype",
       acceptsDisplay: true,
       device,
       args: input,

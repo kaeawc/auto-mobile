@@ -8,7 +8,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackSwipeExecutor } from "../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
-import { FakeElementFinder } from "../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../fakes/FakeElementTraitQueries";
 
 type Options = SwipeOnOptions;
 const container = {
@@ -80,7 +80,7 @@ function harness(frames: ObserveResult[], resolver?: ElementResolver) {
       timer,
       resolver,
       voiceOverExecutor: runner,
-      finder: new FakeElementFinder(),
+      finder: new FakeScrollableElementsQuery(),
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );

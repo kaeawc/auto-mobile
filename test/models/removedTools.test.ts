@@ -40,9 +40,9 @@ test("removed tool actions name the replacement and ignore live or unknown actio
       );
     }
   }
-  expect(Object.keys(REMOVED_TOOL_ACTIONS.overlay)).toEqual(["showVariants", "update"]);
-  expect(getRemovedToolActionHint("overlay", "show")).toBeUndefined();
-  expect(getRemovedToolActionHint("overlay", "toString")).toBeUndefined();
-  expect(getRemovedToolActionHint("overlay", 3)).toBeUndefined();
+  expect(Object.keys(REMOVED_TOOL_ACTIONS.prototype)).toEqual(["showVariants", "update"]);
+  expect(getRemovedToolActionHint("prototype", "show")).toBeUndefined();
+  expect(getRemovedToolActionHint("prototype", "toString")).toBeUndefined();
+  expect(getRemovedToolActionHint("prototype", 3)).toBeUndefined();
   expect(getRemovedToolActionHint("missing-tool", "update")).toBeUndefined();
 });

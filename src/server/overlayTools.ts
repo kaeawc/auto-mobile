@@ -150,7 +150,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
     .object({
       action: z.enum(["show", "dismiss", "status", "awaitEvent"], {
         error: (issue) =>
-          getRemovedToolActionHint("overlay", issue.input) ??
+          getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
           "action must be one of show, dismiss, status or awaitEvent",
       }),
       spec: specInput
@@ -389,6 +389,9 @@ export interface OverlayToolDependencies {
   timer?: Timer;
   lifecycle?: OverlayEventLifecycle;
 }
+/** MCP name of the on-device prototype tool; `overlay` is its deprecated alias (#10495). */
+export const PROTOTYPE_TOOL_NAME = "prototype";
+export const DEPRECATED_OVERLAY_TOOL_NAME = "overlay";
 const responseFor = (payload: z.infer<typeof overlayOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
 let unsubscribeOverlayLifecycle: (() => void) | undefined;
@@ -868,11 +871,24 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     );
   };
   ToolRegistry.registerDeviceAware(
-    "overlay",
+    PROTOTYPE_TOOL_NAME,
     'Show (always a full spec), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },
+  );
+  // Deprecated alias for one release (#10495): same schema and handler, hidden from discovery.
+  ToolRegistry.registerDeviceAware(
+    DEPRECATED_OVERLAY_TOOL_NAME,
+    `Deprecated alias of ${PROTOTYPE_TOOL_NAME}; use ${PROTOTYPE_TOOL_NAME}.`,
+    overlaySchema,
+    async (...args: Parameters<typeof handler>) => {
+      logger.warn(
+        `[overlayTools] tool "${DEPRECATED_OVERLAY_TOOL_NAME}" is deprecated; use "${PROTOTYPE_TOOL_NAME}"`,
+      );
+      return handler(...args);
+    },
+    { defaultEnabled: false, hidden: true, outputSchema: overlayOutputSchema },
   );
   const unsubscribeCleanup = subscribeOverlayCleanup(
     dependencies.lifecycle ?? defaultOverlayLifecycle(),

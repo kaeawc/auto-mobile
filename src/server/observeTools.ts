@@ -89,9 +89,16 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import {
+  hierarchyLayerSchema,
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
 } from "./elementSelectorSchemas";
+import {
+  scopeHierarchyForSelector,
+  scopeHierarchyToLayer,
+  scopeObserveResultToLayer,
+} from "../features/observe/hierarchyLayer";
+import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import {
   ElementResolver,
@@ -747,6 +754,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           ),
         skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
         scope: observeScopeSchema.optional(),
+        layer: hierarchyLayerSchema.optional(),
       })
       .strict(),
   )
@@ -828,7 +836,11 @@ const WAIT_FOR_POLL_INTERVAL_MS = 100;
 export type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
 export type SettledOptions = z.infer<typeof settledSchema>;
 /** waitFor options carrying the (top-level) settled gate, as threaded to {@link waitForObservation}. */
-export type WaitForWithSettled = ObserveWaitForOptions & { settled?: SettledOptions };
+export type WaitForWithSettled = ObserveWaitForOptions & {
+  settled?: SettledOptions;
+  /** Scope element predicates to the app or the AutoMobile overlay (issue #9305). */
+  layer?: HierarchyLayer;
+};
 type ObserveArgs = z.infer<typeof observeSchema>;
 type WaitForConditionDsl = z.infer<typeof waitForConditionDslSchema>;
 type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
@@ -1040,7 +1052,9 @@ const runWaitForConditionDsl = async (
   );
   const predicate: ConditionPredicate = (observation) => {
     tracked.reset();
-    const evaluation = evaluate(observation);
+    const evaluation = evaluate(
+      layerScopedObservation(observation, (waitFor as WaitForWithSettled).layer),
+    );
     return { ...evaluation, ...containerFailureMetadata(!evaluation.matched, tracked.failure()) };
   };
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
@@ -1462,6 +1476,24 @@ const matchesDisplayStamp = (
   );
 };
 
+/**
+ * The observation an element predicate sees for `layer` (issue #9305). Only the
+ * hierarchy is scoped; the polled observation itself, and the cache behind it,
+ * keep every window.
+ */
+function layerScopedObservation(
+  observation: ObserveResult,
+  layer: HierarchyLayer | undefined,
+): ObserveResult {
+  if (layer === undefined || !observation.viewHierarchy) {
+    return observation;
+  }
+  return {
+    ...observation,
+    viewHierarchy: scopeHierarchyToLayer(observation.viewHierarchy, layer),
+  };
+}
+
 const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: WaitForWithSettled,
@@ -1470,6 +1502,7 @@ const evaluateWaitForObservation = (
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
 ): ObserveConditionEvaluation & { awaitedElement?: Element } => {
+  observation = layerScopedObservation(observation, waitFor.layer);
   const sizeOptions = {
     platform,
     iosMultiPanel,
@@ -2101,6 +2134,26 @@ async function attachObserveCrop(
   );
 }
 
+/**
+ * The observation `observe` serves for `layer` (issue #9305). A plain observe
+ * that asks for the overlay while none is showing is an actionable error; a
+ * waitFor observe returns the (empty) scoped capture so its timeout reports the miss.
+ */
+function layerScopedObserveResult(
+  result: ObserveResult,
+  layer: HierarchyLayer | undefined,
+  platform: BootedDevice["platform"],
+  requireOverlay: boolean,
+): ObserveResult {
+  if (layer === undefined) {
+    return result;
+  }
+  if (requireOverlay && result.viewHierarchy) {
+    scopeHierarchyForSelector(result.viewHierarchy, layer);
+  }
+  return scopeObserveResultToLayer(result, layer, platform);
+}
+
 function recordObservationBackStack(result: ObserveResult, sessionUuid?: string): void {
   if (result.backStack && result.activeWindow?.appId) {
     const navGraph = sessionUuid
@@ -2207,14 +2260,16 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
+      const served = layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome);
+
       if (waitOutcome) {
-        return await createObserveWaitResponse(result, waitOutcome, args.includeScreenshotImage, {
+        return await createObserveWaitResponse(served, waitOutcome, args.includeScreenshotImage, {
           signal,
           protection: dependencies.pathProtection,
         });
       }
 
-      return await createObserveResponse(result, args.includeScreenshotImage, {
+      return await createObserveResponse(served, args.includeScreenshotImage, {
         signal,
         protection: dependencies.pathProtection,
       });
@@ -2717,7 +2772,7 @@ function observeWaitParameters(
 ): Parameters<typeof waitForObservation> {
   return [
     observeScreen,
-    { ...args.waitFor, settled: args.settled },
+    { ...args.waitFor, settled: args.settled, layer: args.layer },
     signal,
     args.skipBackStack ?? false,
     dependencies.timer ?? defaultTimer,

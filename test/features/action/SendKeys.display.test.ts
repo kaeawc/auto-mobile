@@ -27,7 +27,7 @@ const multiDisplay: BootedDevice = {
 };
 const commands: SendKeysCommand[] = [
   { action: "type", text: "hello", mode: "a11y" },
-  { action: "clear" },
+  { action: "clear", mode: "a11y" },
   { action: "key", key: "done" },
 ];
 
@@ -190,7 +190,7 @@ describe("sendKeys selector-less display focus", () => {
 describe("sendKeys Android focus read routing", () => {
   const cases: Array<{ name: string; command: SendKeysCommand; verifiesClear?: boolean }> = [
     { name: "semantic key", command: { action: "key", key: "done" } },
-    { name: "clear fallback", command: { action: "clear" }, verifiesClear: true },
+    { name: "clear fallback", command: { action: "clear", mode: "a11y" }, verifiesClear: true },
     { name: "eventLast", command: { action: "type", text: "abc", mode: "eventLast" } },
     { name: "eventAll", command: { action: "type", text: "abc", mode: "eventAll" } },
     { name: "eventOnly", command: { action: "type", text: "abc", mode: "eventOnly" } },
@@ -297,7 +297,9 @@ describe("sendKeys Android focus read routing", () => {
           expect(h.clientCalls).toContain("ime");
         } else if (command.action === "type") {
           expect(
-            h.adb.getExecutedCommands().some((command) => command.includes("input keyevent")),
+            h.adb
+              .getExecutedCommands()
+              .some((command) => /^shell input (keyevent|text) /.test(command)),
           ).toBe(true);
         }
       });

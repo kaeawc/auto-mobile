@@ -18,10 +18,10 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`, `overlay`,
+`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
-`postNotification`, `pressButton`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
+`postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
@@ -563,13 +563,14 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>overlay</code>              | Shows, dismisses, awaits events, or reports Android overlays.             |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports Android prototypes.           |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
-### overlay
+### prototype
 
-The Android-only `overlay` tool is omitted from discovery by default. Enable it
-with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
+The Android-only `prototype` tool (formerly `overlay`, which remains a hidden
+deprecated alias for one release) is omitted from discovery by default. Enable it
+with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root) and always renders the whole spec. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
@@ -596,7 +597,7 @@ never wait on the device for a choice.
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing overlay schema and limits
-before contacting CtrlProxy. Verify rendering with `observe`; overlay returns
+before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
 no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
@@ -972,6 +973,19 @@ ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
 belong inside each endpoint, not at the top level; unknown endpoint keys and
 malformed recursive containers are rejected.
 
+#### Hierarchy layer
+
+`observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, and `dragAndDrop` accept an
+optional top-level `layer` (`"app"` or `"overlay"`) that scopes the view hierarchy
+to one layer of the screen. `app` excludes AutoMobile's own overlay window;
+`overlay` keeps only overlay nodes and fails with an actionable error when no
+overlay is showing. Omit it to search both, topmost first. `observe` applies it
+to the returned hierarchy and to `waitFor` element conditions. `dragAndDrop.layer`
+scopes both the `source` and the `target` drop-target resolution. With `layer: "app"`,
+a coordinate gesture whose point lies under an overlay window is refused before
+dispatch. `layer` on `sendKeys` and `highlight` requires a selector, and `tapOn`
+rejects it together with `accessibilityLink` or `subtext`.
+
 `swipeOn.container` identifies the element to swipe within and accepts the same
 recursive container, per-level index, and selectionStrategy fields. `lookFor`
 accepts exactly one of `elementId` or `text`, plus its own recursive `container`
@@ -1085,7 +1099,11 @@ reports the actual `xcuiTypeText` mechanism as
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A
-standalone `{ "action": "clear" }` command clears the focused field. Execution
+standalone `{ "action": "clear" }` command clears the focused field. On Android
+its default (`auto`) and `ime` modes clear through the CtrlProxy IME
+(`ime_clear_field_v1`), or with key-event deletes on an older APK, so a
+rich-text editor keeps its live formatting; only `mode: "a11y"` uses the
+accessibility `ACTION_SET_TEXT` clear. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
@@ -1645,6 +1663,15 @@ Failed restores keep the record for retry. The iOS Simulator reset continues to
 restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
 `shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
+On iOS, `match`, `fail`, `cancel` and `error` first arm an `AutoMobileBiometrics`
+override through the app's AutoMobile iOS SDK (DEBUG build, app in the foreground),
+which the app reads with `consumeOverride()`; `ttlMs` and `errorCode` apply as on
+Android. On the Simulator, `match` and `fail` also post the BiometricKit event so a
+pending system prompt completes. Without the SDK, the Simulator falls back to
+BiometricKit events (`match` and `fail` only) and a physical device is unsupported.
+On iOS, `cancel` and `error` only arm the SDK override; the app must read it via
+`consumeOverride()`, as no system prompt is completed for them.
+`enroll` and `unenroll` always use the Simulator.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
 bundle ID; required on iOS, while Android defaults to the foreground app if omitted). `actions` supplies

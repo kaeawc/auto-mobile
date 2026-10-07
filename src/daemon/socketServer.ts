@@ -826,6 +826,7 @@ export class UnixSocketServer {
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
   private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
   private readonly backpressuredSocketIdle = new WeakMap<
@@ -1188,6 +1189,7 @@ export class UnixSocketServer {
 
     this.sessions.set(sessionId, session);
     this.clientSockets.set(sessionId, socket);
+    this.acceptedClientConnections++;
     logger.info(`New client connection: ${sessionId}`);
 
     // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
@@ -7280,6 +7282,16 @@ export class UnixSocketServer {
    */
   isListening(): boolean {
     return this.server !== null && this.server.listening;
+  }
+
+  /** Connected control-socket clients (orphaned private-daemon watchdog, #10497). */
+  getClientConnectionCount(): number {
+    return this.clientSockets.size;
+  }
+
+  /** Monotonic count of control-socket connections accepted (orphan watchdog, #10497). */
+  getAcceptedClientConnectionCount(): number {
+    return this.acceptedClientConnections;
   }
 
   /**

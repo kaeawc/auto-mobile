@@ -214,6 +214,64 @@ run_runner() {
   grep -q "parallel:.*--jobs 7" "$ARGS_FILE"
 }
 
+@test "within-file tagged files run in a pass that never oversubscribes cores" {
+  printf '# bats file_tags=parallel-within-file\n@test "within" { true; }\n' \
+    > "$FIXTURES/within.bats"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBS=8 \
+    AUTOMOBILE_BATS_WITHIN_FILE_JOBS=4 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "^bats:$FIXTURES/within.bats$" "$ARGS_FILE")" -eq 1 ]
+  # 2 concurrent files x 4 tests each = 8 cores; the plain pass keeps all 8.
+  grep -q -- 'parallel:.*--jobs 2 ' "$ARGS_FILE"
+  grep -q -- 'parallel:.*--jobs 8 ' "$ARGS_FILE"
+  grep -q -- '--jobs 4 2>&1' "$ARGS_FILE"
+  [[ "$output" == *"2 files x 4 tests <= 8 cores"* ]]
+}
+
+@test "within-file inner jobs are clamped to the core count" {
+  printf '# bats file_tags=parallel-within-file\n@test "within" { true; }\n' \
+    > "$FIXTURES/within.bats"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBS=2 \
+    AUTOMOBILE_BATS_WITHIN_FILE_JOBS=16 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 files x 2 tests <= 2 cores"* ]]
+}
+
+@test "within-file jobs of 1 run tagged files in the plain parallel pass" {
+  printf '# bats file_tags=parallel-within-file\n@test "within" { true; }\n' \
+    > "$FIXTURES/within.bats"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_WITHIN_FILE_JOBS=1 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c "^bats:$FIXTURES/within.bats$" "$ARGS_FILE")" -eq 1 ]
+  [[ "$output" != *"Within-file"* ]]
+}
+
+@test "rejects an invalid within-file jobs override" {
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_WITHIN_FILE_JOBS=0 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_BATS_WITHIN_FILE_JOBS must be a positive integer"* ]]
+}
+
 @test "parallel pass defaults to a 240 second file timeout" {
   run_runner unit
   [ "$status" -eq 0 ]

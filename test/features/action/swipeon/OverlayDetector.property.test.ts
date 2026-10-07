@@ -10,7 +10,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // `finder`/`elementParser` are unused by intersectBounds/computeSafeSwipeCoordinates,
 // so minimal stubs are sufficient; `geometry` is the real implementation because
 // computeSafeSwipeCoordinates delegates to its getSwipeWithinBounds.
-const detector = new OverlayDetector({} as any, new DefaultElementGeometry(), {} as any);
+const detector = new OverlayDetector(new DefaultElementGeometry(), {} as any);
 
 // Arbitrary rectangles, allowing some degenerate/inverted ones (width/height <= 0)
 // so intersectBounds's null-handling for non-overlapping/empty rects is exercised.

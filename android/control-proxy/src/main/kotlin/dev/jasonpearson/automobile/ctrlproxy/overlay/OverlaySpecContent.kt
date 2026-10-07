@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -108,8 +109,8 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
         node.text,
         modifier,
         color = node.style.color,
-        fontSize =
-          with(LocalDensity.current) { (node.style.source.textSize ?: 14.0).toFloat().dp.toSp() },
+        // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
+        fontSize = (node.style.source.textSize ?: 14.0).toFloat().sp,
         fontWeight = node.style.fontWeight,
         fontFamily = node.style.fontFamily,
         textAlign = node.style.textAlign,
@@ -344,7 +345,12 @@ private fun overlayNodeModifier(
   interact: (OverlayInteraction) -> Unit,
 ): Modifier {
   val style = node.style.source
+  val actions = node.source?.onTap.orEmpty()
+  val tappable = actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet"
   var modifier: Modifier = Modifier
+  // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
+  // without changing the size it draws at (#10435).
+  if (tappable) modifier = modifier.minimumInteractiveComponentSize()
   modifier = dimensionModifier(modifier, style.width, horizontal = true)
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
@@ -353,6 +359,22 @@ private fun overlayNodeModifier(
   node.style.background?.let { modifier = modifier.background(it, shape) }
   style.border?.let {
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
+  }
+  // Click handling and semantics go before the inset and authored padding, so the whole drawn node
+  // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
+  if (tappable) modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
+  modifier = modifier.semantics {
+    if (node.role != "textField") text = AnnotatedString(node.text)
+    this[OverlayRole] = node.role
+    if (node.role == "icon" || node.role == "image") role = Role.Image
+    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+    overlayContentDescription(node.role, node.text, node.iconName, tappable)?.let {
+      contentDescription = it
+    }
+    overlayStateDescription(node.role, node.page, node.children.size)?.let {
+      stateDescription = it
+    }
+    node.testTag?.let { testTag = it }
   }
   val insetFloor = LocalOverlayInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -391,22 +413,7 @@ private fun overlayNodeModifier(
         bottom = (it.bottom ?: 0.0).toFloat().dp,
       )
   }
-  val actions = node.source?.onTap.orEmpty()
-  if (actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet")
-    modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
-  return modifier.semantics {
-    if (node.role != "textField") text = AnnotatedString(node.text)
-    this[OverlayRole] = node.role
-    if (node.role == "icon" || node.role == "image") role = Role.Image
-    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
-    overlayContentDescription(node.role, node.text, node.iconName, actions.isNotEmpty())?.let {
-      contentDescription = it
-    }
-    overlayStateDescription(node.role, node.page, node.children.size)?.let {
-      stateDescription = it
-    }
-    node.testTag?.let { testTag = it }
-  }
+  return modifier
 }
 
 private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")

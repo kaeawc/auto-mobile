@@ -1513,7 +1513,7 @@ describe("argument budget deadline gaps", () => {
         type: "mcp_request",
         method: "tools/call",
         timeoutMs,
-        params: { name: "overlay", arguments: args },
+        params: { name: "prototype", arguments: args },
       });
     const headroom = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
     test("the default wait outlives the tool's own default timeout", () => {

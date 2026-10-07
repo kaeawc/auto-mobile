@@ -84,6 +84,21 @@ const convertSpec = toJsonSchemaCompat as unknown as (
   schema: ZodTypeAny,
 ) => Record<string, unknown>;
 const advertisedSpec = convertSpec(overlaySpecSchema);
+/**
+ * The contract and validator reject `theme: {}` and `theme.colors: {}`, but a Zod refinement has no
+ * JSON Schema form, so state it on the advertised schema for schema-driven clients.
+ */
+function requireNonEmptyThemeObjects(spec: Record<string, unknown>): void {
+  const theme = (spec.properties as Record<string, Record<string, unknown>> | undefined)?.theme;
+  if (!theme) {
+    return;
+  }
+  theme.minProperties = 1;
+  const colors = (theme.properties as Record<string, Record<string, unknown>> | undefined)?.colors;
+  if (colors) {
+    colors.minProperties = 1;
+  }
+}
 function rehomeSpecReferences(value: unknown, property = "spec"): void {
   if (!value || typeof value !== "object") {
     return;
@@ -98,6 +113,7 @@ function rehomeSpecReferences(value: unknown, property = "spec"): void {
 }
 rehomeSpecReferences(advertisedSpec);
 delete advertisedSpec.$schema;
+requireNonEmptyThemeObjects(advertisedSpec);
 const advertisedVariants = convertSpec(variantListSchema);
 rehomeSpecReferences(advertisedVariants, "variants");
 delete advertisedVariants.$schema;

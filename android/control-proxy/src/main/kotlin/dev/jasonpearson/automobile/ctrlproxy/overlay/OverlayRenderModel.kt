@@ -251,7 +251,8 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     style,
     style.background?.let(::overlayColor),
     style.border?.color?.let(::overlayColor),
-    style.color?.let(::overlayColor) ?: Color.Black,
+    // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
+    style.color?.let(::overlayColor) ?: Color.Unspecified,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),

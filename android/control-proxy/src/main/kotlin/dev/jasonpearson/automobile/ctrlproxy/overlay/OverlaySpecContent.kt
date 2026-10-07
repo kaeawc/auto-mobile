@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -126,7 +127,12 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
     "icon" -> {
       val icon = overlayIcon(node.iconName)
       if (icon != null)
-        Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
+        Icon(
+          icon,
+          contentDescription = null,
+          modifier = modifier,
+          tint = node.style.color.takeOrElse { LocalContentColor.current },
+        )
       else
         Box(
           modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)

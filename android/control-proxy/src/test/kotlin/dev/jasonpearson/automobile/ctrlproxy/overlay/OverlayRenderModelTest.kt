@@ -28,6 +28,12 @@ class OverlayRenderModelTest {
     OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
 
   @Test
+  fun `an unstyled node has no fixed colour so the theme content colour applies`() {
+    val node = mapOverlaySpec(spec(OverlayTextNode(text = "plain"))).root
+    assertEquals(Color.Unspecified, node.style.color)
+  }
+
+  @Test
   fun `all static primitives expose roles text and tags`() {
     val nodes =
       listOf(

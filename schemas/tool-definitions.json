@@ -18118,10 +18118,12 @@
                       "enum": ["device"]
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "minProperties": 1
                 }
               },
-              "additionalProperties": false
+              "additionalProperties": false,
+              "minProperties": 1
             },
             "state": {},
             "root": {

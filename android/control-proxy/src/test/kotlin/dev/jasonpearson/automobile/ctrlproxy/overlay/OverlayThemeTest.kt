@@ -12,6 +12,8 @@ class OverlayThemeTest {
   private fun model(root: OverlayNode) =
     mapOverlaySpec(OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root))
 
+  private val hiddenCondition = OverlayCondition("show", OverlayScalar.BooleanValue(true))
+
   private fun styled(background: String?) = OverlayStyle(background = background)
 
   @Test
@@ -115,6 +117,57 @@ class OverlayThemeTest {
     assertEquals(true, overlayHostDark(dark))
     assertEquals(false, overlayHostDark(dark.copy(theme = themed(mode = "light"))))
     assertNull(overlayHostDark(model(OverlaySpacerNode())))
+  }
+
+  @Test
+  fun `a system mode leaves the host chrome to the device even over an authored background`() {
+    val dark = model(OverlayBoxNode(style = styled("#121316"), children = emptyList()))
+    assertNull(overlayHostDark(dark.copy(theme = themed(mode = "system"))))
+  }
+
+  @Test
+  fun `a mid light surface selects the light scheme so its text stays readable`() {
+    val root = model(OverlayBoxNode(style = styled("#BBBBBB"), children = emptyList())).root
+    val theme = overlayThemeSpec(root, false)
+    assertFalse(theme.dark)
+    val scheme = overlayColorScheme(theme)
+    assertTrue(scheme.onSurface.contrastWith(scheme.surface) >= 4.5f)
+  }
+
+  @Test
+  fun `hidden nodes do not decide the authored theme`() {
+    val hidden =
+      OverlayBoxNode(
+        children =
+          listOf(
+            OverlayBoxNode(
+              style = styled("#101010"),
+              visibleWhen = hiddenCondition,
+              children = emptyList(),
+            ),
+            OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()),
+          )
+      )
+    assertEquals(false, overlayAuthoredTheme(model(hidden).root)?.dark)
+  }
+
+  @Test
+  fun `a grey seed stays grey`() {
+    val scheme = overlaySeedColorScheme(Color(0xFF808080), dark = false)
+    assertEquals(scheme.primary.red, scheme.primary.green, 0.01f)
+    assertEquals(scheme.primary.green, scheme.primary.blue, 0.01f)
+  }
+
+  @Test
+  fun `a bright seed still gives a legible primary and content colour`() {
+    for (dark in listOf(false, true)) {
+      val scheme = overlaySeedColorScheme(Color(0xFFFFFF00), dark)
+      assertTrue(
+        "primary on surface, dark=$dark",
+        scheme.primary.contrastWith(scheme.surface) >= 3f,
+      )
+      assertTrue("onPrimary, dark=$dark", scheme.onPrimary.contrastWith(scheme.primary) >= 4.5f)
+    }
   }
 
   @Test

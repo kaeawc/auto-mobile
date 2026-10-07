@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
 /**
@@ -509,7 +510,7 @@ export const resolveAppLabel = async (
     const result = await adb.executeCommand(
       `shell dumpsys package ${shellQuote(appId)}`,
       undefined,
-      undefined,
+      DUMPSYS_MAX_BUFFER,
       true,
       signal,
     );
@@ -2621,7 +2622,6 @@ const trayAtScrollEnd = (hierarchy: ViewHierarchyResult): boolean =>
 // The aggregate unredacted dump of every posted notification routinely exceeds
 // the child process's 1 MiB default stdout buffer, which rejects the read
 // outright and leaves every header-less row unattributed.
-const DUMPSYS_NOTIFICATION_MAX_BUFFER = 8 * 1024 * 1024;
 
 const readDumpsysNotificationOutput = async (
   adb: SystemTrayAdb,
@@ -2631,7 +2631,7 @@ const readDumpsysNotificationOutput = async (
     const result = await adb.executeCommand(
       "shell dumpsys notification --noredact",
       undefined,
-      DUMPSYS_NOTIFICATION_MAX_BUFFER,
+      DUMPSYS_MAX_BUFFER,
       true,
       signal,
     );
@@ -2753,6 +2753,9 @@ const attributeTrayRows = (
   return { notifications, unattributedRows };
 };
 
+/** The list pass cannot read an open notification shade. */
+export class NotificationShadeNotOpenError extends ActionableError {}
+
 /** Bounded UI inventory, in encounter order, with no inferred posting times. */
 // eslint-disable-next-line complexity -- bounded scan coordinates shade state, pagination, and overlap.
 export const listSystemTrayNotifications = async (
@@ -2794,7 +2797,9 @@ export const listSystemTrayNotifications = async (
   while (true) {
     signal?.throwIfAborted();
     if (!observation?.viewHierarchy || !detector.isTrayOpen(observation.viewHierarchy)) {
-      throw new ActionableError("Notification shade is not open; cannot list notifications.");
+      throw new NotificationShadeNotOpenError(
+        "Notification shade is not open; cannot list notifications.",
+      );
     }
     const pageNotifications = readTrayNotifications(observation.viewHierarchy);
     const overlap = trayPageOverlap(previousNotifications, pageNotifications);

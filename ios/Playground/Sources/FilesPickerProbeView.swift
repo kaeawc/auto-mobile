@@ -8,16 +8,17 @@ import UniformTypeIdentifiers
 /// With this app's File Sharing and open-in-place keys enabled, iOS's local File
 /// Provider exposes that directory to the real `UIDocumentPickerViewController`.
 struct FilesPickerProbeView: View {
+    @Environment(\.autoMobileTheme) private var theme
     @State private var selectedFixture = "No fixture selected"
     @State private var showingPicker = false
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Files picker probe")
-                .font(.title2)
+                .font(theme.typography.headlineMedium)
             Text("The #5806 smoke stages fixtures only in this app's bounded Documents namespace.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondary)
             Button("Open document picker") {
                 showingPicker = true
             }
@@ -27,6 +28,7 @@ struct FilesPickerProbeView: View {
                 .accessibilityIdentifier("selected-document")
         }
         .padding()
+        .playgroundContent()
         .sheet(isPresented: $showingPicker) {
             FilesPickerController(
                 selectedFixture: $selectedFixture,

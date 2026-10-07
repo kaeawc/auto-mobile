@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
@@ -2047,8 +2048,10 @@ export class LaunchApp extends BaseVisualChange {
       logger.info(`[LaunchApp] Dumpsys check: ${cmd}`);
 
       const checkResult = perf
-        ? await perf.track("dumpsysCheck", () => this.adb.executeCommand(cmd))
-        : await this.adb.executeCommand(cmd);
+        ? await perf.track("dumpsysCheck", () =>
+            this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER),
+          )
+        : await this.adb.executeCommand(cmd, undefined, DUMPSYS_MAX_BUFFER);
 
       const output = (checkResult && checkResult.stdout ? checkResult.stdout : "").trim();
       logger.info(`[LaunchApp] Dumpsys check output: "${output}" (${output.length} chars)`);

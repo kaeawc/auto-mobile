@@ -122,12 +122,20 @@ function decodeOutput(output: Uint8Array | null): string {
   return decoder.decode(output);
 }
 
+export function trimmedPackEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return { ...env, AUTOMOBILE_TRIM_BUNDLED_DEPS: "true" };
+}
+
 function runCommand(
   cmd: string[],
   allowFailure = false,
+  env?: Record<string, string | undefined>,
 ): { stdout: string; stderr: string; exitCode: number } {
   const result = Bun.spawnSync({
     cmd,
+    env: { ...process.env, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -332,7 +340,7 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
   try {
     runCommand(["bun", "run", "prepublishOnly"]);
 
-    const packResult = runCommand(["npm", "pack", "--json"]);
+    const packResult = runCommand(["npm", "pack", "--json"], false, trimmedPackEnv(process.env));
     const packInfo = parsePackOutput(packResult.stdout);
     packFilename = packInfo.filename;
 

@@ -828,9 +828,7 @@ describe("DaemonClient argument budget deadline gaps", () => {
     });
     test(`${budget.tool} malformed budgets are safe and capped on the wire`, async () => {
       for (const value of MALFORMED_MCP_BUDGETS) {
-        const capped =
-          value === Number.MAX_SAFE_INTEGER &&
-          !["stageSharedStorage", "stageSharedStorageFixtures", "putAppFile"].includes(budget.tool);
+        const capped = value === Number.MAX_SAFE_INTEGER && !["putAppFile"].includes(budget.tool);
         await checkArgumentBudgetClientTimeout(
           budget.tool,
           budget.argumentsFor(value),

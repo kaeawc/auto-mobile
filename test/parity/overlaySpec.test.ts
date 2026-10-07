@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -55,6 +55,20 @@ function parseDocumentExamples(document: string): { id?: string }[] {
 }
 
 describe("shared overlay contract", () => {
+  const decoded = new Map<string, unknown>();
+  beforeAll(() => {
+    const warmup = valid.find((fixture) => fixture.name === "doc-example-1.json") ?? valid[0];
+    if (warmup) {
+      validateOverlaySpec(warmup.json);
+    }
+    for (const { name, json } of valid) {
+      const result = validateOverlaySpec(json);
+      if (!result.success) {
+        throw new Error(JSON.stringify(result.error));
+      }
+      decoded.set(name, result.data);
+    }
+  });
   test("fixtures are nonempty and cover every node, action, and placement", () => {
     expect(valid.length).toBeGreaterThan(0);
     expect(invalid.length).toBeGreaterThan(0);
@@ -77,7 +91,9 @@ describe("shared overlay contract", () => {
       if (!result.success) {
         throw new Error(JSON.stringify(result.error));
       }
-      expect(overlaySpecSchema.safeParse(result.data).success).toBe(true);
+    });
+    test(`round-trips ${name}`, () => {
+      expect(overlaySpecSchema.safeParse(decoded.get(name)).success).toBe(true);
     });
   }
   for (const { name, data } of invalid) {

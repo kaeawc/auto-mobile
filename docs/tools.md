@@ -996,6 +996,19 @@ ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
 belong inside each endpoint, not at the top level; unknown endpoint keys and
 malformed recursive containers are rejected.
 
+#### Hierarchy layer
+
+`observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, and `dragAndDrop` accept an
+optional top-level `layer` (`"app"` or `"overlay"`) that scopes the view hierarchy
+to one layer of the screen. `app` excludes AutoMobile's own overlay window;
+`overlay` keeps only overlay nodes and fails with an actionable error when no
+overlay is showing. Omit it to search both, topmost first. `observe` applies it
+to the returned hierarchy and to `waitFor` element conditions. `dragAndDrop.layer`
+scopes both the `source` and the `target` drop-target resolution. With `layer: "app"`,
+a coordinate gesture whose point lies under an overlay window is refused before
+dispatch. `layer` on `sendKeys` and `highlight` requires a selector, and `tapOn`
+rejects it together with `accessibilityLink` or `subtext`.
+
 `swipeOn.container` identifies the element to swipe within and accepts the same
 recursive container, per-level index, and selectionStrategy fields. `lookFor`
 accepts exactly one of `elementId` or `text`, plus its own recursive `container`

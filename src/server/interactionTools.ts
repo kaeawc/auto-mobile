@@ -150,6 +150,7 @@ import {
 import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
+  hierarchyLayerSchema,
   tapOnSelectorSchema,
   resolverSelectionStrategySchema,
   nestedElementContainerSchema,
@@ -423,6 +424,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       .object({
         selector: tapOnSelectorSchema,
         display: z.string().optional().describe("Target panel key, role, or active"),
+        layer: hierarchyLayerSchema.optional(),
         sibling: z
           .boolean()
           .optional()
@@ -557,6 +559,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       ["ensureChecked"],
     );
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
+    addIssue(value.layer !== undefined, "semantic link activation cannot use layer", ["layer"]);
     addIssue(
       value.subtext && value.index !== undefined,
       "owner-scoped semantic link activation cannot use index; use a unique owner selector",
@@ -722,6 +725,7 @@ export const tapAnySchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Search only scrollable containers/lists"),
+        layer: hierarchyLayerSchema.optional(),
         action: z
           .enum(["tap", "doubleTap", "longPress"])
           .default("tap")
@@ -810,6 +814,7 @@ export const dragAndDropSchema = withJsonSchemaOverride(
         display: z.string().optional().describe("Target panel key, role, or active"),
         source: dragAndDropSelectorSchema("Source"),
         target: dragAndDropSelectorSchema("Target"),
+        layer: hierarchyLayerSchema.optional(),
         pressDurationMs: z
           .number()
           .min(PRESS_DURATION_MIN_MS)
@@ -1216,6 +1221,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
           .describe(
             "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target. Requires a selector naming the field to focus.",
           ),
+        layer: hierarchyLayerSchema.optional(),
         commands: z
           .array(sendKeysCommandSchema)
           .min(1)
@@ -1232,7 +1238,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
     if (value.selector !== undefined) {
       return;
     }
-    for (const field of ["container", "selectionStrategy"] as const) {
+    for (const field of ["container", "selectionStrategy", "layer"] as const) {
       if (value[field] !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -1243,7 +1249,11 @@ export const sendKeysSchema = withJsonSchemaOverride(
     }
   }),
   (jsonSchema) => {
-    jsonSchema.dependentRequired = { container: ["selector"], selectionStrategy: ["selector"] };
+    jsonSchema.dependentRequired = {
+      container: ["selector"],
+      selectionStrategy: ["selector"],
+      layer: ["selector"],
+    };
   },
 );
 
@@ -2170,6 +2180,7 @@ export async function tapOnHandler(
       ensureTap: args.ensureTap,
       ensureChecked: args.ensureChecked,
       subtext: args.subtext,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2300,6 +2311,7 @@ export async function tapAnyHandler(
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2355,6 +2367,7 @@ export async function dragAndDropHandler(
       display: args.display,
       source: args.source,
       target: args.target,
+      layer: args.layer,
       pressDurationMs: args.pressDurationMs,
       dragDurationMs: args.dragDurationMs,
       holdDurationMs: args.holdDurationMs,
@@ -3333,7 +3346,7 @@ export function registerInteractionTools() {
       progress,
       signal,
       args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy },
+      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
     );
     const dismissal = await dismissKeyboardAfterSendKeys(
       device,

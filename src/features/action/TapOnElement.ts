@@ -124,6 +124,10 @@ import {
   resolveOverlayTapUnderSystemBar,
   type OverlayBarTapDecision,
 } from "./overlayTapUnderSystemBars";
+import {
+  assertAppGestureNotUnderOverlay,
+  scopeHierarchyForSelector,
+} from "../observe/hierarchyLayer";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -631,6 +635,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
+    if (options.layer !== undefined && this.hasSemanticLinkTarget(options)) {
+      // Semantic links are activated on the device across every window, so the
+      // host cannot keep the activation inside the app or the overlay (#9305).
+      return "tapOn layer cannot be used with accessibilityLink or subtext";
+    }
     if (options.selectionStrategy === "unique" && (options.sibling || options.accessibilityLink)) {
       return "tapOn unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead";
     }
@@ -1767,6 +1776,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapVerificationOptions,
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     try {
       return this.selectElementInHierarchy(options, viewHierarchy);
     } catch (error) {
@@ -4464,6 +4474,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             );
           }
           const tapPoint = barDecision.point;
+          // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
+          assertAppGestureNotUnderOverlay(viewHierarchy, options.layer, tapPoint, "tap");
           if (barDecision.warning) {
             activationWarnings.push(barDecision.warning);
           }
@@ -5185,7 +5197,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
       reResolve: hasSelector
         ? (hierarchy) => {
-            const selection = this.selectElementInHierarchy(options, hierarchy).selection;
+            const selection = this.selectElementInHierarchy(
+              options,
+              scopeHierarchyForSelector(hierarchy, options.layer),
+            ).selection;
             resolvedSelection = selection;
             resolvedHierarchy = hierarchy;
             return selection.element

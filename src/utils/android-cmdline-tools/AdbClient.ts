@@ -51,6 +51,11 @@ import { SingleFlight } from "../cache/SingleFlight";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import type { EmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
+import {
+  defaultAdbTransportRestartRegistry,
+  isAdbTransportRestartCommand,
+  type AdbTransportRestartRegistry,
+} from "./AdbTransportRestartRegistry";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
 import {
   defaultDiscoveryObservationSequence,
@@ -207,6 +212,8 @@ export class AdbClient implements AdbExecutor {
    * @param consoleBusyRegistry - Shared console-exclusive operation state
    * @param defaultTimeoutMs - Per-command budget when no timeout is supplied
    * @param hostProcessExecutor - Host process executor for cancellable commands
+   * @param transportRouting - Per-pool alias routing for the target serial
+   * @param transportRestartRegistry - Marks serials whose adbd this client restarts
    */
   constructor(
     device: BootedDevice | null = null,
@@ -224,6 +231,7 @@ export class AdbClient implements AdbExecutor {
     private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
     hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
     private readonly transportRouting?: AndroidTransportRouting,
+    private readonly transportRestartRegistry?: AdbTransportRestartRegistry,
   ) {
     this.device = device;
     this.hostProcessExecutor = hostProcessExecutor;
@@ -613,6 +621,18 @@ export class AdbClient implements AdbExecutor {
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    const deviceId = this.device?.deviceId;
+    // adb root/unroot restarts adbd, so the serial briefly leaves `adb devices`;
+    // mark it so the disconnect monitor does not mistake that for an unplug (#10493).
+    return deviceId && isAdbTransportRestartCommand(args)
+      ? (this.transportRestartRegistry ?? defaultAdbTransportRestartRegistry).runRestart(
+          deviceId,
+          () => this.executeTracked(args, options),
+        )
+      : this.executeTracked(args, options);
+  }
+
+  private async executeTracked(args: string[], options: AdbExecuteOptions): Promise<ExecResult> {
     const {
       timeoutMs,
       maxBuffer,

@@ -25,6 +25,16 @@ export function isAndroidTransportAddressSerial(deviceId: string): boolean {
   return ANDROID_TRANSPORT_ADDRESS_SERIAL_PATTERN.test(deviceId);
 }
 
+/**
+ * True when `deviceId` is a USB-attached physical Android serial: neither an
+ * emulator serial nor a TCP/mDNS transport address (which can also front an
+ * emulator, and whose wireless transport drops transiently). Absence of such a
+ * serial from a successful `adb devices` listing is definitive (#10493).
+ */
+export function isPhysicalAndroidUsbSerial(deviceId: string): boolean {
+  return !isAndroidEmulatorSerial(deviceId) && !isAndroidTransportAddressSerial(deviceId);
+}
+
 /** Explicit per-pool routing seam. Clients resolve it on every dispatch. */
 export interface AndroidTransportRouting {
   resolveTransport(deviceId: string): string;

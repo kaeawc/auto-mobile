@@ -373,11 +373,13 @@ export class PlanValidator {
    * order deadlocks (cross-lock AB-BA cycles, generations stranded behind
    * another lock), never plans that can complete under some timing.
    *
-   * Skipped (accepted) when the model would not match the runtime: any
-   * coordination step marked `optional` (a timed-out optional wait lets the
-   * track continue), a criticalSection whose sub-steps coordinate again
-   * (nested waits under the section mutex), or a coordination step missing
-   * a usable device/lock/deviceCount (reported by the earlier checks).
+   * Independent components (devices linked by shared locks) are analyzed
+   * separately. A component is skipped (accepted) when the model would not
+   * match the runtime for it: a coordination step marked `optional` (a
+   * timed-out optional wait lets the track continue) or a criticalSection
+   * whose sub-steps coordinate again (nested waits under the section mutex).
+   * The whole check is skipped when a coordination step is missing a usable
+   * device/lock/deviceCount (reported by the earlier checks).
    */
   private static validateCoordinationScheduleFeasibility(plan: Plan): void {
     const tracks = this.collectCoordinationTracks(plan);
@@ -392,7 +394,7 @@ export class PlanValidator {
 
   /**
    * Builds per-device tracks of coordination arrivals in plan order, or
-   * returns null when the plan falls outside the feasibility model.
+   * returns null when a coordination step lacks a usable device/lock/deviceCount.
    */
   private static collectCoordinationTracks(plan: Plan): CoordinationTrack[] | null {
     const tracksByDevice = new Map<string, CoordinationTrack>();
@@ -424,16 +426,11 @@ export class PlanValidator {
     const device = this.effectiveField(step, "device");
     const lock = this.effectiveField(step, "lock");
     const deviceCount = this.effectiveField(step, "deviceCount");
-    if (
-      step.optional === true ||
-      !isNonEmptyString(device) ||
-      !isNonEmptyString(lock) ||
-      !isPositiveInteger(deviceCount) ||
-      this.hasNestedCoordination(step)
-    ) {
+    if (!isNonEmptyString(device) || !isNonEmptyString(lock) || !isPositiveInteger(deviceCount)) {
       return null;
     }
-    return { device, event: { tool: step.tool, lock, deviceCount, stepIndex } };
+    const unmodeled = step.optional === true || this.hasNestedCoordination(step);
+    return { device, event: { tool: step.tool, lock, deviceCount, stepIndex, unmodeled } };
   }
 
   private static hasNestedCoordination(step: PlanStep): boolean {

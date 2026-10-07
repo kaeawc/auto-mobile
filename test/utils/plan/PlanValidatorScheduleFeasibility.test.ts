@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { PlanValidator } from "../../../src/utils/plan/PlanValidator";
 import {
   findUnavoidableCoordinationDeadlock,
+  splitIndependentComponents,
   type CoordinationTrack,
 } from "../../../src/utils/plan/CoordinationScheduleFeasibility";
 import type { Plan, PlanStep } from "../../../src/models/Plan";
@@ -77,6 +78,38 @@ describe("PlanValidator coordination schedule feasibility", () => {
       );
       expect(() => PlanValidator.validate(p)).toThrow(
         'Generations released before the stall: "start" {A, B}',
+      );
+    });
+
+    test("an optional step on an unrelated lock does not mask an AB-BA cycle", () => {
+      const optionalC: PlanStep = { ...barrier("C", "Z"), optional: true };
+      const p = plan(
+        ["A", "B", "C", "D"],
+        [
+          barrier("A", "X"),
+          barrier("A", "Y"),
+          barrier("B", "Y"),
+          barrier("B", "X"),
+          optionalC,
+          barrier("D", "Z"),
+        ],
+      );
+      expect(() => PlanValidator.validate(p)).toThrow(
+        'device "A" waits at barrier lock "X" (step 0; 1/2 arrived: A)',
+      );
+    });
+
+    test("seven independent AB-BA pairs are each analyzed within budget", () => {
+      const pairs = Array.from({ length: 7 }, (_, k) => k);
+      const devices = pairs.flatMap((k) => [`A${k}`, `B${k}`]);
+      const steps = pairs.flatMap((k) => [
+        barrier(`A${k}`, `X${k}`),
+        barrier(`A${k}`, `Y${k}`),
+        barrier(`B${k}`, `Y${k}`),
+        barrier(`B${k}`, `X${k}`),
+      ]);
+      expect(() => PlanValidator.validate(plan(devices, steps))).toThrow(
+        "coordination can never complete",
       );
     });
 
@@ -213,6 +246,35 @@ describe("PlanValidator coordination schedule feasibility", () => {
         ["B", "Y"],
       ]);
       expect(deadlock?.finished).toEqual([]);
+    });
+
+    test("splitIndependentComponents groups tracks that share a lock", () => {
+      const tracks: CoordinationTrack[] = [
+        ...abba,
+        { device: "C", events: [ev("Z", 4)] },
+        { device: "D", events: [ev("Z", 5), ev("W", 6)] },
+        { device: "E", events: [ev("W", 7)] },
+      ];
+      const components = splitIndependentComponents(tracks);
+      expect(components.map((c) => c.map((t) => t.device).sort())).toEqual([
+        ["A", "B"],
+        ["C", "D", "E"],
+      ]);
+    });
+
+    test("skips only the component containing an unmodeled event", () => {
+      const tainted: CoordinationTrack[] = [
+        { device: "A", events: [{ ...ev("X", 0), unmodeled: true }, ev("Y", 1)] },
+        { device: "B", events: [ev("Y", 2), ev("X", 3)] },
+      ];
+      expect(findUnavoidableCoordinationDeadlock(tainted)).toBeNull();
+      const independent: CoordinationTrack[] = [
+        { device: "C", events: [{ ...ev("Z", 4), unmodeled: true }] },
+        { device: "D", events: [ev("Z", 5)] },
+        ...abba,
+      ];
+      const deadlock = findUnavoidableCoordinationDeadlock(independent);
+      expect(deadlock?.stalled.map((s) => s.device)).toEqual(["A", "B"]);
     });
 
     test("returns null when there are no coordination events", () => {

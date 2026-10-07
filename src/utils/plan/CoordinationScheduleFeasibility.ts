@@ -27,8 +27,14 @@
  * strands A when B and C pair up first). Those are timing-dependent, not
  * infeasible, and the validator accepts them today.
  *
- * The search is bounded by `maxStates`; when the bound is hit the result is
- * "unknown" and the caller accepts the plan (never a false rejection).
+ * Tracks are first split into independent components (devices linked by a
+ * shared lock); each component is searched separately, so the state budget
+ * applies per component and an unmodeled event (see
+ * `CoordinationEvent.unmodeled`) opts out only its own component.
+ *
+ * Each component search is bounded by `maxStates`; when the bound is hit the
+ * result for that component is "unknown" and it is accepted (never a false
+ * rejection).
  */
 
 export interface CoordinationEvent {
@@ -36,6 +42,13 @@ export interface CoordinationEvent {
   lock: string;
   deviceCount: number;
   stepIndex: number;
+  /**
+   * True when the runtime may not follow the model for this arrival (an
+   * `optional` step can time out and continue; a criticalSection with nested
+   * coordination waits again under the section mutex). The whole component
+   * containing it is skipped.
+   */
+  unmodeled?: boolean;
 }
 
 export interface CoordinationTrack {
@@ -176,13 +189,64 @@ function describeStall(
   return { stalled, finished, releasedGenerations: releasedGenerationsTo(visited, candidate.key) };
 }
 
+function findRoot(parents: Map<string, string>, node: string): string {
+  let root = node;
+  while (parents.get(root) !== root) {
+    root = parents.get(root)!;
+  }
+  return root;
+}
+
 /**
- * Returns a representative deadlock when no arrival order lets every track
- * finish, or `null` when some order completes (or the search bound is hit).
+ * Splits tracks into independent components: two tracks are in the same
+ * component when they (transitively) share a lock. Components cannot block
+ * each other, so the plan completes iff every component can complete.
+ */
+export function splitIndependentComponents(tracks: CoordinationTrack[]): CoordinationTrack[][] {
+  const parents = new Map<string, string>();
+  const nodeOf = (kind: "device" | "lock", name: string): string => {
+    const node = `${kind}:${name}`;
+    if (!parents.has(node)) {
+      parents.set(node, node);
+    }
+    return node;
+  };
+  for (const track of tracks) {
+    const deviceNode = nodeOf("device", track.device);
+    for (const event of track.events) {
+      parents.set(findRoot(parents, nodeOf("lock", event.lock)), findRoot(parents, deviceNode));
+    }
+  }
+  const components = new Map<string, CoordinationTrack[]>();
+  for (const track of tracks) {
+    const root = findRoot(parents, `device:${track.device}`);
+    components.set(root, [...(components.get(root) ?? []), track]);
+  }
+  return Array.from(components.values());
+}
+
+/**
+ * Returns a representative deadlock when, in some independent component, no
+ * arrival order lets every track finish; `null` when every analyzed
+ * component can complete, is unmodeled, or exhausts the search bound.
  */
 export function findUnavoidableCoordinationDeadlock(
   tracks: CoordinationTrack[],
   maxStates: number = MAX_SCHEDULE_STATES,
+): CoordinationDeadlock | null {
+  for (const component of splitIndependentComponents(tracks)) {
+    const unmodeled = component.some((track) => track.events.some((e) => e.unmodeled === true));
+    const deadlock = unmodeled ? null : searchComponent(component, maxStates);
+    if (deadlock !== null) {
+      return deadlock;
+    }
+  }
+  return null;
+}
+
+function searchComponent(
+  tracks: CoordinationTrack[],
+  maxStates: number,
 ): CoordinationDeadlock | null {
   const initial: ScheduleState = {
     positions: tracks.map(() => 0),

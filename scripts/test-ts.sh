@@ -46,6 +46,12 @@ if [[ "$default_workers" -lt 2 ]]; then
   default_workers=2
 fi
 
+# Owner decision on #8381: GitHub-hosted macOS unit lanes run 3 workers. Keyed on the
+# runner-provided RUNNER_OS (not uname) so local macOS development keeps the core-based default.
+if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+  default_workers=3
+fi
+
 unit_workers="${AUTOMOBILE_UNIT_TEST_WORKERS:-$default_workers}"
 # shellcheck source=scripts/lib/bun-unit-test.sh disable=SC1091
 source "$ROOT/scripts/lib/bun-unit-test.sh"

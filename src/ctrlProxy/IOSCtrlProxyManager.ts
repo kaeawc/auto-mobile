@@ -3922,6 +3922,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return Promise.resolve();
     }
     return this.tunnelClient.start({
+      // Computed ports must follow options: an explicit undefined is not an override.
       ...options,
       localPort: this.servicePort,
       devicePort: this.useRemoteRunner()

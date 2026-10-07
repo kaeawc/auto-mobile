@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
-import android.text.InputType
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 
 interface ImeCommitSink {
@@ -107,15 +106,12 @@ class ImeCommitDriver(
       return
     }
 
-    val inputType = sink.editorInputType()
-    if (inputType == null) {
+    if (sink.editorInputType() == null) {
       complete(failure("No active input connection"))
       return
     }
-    if (isPasswordInputType(inputType)) {
-      complete(failure("Cannot commit text into a password field"))
-      return
-    }
+    // Password fields commit like any other field (owner decision 2026-10-07: this is a local,
+    // user-operated debug tool). The typed text is never formatted into a log or error here.
 
     if (delivery == ImeTextDelivery.KEY_EVENTS) {
       sendKeyEvents(text, deadlineMs, isCancelled)
@@ -278,23 +274,6 @@ class ImeCommitDriver(
   }
 
   private data class Segment(val text: String, val trailingSpan: String?)
-
-  private fun isPasswordInputType(inputType: Int): Boolean {
-    val variation = inputType and InputType.TYPE_MASK_VARIATION
-    val inputClass = inputType and InputType.TYPE_MASK_CLASS
-    val isTextPassword =
-      inputClass == InputType.TYPE_CLASS_TEXT &&
-        variation in
-          setOf(
-            InputType.TYPE_TEXT_VARIATION_PASSWORD,
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
-            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
-          )
-    val isNumberPassword =
-      inputClass == InputType.TYPE_CLASS_NUMBER &&
-        variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD
-    return isTextPassword || isNumberPassword
-  }
 
   private fun failure(error: String) =
     ImeCommitResult(success = false, error = error, partialApplication = committedUnits > 0)

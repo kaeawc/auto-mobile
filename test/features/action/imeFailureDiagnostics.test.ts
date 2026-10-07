@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
+import { verifyImeCommitResult } from "../../../src/features/action/imeFailureDiagnostics";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -20,8 +21,21 @@ function field(text: string): ObserveResult {
   };
 }
 
-function harness(text: string) {
-  const observer = { execute: async () => field(text) };
+function passwordField(): ObserveResult {
+  return {
+    ...focused,
+    viewHierarchy: {
+      hierarchy: {
+        node: {
+          $: { focused: "true", class: "android.widget.EditText", text: "", password: "true" },
+        },
+      },
+    },
+  };
+}
+
+function harness(text: string, observation: ObserveResult = field(text)) {
+  const observer = { execute: async () => observation };
   const h = createSendKeysHarness(device, observer);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -40,6 +54,103 @@ function harness(text: string) {
 }
 
 describe("IME failure diagnostics", () => {
+  test("a password-field read-back mismatch never names the typed or observed value", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await verifyImeCommitResult({ success: true }, "hunter2", {
+      timer,
+      settleMs: 1,
+      observe: async () => field("other"),
+      checkAbort: () => {},
+      lacksRequiredFocus: () => false,
+      focusedText: () => "other",
+      focusError: "unfocused",
+      passwordField: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      "IME partial commit: sent <password, 7 characters> but the focused field holds a different value",
+    );
+    expect(result.imeFailure).toMatchObject({
+      expectedText: "<password, 7 characters>",
+      observedText: null,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/hunter2|other/);
+  });
+
+  test("an explicit-mode read-back that shows a password field redacts the mismatch", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await verifyImeCommitResult({ success: true }, "hunter2", {
+      timer,
+      settleMs: 1,
+      observe: async () => passwordField(),
+      checkAbort: () => {},
+      lacksRequiredFocus: () => false,
+      focusedText: () => "other",
+      focusError: "unfocused",
+      isPasswordField: () => true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.imeFailure).toMatchObject({
+      expectedText: "<password, 7 characters>",
+      observedText: null,
+    });
+    expect(JSON.stringify(result)).not.toMatch(/hunter2|other/);
+  });
+
+  test.each(["ime", "imeKeyEvents"] as const)(
+    "explicit %s failure into a password field never carries the typed text",
+    async (mode) => {
+      const h = harness("", passwordField());
+      h.client.commitViaIme = async () => ({
+        success: false,
+        error: "Input connection lost during commit",
+        partialApplication: true,
+        committedUnits: 3,
+      });
+
+      const result = await h.action.execute([{ action: "type", text: "hunter2", mode }]);
+
+      expect(result.success).toBe(false);
+      expect(result.commands[0]?.imeFailure).toMatchObject({
+        expectedText: "<password, 7 characters>",
+        observedText: null,
+      });
+      expect(JSON.stringify(result.commands)).not.toContain("hunter2");
+    },
+  );
+
+  test("a selector resolved to a password field redacts an explicit-mode failure", async () => {
+    const h = harness("visible");
+    h.client.commitViaIme = async () => ({ success: false, error: "No active input connection" });
+    const action = new SendKeys(device, h.adbFactory, {
+      executor: h.executor,
+      observer: { execute: async () => field("visible") },
+      timer: h.timer,
+      timestampProvider: { now: async () => 1 },
+      focuser: { focus: async () => ({ success: true, focusVerified: true, passwordField: true }) },
+    });
+
+    const result = await action.execute([{ action: "type", text: "hunter2", mode: "ime" }], {
+      testTag: "password",
+    });
+
+    expect(result.commands[0]?.imeFailure?.expectedText).toBe("<password, 7 characters>");
+    expect(JSON.stringify(result.commands)).not.toContain("hunter2");
+  });
+
+  test("a non-password explicit-mode failure keeps the typed text in its diagnostic", async () => {
+    const h = harness("visible");
+    h.client.commitViaIme = async () => ({ success: false, error: "No active input connection" });
+
+    const result = await h.action.execute([{ action: "type", text: "hello", mode: "ime" }]);
+
+    expect(result.commands[0]?.imeFailure?.expectedText).toBe("hello");
+  });
+
   test("retains acknowledged progress and the final verification mismatch without fallback", async () => {
     const h = harness("@every");
     h.client.commitViaIme = async () => ({

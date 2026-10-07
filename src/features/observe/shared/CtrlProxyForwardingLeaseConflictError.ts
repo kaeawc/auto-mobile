@@ -17,6 +17,9 @@ export class CtrlProxyForwardingLeaseConflictError extends Error {
   constructor(
     message: string,
     readonly ownerPid: number | undefined,
+    readonly ownerSocketPath?: string,
+    /** The owner refused for a time-based reason that may lift if retried (#10485). */
+    readonly transient: boolean = false,
   ) {
     super(message);
     this.name = "CtrlProxyForwardingLeaseConflictError";

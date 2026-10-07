@@ -8,14 +8,14 @@ import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 describe("SwipeOn cached freshness for scrollable discovery", () => {
   let observe: FakeObserveScreen;
-  let finder: FakeElementFinder;
+  let finder: FakeScrollableElementsQuery;
   let swipe: SwipeOn;
   let gesture: FakeGestureExecutor;
   let observed: ReturnType<typeof spyOn<SwipeOn, "observedInteraction">>;
@@ -39,7 +39,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
     spyOn(observe, "getMostRecentCachedObserveResult").mockImplementation(async () =>
       recordObservationRead(await cachedRead()),
     );
-    finder = new FakeElementFinder();
+    finder = new FakeScrollableElementsQuery();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     gesture = new FakeGestureExecutor();

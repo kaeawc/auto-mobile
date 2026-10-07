@@ -16,7 +16,6 @@ import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
  */
 
 import type { InsertTextState } from "./ctrlProxyProtocol";
-import { join } from "node:path";
 import WebSocket from "ws";
 import {
   AdbClientFactory,
@@ -165,11 +164,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { screenshotTempIdToken } from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
 import {
-  readLockOwnerPid,
-  releaseExclusiveLock,
-  tryAcquireExclusiveLock,
-} from "../../../utils/fileLock";
-import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
+  FileCtrlProxyForwardLease,
+  NoOpCtrlProxyForwardLease,
+  type CtrlProxyForwardLease,
+  type ForwardLeaseReclaimResult,
+} from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -1365,110 +1364,6 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 /** Isolation markers kept for hierarchy requests whose waiter already gave up. */
 const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
 
-/**
- * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
- * server is shared by AutoMobile processes, so its global forward listing alone
- * cannot identify which process owns a row.
- */
-interface CtrlProxyForwardLease {
-  tryAcquire(): boolean;
-  release(): void;
-  fork?(): CtrlProxyForwardLease;
-  /**
-   * PID of the process currently holding the lease, when a preceding
-   * {@link tryAcquire} call returned `false` (issue #6260). Lets the caller
-   * name the orphan in its actionable error instead of a bare "another
-   * process owns this" message the client cannot act on.
-   */
-  getLastOwnerPid(): number | undefined;
-}
-
-class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
-  private lockPath: string | null = null;
-  private readonly ownerToken = defaultIdGenerator.next();
-  private holders = 0;
-  private acquired = false;
-  private lastOwnerPid: number | undefined;
-
-  public constructor(private readonly deviceId: string) {}
-
-  private resolveLockPath(): string {
-    if (this.lockPath === null) {
-      // base64url makes arbitrary Android serials safe as one path segment.
-      this.lockPath = join(
-        // Agent-specific data directories are intentionally isolated, but a
-        // default ADB server is shared across agents for this OS user.
-        ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
-        `${Buffer.from(this.deviceId).toString("base64url")}.lock`,
-      );
-    }
-    return this.lockPath;
-  }
-
-  public tryAcquire(): boolean {
-    if (this.acquired) {
-      return true;
-    }
-    this.acquired = this.acquireHolder();
-    return this.acquired;
-  }
-
-  private acquireHolder(): boolean {
-    if (this.holders > 0) {
-      this.holders++;
-      return true;
-    }
-    // Shutdown recovery can evict a singleton while its setup remains in flight.
-    // Another client in this process must wait for that live lease, not reclaim it.
-    const acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
-      ownerToken: this.ownerToken,
-    });
-    this.holders = acquired ? 1 : 0;
-    this.lastOwnerPid = acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
-    return acquired;
-  }
-
-  public release(): void {
-    if (!this.acquired) {
-      return;
-    }
-    this.acquired = false;
-    this.releaseHolder();
-  }
-
-  private releaseHolder(): void {
-    this.holders--;
-    if (this.holders > 0) {
-      return;
-    }
-    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
-  }
-
-  public getLastOwnerPid(): number | undefined {
-    return this.lastOwnerPid;
-  }
-
-  /** A separate holder on the same process lease for one detached observer. */
-  public fork(): CtrlProxyForwardLease {
-    let acquired = false;
-    return {
-      tryAcquire: () => {
-        if (!acquired) {
-          acquired = this.acquireHolder();
-        }
-        return acquired;
-      },
-      release: () => {
-        if (acquired) {
-          acquired = false;
-          this.releaseHolder();
-        }
-      },
-      getLastOwnerPid: () => this.lastOwnerPid,
-    };
-  }
-}
-
 function portAllocationIdForClient(
   deviceId: string,
   transientObserver: boolean,
@@ -1480,12 +1375,22 @@ function portAllocationIdForClient(
 /**
  * Actionable message for a CtrlProxy forwarding-lease conflict (issue #6260).
  * Named the owning PID when known, so a client is pointed at the orphan
- * process rather than left to guess or, worse, blame the device.
+ * process rather than left to guess or, worse, blame the device. When the
+ * owner was asked and refused the takeover (issue #10497), the message names
+ * its socket and the reason, such as its live session.
  */
 function describeCtrlProxyForwardingLeaseConflict(
   deviceId: string,
   ownerPid: number | undefined,
+  refusal?: ForwardLeaseReclaimResult,
 ): string {
+  if (ownerPid !== undefined && refusal?.ownerSocketPath !== undefined) {
+    return (
+      `Another AutoMobile process (PID ${ownerPid}, socket ${refusal.ownerSocketPath}) owns ` +
+      `CtrlProxy forwarding for ${deviceId} and kept it because ${refusal.reason}. Release that ` +
+      `session or stop that process (\`kill ${ownerPid}\`), then retry.`
+    );
+  }
   if (ownerPid !== undefined) {
     return (
       `Another AutoMobile process (PID ${ownerPid}) owns CtrlProxy forwarding for ${deviceId}. ` +
@@ -1507,6 +1412,7 @@ function describeCtrlProxyForwardingLeaseConflict(
 function throwCtrlProxyForwardingLeaseConflict(
   deviceId: string,
   ownerPid: number | undefined,
+  refusal?: ForwardLeaseReclaimResult,
 ): never {
   if (ownerPid === process.pid) {
     // Same-process transient, NOT an orphan: shutdown recovery can evict a
@@ -1521,28 +1427,16 @@ function throwCtrlProxyForwardingLeaseConflict(
     // and let the caller's existing retry path recover once the lease frees.
     throw new Error(describeCtrlProxyForwardingLeaseConflict(deviceId, undefined));
   }
-  // Named explicitly (issue #6260): this exact string is matched by
+  // Named explicitly (issue #6260): this typed error is detected by
   // RunnerReadinessService to replace a generic, device-blaming
   // "runner did not become responsive" failure with the real, actionable
-  // cause — a stale/orphaned AutoMobile process still holding forwarding
-  // for this device, most commonly left behind by a `--daemon restart`
-  // that could not confirm the previous daemon stopped.
+  // cause, and to fail fast rather than retry to the deadline (#10485).
   throw new CtrlProxyForwardingLeaseConflictError(
-    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid),
+    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid, refusal),
     ownerPid,
+    refusal?.ownerSocketPath,
+    refusal?.transient === true,
   );
-}
-
-class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
-  public tryAcquire(): boolean {
-    return true;
-  }
-
-  public release(): void {}
-
-  public getLastOwnerPid(): undefined {
-    return undefined;
-  }
 }
 
 /**
@@ -1955,6 +1849,57 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
       }
     }
+  }
+
+  /** Devices whose singleton client holds the cross-process forwarding lease. */
+  public static getForwardLeaseHeldDeviceIds(): string[] {
+    return [...AndroidCtrlProxyClient.instances.entries()]
+      .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
+      .map(([deviceId]) => deviceId);
+  }
+
+  /**
+   * CtrlProxy use of a device by this process (#10497): requests in flight
+   * through its singleton and any detached observer, and time since the last
+   * request or since the lease was taken, whichever is later. `null` when
+   * this process neither holds the lease nor has used the device.
+   */
+  public static getForwardLeaseActivity(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+  ): { inFlightRequests: number; idleForMs: number | null } {
+    const clients = [
+      AndroidCtrlProxyClient.instances.get(deviceId),
+      ...[...AndroidCtrlProxyClient.activeObservers].filter(
+        (observer) => observer.device.deviceId === deviceId,
+      ),
+    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
+    const activities = clients.map((client) => client.getRequestActivity());
+    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
+    const lastTimes = [
+      ...activities.map((activity) => activity.lastActivityAt),
+      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
+    ].filter((time): time is number => time !== undefined);
+    return {
+      // A live detached observer is a read in progress even between its requests.
+      inFlightRequests:
+        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) + observers,
+      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+    };
+  }
+
+  /**
+   * Give up an idle device's forwarding lease (issue #10497): evict the
+   * singleton first so a new call builds a fresh client that re-acquires the
+   * lease, then close the old one, which removes its forward and releases it.
+   */
+  public static async releaseIdleForwardLease(deviceId: string): Promise<void> {
+    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    if (!client) {
+      return;
+    }
+    AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+    await client.close();
   }
 
   /**
@@ -5033,6 +4978,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * Acquire this device's cross-process forwarding lease, taking it over from a
+   * live owner that reports it no longer uses the device (issue #10497).
+   */
+  private async acquireCtrlProxyForwardLease(): Promise<void> {
+    const lease = this.ctrlProxyForwardLease;
+    if (lease.tryAcquire()) {
+      return;
+    }
+    const ownerPid = lease.getLastOwnerPid();
+    const reclaim =
+      ownerPid !== undefined && ownerPid !== process.pid
+        ? await lease.tryReclaimFromStaleOwner?.()
+        : undefined;
+    if (reclaim?.acquired) {
+      return;
+    }
+    throwCtrlProxyForwardingLeaseConflict(
+      this.device.deviceId,
+      reclaim?.ownerPid ?? ownerPid,
+      reclaim,
+    );
+  }
+
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   async setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
@@ -5041,12 +5010,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.closed) {
       return;
     }
-    if (!this.ctrlProxyForwardLease.tryAcquire()) {
-      throwCtrlProxyForwardingLeaseConflict(
-        this.device.deviceId,
-        this.ctrlProxyForwardLease.getLastOwnerPid(),
-      );
-    }
+    await this.acquireCtrlProxyForwardLease();
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {

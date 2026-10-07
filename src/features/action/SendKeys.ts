@@ -16,6 +16,7 @@ import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
@@ -55,6 +56,7 @@ import {
   imeCommitExceptionResult,
   IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
   LEGACY_IME_PASSWORD_REFUSAL,
+  passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
   withImeFailure,
@@ -132,7 +134,9 @@ function isSendKeysBudgetExhausted(signal?: AbortSignal): boolean {
 import {
   ANDROID_KEYCOMBINATION_MIN_API_LEVEL,
   asciiKeyEventNeedsKeyCombination,
+  buildAndroidInputTextCommand,
   buildAsciiKeyEventPlan,
+  canJoinAndroidInputText,
   type KeyEventPlan,
 } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import type { ProgressCallback } from "./BaseVisualChange";
@@ -150,6 +154,15 @@ export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
 
+/**
+ * Android delivery for a `clear` command. auto and ime clear through the CtrlProxy IME
+ * (`ime_clear_field_v1`), falling back to key-event deletes; the accessibility ACTION_SET_TEXT
+ * clear breaks a rich-text editor's live formatting until it resets (#10408), so only an explicit
+ * a11y clear uses it (#10479).
+ */
+export const SEND_KEYS_CLEAR_MODES = ["auto", "ime", "a11y"] as const;
+export type SendKeysClearMode = (typeof SEND_KEYS_CLEAR_MODES)[number];
+
 function isPrintableAscii(text: string): boolean {
   for (const char of text) {
     const codePoint = char.codePointAt(0)!;
@@ -165,6 +178,27 @@ export function segmentGraphemes(text: string): string[] {
     new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text),
     ({ segment }) => segment,
   );
+}
+
+function hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
+  const parser = new DefaultElementParser();
+  const detector = new FieldTypeDetector();
+  for (const root of parser.extractRootNodes(hierarchy)) {
+    let password = false;
+    parser.traverseNode(root, (node) => {
+      const element = parser.extractNodeProperties(node);
+      if (
+        (element.focused === true || element.focused === "true") &&
+        detector.isPasswordField(element)
+      ) {
+        password = true;
+      }
+    });
+    if (password) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function graphemeCodePoints(graphemes: string[]): string {
@@ -280,6 +314,8 @@ export interface SendKeysSelector {
 export interface SendKeysFocusOptions {
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
+  /** Resolve the field in the app or the AutoMobile overlay only (issue #9305). */
+  layer?: HierarchyLayer;
 }
 
 export interface SendKeysTypeCommand {
@@ -298,6 +334,7 @@ export interface SendKeysKeyCommand {
 
 export interface SendKeysClearCommand {
   action: "clear";
+  mode?: SendKeysClearMode;
 }
 
 export type SendKeysCommand = SendKeysTypeCommand | SendKeysKeyCommand | SendKeysClearCommand;
@@ -365,6 +402,7 @@ export interface SendKeysCommandExecutor {
   clear(
     signal?: AbortSignal,
     display?: string,
+    mode?: SendKeysClearMode,
   ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
 }
 
@@ -889,19 +927,48 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
-  async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
+  async clear(
+    signal?: AbortSignal,
+    display?: string,
+    mode: SendKeysClearMode = "auto",
+  ): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
     if (this.device.platform !== "android") {
       return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
     }
-    if (this.imeSpan) {
-      return this.executeAndroidImeCommit("", "insert", undefined, {
-        signal,
-        display,
-        delivery: "clearField",
-      });
+    if (mode === "a11y") {
+      return this.clearAndroidWithAccessibility(signal, display);
     }
+    return this.clearAndroidWithIme(signal, display);
+  }
+
+  /**
+   * auto/ime clear (#10479): the IME clearField when CtrlProxy advertises `ime_clear_field_v1`,
+   * activated and restored like IME typing (inside the call's IME span when there is one);
+   * otherwise key-event deletes, which need no keyboard switch. Never the accessibility clear.
+   */
+  private async clearAndroidWithIme(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    const supportsClearField = await this.textClient.supportsImeClearField();
+    this.checkAbort(signal);
+    if (!supportsClearField) {
+      return this.clearImeFieldWithKeyEvents(signal, display);
+    }
+    return this.executeAndroidImeCommit("", "insert", undefined, {
+      signal,
+      display,
+      delivery: "clearField",
+    });
+  }
+
+  /** Explicit `mode: "a11y"` clear: ACTION_SET_TEXT, then key-event deletes if it fails. */
+  private async clearAndroidWithAccessibility(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
     const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
       signal,
       display,
@@ -1210,24 +1277,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       // Replace still dispatches; distinguish absent focus from a focused non-password field.
       return undefined;
     }
-    const parser = new DefaultElementParser();
-    const detector = new FieldTypeDetector();
-    for (const root of parser.extractRootNodes(hierarchy)) {
-      let password = false;
-      parser.traverseNode(root, (node) => {
-        const element = parser.extractNodeProperties(node);
-        if (
-          (element.focused === true || element.focused === "true") &&
-          detector.isPasswordField(element)
-        ) {
-          password = true;
-        }
-      });
-      if (password) {
-        return true;
-      }
-    }
-    return false;
+    return hasFocusedPasswordField(hierarchy);
   }
 
   private async executeIosType(
@@ -2501,6 +2551,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (!focusResult.success) {
         return focusResult;
       }
+      // An explicit eventAll skips auto routing's password check; keep a password's text out of
+      // batched adb command lines and error messages all the same.
+      this.typingPasswordField ||= hasFocusedPasswordField(focusResult.hierarchy);
     }
 
     const { result: clearResult, unchangedWarning } = await this.clearForReplace(
@@ -2570,7 +2623,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     display?: string,
     before = "",
   ): Promise<TextActionResult> {
-    if (!typed.success || text.toLowerCase() === text.toUpperCase()) {
+    // A password's text and read-back must never reach a warning or log.
+    if (!typed.success || this.typingPasswordField || text.toLowerCase() === text.toUpperCase()) {
       return typed;
     }
     try {
@@ -2627,21 +2681,31 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const plan = await this.getEventAllKeyEventPlan(graphemes[index] ?? "");
       if (plan) {
         await this.captureEventAllBaseline(graphemes, index, progress);
-        const eventFailure = await this.executeKeyEventPlanSafely(plan, progress.mutated, signal);
+        const run = graphemes.slice(
+          index,
+          (await this.eventAllKeyEventRunEnd(graphemes, index)) + 1,
+        );
+        const eventFailure = await this.executeEventAllKeyRunSafely(
+          run,
+          plan,
+          progress.mutated,
+          signal,
+        );
         if (eventFailure) {
           return this.withTextWarnings(
             {
               ...eventFailure,
-              error: `eventAll could not deliver grapheme ${this.describeGraphemes([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
+              error: `eventAll could not deliver grapheme${run.length > 1 ? "s" : ""} ${this.describeGraphemes(run)}: ${eventFailure.error ?? "unknown error"}`,
               committedGraphemes: progress.committedGraphemes,
             },
             progress.warnings,
           );
         }
         progress.mutated = true;
-        progress.committedGraphemes++;
-        progress.pendingKeyText += graphemes[index];
+        progress.committedGraphemes += run.length;
+        progress.pendingKeyText += run.join("");
         progress.sinceLastInsertEvents = true;
+        index += run.length - 1;
         continue;
       }
       const runStart = index;
@@ -2695,6 +2759,43 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
     return false;
+  }
+
+  /**
+   * Last index of the key-event run starting at `index`. Consecutive printable ASCII goes to
+   * the device in one `input text` process: one process per character let the keyboard
+   * re-capitalise letters after a space (#9888). A password field keeps one key event per
+   * character, so its text never appears in a single adb command line, log or error.
+   */
+  private async eventAllKeyEventRunEnd(graphemes: string[], index: number): Promise<number> {
+    if (this.typingPasswordField) {
+      return index;
+    }
+    while (
+      index + 1 < graphemes.length &&
+      canJoinAndroidInputText(graphemes[index] ?? "", graphemes[index + 1] ?? "") &&
+      (await this.getEventAllKeyEventPlan(graphemes[index + 1] ?? ""))
+    ) {
+      index++;
+    }
+    return index;
+  }
+
+  private async executeEventAllKeyRunSafely(
+    run: string[],
+    plan: KeyEventPlan,
+    previouslyMutated: boolean,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult | undefined> {
+    if (run.length === 1) {
+      return this.executeKeyEventPlanSafely(plan, previouslyMutated, signal);
+    }
+    // The process may have typed part of the run before failing, so any failure is partial.
+    return this.executeKeyEventPlanSafely(
+      { commands: [buildAndroidInputTextCommand(run.join(""))] },
+      true,
+      signal,
+    );
   }
 
   private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {
@@ -2779,7 +2880,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private describeGraphemes(graphemes: string[]): string {
     return this.typingPasswordField
-      ? `(${graphemes.length} password character(s))`
+      ? passwordTextPlaceholder(graphemes.join(""))
       : graphemeCodePoints(graphemes);
   }
 
@@ -2833,10 +2934,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return undefined;
     } catch (error) {
       signal?.throwIfAborted();
-      logger.warn("[SendKeys] Android key event dispatch failed", error);
-      const failure = { success: false, error: errorMessage(error) };
+      const failure = { success: false, error: this.keyEventFailureMessage(error) };
       return previouslyMutated ? markPartialAfterMutation(failure) : failure;
     }
+  }
+
+  /**
+   * A key-event failure can quote the adb command line, which names the key codes typed. For a
+   * password field, log and report only the error class, never the message.
+   */
+  private keyEventFailureMessage(error: unknown): string {
+    if (!this.typingPasswordField) {
+      logger.warn("[SendKeys] Android key event dispatch failed", error);
+      return errorMessage(error);
+    }
+    const kind = error instanceof Error ? error.name : typeof error;
+    const message = `Android key event dispatch failed for a password field (${kind}; details withheld)`;
+    logger.warn(`[SendKeys] ${message}`);
+    return message;
   }
 
   /**
@@ -3017,7 +3132,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {
     for (const command of plan.commands) {
       signal?.throwIfAborted();
-      await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+      if (this.typingPasswordField && command.startsWith("shell ")) {
+        // The command names the key code typed; adb logs and errors show only the label.
+        await this.adb.execute(["shell", command.slice("shell ".length)], {
+          signal,
+          logLabel: "shell input <password key event>",
+        });
+      } else {
+        await this.adb.executeCommand(command, undefined, undefined, undefined, signal);
+      }
     }
   }
 
@@ -3371,7 +3494,7 @@ export class SendKeys {
     if (selector) {
       return undefined;
     }
-    for (const field of ["container", "selectionStrategy"] as const) {
+    for (const field of ["container", "selectionStrategy", "layer"] as const) {
       if (options[field] !== undefined) {
         return `${field} requires a selector naming the field to focus`;
       }
@@ -3657,6 +3780,7 @@ export class SendKeys {
     const result = await this.focusSelector(selector, signal, routing.display, {
       container: routing.container,
       selectionStrategy: routing.selectionStrategy,
+      layer: routing.layer,
     });
     return result.success
       ? undefined
@@ -3773,9 +3897,10 @@ export class SendKeys {
           routing.onCommandResult?.(result);
         },
       });
+    // An auto/ime clear activates the IME the way IME typing does (#10479).
     const needsImeSpan = commands.some(
       (command) =>
-        command.action === "type" &&
+        (command.action === "type" || command.action === "clear") &&
         ["auto", "ime", "imeKeyEvents"].includes(command.mode ?? "auto"),
     );
     try {
@@ -3946,7 +4071,7 @@ export class SendKeys {
         }
         return this.executor.key(command, signal, onDispatch, display);
       case "clear":
-        return this.executor.clear(signal, display).then((result) => ({
+        return this.executor.clear(signal, display, command.mode).then((result) => ({
           index: -1,
           action: "clear",
           success: result.success,

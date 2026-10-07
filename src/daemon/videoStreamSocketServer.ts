@@ -5,6 +5,7 @@ import {
   stopStaleCapture,
   type DeviceCaptureRegistry,
 } from "../features/webrtc/deviceCaptureRegistry";
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   decideLifecycleEvent,
@@ -50,7 +51,7 @@ import {
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
-import { reconcileDiscoveryObservation } from "./discoveryReconcile";
+import { resolveStreamDevice } from "./streamDeviceResolver";
 import { DaemonState } from "./daemonState";
 import {
   encodeDroppedFrames,
@@ -101,7 +102,7 @@ export interface VideoStreamSocketServerDependencies {
   createCaptureSource: CaptureSourceFactory;
   /** Share across transports by injection; omitted registries are local to this server. */
   captureRegistry?: DeviceCaptureRegistry;
-  resolveDevice: (deviceId?: string) => Promise<BootedDevice>;
+  resolveDevice: (deviceId?: string, platform?: "android" | "ios") => Promise<BootedDevice>;
   /** Monotonic microseconds, used for packet presentation timestamps. */
   nowUs: () => bigint;
   ownershipChanges?: () => DeviceOwnershipChanges | null;
@@ -277,13 +278,22 @@ function validateSize(size: VideoStreamSocketRequest["size"]): string | null {
  * first invalid field or null when all hints are usable. TypeScript's wire types are erased at
  * runtime, so this is the only thing standing between a malformed hint and the encoder argv.
  */
-export function validateCaptureHints(request: VideoStreamSocketRequest): string | null {
+export function validateCaptureHints(
+  request: Omit<VideoStreamSocketRequest, "platform"> & { platform?: unknown },
+): string | null {
   return (
+    validatePlatform(request.platform) ??
     validateQuality(request.quality) ??
     validateFps(request.fps) ??
     validateBitrate(request.bitrateKbps) ??
     validateSize(request.size)
   );
+}
+
+function validatePlatform(platform: unknown): string | null {
+  return platform === undefined || platform === "android" || platform === "ios"
+    ? null
+    : `Invalid platform ${JSON.stringify(platform)}; expected "android" or "ios".`;
 }
 
 function subscribeFailureResponse(
@@ -537,7 +547,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       if (request.deviceId !== undefined) {
         this.admissionGate.assertDeviceActionable(request.deviceId, VIDEO_STREAM_PURPOSE);
       }
-      const device = await this.deps.resolveDevice(request.deviceId);
+      const device = await this.deps.resolveDevice(request.deviceId, request.platform);
       this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
       authorizeResolvedDevice(this.authenticator, {
         sessionUuid: request.sessionUuid,
@@ -1767,67 +1777,42 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 }
 
-let socketServer: VideoStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<VideoStreamSocketServer>();
 
 export function getVideoStreamSocketPath(): string {
-  return socketServer?.getSocketPath?.() ?? getSocketPath(VIDEO_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath?.() ?? getSocketPath(VIDEO_STREAM_SOCKET_CONFIG);
 }
 
 export function setVideoStreamSocketServerForTesting(server: VideoStreamSocketServer | null): void {
-  socketServer = server;
+  socketServer.instance = server;
 }
 
-/**
- * Device resolution for the relay: an explicit id must match a connected device, and an omitted id
- * is only unambiguous when exactly one device is connected.
- */
-/**
- * Pick the device this subscribe streams from, and fold the discovery it ran
- * into the pool first.
- *
- * FUNNEL 1. This resolver runs its OWN fresh discovery, so it can be the first
- * path to see the `Unknown (<serial>)` placeholder or a different AVD on a
- * reused serial. Without folding that observation in, BOTH admission checks in
- * `handleSubscribe` -- the one on the named serial and the one on the resolved
- * device -- re-read pool state from BEFORE this discovery and `attach` starts a
- * capture on whichever runtime now answers
- * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
- *
- * Reconciling happens BEFORE the serial is matched, so an observation about some
- * OTHER serial is still folded in even when this request goes on to fail.
- */
+/** Legacy video requests discover either platform; explicit platform requests stay scoped. */
 export async function resolveVideoStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
+  platform: "android" | "ios" | "either" = "either",
+  timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<BootedDevice> {
-  const devices = await deviceManager.getBootedDevices("either");
-  await reconcileDiscoveryObservation(devices, "video-stream-resolve");
-
-  if (deviceId) {
-    const match = devices.find((device) => device.deviceId === deviceId);
-    if (!match) {
-      throw new ActionableError(`No connected device with id ${deviceId}.`);
-    }
-    return match;
-  }
-
-  if (devices.length === 0) {
-    throw new ActionableError("No connected devices found.");
-  }
-  if (devices.length > 1) {
-    throw new ActionableError(
-      `Multiple connected devices; specify deviceId. Found: ${devices
-        .map((device) => device.deviceId)
-        .join(", ")}`,
-    );
-  }
-  return devices[0];
+  return resolveStreamDevice(
+    deviceManager,
+    deviceId,
+    platform,
+    timer,
+    signal,
+    "video-stream-resolve",
+  );
 }
 
-async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
-  return await resolveVideoStreamDevice(
+async function defaultResolveDevice(
+  deviceId?: string,
+  platform?: "android" | "ios",
+): Promise<BootedDevice> {
+  return resolveVideoStreamDevice(
     DeviceSessionManager.getInstance().getPlatformDeviceManager(),
     deviceId,
+    platform,
   );
 }
 
@@ -1869,18 +1854,9 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
 }
 
 export async function startVideoStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new VideoStreamSocketServer(defaultDependencies());
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new VideoStreamSocketServer(defaultDependencies()));
 }
 
 export async function stopVideoStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

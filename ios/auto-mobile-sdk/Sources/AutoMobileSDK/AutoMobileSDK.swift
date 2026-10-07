@@ -28,6 +28,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var sessionObservers: [NSObjectProtocol] = []
     private var _breadcrumbTrail: BreadcrumbTrail?
 
+    @MainActor private var frameCollector: FrameMetricsCollector?
+    private let mainExecutor: any MainThreadExecuting
     private let mainLifecycle: MainThreadLifecycle
     private let persistenceOverride: (any EventPersisting)?
     private let timerFactory: @Sendable () -> any TimerScheduling
@@ -37,6 +39,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         persistence: (any EventPersisting)? = nil,
         timerFactory: @escaping @Sendable () -> any TimerScheduling = { GCDTimer() }
     ) {
+        mainExecutor = executor
         mainLifecycle = MainThreadLifecycle(executor: executor)
         persistenceOverride = persistence
         self.timerFactory = timerFactory
@@ -174,6 +177,13 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         guard let mainGeneration else { return }
         mainLifecycle.schedule(generation: mainGeneration, setup: {
+            #if canImport(UIKit) && !os(watchOS)
+                let frames = FrameMetricsCollector(
+                    source: DisplayLinkFrameTickSource(), dateProvider: dateProvider, buffer: buffer
+                )
+                self.frameCollector = frames
+                frames.setEnabled(self.isEnabled)
+            #endif
             AutoMobileFailures.shared.cacheDeviceInfo()
             AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
             #if canImport(UIKit) && !os(watchOS)
@@ -199,6 +209,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
                 self.lock.unlock()
             #endif
         }, teardown: {
+            self.frameCollector?.setEnabled(false)
+            self.frameCollector = nil
             AutoMobileOsEvents.shared.reset()
             #if canImport(UIKit) && !os(watchOS)
                 ViewHierarchyTracker.shared.reset()
@@ -461,6 +473,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // cannot start a watchdog or register URLProtocol that the host
         // explicitly disabled.
         guard initialized else { return }
+        mainExecutor.execute { [weak self] in
+            guard let self else { return }
+            self.frameCollector?.setEnabled(self.isEnabled)
+        }
         if config?.enableHangDetection ?? true {
             AutoMobileHangs.shared.setEnabled(enabled)
         }

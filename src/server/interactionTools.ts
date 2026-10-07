@@ -70,6 +70,8 @@ import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard, KeyboardOpenIndeterminateError } from "../features/action/Keyboard";
+import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
+import { serverConfig } from "../utils/ServerConfig";
 import { withAndroidImeLock } from "../features/action/androidImeLock";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
@@ -181,6 +183,8 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
+import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+
 import {
   SystemTrayObserver,
   SystemTrayAdb,
@@ -190,6 +194,7 @@ import {
   getSystemTrayDependencies,
   waitForNotificationMatch,
   listSystemTrayNotifications,
+  NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
   resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
@@ -1455,6 +1460,14 @@ export const rotateSchema = addDeviceTargetingToSchema(
         .describe(
           "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
         ),
+      display: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+        ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -2197,6 +2210,7 @@ export async function tapAtHandler(
     },
     progress,
     signal,
+    args.__tapAtPlanContext ?? args.__tapAtRecordingContext,
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -2546,7 +2560,13 @@ export async function rotateHandler(
       sessionRotation: (mutation) =>
         runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
     });
-    const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
+    const result = await rotate.execute(
+      args.orientation,
+      progress,
+      args.lockOrientation,
+      signal,
+      args.display,
+    );
     const response = createStructuredToolResponse({
       observation: result.observation,
       ...result,
@@ -2841,6 +2861,7 @@ export function registerInteractionTools() {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    let restoreFailedClearAll: (() => Promise<void>) | undefined;
     try {
       throwIfAborted(signal);
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
@@ -3126,6 +3147,30 @@ export function registerInteractionTools() {
         throw new ActionableError(`Unknown systemTray action: ${args.action}`);
       }
 
+      const clearDetector =
+        device.platform === "android"
+          ? createNotificationUIDetector(device, getSystemTrayDependencies, signal)
+          : undefined;
+      if (clearDetector) {
+        const initialObservation = await awaitWhileRequestIsLive(
+          getSystemTrayDependencies()
+            .observeScreenFactory(device)
+            .execute({
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              skipPerformanceAudit: true,
+              minTimestamp: await clearDetector.getObservationTimestamp(),
+              signal,
+            }),
+          signal,
+        );
+        const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
+        // Use statusbar commands directly: an unreadable hierarchy must not
+        // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
+        restoreFailedClearAll = () =>
+          initiallyOpen ? clearDetector.expandTray() : clearDetector.collapseTray();
+      }
+
       let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
@@ -3164,7 +3209,7 @@ export function registerInteractionTools() {
       const { timer } = getSystemTrayDependencies();
 
       for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-        const { match } = await waitForNotificationMatch(
+        const { observation, match } = await waitForNotificationMatch(
           device,
           notification,
           clearMatchTexts,
@@ -3179,6 +3224,13 @@ export function registerInteractionTools() {
           signal,
         );
 
+        if (!match && clearDetector && !clearDetector.isTrayOpen(observation.viewHierarchy)) {
+          throw new ActionableError(
+            observation.viewHierarchy
+              ? "Could not clear notifications: shade not readable (shade not detected open)."
+              : "Could not clear notifications: shade not readable (view hierarchy missing).",
+          );
+        }
         if (!match) {
           break;
         }
@@ -3202,6 +3254,16 @@ export function registerInteractionTools() {
           ? undefined
           : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
 
+      const result = formatClearAllResult(
+        notification.appId,
+        swipeCount,
+        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
+      );
+      if (!result.success && restoreFailedClearAll) {
+        await restoreFailedClearAll();
+        restoreFailedClearAll = undefined;
+      }
+
       const { observeScreenFactory } = getSystemTrayDependencies();
       const observeScreen = observeScreenFactory(device);
       throwIfAborted(signal);
@@ -3216,17 +3278,30 @@ export function registerInteractionTools() {
       );
       await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
-      const result = formatClearAllResult(
-        notification.appId,
-        swipeCount,
-        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
-      );
-      return createJSONToolResponse({
+      restoreFailedClearAll = undefined;
+      const response = createJSONToolResponse({
         ...result,
         observation: nextObservation,
       });
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throwIfAborted(signal);
+      if (restoreFailedClearAll) {
+        try {
+          await restoreFailedClearAll();
+        } catch (restoreError) {
+          logger.warn(
+            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+            restoreError,
+          );
+        }
+      }
+      if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
+        throw new ActionableError(
+          "Could not clear notifications: shade not readable (shade not detected open during list).",
+          { cause: error },
+        );
+      }
       if (error instanceof ActionableError) {
         throw error;
       }
@@ -3258,11 +3333,19 @@ export function registerInteractionTools() {
       args.display,
       { container: args.container, selectionStrategy: args.selectionStrategy },
     );
+    const dismissal = await dismissKeyboardAfterSendKeys(
+      device,
+      serverConfig.isDismissKeyboardAfterInputEnabled(),
+      result.success,
+      async (closeSignal) => keyboardFactory(device).execute("close", closeSignal),
+      signal,
+    );
     const response = createStructuredToolResponse({
       message: result.success
-        ? `Executed ${result.completedCommands} sendKeys command(s)`
+        ? `Executed ${result.completedCommands} sendKeys command(s)${dismissal.warnings?.length ? `. Warning: ${dismissal.warnings.join("; ")}` : ""}`
         : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
       ...result,
+      ...dismissal,
     });
     return result.success ? response : { ...response, isError: true };
   };

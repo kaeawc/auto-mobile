@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import os from "node:os";
 import type { BootedDevice, CrashAppEvidence, CrashAppResult, ExecResult } from "../../models";
 import {
@@ -445,7 +446,7 @@ export class CrashApp {
         await this.adb.executeCommand(
           command,
           CONFIRMATION_COMMAND_TIMEOUT_MS,
-          undefined,
+          command === PROCESS_STATE_COMMAND ? DUMPSYS_MAX_BUFFER : undefined,
           true,
           signal,
         )

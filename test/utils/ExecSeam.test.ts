@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../src/utils/android-cmdline-tools/dumpsysLimits";
 import { describe, expect, test } from "bun:test";
 import { runExecSeam, type ExecSeamOptions, type RawExecOutput } from "../../src/utils/ExecSeam";
 import { createExecResult } from "../../src/utils/execResult";
@@ -234,6 +235,32 @@ describe("argv exec seam", function () {
     ).executeCommandWithChild("adb", ["shell", "true"]);
 
     await expect(started.result).rejects.toThrow(/callback stdout[\s\S]*callback stderr/);
+  });
+
+  test("adb overflow failures keep the code and bound callback stdout diagnostics", async () => {
+    const stdout = "flag=true\n".repeat(110_000);
+    const child = { kill: () => true } as ChildProcess;
+    const execWithChild: ExecFileWithChild = (_file, args, options, callback) => {
+      expect(args).toEqual(["shell", "dumpsys", "input_method"]);
+      expect(options?.maxBuffer).toBe(DUMPSYS_MAX_BUFFER);
+      const error = Object.assign(new RangeError("stdout maxBuffer length exceeded"), {
+        code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      });
+      callback(error, stdout, "");
+      return child;
+    };
+    const started = new DefaultHostCommandExecutor(
+      undefined,
+      execWithChild,
+    ).executeCommandWithChild("adb", ["shell", "dumpsys", "input_method"], {
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
+    await expect(started.result).rejects.toThrow("ERR_CHILD_PROCESS_STDIO_MAXBUFFER");
+    await expect(started.result).rejects.toThrow(
+      `stdout: (last 300 chars; ${Buffer.byteLength(stdout)} bytes; truncated)`,
+    );
+    await expect(started.result).rejects.toThrow("...[truncated]");
+    await expect(started.result).rejects.toMatchObject({ name: "RangeError" });
   });
 
   test("trackable command execution propagates synchronous startup failures", function () {

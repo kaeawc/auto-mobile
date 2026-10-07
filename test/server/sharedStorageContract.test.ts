@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { putAppFileSchema } from "../../src/server/appFileContract";
 import {
   normalizeSharedStorageRelativePath,
   normalizeSharedStorageNamespace,
-  stageSharedStorageSchema,
 } from "../../src/server/sharedStorageContract";
 
 describe("shared-storage contract", () => {
@@ -16,33 +16,29 @@ describe("shared-storage contract", () => {
       },
     ]) {
       expect(
-        stageSharedStorageSchema.safeParse({ namespace: "run-42", files: [file] }).success,
+        putAppFileSchema.safeParse({
+          target: { domain: "user_files", namespace: "run-42" },
+          files: [file],
+        }).success,
       ).toBe(true);
     }
   });
 
-  test("defaults platform to Android and rejects iOS routing", () => {
-    expect(
-      stageSharedStorageSchema.parse({
-        namespace: "run-42",
-        files: [{ contentText: "x", destinationPath: "x.txt" }],
-      }).platform,
-    ).toBe("android");
-    expect(
-      stageSharedStorageSchema.safeParse({
-        platform: "ios",
-        namespace: "run-42",
-        files: [{ contentText: "x", destinationPath: "x.txt" }],
-      }).success,
-    ).toBe(false);
+  test("user_files accepts both supported platform routes without an Android default", () => {
+    const args = {
+      target: { domain: "user_files", namespace: "run-42" },
+      files: [{ contentText: "x", destinationPath: "x.txt" }],
+    };
+    expect(putAppFileSchema.parse(args).platform).toBeUndefined();
+    expect(putAppFileSchema.safeParse({ ...args, platform: "ios" }).success).toBe(true);
+    expect(putAppFileSchema.safeParse({ ...args, platform: "android" }).success).toBe(true);
   });
 
   test("rejects unsafe namespace resets before an ADB operation can be constructed", () => {
     for (const namespace of ["", ".", "..", "a/b", "a\\b", "a\0b"]) {
       expect(
-        stageSharedStorageSchema.safeParse({
-          namespace,
-          reset: true,
+        putAppFileSchema.safeParse({
+          target: { domain: "user_files", namespace, reset: true },
           files: [{ contentText: "safe", destinationPath: "file.txt" }],
         }).success,
       ).toBe(false);
@@ -51,14 +47,14 @@ describe("shared-storage contract", () => {
   });
 
   test("rejects unsafe file destinations and ambiguous content sources", () => {
-    const unsafe = stageSharedStorageSchema.safeParse({
-      namespace: "run-42",
+    const unsafe = putAppFileSchema.safeParse({
+      target: { domain: "user_files", namespace: "run-42" },
       files: [{ contentText: "safe", destinationPath: "../outside.txt" }],
     });
     expect(unsafe.success).toBe(false);
 
-    const ambiguous = stageSharedStorageSchema.safeParse({
-      namespace: "run-42",
+    const ambiguous = putAppFileSchema.safeParse({
+      target: { domain: "user_files", namespace: "run-42" },
       files: [{ contentText: "safe", contentBase64: "c2FmZQ==", destinationPath: "file.txt" }],
     });
     expect(ambiguous.success).toBe(false);
@@ -68,8 +64,8 @@ describe("shared-storage contract", () => {
     expect(normalizeSharedStorageRelativePath("docs/fixture.pdf")).toBe("docs/fixture.pdf");
     expect(() => normalizeSharedStorageRelativePath("a\0b")).toThrow("destinationPath");
     expect(
-      stageSharedStorageSchema.safeParse({
-        namespace: "run-42",
+      putAppFileSchema.safeParse({
+        target: { domain: "user_files", namespace: "run-42" },
         files: [{ contentText: "safe", destinationPath: "a\0b" }],
       }).success,
     ).toBe(false);

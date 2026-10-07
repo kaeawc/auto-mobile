@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   DeviceAutolockManager,
   type DeviceAutolockPoolPort,
@@ -11,7 +11,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
-function harness() {
+function harness(env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" }) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const device: PooledDevice = {
@@ -98,6 +98,7 @@ function harness() {
       markAutolockSession: (id, input) => persist(id, input),
     },
     new CountingIdGenerator("autolock-test"),
+    env,
   );
   return {
     manager,
@@ -121,17 +122,22 @@ function harness() {
 }
 
 describe("DeviceAutolockManager", () => {
-  const priorAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-  afterEach(() => {
-    if (priorAutolock === undefined) {
-      delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    } else {
-      process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = priorAutolock;
-    }
+  test("standalone fallback reads the injected environment for each operation", async () => {
+    const env = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" };
+    const { manager, sessions, device, events } = harness(env);
+    expect(await manager.autolockDevice(device.id, "android")).toBeUndefined();
+    expect(events).toEqual([]);
+    env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const session = await manager.autolockDevice(device.id, "android");
+    expect(session).toEqual(expect.any(String));
+    expect(() => manager.assertAutolockAccess(device.id, "other")).toThrow("locked");
+    env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
+    expect(() => manager.assertAutolockAccess(device.id, "other")).not.toThrow();
+    expect(() => manager.assertAutolockAccess(device.id, "other", true)).toThrow("locked");
+    sessions.stopCleanupTimer();
   });
 
   test("publishes readiness and ownership after the pool checks and before persistence", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, events } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
 
@@ -156,7 +162,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("retries when validation replaces the captured entry", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, port, devices, device, events, sessions } = harness();
     const replacement = { ...device, incarnation: 2 };
     port.validateOrReloadIdlePooledDevice = async ({ device: current }) => {
@@ -176,7 +181,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("retries when the entry changes after owned-session reuse yields", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, port, devices, device, events, sessions } = harness();
     const replacement = { ...device, incarnation: 2 };
     port.validateOrReloadIdlePooledDevice = async ({ device: current }) => {
@@ -197,7 +201,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("clears only the released lock and keeps a replacement route", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, timer } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     device.autolockSessionId = "replacement";
@@ -210,7 +213,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("clears only the captured entry's rebind lock and preserves MCP routes", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     await manager.attachAutolockSessionToMcpSession(id!, "mcp-2");
@@ -226,7 +228,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("does not clear a same-serial replacement entry or its MCP route", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, devices } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     const replacement = { ...device, incarnation: device.incarnation + 1 };
@@ -244,7 +245,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("does not clear another session's lock on the captured entry", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     device.autolockSessionId = "another-owner";
@@ -258,7 +258,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("reuses the caller's owned autolock session", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, events } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     const assignmentCount = device.assignmentCount;
@@ -270,7 +269,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("reads the current device manager and daemon identity through the port", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const {
       manager,
       sessions,
@@ -304,7 +302,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("reports ambiguous owned selector candidates", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, devices } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     const other: PooledDevice = {
@@ -329,7 +326,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("routes a quarantined ADB-reset session to its original device", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, devices, quarantined } = harness();
     const id = await manager.autolockDevice(device.id, "android", "mcp-1");
     devices.delete(device.id);
@@ -344,7 +340,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("if-absent attachment preserves an existing default", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, devices } = harness();
     const first = await manager.autolockDevice(device.id, "android", "mcp-1");
     const other: PooledDevice = {
@@ -367,7 +362,6 @@ describe("DeviceAutolockManager", () => {
   });
 
   test("restores the assignment when persistence is cancelled", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const { manager, sessions, device, events, setPersistence } = harness();
     const controller = new AbortController();
     setPersistence(async () => {

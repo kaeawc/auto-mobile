@@ -6,7 +6,6 @@ import {
   nodeAppFileFileSystem,
   type AppFileService,
 } from "../../src/server/appFileService";
-import { registerSharedStorageTools } from "../../src/server/sharedStorageTools";
 import type {
   StageSharedStorageRequest,
   SharedStorageService,
@@ -49,6 +48,20 @@ describe("App file tools", () => {
     ).toBe(true);
     expect(
       validate({ target, files: [{ destinationPath: "one-source.txt", contentText: "x" }] }),
+    ).toBe(true);
+  });
+
+  test("user_files advertises defaulted target fields as optional", () => {
+    registerAppFileTools();
+    const definition = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "putAppFile",
+    )!;
+    const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+    expect(
+      validate({
+        target: { domain: "user_files", namespace: "fixtures" },
+        files: [{ contentText: "fixture", destinationPath: "fixture.txt" }],
+      }),
     ).toBe(true);
   });
 
@@ -179,7 +192,7 @@ describe("App file tools", () => {
     await resultPromise;
   });
 
-  test("putAppFile user_files and stageSharedStorage send the same fixture to staging", async () => {
+  test("putAppFile user_files delegates to shared storage with rollback", async () => {
     const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
     const calls: StageSharedStorageRequest[] = [];
     const sharedStorage: SharedStorageService = {
@@ -216,22 +229,20 @@ describe("App file tools", () => {
         createAppFileServiceForTesting({ sharedStorageService: sharedStorage, fileSystem }),
       registerPendingDeviceCleanup: () => {},
     });
-    registerSharedStorageTools({
-      sharedStorage: () => sharedStorage,
-      registerPendingDeviceCleanup: () => {},
-    });
     const file = { sourcePath: "/fixtures/photo.png", destinationPath: "photo.png" };
     await ToolRegistry.getTool("putAppFile")!.deviceAwareHandler!(device, {
       target: { domain: "user_files", namespace: "run-42", reset: true, indexMedia: true },
       files: [file],
     });
-    await ToolRegistry.getTool("stageSharedStorage")!.deviceAwareHandler!(device, {
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      device,
       namespace: "run-42",
       reset: true,
       indexMedia: true,
-      files: [file],
+      files: [{ sourcePath: file.sourcePath, destinationPath: file.destinationPath }],
+      signal: undefined,
+      rollbackOnFailure: true,
     });
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual(calls[1]);
   });
 });

@@ -12,19 +12,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -37,6 +33,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 
@@ -53,7 +53,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
 
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Bug Reproduction Demo") },
           navigationIcon = {
             IconButton(
@@ -100,7 +100,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
           )
         }
 
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "bug_repro_status_card" },
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
@@ -124,7 +124,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          Button(
+          AutoMobileContentButton(
             onClick = {
               expectedCount += 1
               if (!bugEnabled) {
@@ -138,7 +138,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
           ) {
             Text("Add Item")
           }
-          Button(
+          AutoMobileContentButton(
             onClick = {
               expectedCount = 0
               displayedCount = 0
@@ -162,7 +162,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
           style = MaterialTheme.typography.bodyMedium,
         )
 
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "error_status_card" },
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
@@ -185,7 +185,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
         }
 
         // Non-fatal error button
-        OutlinedButton(
+        AutoMobileContentOutlinedButton(
           onClick = {
             try {
               throw IllegalStateException(
@@ -207,7 +207,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
         }
 
         // ANR button (blocks main thread)
-        Button(
+        AutoMobileContentButton(
           onClick = {
             errorStatusMessage = "Triggering ANR (blocking main thread for 6 seconds)..."
             // Block the main thread for 6 seconds to trigger ANR
@@ -222,7 +222,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
         }
 
         // Crash button
-        Button(
+        AutoMobileContentButton(
           onClick = {
             errorStatusMessage = "Crashing app..."
             // Throw an uncaught exception to crash the app

@@ -30,6 +30,6 @@ export function registerAppFileTools(
       const result = await writePromise;
       return createJSONToolResponse(result);
     },
-    { defaultEnabled: false },
+    { defaultEnabled: true },
   );
 }

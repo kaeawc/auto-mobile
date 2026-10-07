@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -102,7 +103,7 @@ export class AwaitIdle implements AwaitIdleInterface {
         this.adb.executeCommand(
           `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
           remainingMs,
-          undefined,
+          DUMPSYS_MAX_BUFFER,
           undefined,
           activeSignal,
         ),
@@ -310,7 +311,7 @@ export class AwaitIdle implements AwaitIdleInterface {
             this.adb.executeCommand(
               `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
               remainingMs,
-              undefined,
+              DUMPSYS_MAX_BUFFER,
               undefined,
               activeSignal,
             ),

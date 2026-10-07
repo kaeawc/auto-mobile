@@ -1,6 +1,8 @@
+import thresholds from "../../scripts/npm-unpacked-size-thresholds.json";
 import { expect, test } from "bun:test";
 import {
   evaluateUnpackedSize,
+  trimmedPackEnv,
   validateThresholdConfig,
   parsePackOutput,
 } from "../../scripts/benchmark-npm-unpacked-size";
@@ -187,4 +189,33 @@ test("optional warning threshold must be finite and non-negative", () => {
   ]) {
     expect(validateThresholdConfig({ version: "1", thresholds }).thresholds).toEqual(thresholds);
   }
+});
+
+test("benchmark pack enables trim while preserving caller environment", () => {
+  const env = { PATH: "/bin", CI: "false", AUTOMOBILE_TRIM_BUNDLED_DEPS: "false" };
+  expect(trimmedPackEnv(env)).toEqual({ ...env, AUTOMOBILE_TRIM_BUNDLED_DEPS: "true" });
+  expect(env.AUTOMOBILE_TRIM_BUNDLED_DEPS).toBe("false");
+});
+
+test("trimmed cap follows measured bytes plus 3 MiB rounded up and rejects lost trimming", () => {
+  const measuredTrimmed = 18_345_761;
+  const measuredUntrimmed = 23_838_787;
+  const mib = 1024 * 1024;
+  expect(thresholds.thresholds.unpackedBytes).toBe(
+    Math.ceil((measuredTrimmed + 3 * mib) / mib) * mib,
+  );
+  expect(
+    evaluateUnpackedSize({
+      unpackedBytes: measuredTrimmed,
+      files: runtimeFiles,
+      thresholds: thresholds.thresholds,
+    }).passed,
+  ).toBe(true);
+  expect(
+    evaluateUnpackedSize({
+      unpackedBytes: measuredUntrimmed,
+      files: runtimeFiles,
+      thresholds: thresholds.thresholds,
+    }).passed,
+  ).toBe(false);
 });

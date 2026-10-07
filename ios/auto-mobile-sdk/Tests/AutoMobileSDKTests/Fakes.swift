@@ -550,3 +550,26 @@ final class FakeMainThreadExecutor: MainThreadExecuting, Sendable {
         }
     }
 }
+
+// MARK: - FakeFrameTickSource
+
+@MainActor
+final class FakeFrameTickSource: FrameTickSource {
+    private var onTick: (@MainActor (TimeInterval, TimeInterval) -> Void)?
+    private(set) var starts = 0
+    private(set) var stops = 0
+
+    func start(_ onTick: @escaping @MainActor (TimeInterval, TimeInterval) -> Void) {
+        starts += 1
+        self.onTick = onTick
+    }
+
+    func stop() {
+        stops += 1
+        onTick = nil
+    }
+
+    func tick(at timestamp: TimeInterval, nominalInterval: TimeInterval = 0.25) {
+        onTick?(timestamp, nominalInterval)
+    }
+}

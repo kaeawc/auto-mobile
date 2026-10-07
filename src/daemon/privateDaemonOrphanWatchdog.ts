@@ -5,8 +5,13 @@ import { logger } from "../utils/logger";
 export interface PrivateDaemonOrphanPort {
   /** Current parent PID; 1 once the launching parent has exited and init adopted us. */
   parentPid(): number;
-  /** Connected control-socket, auxiliary-socket and HTTP MCP clients. */
+  /** Open control-socket and auxiliary-socket connections and in-flight HTTP requests. */
   clientCount(): number;
+  /**
+   * Monotonic count of client connections and HTTP requests ever accepted, so
+   * short-lived clients that come and go between checks still count as use.
+   */
+  clientActivityCount(): number;
   /** Live device sessions. */
   liveSessionCount(): number;
   /** Begin graceful shutdown. */
@@ -46,6 +51,7 @@ export function isHarnessPrivateDaemon(
  */
 export class PrivateDaemonOrphanWatchdog {
   private orphanIdleSince: number | null = null;
+  private lastClientActivityCount: number | null = null;
   private handle: NodeJS.Timeout | null = null;
   private shutdownRequested = false;
 
@@ -79,8 +85,13 @@ export class PrivateDaemonOrphanWatchdog {
     if (this.shutdownRequested) {
       return false;
     }
+    const activityCount = this.port.clientActivityCount();
+    const clientSinceLastCheck =
+      this.lastClientActivityCount !== null && activityCount !== this.lastClientActivityCount;
+    this.lastClientActivityCount = activityCount;
     const orphanedAndIdle =
       this.port.parentPid() === INIT_PID &&
+      !clientSinceLastCheck &&
       this.port.clientCount() === 0 &&
       this.port.liveSessionCount() === 0;
     const now = this.timer.now();

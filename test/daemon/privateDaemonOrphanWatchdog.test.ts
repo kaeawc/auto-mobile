@@ -21,6 +21,11 @@ class FakeOrphanPort implements PrivateDaemonOrphanPort {
   clientCount(): number {
     return this.clients;
   }
+  /** Connections or requests ever accepted. */
+  accepted = 0;
+  clientActivityCount(): number {
+    return this.accepted;
+  }
   liveSessionCount(): number {
     return this.sessions;
   }
@@ -70,6 +75,18 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     port.sessions = 0;
     expect(watchdog.check()).toBe(false);
     timer.setCurrentTime(IDLE_MS * 3);
+    expect(watchdog.check()).toBe(true);
+  });
+
+  test("short-lived clients between checks reset the idle clock (#10506 review)", () => {
+    watchdog.check();
+    // A status request opens and closes between two checks: never seen as open.
+    timer.setCurrentTime(IDLE_MS - 1);
+    port.accepted += 1;
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS);
+    expect(watchdog.check()).toBe(false);
+    timer.setCurrentTime(IDLE_MS * 2);
     expect(watchdog.check()).toBe(true);
   });
 

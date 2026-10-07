@@ -16,8 +16,7 @@ import {
   decodeForwardLeaseOwnerMetadata,
   encodeForwardLeaseOwnerMetadata,
   getCtrlProxyForwardLeaseOwnerSocketPath,
-  resolveCtrlProxyForwardLeaseIdleMs,
-  type ForwardLeaseOwnerProbe,
+  type ForwardLeaseRelinquishProbe,
 } from "../shared/ctrlProxyForwardLeaseOwnership";
 
 /** Shared (agent-invariant) directory holding one lease lock file per device. */
@@ -70,8 +69,9 @@ export interface CtrlProxyForwardLease {
   getLastOwnerPid(): number | undefined;
   /**
    * After {@link tryAcquire} failed against a live foreign owner, ask that
-   * owner whether it still uses the device and take the lease when it does not
-   * (issue #10497).
+   * owner to give the lease up when it no longer uses the device, then take it
+   * (issue #10497). An owner that cannot be asked (unreachable or orphaned
+   * socket) is taken over directly.
    */
   tryReclaimFromStaleOwner?(): Promise<ForwardLeaseReclaimResult>;
   /** Whether this process currently holds the lease. */
@@ -82,9 +82,8 @@ export interface CtrlProxyForwardLease {
 
 export interface FileCtrlProxyForwardLeaseDeps {
   lockDir?: () => string;
-  ownerProbe?: ForwardLeaseOwnerProbe;
+  ownerProbe?: ForwardLeaseRelinquishProbe;
   ownerSocketPath?: () => string | undefined;
-  idleMs?: number;
   timer?: Timer;
   pid?: number;
 }
@@ -97,9 +96,8 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private lastOwnerPid: number | undefined;
   private acquiredAt: number | undefined;
   private readonly lockDir: () => string;
-  private readonly ownerProbe: ForwardLeaseOwnerProbe;
+  private readonly ownerProbe: ForwardLeaseRelinquishProbe;
   private readonly ownerSocketPath: () => string | undefined;
-  private readonly idleMs: number;
   private readonly timer: Timer;
   private readonly pid: number;
 
@@ -110,7 +108,6 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     this.lockDir = deps.lockDir ?? ctrlProxyForwardLeaseDir;
     this.ownerProbe = deps.ownerProbe ?? new DaemonDeviceLeaseOwnerProbe();
     this.ownerSocketPath = deps.ownerSocketPath ?? getCtrlProxyForwardLeaseOwnerSocketPath;
-    this.idleMs = deps.idleMs ?? resolveCtrlProxyForwardLeaseIdleMs();
     this.timer = deps.timer ?? defaultTimer;
     this.pid = deps.pid ?? process.pid;
   }
@@ -178,6 +175,19 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   }
 
   public async tryReclaimFromStaleOwner(): Promise<ForwardLeaseReclaimResult> {
+    const result = await this.reclaimHolder();
+    if (result.acquired) {
+      this.acquired = true;
+    }
+    return result;
+  }
+
+  /**
+   * Get the lease from a live foreign owner for one holder of this process
+   * lease: the singleton itself or a forked observer (#10506 review). On
+   * success the holder count is 1 and the caller records its own claim.
+   */
+  private async reclaimHolder(): Promise<ForwardLeaseReclaimResult> {
     const lockPath = this.resolveLockPath();
     const observed = readExclusiveLockContent(lockPath);
     if (!observed || Number.isNaN(observed.pid) || observed.pid === this.pid) {
@@ -185,16 +195,12 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       return { acquired: false, ownerPid: this.lastOwnerPid, reason: "no foreign owner to check" };
     }
     const metadata = decodeForwardLeaseOwnerMetadata(observed.metadata);
+    // The owner checks its own use of the device and releases in one step, so
+    // activity it starts while we wait is never taken from under it.
     const report = metadata
-      ? await this.ownerProbe.query(metadata.socketPath, this.deviceId)
+      ? await this.ownerProbe.requestRelinquish(metadata.socketPath, this.deviceId)
       : undefined;
-    const decision = decideForwardLeaseReclaim({
-      ownerPid: observed.pid,
-      metadata,
-      report,
-      idleMs: this.idleMs,
-      now: this.timer.now(),
-    });
+    const decision = decideForwardLeaseReclaim({ ownerPid: observed.pid, metadata, report });
     this.lastOwnerPid = observed.pid;
     const owner = { ownerPid: observed.pid, ownerSocketPath: metadata?.socketPath };
     if (decision.action === "refuse") {
@@ -208,12 +214,12 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     if (this.isHeld()) {
       return { acquired: false, ...owner, reason: decision.reason };
     }
-    const tookOver = takeOverExclusiveLock(lockPath, observed, {
-      pid: this.pid,
-      ownerToken: this.ownerToken,
-      metadata: this.ownerMetadata(),
-    });
-    if (!tookOver) {
+    const claim = { pid: this.pid, ownerToken: this.ownerToken, metadata: this.ownerMetadata() };
+    const claimed =
+      decision.action === "acquire"
+        ? tryAcquireExclusiveLock(lockPath, claim)
+        : takeOverExclusiveLock(lockPath, observed, claim);
+    if (!claimed) {
       return {
         acquired: false,
         ...owner,
@@ -221,12 +227,12 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
         transient: true,
       };
     }
+    const how = decision.action === "acquire" ? "released by" : "taken over from";
     logger.warn(
-      `[CTRL_PROXY] Took over CtrlProxy forwarding lease for ${this.deviceId} from PID ` +
+      `[CTRL_PROXY] CtrlProxy forwarding lease for ${this.deviceId} ${how} PID ` +
         `${observed.pid}: ${decision.reason}`,
     );
     this.holders = 1;
-    this.acquired = true;
     this.acquiredAt = this.timer.now();
     this.lastOwnerPid = undefined;
     return { acquired: true, ...owner, reason: decision.reason };
@@ -273,6 +279,14 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
         }
       },
       getLastOwnerPid: () => this.lastOwnerPid,
+      // A fork can meet the same idle or orphaned foreign owner as the singleton.
+      tryReclaimFromStaleOwner: async () => {
+        const result = await this.reclaimHolder();
+        if (result.acquired) {
+          acquired = true;
+        }
+        return result;
+      },
     };
   }
 }

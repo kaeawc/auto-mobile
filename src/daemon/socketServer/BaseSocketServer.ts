@@ -15,6 +15,8 @@ import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
 /** Open connections across every auxiliary socket server in this process. */
 const liveAuxConnections = new Set<Socket>();
+/** Connections ever accepted across every auxiliary socket server in this process. */
+let auxConnectionsAccepted = 0;
 
 /**
  * Clients (stream subscribers, recorders, IDE plugins) connected to any
@@ -22,6 +24,11 @@ const liveAuxConnections = new Set<Socket>();
  */
 export function getLiveAuxSocketConnectionCount(): number {
   return liveAuxConnections.size;
+}
+
+/** Monotonic count of auxiliary-socket connections accepted by this process. */
+export function getAcceptedAuxSocketConnectionCount(): number {
+  return auxConnectionsAccepted;
 }
 
 export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
@@ -257,6 +264,7 @@ export abstract class BaseSocketServer {
     });
 
     liveAuxConnections.add(socket);
+    auxConnectionsAccepted++;
     socket.on("close", () => {
       liveAuxConnections.delete(socket);
       this.onConnectionClose(socket);

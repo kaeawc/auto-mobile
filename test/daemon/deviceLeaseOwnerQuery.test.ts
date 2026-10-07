@@ -4,12 +4,16 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
   DaemonDeviceLeaseOwnerProbe,
   rawDaemonSocketExchange,
   type DaemonSocketExchange,
   type DaemonSocketExchangeOutcome,
 } from "../../src/daemon/deviceLeaseOwnerQuery";
-import { DAEMON_DEVICE_LEASE_STATUS_METHOD } from "../../src/daemon/constants";
+import {
+  DAEMON_DEVICE_LEASE_STATUS_METHOD,
+  DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
+} from "../../src/daemon/constants";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -91,6 +95,32 @@ describe("DaemonDeviceLeaseOwnerProbe (#10497)", () => {
       kind: "unsupported",
       detail: "Unsupported daemon method: daemon/deviceLeaseStatus",
     });
+  });
+
+  test("asks the owner to relinquish and maps its answer (#10506 review)", async () => {
+    const answer = { ...status, released: false, reason: "it has live session session-1" };
+    const { probe, frames } = probeAnswering({
+      kind: "response",
+      line: JSON.stringify({ id: "q-1", type: "mcp_response", success: true, result: answer }),
+    });
+    expect(await probe.requestRelinquish("/tmp/priv.sock", "emulator-5600")).toEqual({
+      kind: "relinquish",
+      result: answer,
+    });
+    expect(JSON.parse(frames[0]!)).toMatchObject({
+      type: "daemon_request",
+      method: DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
+      params: { deviceId: "emulator-5600" },
+      timeoutMs: DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
+    });
+  });
+
+  test("treats a relinquish answer without a decision as unsupported", async () => {
+    const report = await probeAnswering({
+      kind: "response",
+      line: JSON.stringify({ id: "q-1", success: true, result: status }),
+    }).probe.requestRelinquish("/tmp/priv.sock", "emulator-5600");
+    expect(report).toEqual({ kind: "unsupported", detail: "unexpected response shape" });
   });
 
   test("the raw exchange reports a missing socket as a connect failure", async () => {

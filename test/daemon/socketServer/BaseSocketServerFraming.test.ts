@@ -2,6 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { Socket } from "node:net";
 import {
   BaseSocketServer,
+  getAcceptedAuxSocketConnectionCount,
   getLiveAuxSocketConnectionCount,
 } from "../../../src/daemon/socketServer/BaseSocketServer";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -34,11 +35,14 @@ describe("BaseSocketServer line framing", () => {
   it("counts open auxiliary-socket connections for the orphan watchdog (#10497)", () => {
     const server = new FramingTestServer();
     const before = getLiveAuxSocketConnectionCount();
+    const acceptedBefore = getAcceptedAuxSocketConnectionCount();
     const socket = new FakeSocket();
     server.attach(socket);
     expect(getLiveAuxSocketConnectionCount()).toBe(before + 1);
     socket.destroy();
     expect(getLiveAuxSocketConnectionCount()).toBe(before);
+    // A closed connection still counts as use since the watchdog's last check.
+    expect(getAcceptedAuxSocketConnectionCount()).toBe(acceptedBefore + 1);
   });
 
   it("does not dispatch a partial line before its newline arrives", () => {

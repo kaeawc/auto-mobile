@@ -2,16 +2,17 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_CTRL_PROXY_FORWARD_LEASE_IDLE_MS,
   decideForwardLeaseReclaim,
+  decideOwnerRelinquish,
   decodeForwardLeaseOwnerMetadata,
   encodeForwardLeaseOwnerMetadata,
   resolveCtrlProxyForwardLeaseIdleMs,
   type DeviceLeaseOwnerStatus,
+  type DeviceLeaseRelinquishResult,
+  type ForwardLeaseRelinquishReport,
 } from "../../../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
 
 const metadata = { socketPath: "/tmp/priv/daemon.sock", acquiredAt: 1_000 };
 const idleMs = 60_000;
-// Long after the owner took the lease at metadata.acquiredAt.
-const now = 1_000_000;
 
 function status(overrides: Partial<DeviceLeaseOwnerStatus> = {}): DeviceLeaseOwnerStatus {
   return {
@@ -48,137 +49,115 @@ describe("forwarding-lease owner metadata", () => {
   });
 });
 
+function relinquished(
+  overrides: Partial<DeviceLeaseRelinquishResult> = {},
+): ForwardLeaseRelinquishReport {
+  return {
+    kind: "relinquish",
+    result: {
+      ...status(),
+      released: true,
+      reason: "it reports no live session or recent activity",
+      ...overrides,
+    },
+  };
+}
+
 describe("decideForwardLeaseReclaim", () => {
   test("refuses an owner that recorded no socket, keeping the pre-#10497 behaviour", () => {
     expect(
-      decideForwardLeaseReclaim({
-        ownerPid: 4242,
-        metadata: undefined,
-        report: undefined,
-        idleMs,
-        now,
-      }).action,
+      decideForwardLeaseReclaim({ ownerPid: 4242, metadata: undefined, report: undefined }).action,
     ).toBe("refuse");
   });
 
-  test("reclaims from an owner whose socket is unreachable", () => {
+  test("takes over from an owner whose socket is unreachable", () => {
     const decision = decideForwardLeaseReclaim({
       ownerPid: 4242,
       metadata,
       report: { kind: "unreachable", detail: "ECONNREFUSED" },
-      idleMs,
-      now,
     });
     expect(decision).toEqual({
-      action: "reclaim",
+      action: "takeover",
       reason: "its control socket /tmp/priv/daemon.sock is unreachable (ECONNREFUSED)",
     });
   });
 
-  test("refuses a busy owner that does not answer, or cannot report status", () => {
+  test("refuses a busy owner that does not answer, or cannot relinquish", () => {
     for (const report of [
-      { kind: "no-response", detail: "no answer within 2000ms" } as const,
+      { kind: "no-response", detail: "no answer within 5000ms" } as const,
       { kind: "unsupported", detail: "Unsupported daemon method" } as const,
     ]) {
-      expect(
-        decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report, idleMs, now }).action,
-      ).toBe("refuse");
+      expect(decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report }).action).toBe("refuse");
     }
   });
 
-  test("reclaims when the socket is now served by a different daemon", () => {
+  test("takes over when the socket is now served by a different daemon", () => {
     const decision = decideForwardLeaseReclaim({
       ownerPid: 4242,
       metadata,
-      report: { kind: "status", status: status({ pid: 9999, sessionId: "s-new" }) },
-      idleMs,
-      now,
+      report: relinquished({ pid: 9999, released: false, reason: "it has live session s-new" }),
     });
-    expect(decision.action).toBe("reclaim");
+    expect(decision.action).toBe("takeover");
     expect(decision.reason).toContain("now served by PID 9999");
   });
 
-  test("refuses an owner with a live session and names it", () => {
-    const decision = decideForwardLeaseReclaim({
-      ownerPid: 4242,
-      metadata,
-      report: { kind: "status", status: status({ sessionId: "session-abc" }) },
-      idleMs,
-      now,
-    });
-    expect(decision).toEqual({
-      action: "refuse",
+  test("acquires normally once the owner released the lease itself", () => {
+    expect(decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report: relinquished() })).toEqual(
+      { action: "acquire", reason: "it reports no live session or recent activity" },
+    );
+  });
+
+  test("refuses with the owner's reason, transient only when the owner says so", () => {
+    const transientOf = (report: ForwardLeaseRelinquishReport) => {
+      const decision = decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report });
+      return decision.action === "refuse" ? (decision.transient ?? false) : undefined;
+    };
+    expect(
+      decideForwardLeaseReclaim({
+        ownerPid: 4242,
+        metadata,
+        report: relinquished({ released: false, reason: "it has live session s" }),
+      }),
+    ).toEqual({ action: "refuse", reason: "it has live session s" });
+    expect(transientOf({ kind: "no-response", detail: "slow" })).toBe(true);
+    expect(transientOf({ kind: "unsupported", detail: "old" })).toBe(false);
+    expect(
+      transientOf(relinquished({ released: false, reason: "used 5s ago", transient: true })),
+    ).toBe(true);
+  });
+});
+
+describe("decideOwnerRelinquish (#10506 review)", () => {
+  test("keeps the lease with a live session and names it", () => {
+    expect(decideOwnerRelinquish(status({ sessionId: "session-abc" }), idleMs)).toEqual({
+      release: false,
       reason: "it has live session session-abc on emulator-5600",
     });
   });
 
-  test("refuses an owner with in-flight tool calls, a stream subscriber, or recent activity", () => {
+  test("keeps the lease for in-flight tool calls, CtrlProxy requests or a stream, not transiently", () => {
     for (const overrides of [
       { activeExecutions: 1 },
+      { inFlightRequests: 2 },
       { streaming: true },
-      { idleForMs: idleMs - 1 },
     ]) {
-      const decision = decideForwardLeaseReclaim({
-        ownerPid: 4242,
-        metadata,
-        report: { kind: "status", status: status(overrides) },
-        idleMs,
-        now,
-      });
-      expect(decision.action).toBe("refuse");
+      const decision = decideOwnerRelinquish(status(overrides), idleMs);
+      expect(decision.release).toBe(false);
+      expect(decision).not.toHaveProperty("transient");
     }
   });
 
-  test("reclaims from an idle owner", () => {
-    for (const idleForMs of [null, idleMs]) {
-      expect(
-        decideForwardLeaseReclaim({
-          ownerPid: 4242,
-          metadata,
-          report: { kind: "status", status: status({ idleForMs }) },
-          idleMs,
-          now,
-        }).action,
-      ).toBe("reclaim");
-    }
-  });
-
-  test("treats an owner with no recorded use that took the lease recently as active (#10497 review)", () => {
-    const decision = decideForwardLeaseReclaim({
-      ownerPid: 4242,
-      metadata: { ...metadata, acquiredAt: now - 5_000 },
-      report: { kind: "status", status: status({ idleForMs: null }) },
-      idleMs,
-      now,
-    });
-    expect(decision).toEqual({
-      action: "refuse",
+  test("keeps the lease after recent use, as a transient refusal", () => {
+    expect(decideOwnerRelinquish(status({ idleForMs: 5_000 }), idleMs)).toEqual({
+      release: false,
       reason: "it used emulator-5600 5s ago",
       transient: true,
     });
   });
 
-  test("refuses an owner with CtrlProxy requests in flight, not as a transient refusal", () => {
-    const decision = decideForwardLeaseReclaim({
-      ownerPid: 4242,
-      metadata,
-      report: { kind: "status", status: status({ inFlightRequests: 2 }) },
-      idleMs,
-      now,
-    });
-    expect(decision.action).toBe("refuse");
-    expect(decision).not.toHaveProperty("transient");
-  });
-
-  test("marks only time-based refusals transient", () => {
-    const transientOf = (report: Parameters<typeof decideForwardLeaseReclaim>[0]["report"]) => {
-      const decision = decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report, idleMs, now });
-      return decision.action === "refuse" ? (decision.transient ?? false) : undefined;
-    };
-    expect(transientOf({ kind: "no-response", detail: "slow" })).toBe(true);
-    expect(transientOf({ kind: "unsupported", detail: "old" })).toBe(false);
-    expect(transientOf({ kind: "status", status: status({ sessionId: "s" }) })).toBe(false);
-    expect(transientOf({ kind: "status", status: status({ streaming: true }) })).toBe(false);
-    expect(transientOf({ kind: "status", status: status({ idleForMs: 1 }) })).toBe(true);
+  test("releases when idle for the full period or never used", () => {
+    for (const idleForMs of [null, idleMs]) {
+      expect(decideOwnerRelinquish(status({ idleForMs }), idleMs).release).toBe(true);
+    }
   });
 });

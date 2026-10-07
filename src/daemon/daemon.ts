@@ -60,7 +60,10 @@ import {
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
 import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
-import { getLiveAuxSocketConnectionCount } from "./socketServer/BaseSocketServer";
+import {
+  getAcceptedAuxSocketConnectionCount,
+  getLiveAuxSocketConnectionCount,
+} from "./socketServer/BaseSocketServer";
 import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
 import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
 import {
@@ -428,6 +431,10 @@ export class Daemon {
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
   private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
   private readonly activeHttpRequests = new Map<string, number>();
+  /** HTTP requests whose response is still open (SSE streams included). */
+  private openHttpRequests = 0;
+  /** HTTP requests ever received. */
+  private httpRequestsSeen = 0;
   private acceptingHttpSessions = false;
   private port: number;
   private host: string;
@@ -1191,6 +1198,13 @@ export class Daemon {
     const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
       this.handleHttpRequest(req, res, allowedHosts);
     this.httpServer.on("request", (req, res) => {
+      // Counted for the orphaned private-daemon watchdog (#10497): a retained
+      // MCP session is not a connected client, but an open request is.
+      this.openHttpRequests++;
+      this.httpRequestsSeen++;
+      res.once("close", () => {
+        this.openHttpRequests--;
+      });
       handleRequest(req, res).catch((error) => {
         logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
         if (!res.headersSent) {
@@ -2478,7 +2492,11 @@ export class Daemon {
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +
-          this.transports.size,
+          this.openHttpRequests,
+        clientActivityCount: () =>
+          (this.socketServer?.getAcceptedClientConnectionCount() ?? 0) +
+          getAcceptedAuxSocketConnectionCount() +
+          this.httpRequestsSeen,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
           setImmediate(() => process.kill(process.pid, "SIGTERM"));

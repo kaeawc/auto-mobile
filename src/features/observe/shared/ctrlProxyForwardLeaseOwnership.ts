@@ -99,8 +99,35 @@ export interface ForwardLeaseOwnerProbe {
   query(socketPath: string, deviceId: string): Promise<ForwardLeaseOwnerReport>;
 }
 
+/**
+ * A lease owner's answer to `daemon/relinquishDeviceLease`: its use of the
+ * device, and whether it gave the lease up. The owner decides and releases in
+ * one synchronous step, so activity it starts afterwards is never taken from
+ * under it (#10506 review).
+ */
+export interface DeviceLeaseRelinquishResult extends DeviceLeaseOwnerStatus {
+  released: boolean;
+  reason: string;
+  transient?: boolean;
+}
+
+export type ForwardLeaseRelinquishReport =
+  | Exclude<ForwardLeaseOwnerReport, { kind: "status" }>
+  | { kind: "relinquish"; result: DeviceLeaseRelinquishResult };
+
+/** Asks a lease owner to give a device's lease up when it no longer uses it. */
+export interface ForwardLeaseRelinquishProbe {
+  requestRelinquish(socketPath: string, deviceId: string): Promise<ForwardLeaseRelinquishReport>;
+}
+
 export type ForwardLeaseReclaimDecision =
-  | { action: "reclaim"; reason: string }
+  /** The owner released the lease itself; compete for it with an ordinary acquire. */
+  | { action: "acquire"; reason: string }
+  /**
+   * The owner cannot be asked (its socket is unreachable or now served by a
+   * different daemon), so take the lease over from it directly.
+   */
+  | { action: "takeover"; reason: string }
   | {
       action: "refuse";
       reason: string;
@@ -115,20 +142,17 @@ export type ForwardLeaseReclaimDecision =
 export interface ForwardLeaseReclaimInput {
   ownerPid: number;
   metadata: ForwardLeaseOwnerMetadata | undefined;
-  report: ForwardLeaseOwnerReport | undefined;
-  idleMs: number;
-  /** Requester's clock, compared with the owner's recorded acquire time. */
-  now: number;
+  report: ForwardLeaseRelinquishReport | undefined;
 }
 
 /**
- * Decide whether a requester may take a live owner's forwarding lease. A dead
- * owner never reaches here: the lock primitive already reclaims it.
+ * Decide how a requester may get a live owner's forwarding lease. A dead owner
+ * never reaches here: the lock primitive already reclaims it.
  */
 export function decideForwardLeaseReclaim(
   input: ForwardLeaseReclaimInput,
 ): ForwardLeaseReclaimDecision {
-  const { ownerPid, metadata, report, idleMs } = input;
+  const { ownerPid, metadata, report } = input;
   if (!metadata || !report) {
     return {
       action: "refuse",
@@ -138,7 +162,7 @@ export function decideForwardLeaseReclaim(
   switch (report.kind) {
     case "unreachable":
       return {
-        action: "reclaim",
+        action: "takeover",
         reason: `its control socket ${metadata.socketPath} is unreachable (${report.detail})`,
       };
     case "no-response":
@@ -148,57 +172,76 @@ export function decideForwardLeaseReclaim(
         reason: `its control socket ${metadata.socketPath} could not report lease status (${report.detail})`,
         transient: report.kind === "no-response",
       };
-    case "status":
-      return decideFromOwnerStatus(ownerPid, metadata, report.status, idleMs, input.now);
+    case "relinquish":
+      return decideFromRelinquishResult(ownerPid, metadata, report.result);
   }
 }
 
-function decideFromOwnerStatus(
+function decideFromRelinquishResult(
   ownerPid: number,
   metadata: ForwardLeaseOwnerMetadata,
-  status: DeviceLeaseOwnerStatus,
-  idleMs: number,
-  now: number,
+  result: DeviceLeaseRelinquishResult,
 ): ForwardLeaseReclaimDecision {
-  if (status.pid !== ownerPid) {
+  if (result.pid !== ownerPid) {
     return {
-      action: "reclaim",
-      reason: `its control socket ${metadata.socketPath} is now served by PID ${status.pid}, so the owner is orphaned`,
+      action: "takeover",
+      reason: `its control socket ${metadata.socketPath} is now served by PID ${result.pid}, so the owner is orphaned`,
     };
   }
+  if (result.released) {
+    return { action: "acquire", reason: result.reason };
+  }
+  return {
+    action: "refuse",
+    reason: result.reason,
+    ...(result.transient === true ? { transient: true } : {}),
+  };
+}
+
+export type OwnerRelinquishDecision =
+  | { release: true; reason: string }
+  | { release: false; reason: string; transient?: boolean };
+
+/**
+ * The owner-side rule for `daemon/relinquishDeviceLease`: give the lease up
+ * only with no live session, tool call, CtrlProxy request or stream on the
+ * device and no use within `idleMs`. `idleForMs` already counts the lease
+ * acquisition, so an owner that just took the lease is not treated as idle.
+ */
+export function decideOwnerRelinquish(
+  status: DeviceLeaseOwnerStatus,
+  idleMs: number,
+): OwnerRelinquishDecision {
   if (status.sessionId !== null) {
     return {
-      action: "refuse",
+      release: false,
       reason: `it has live session ${status.sessionId} on ${status.deviceId}`,
     };
   }
   if (status.activeExecutions > 0) {
     return {
-      action: "refuse",
+      release: false,
       reason: `it has ${status.activeExecutions} tool call(s) in flight on ${status.deviceId}`,
     };
   }
   if ((status.inFlightRequests ?? 0) > 0) {
     return {
-      action: "refuse",
+      release: false,
       reason: `it has ${status.inFlightRequests} CtrlProxy request(s) in flight on ${status.deviceId}`,
     };
   }
   if (status.streaming === true) {
     return {
-      action: "refuse",
+      release: false,
       reason: `a device-data stream subscriber is watching ${status.deviceId}`,
     };
   }
-  // No recorded use: fall back to when the owner took the lease, so an owner
-  // that just acquired it is not treated as idle (#10497 review).
-  const idleForMs = status.idleForMs ?? now - metadata.acquiredAt;
-  if (idleForMs < idleMs) {
+  if (status.idleForMs !== null && status.idleForMs < idleMs) {
     return {
-      action: "refuse",
-      reason: `it used ${status.deviceId} ${Math.round(Math.max(0, idleForMs) / 1000)}s ago`,
+      release: false,
+      reason: `it used ${status.deviceId} ${Math.round(Math.max(0, status.idleForMs) / 1000)}s ago`,
       transient: true,
     };
   }
-  return { action: "reclaim", reason: `it reports no live session or recent activity` };
+  return { release: true, reason: "it reports no live session or recent activity" };
 }

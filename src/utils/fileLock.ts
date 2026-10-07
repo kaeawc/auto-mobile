@@ -414,6 +414,12 @@ export function releaseExclusiveLock(
   // unlink-by-path, which would delete the TAKER's lock. Claim the exact file
   // instance by renaming it to a unique marker, verify the marker is ours, and
   // only then delete it; a displaced foreign lock is restored instead.
+  // POSIX has no compare-and-unlink, so a residual window remains: a releaser
+  // whose read predates a completed takeover can rename the taker's lock away
+  // and a third `wx` acquirer can win before the restore. Forwarding-lease
+  // owners that answer their socket therefore release on request instead of
+  // being taken over (#10506 review); only an unreachable or orphaned owner is
+  // taken over while live.
   const releaseMarker = `${lockFilePath}.${pid}.release.${++releaseMarkerCounter}`;
   try {
     renameSync(lockFilePath, releaseMarker);

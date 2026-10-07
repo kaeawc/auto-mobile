@@ -267,6 +267,12 @@ describe("explicit-display pre-dispatch read", () => {
           },
         }),
       };
+      // The real-screen path configures recomposition tracking on the device's
+      // CtrlProxy client; stub it so this test never opens a real WebSocket (#10470).
+      const recomposition = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "setRecompositionTrackingEnabled",
+      ).mockResolvedValue(undefined);
       const screen = createObserveScreenForTest(
         target,
         new FakeAdbClientFactory(adb()),
@@ -298,6 +304,7 @@ describe("explicit-display pre-dispatch read", () => {
         expect(recorder.captureFreshCalls + recorder.captureSettledCalls).toBe(0);
         expect(audits).toBe(0);
       } finally {
+        recomposition.mockRestore();
         ObservedAndroidDisplayCache.release(target.deviceId);
         displayTransitions.reset(target.deviceId);
         resetObserveCacheStore();

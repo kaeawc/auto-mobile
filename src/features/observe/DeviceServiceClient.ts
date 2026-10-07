@@ -15,7 +15,7 @@
  */
 
 import WebSocket from "ws";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -39,9 +39,52 @@ import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigat
 export type WebSocketFactory = (url: string) => WebSocket;
 
 /**
- * Default WebSocket factory that creates real WebSocket instances.
+ * Env flag a unit test sets (`1`/`true`/`yes`) to opt into a real WebSocket from
+ * {@link defaultWebSocketFactory} under `bun test`. Prefer injecting a
+ * `WebSocketFactory` instead; this exists for suites that must exercise the
+ * default factory against a local fake server.
  */
-export const defaultWebSocketFactory: WebSocketFactory = (url: string) => new WebSocket(url);
+export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET";
+
+function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
+  const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
+ * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
+ * CtrlProxy socket. On a developer machine with an emulator or simulator running,
+ * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
+ * unstubbed client method sent real taps from a unit test (#10470). Mirrors the
+ * real-DB guard (#3067): armed by Bun's test context signal (`NODE_ENV=test`),
+ * and it fires only on the default path. Injecting a `WebSocketFactory` (or
+ * setting {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
+ */
+export function assertUnitTestRealWebSocketAllowed(
+  url: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (env.NODE_ENV !== "test" || isRealCtrlProxyWebSocketOptInEnabled(env)) {
+    return;
+  }
+  throw new ActionableError(
+    `Unit test tried to open a real CtrlProxy WebSocket to ${url}. With an ` +
+      "emulator or simulator running this reaches a live device (issue #10470). " +
+      "Stub the client method the code under test calls (e.g. " +
+      "AndroidCtrlProxyClient.prototype.requestTapCoordinates or the matching " +
+      "IOSCtrlProxyClient method), inject a fake WebSocketFactory, or, for a " +
+      `suite that runs its own local fake server, set ${REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}=1.`,
+  );
+}
+
+/**
+ * Default WebSocket factory that creates real WebSocket instances. Guarded under
+ * `bun test`; see {@link assertUnitTestRealWebSocketAllowed}.
+ */
+export const defaultWebSocketFactory: WebSocketFactory = (url: string) => {
+  assertUnitTestRealWebSocketAllowed(url);
+  return new WebSocket(url);
+};
 
 /**
  * Configuration for connection behavior.

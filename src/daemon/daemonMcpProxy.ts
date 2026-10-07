@@ -42,6 +42,7 @@ import {
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
@@ -274,13 +275,14 @@ function isLivenessOwnerConflictError(error: unknown): boolean {
   );
 }
 
-/** The daemon answered that another token owns this session's liveness now (#10050). */
-function isLivenessOwnerSupersededError(error: unknown): boolean {
+/** The daemon answered that this token no longer owns liveness (#10050, #10260). */
+function isLivenessOwnershipLostError(error: unknown): boolean {
   return (
     error !== null &&
     typeof error === "object" &&
     "code" in error &&
-    error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+      error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
   );
 }
 
@@ -4087,7 +4089,7 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       return "session-gone";
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Another token took the session over while this proxy could not heartbeat it.
       return "superseded";
     }
@@ -4218,7 +4220,7 @@ export class DaemonMcpProxy {
         typeof error === "object" &&
         "code" in error &&
         error.code === DAEMON_SESSION_NOT_FOUND_CODE) ||
-      isLivenessOwnerSupersededError(error) ||
+      isLivenessOwnershipLostError(error) ||
       isLivenessOwnerConflictError(error)
     );
   }
@@ -4397,7 +4399,7 @@ export class DaemonMcpProxy {
     if (isLivenessOwnerConflictError(error)) {
       return false;
     }
-    return !isLivenessOwnerSupersededError(error);
+    return !isLivenessOwnershipLostError(error);
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -4423,7 +4425,7 @@ export class DaemonMcpProxy {
     if (this.closing) {
       return;
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Same informational outcome as the latest binding: no fencing or re-claim.
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
       return;
@@ -4593,13 +4595,17 @@ export class DaemonMcpProxy {
       error !== null &&
       typeof error === "object" &&
       "code" in error &&
-      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+      (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+        error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
     ) {
-      // Another claimant owns liveness now. Preserve the old successful no-op's
-      // local acknowledgement without fencing, reconnecting or re-claiming.
+      // #10115: a refusal proves transport reachability, not ownership. Do not
+      // fence or re-claim: that would undo a deliberate handoff. Report the loss
+      // visibly once; the local acknowledgement only prevents transport recovery.
       if (!this.livenessSupersessionLogged) {
         this.livenessSupersessionLogged = true;
-        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
+        logger.warn(
+          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper or explicitly claim with a fresh token.`,
+        );
       }
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
       return true;

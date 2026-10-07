@@ -354,12 +354,15 @@ export interface PreCliLivenessSnapshot {
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
 
+/** Result of an explicit owner-authorized liveness release. */
+export type LivenessReleaseOutcome = "released" | "already-unowned" | "not-owner" | "not-found";
+
 /**
  * Result of an explicit liveness-ownership claim (#10050).
  *
  * - `claimed`: the token now owns (or already owned) the session.
  * - `conflict`: a different token owns it and that owner's lease is live; nothing changed.
- * - `superseded`: this token already claimed and was displaced; it can never reclaim.
+ * - `superseded`: this token already claimed and was displaced; it cannot reclaim an owned session.
  * - `not-found`: the session is unknown or was replaced while the claim waited.
  */
 export type LivenessClaimOutcome = "claimed" | "conflict" | "superseded" | "not-found";
@@ -5463,6 +5466,44 @@ export class SessionManager {
     });
   }
 
+  /** Clear only the owner token; preserve the device, policy and existing lease/grace deadline. */
+  async releaseLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessReleaseOutcome> {
+    const session = this.getSession(sessionId);
+    if (!session || !this.isAdmittedForAutomation(session)) {
+      return "not-found";
+    }
+    return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
+        return "not-found";
+      }
+      if (session.livenessOwnerToken === undefined) {
+        return "already-unowned";
+      }
+      if (session.livenessOwnerToken !== ownerToken) {
+        return "not-owner";
+      }
+      // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
+      session.livenessOwnershipClaims ??= new Set<string>();
+      session.livenessOwnershipClaims.add(ownerToken);
+      session.livenessOwnerToken = undefined;
+      // Fence an older heartbeat write's failure rollback across the handoff.
+      session.activityGeneration++;
+      try {
+        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
+      } catch (error) {
+        session.livenessOwnerToken = ownerToken;
+        if (!this.isAdmittedForAutomation(session)) {
+          return "not-found";
+        }
+        throw error;
+      }
+      return "released";
+    });
+  }
+
   private livenessOwnershipClaimMutexFor(session: Session): Mutex {
     const existing = this.livenessOwnershipClaimMutexes.get(session);
     if (existing) {
@@ -5479,7 +5520,7 @@ export class SessionManager {
   ): Promise<LivenessClaimOutcome> {
     const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
     session.livenessOwnershipClaims = processedClaims;
-    if (processedClaims.has(ownerToken)) {
+    if (session.livenessOwnerToken !== undefined && processedClaims.has(ownerToken)) {
       // A retried claim whose token has since been displaced must never take
       // the session back, whatever the new owner's lease says.
       return session.livenessOwnerToken === ownerToken ? "claimed" : "superseded";
@@ -5492,18 +5533,26 @@ export class SessionManager {
       return "conflict";
     }
     const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    const alreadyProcessed = processedClaims.has(ownerToken);
     processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
     // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
     // request handler records the claimant's heartbeat several awaits later; until then a second
     // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
     session.lastOwnerHeartbeat = this.timer.now();
-    await this.persistNewLivenessOwnershipClaim(
-      session,
-      ownerToken,
-      { previousOwnerToken, previousOwnerHeartbeat },
-      processedClaims,
-    );
+    try {
+      await this.persistNewLivenessOwnershipClaim(
+        session,
+        ownerToken,
+        { previousOwnerToken, previousOwnerHeartbeat },
+        processedClaims,
+      );
+    } catch (error) {
+      if (alreadyProcessed) {
+        processedClaims.add(ownerToken);
+      }
+      throw error;
+    }
     return "claimed";
   }
 
@@ -5605,7 +5654,11 @@ export class SessionManager {
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.getSession(sessionId);
-    if (!session || session.livenessOwnerToken !== undefined) {
+    if (
+      !session ||
+      session.livenessOwnerToken !== undefined ||
+      session.livenessOwnershipClaims?.size
+    ) {
       return false;
     }
     session.livenessOwnerToken = ownerToken;

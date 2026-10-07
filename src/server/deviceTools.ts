@@ -1,3 +1,4 @@
+import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
   DefaultDeviceResourceObserver,
   type DeviceResourceObserver,
@@ -315,6 +316,19 @@ const startDeviceParametersSchema = z.object({
     .describe(
       "Host PNG/JPG/JPEG poster image for the Android emulator back camera wall; cold boot only",
     ),
+  cameraPosterQr: z
+    .object({
+      text: z
+        .string()
+        .min(1)
+        .max(1024)
+        .describe("Payload the generated QR code encodes (UTF-8, at most ~213 bytes)"),
+    })
+    .strict()
+    .optional()
+    .describe(
+      "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
+    ),
   formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
   requires: z
     .object({
@@ -386,6 +400,13 @@ export const startDeviceSchema = z.preprocess(
     };
   },
   startDeviceParametersSchema.superRefine((value, context) => {
+    if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["cameraPosterQr"],
+        message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
+      });
+    }
     if (value.avdName !== undefined && value.platform !== "android") {
       context.addIssue({
         code: "custom",
@@ -845,6 +866,7 @@ export function createToolErrorResponse(
 // Export interfaces for type safety
 export interface StartDeviceArgs {
   cameraPosterPath?: string;
+  cameraPosterQr?: { text: string };
   platform: "android" | "ios";
   minOsVersion?: string;
   maxOsVersion?: string;
@@ -1290,6 +1312,8 @@ export function detailedDiscoveryOptions(
 }
 
 export interface DeviceToolsDependencies {
+  /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
+  cameraPosterQrWriter?: QrPosterWriter;
   androidAdbFactory: AdbClientFactory;
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
@@ -3588,6 +3612,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
     androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
+    cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
     env: deps.env ?? currentDeps.env,
     deviceResourceObserverFactory:
       deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,

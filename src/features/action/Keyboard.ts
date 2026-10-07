@@ -16,7 +16,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { FocusedInputQuery } from "../../utils/interfaces/ElementTraitQueries";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -151,6 +151,19 @@ export class KeyboardOpenIndeterminateError extends ActionableError {
   }
 }
 
+function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean {
+  return (
+    a?.length === b.length &&
+    a.every(
+      (box, i) =>
+        box.left === b[i].left &&
+        box.top === b[i].top &&
+        box.right === b[i].right &&
+        box.bottom === b[i].bottom,
+    )
+  );
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -176,7 +189,7 @@ export class Keyboard {
     timer: Timer = defaultTimer,
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: FocusedInputQuery = new DefaultElementFinder(),
+    finder: FocusedInputQuery = new DefaultFocusedInputQuery(),
     openClient?: KeyboardOpenClient,
   ) {
     this.device = device;
@@ -654,7 +667,9 @@ export class Keyboard {
     const deadline = this.timer.now() + Keyboard.STATE_CONFIRMATION_TIMEOUT_MS;
 
     let lastState = await this.readKeyboardStateBefore(deadline, signal);
-    while (lastState.error || lastState.open !== expectedOpen) {
+    let previousState: KeyboardDetection | undefined;
+    while (!this.isStateSettled(lastState, previousState, expectedOpen)) {
+      previousState = lastState;
       const remainingMs = deadline - this.timer.now();
       throwIfAborted(signal);
       if (remainingMs <= 0) {
@@ -674,6 +689,26 @@ export class Keyboard {
     }
 
     return lastState;
+  }
+
+  /**
+   * A sample is settled once it reports the expected open state. For an open
+   * keyboard the IME window is still sliding in until two consecutive samples
+   * report the same bounds, so a single sample can lie partly off screen (#10480).
+   * Windowless (heuristic) detections carry no bounds and settle immediately.
+   */
+  private isStateSettled(
+    state: KeyboardDetection,
+    previous: KeyboardDetection | undefined,
+    expectedOpen: boolean,
+  ): boolean {
+    if (state.error || state.open !== expectedOpen) {
+      return false;
+    }
+    if (!expectedOpen || !state.bounds?.length) {
+      return true;
+    }
+    return previous?.open === true && sameBounds(previous.bounds, state.bounds);
   }
 
   /**

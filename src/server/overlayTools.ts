@@ -559,6 +559,9 @@ export interface OverlayToolDependencies {
   timer?: Timer;
   lifecycle?: OverlayEventLifecycle;
 }
+/** MCP name of the on-device prototype tool; `overlay` is its deprecated alias (#10495). */
+export const PROTOTYPE_TOOL_NAME = "prototype";
+export const DEPRECATED_OVERLAY_TOOL_NAME = "overlay";
 const responseFor = (payload: z.infer<typeof overlayOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
 let unsubscribeOverlayLifecycle: (() => void) | undefined;
@@ -1142,11 +1145,24 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     );
   };
   ToolRegistry.registerDeviceAware(
-    "overlay",
+    PROTOTYPE_TOOL_NAME,
     'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both need a CtrlProxy advertising overlay_window_options_v1.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },
+  );
+  // Deprecated alias for one release (#10495): same schema and handler, hidden from discovery.
+  ToolRegistry.registerDeviceAware(
+    DEPRECATED_OVERLAY_TOOL_NAME,
+    `Deprecated alias of ${PROTOTYPE_TOOL_NAME}; use ${PROTOTYPE_TOOL_NAME}.`,
+    overlaySchema,
+    async (...args: Parameters<typeof handler>) => {
+      logger.warn(
+        `[overlayTools] tool "${DEPRECATED_OVERLAY_TOOL_NAME}" is deprecated; use "${PROTOTYPE_TOOL_NAME}"`,
+      );
+      return handler(...args);
+    },
+    { defaultEnabled: false, hidden: true, outputSchema: overlayOutputSchema },
   );
   const unsubscribeCleanup = subscribeOverlayCleanup(
     dependencies.lifecycle ?? defaultOverlayLifecycle(),

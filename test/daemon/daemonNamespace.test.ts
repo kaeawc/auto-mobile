@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
 import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
@@ -261,8 +260,16 @@ function createHarness(
   };
 }
 
+// Per-test directory created with mkdtemp under the worktree scratch dir (not a
+// predictable os.tmpdir() path), so the pid/lock files written into it are private.
+function makeHarnessDir(): string {
+  const base = join(process.cwd(), "scratch/data");
+  mkdirSync(base, { recursive: true });
+  return mkdtempSync(join(base, "namespace-unit-"));
+}
+
 function harness() {
-  const dir = mkdtempSync(join(tmpdir(), "namespace-unit-"));
+  const dir = makeHarnessDir();
   dirs.push(dir);
   const socket = join(dir, "private socket.sock");
   const pidPath = join(dir, "daemon.pid");
@@ -272,7 +279,7 @@ function harness() {
 }
 
 function defaultNamespaceHarness() {
-  const dir = mkdtempSync(join(tmpdir(), "namespace-unit-"));
+  const dir = makeHarnessDir();
   dirs.push(dir);
   return createHarness(dir, {
     socket: DEFAULT_SOCKET_PATH,

@@ -102,6 +102,8 @@ export interface TapOnArgs {
 }
 
 export type TapAtArgs = TapAtOptions & {
+  __tapAtPlanContext?: import("../models/TapAtGeometry").TapAtPlanContext;
+  __tapAtRecordingContext?: import("../models/TapAtGeometry").TapAtPlanContext;
   platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";

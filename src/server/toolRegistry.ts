@@ -1671,6 +1671,7 @@ function deviceAwareHandlerArgs(
   args: Record<string, unknown>,
   options: DeviceAwareToolOptions,
   context: ReturnType<typeof getToolSelectionContext>,
+  name: string,
 ): Record<string, unknown> {
   const routingSession =
     options.sessionlessDeviceRead &&
@@ -1679,7 +1680,11 @@ function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  return withAmbientDeviceContext(args, routingSession, context?.execution);
+  const handlerArgs = withAmbientDeviceContext(args, routingSession, context?.execution);
+  if (name === "tapAt") {
+    handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
+  }
+  return handlerArgs;
 }
 
 /**
@@ -1996,7 +2001,7 @@ export class ToolRegistryClass {
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
-      const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext);
+      const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;

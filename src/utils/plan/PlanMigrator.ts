@@ -583,7 +583,9 @@ const migrateStepFields = (
     // would strip the flag before the executor sees it, making a best-effort step mandatory (#2853).
     // `expectations` is likewise a plan-step field: as a tool param a strict schema rejects the
     // step (#9925). PlanNormalizer keeps it off `params` and the executor warns it is unevaluated.
-    if (["tool", "command", "label", "params", "optional", "expectations"].includes(key)) {
+    if (
+      ["tool", "command", "label", "params", "optional", "expectations", "geometry"].includes(key)
+    ) {
       continue;
     }
     inlineParams[key] = value;

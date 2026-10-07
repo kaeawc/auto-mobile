@@ -59,6 +59,7 @@ import {
   suspectGraceMsFor,
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
+import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
@@ -479,9 +480,10 @@ export class SessionSuspectError extends ActionableError {
     readonly remainingMs: number,
   ) {
     super(
-      `Session ${sessionUuid} is suspect: its owner's heartbeat lapsed and the session is held ` +
-        `for ${Math.ceil(remainingMs / 1000)}s more with its device reserved. Resume heartbeats ` +
-        `from the owner to restore it, or retry after the window if the owner is gone.`,
+      `Session ${sessionUuid} missed a liveness heartbeat and is being restored; its device ` +
+        `stays reserved for ${Math.ceil(remainingMs / 1000)}s. Retry this call now, without ` +
+        `waiting. If the retry says the session was released, acquire a device again with ` +
+        `getAndroid or getApple.`,
     );
     this.name = "SessionSuspectError";
   }
@@ -805,6 +807,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "cli-idle-timeout" ||
     releaseReason === "rehydration-owner-timeout" ||
+    releaseReason === OWNER_DISCONNECTED_RELEASE_REASON ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||

@@ -226,9 +226,14 @@ import {
   evaluateDeviceDisconnects,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
+  selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
+import {
+  defaultAdbTransportRestartRegistry,
+  type AdbTransportRestartLookup,
+} from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -630,6 +635,18 @@ export class Daemon {
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
           deferFailureFallback: true,
         }),
+      ownerDisconnect: {
+        release: async (session, reason) => {
+          // Like the heartbeat monitor, leave a session with work in flight to its lease.
+          if (this.hasActiveSessionExecution(session.sessionId)) {
+            logger.info(
+              `[Daemon] Kept session ${session.sessionId} after its owner disconnected: executions are still active`,
+            );
+            return;
+          }
+          await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
+        },
+      },
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryPolicy,
       onDeviceFramesInvalidated: (deviceId) => {
@@ -2615,17 +2632,21 @@ export class Daemon {
       "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
     > = new MultiPlatformDeviceManager(),
     listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
+    transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
   ): void {
     if (this.deviceDisconnectMonitor) {
       return;
     }
 
-    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(deviceManager, () =>
-      this.discoverAndReconcile(deviceManager, {
-        planActive: true,
-        platform: "android",
-        bypassAndroidDeviceListCache: true,
-      }),
+    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(
+      deviceManager,
+      () =>
+        this.discoverAndReconcile(deviceManager, {
+          planActive: true,
+          platform: "android",
+          bypassAndroidDeviceListCache: true,
+        }),
+      transportRestarts,
     );
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(
@@ -2710,6 +2731,13 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
+            immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
+              candidateDeviceIds,
+              candidatePlatforms,
+              bootedDeviceIds,
+              offlineDeviceIds,
+              transportRestarts,
+            ),
           });
 
           if (disconnectResult.skippedAllDiscoveryFailed) {
@@ -2776,12 +2804,14 @@ export class Daemon {
   private createPlanDeviceLossCheck(
     deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
     discover: PlanDeviceLossPort["discover"],
+    transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
   ): (
     result: ReturnType<typeof evaluateDeviceDisconnects>,
     bootedDeviceIds: ReadonlySet<string>,
   ) => Promise<void> {
     const monitor = new PlanDeviceLossMonitor({
       timer: this.timer,
+      isTransportRestarting: (id) => transportRestarts.isRestarting(id),
       getDevice: (id) => this.devicePool.getDevice(id),
       getPlanSessionUuid: (id) =>
         resolveToolSelectionBaseSessionUuid(id, this.sessionManager) ?? id,
@@ -3111,7 +3141,7 @@ export class Daemon {
     }
     if (sessionIdAtDisconnect && sessionAtDisconnect) {
       logger.warn(
-        `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionIdAtDisconnect}`,
+        `[DisconnectMonitor] Device ${deviceId} confirmed disconnected — cancelling session ${sessionIdAtDisconnect}`,
       );
       await this.cancelAndReleaseSession(
         sessionIdAtDisconnect,

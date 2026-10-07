@@ -9,6 +9,7 @@ import type { PooledDevice } from "./devicePool";
 import type { EmulatorLossDetectionPath } from "./emulatorLossIncident";
 import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
+import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import type { Timer } from "../utils/SystemTimer";
 
@@ -25,6 +26,8 @@ interface PlanLossTarget {
 
 export interface PlanDeviceLossPort {
   timer: Pick<Timer, "now">;
+  /** AutoMobile is restarting this serial's adbd; keep the confirmation window (#10493). */
+  isTransportRestarting?(deviceId: string): boolean;
   getDevice(deviceId: string): PooledDevice | null;
   getPlanSessionUuid(sessionId: string): string;
   hasPlanExecution(deviceId: string, planSessionUuid: string): boolean;
@@ -147,12 +150,9 @@ export class PlanDeviceLossMonitor {
       }
       return;
     }
-    const pending = this.pending.get(target.device.id);
-    if (!pending || !this.isCurrent(pending.target)) {
-      this.pending.set(target.device.id, { target, absentSince: this.port.timer.now() });
-      return;
-    }
-    if (this.port.timer.now() - pending.absentSince < PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS) {
+    // A physical USB phone does not leave a successful listing transiently,
+    // so this sweep's cache-bypassing absence confirms it at once (#10493).
+    if (!this.isImmediateLoss(target.device.id) && !this.isWindowElapsed(target)) {
       return;
     }
     const reserved = await this.port.isShutdownReserved(target.device.id);
@@ -161,6 +161,21 @@ export class PlanDeviceLossMonitor {
       return;
     }
     await this.reportLoss(target);
+  }
+
+  private isImmediateLoss(deviceId: string): boolean {
+    return (
+      isPhysicalAndroidUsbSerial(deviceId) && this.port.isTransportRestarting?.(deviceId) !== true
+    );
+  }
+
+  private isWindowElapsed(target: PlanLossTarget): boolean {
+    const pending = this.pending.get(target.device.id);
+    if (!pending || !this.isCurrent(pending.target)) {
+      this.pending.set(target.device.id, { target, absentSince: this.port.timer.now() });
+      return false;
+    }
+    return this.port.timer.now() - pending.absentSince >= PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS;
   }
 
   private isCurrent(target: PlanLossTarget): boolean {

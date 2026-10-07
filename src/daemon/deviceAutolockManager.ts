@@ -758,6 +758,21 @@ export class DeviceAutolockManager {
     }
   }
 
+  /** Whether any connected MCP client still acquired or routes to the autolock session. */
+  hasMcpSessionOwner(sessionId: string): boolean {
+    for (const acquired of this.mcpSessionAcquiredAutolocks.values()) {
+      if (acquired.has(sessionId)) {
+        return true;
+      }
+    }
+    for (const mappedSessionId of this.mcpSessionAutolockMap.values()) {
+      if (mappedSessionId === sessionId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   releaseMcpSessionBindings(mcpSessionId: string): void {
     this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
     this.mcpSessionAutolockMap.delete(mcpSessionId);

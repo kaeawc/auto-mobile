@@ -1,3 +1,4 @@
+import { withAndroidTransportId, copyAndroidTransportId } from "../../../src/utils/androidSerial";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "events";
 import { PassThrough } from "stream";
@@ -119,13 +120,26 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     const devices = await adb.getBootedAndroidDevices();
 
     expect(devices).toEqual([
-      {
-        name: "emulator-5554",
-        platform: "android",
-        deviceId: "emulator-5554",
-        observedAt: 1,
-      },
+      withAndroidTransportId(
+        {
+          name: "emulator-5554",
+          platform: "android",
+          deviceId: "emulator-5554",
+          observedAt: 1,
+        },
+        "42",
+      ),
     ]);
+    expect(JSON.parse(JSON.stringify(devices[0]))).toEqual({
+      name: "emulator-5554",
+      platform: "android",
+      deviceId: "emulator-5554",
+      observedAt: 1,
+    });
+    const snapshot = await adb.getReadinessDeviceSnapshot({ timeoutMs: 250 });
+    expect(copyAndroidTransportId(snapshot.devices[0], {})).toEqual(
+      copyAndroidTransportId(devices[0], {}),
+    );
   });
 
   test("keeps discovery ordering monotonic when the wall clock rolls back", async () => {

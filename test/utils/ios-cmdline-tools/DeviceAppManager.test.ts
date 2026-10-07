@@ -1,3 +1,4 @@
+import { CORESIMULATOR_DEVICE_SET_PATH_ENV } from "../../../src/utils/workingDirectory";
 import { describe, expect, test } from "bun:test";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
@@ -564,6 +565,42 @@ describe("DeviceAppManager", () => {
     expect(fakeLogger.warnMessages[0]).toContain("Failed to hash simulator app bundle");
     expect(fakeLogger.debugMessages).toEqual([]);
   });
+
+  test.each([undefined, "", "  ", " /custom/device set "])(
+    "simulator lookup and uninstall use the configured device set %s",
+    async (configured) => {
+      const saved = process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+      try {
+        if (configured === undefined) {
+          delete process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+        } else {
+          process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = configured;
+        }
+        const calls: Array<{ file: string; args: string[] }> = [];
+        const manager = createCommandSpanManager([], {
+          timer: new FakeTimer(),
+          execute: async (file, args) => {
+            calls.push({ file, args });
+            return createExecResult("", "");
+          },
+        });
+        const udid = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+        await manager.getInstalledAppBundleHash(udid, bundleId, true);
+        await manager.uninstallApp(udid, bundleId, true);
+        const prefix = configured?.trim() ? ["simctl", "--set", "/custom/device set"] : ["simctl"];
+        expect(calls).toEqual([
+          { file: "xcrun", args: [...prefix, "get_app_container", udid, bundleId, "app"] },
+          { file: "xcrun", args: [...prefix, "uninstall", udid, bundleId] },
+        ]);
+      } finally {
+        if (saved === undefined) {
+          delete process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+        } else {
+          process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = saved;
+        }
+      }
+    },
+  );
 
   test("uninstallApp uses simctl for simulators", async () => {
     const commands: string[] = [];

@@ -13,6 +13,7 @@ import type {
   TimeAggregation,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
   normalizeStreamLimit,
   normalizeStreamSinceId,
@@ -95,6 +96,8 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
 > {
   private readonly authenticator: StreamSocketAuthenticator;
 
+  /** `acknowledge` ships an id list the protocol does not bound, so allow more than the default. */
+  protected readonly maxFrameBytes = FAILURES_STREAM_MAX_FRAME_BYTES;
   private readonly repository: FailuresStreamRepository;
 
   constructor(

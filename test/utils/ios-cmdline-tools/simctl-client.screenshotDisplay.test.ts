@@ -1,3 +1,4 @@
+import { CORESIMULATOR_DEVICE_SET_PATH_ENV } from "../../../src/utils/workingDirectory";
 import { expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
@@ -807,5 +808,29 @@ test("valid panel PNG is accepted without a warning", async () => {
     expect(result.data).toBe(frame.toString("base64"));
   } finally {
     warn.mockRestore();
+  }
+});
+
+test("screenshot spawn explicitly selects the custom device set (#6900)", async () => {
+  const saved = process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+  process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = " /custom/device set ";
+  try {
+    const harness = captureHarness({ frame: png(10, 20) });
+    await harness.simctl.screenshot(udid, "0");
+    expect(harness.calls[0].slice(0, -1)).toEqual([
+      "simctl",
+      "--set",
+      "/custom/device set",
+      "io",
+      udid,
+      "screenshot",
+      "--display=0",
+    ]);
+  } finally {
+    if (saved === undefined) {
+      delete process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+    } else {
+      process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = saved;
+    }
   }
 });

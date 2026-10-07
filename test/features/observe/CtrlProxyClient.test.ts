@@ -1520,6 +1520,51 @@ describe("AndroidCtrlProxyClient", function () {
     });
   }
 
+  test("logs exactly once when an own-device forward has extra columns", async function () {
+    const row = `${testDevice.deviceId} tcp:52001 tcp:8765 unexpected`;
+    stubForwardLifecycleCommands(() => `${row}\nother-device tcp:52002 tcp:8765 unexpected\n`);
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      await accessibilityServiceClient.sweepOrphanedCtrlProxyPortForwards();
+
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug).toHaveBeenCalledWith(
+        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52001");
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  for (const site of ["removal check", "active check"] as const) {
+    test(`logs an extra-column row during the ${site}`, async function () {
+      if (site === "active check") {
+        await accessibilityServiceClient.setupPortForwarding();
+      }
+      const row = `${testDevice.deviceId} tcp:8765 tcp:8765 unexpected`;
+      let listings = 0;
+      const targetListing = site === "active check" ? 1 : 2;
+      stubForwardLifecycleCommands(() => (++listings === targetListing ? `${row}\n` : ""));
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        await accessibilityServiceClient.setupPortForwarding();
+
+        const skippedRows = debug.mock.calls.filter(([message]) =>
+          message.includes("Skipping adb forward row with extra columns"),
+        );
+        expect(skippedRows).toEqual([
+          [
+            `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+          ],
+        ]);
+        expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8765");
+      } finally {
+        debug.mockRestore();
+      }
+    });
+  }
+
   test("sweeps a CtrlProxy forward orphaned by a simulated daemon SIGKILL", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();

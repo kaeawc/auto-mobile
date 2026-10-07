@@ -217,6 +217,92 @@ function refreshFailureContext(failure: string | Error | undefined): string {
  */
 type MultiDeviceAllocationBlock = "queued" | "busy" | "contention";
 
+interface MultiDeviceAllocationTicket {
+  requests: DeviceAllocationRequest[];
+  /**
+   * Sessions that already held a pooled device when the ticket last checked
+   * whether it can claim (on enqueue and before each claim check, never while
+   * its own attempt is in flight). Their devices are never rolled back, so they
+   * stay held while it waits.
+   */
+  heldSessionIds?: ReadonlySet<string>;
+}
+
+/** A queued ticket whose pre-existing session pins a device. */
+interface PinnedDeviceHolder {
+  ticket: MultiDeviceAllocationTicket;
+  sessionId: string;
+}
+
+/** A deadlocked claim's candidate device pinned by other waiting tickets. */
+interface PinnedDeviceWait {
+  request: DeviceAllocationRequest;
+  deviceId: string;
+  holders: PinnedDeviceHolder[];
+}
+
+/** Why a deadlocked ticket waits: its edges in the wait-for graph. */
+interface DeadlockWait {
+  /** Earlier conflicting deadlocked tickets it is queued behind. */
+  queuedBehind: MultiDeviceAllocationTicket[];
+  /** Pinned devices it needs; empty when unpinned supply alone could serve it. */
+  blockedOn: PinnedDeviceWait[];
+}
+
+/** Whether each claim (a list of candidate IDs) can get a distinct device. */
+function hasCompleteMatching(candidates: readonly (readonly string[])[]): boolean {
+  const owner = new Map<string, number>();
+  const augment = (index: number, seen: Set<string>): boolean =>
+    candidates[index].some((deviceId) => {
+      if (seen.has(deviceId)) {
+        return false;
+      }
+      seen.add(deviceId);
+      const current = owner.get(deviceId);
+      if (current === undefined || augment(current, seen)) {
+        owner.set(deviceId, index);
+        return true;
+      }
+      return false;
+    });
+  return candidates.every((_, index) => augment(index, new Set()));
+}
+
+/** Nodes that reach `start` and are reachable from it, including `start`. */
+function stronglyConnectedWith<T>(start: T, successors: (node: T) => readonly T[]): Set<T> {
+  const reachableFrom = (from: T) => {
+    const seen = new Set<T>();
+    const pending = [...successors(from)];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        pending.push(...successors(next));
+      }
+    }
+    return seen;
+  };
+  const forward = reachableFrom(start);
+  if (!forward.has(start)) {
+    return new Set([start]);
+  }
+  return new Set([...forward].filter((node) => node === start || reachableFrom(node).has(start)));
+}
+
+function describePinnedWait({ deviceId, holders }: PinnedDeviceWait): string {
+  return `'${deviceId}' (session '${holders[0].sessionId}')`;
+}
+
+/** Pinned devices each claim waits on, described for an error message. */
+function groupPinnedWaits(
+  waits: readonly PinnedDeviceWait[],
+): Array<{ request: DeviceAllocationRequest; devices: string }> {
+  const byRequest = new Map<DeviceAllocationRequest, string[]>();
+  for (const wait of waits) {
+    byRequest.set(wait.request, [...(byRequest.get(wait.request) ?? []), describePinnedWait(wait)]);
+  }
+  return [...byRequest].map(([request, devices]) => ({ request, devices: devices.join(", ") }));
+}
+
 interface MultiDeviceAllocationOutcome<T> {
   success: boolean;
   value?: T;
@@ -777,9 +863,7 @@ export class DevicePool {
   private assignmentMutex = new Mutex();
   // Tickets begin after preflight. Only platform-disjoint requests may
   // overtake earlier waiters; new partial claims are released before waiting.
-  private readonly multiDeviceAllocationQueue: Array<{
-    requests: DeviceAllocationRequest[];
-  }> = [];
+  private readonly multiDeviceAllocationQueue: MultiDeviceAllocationTicket[] = [];
   private readonly multiDeviceAllocationWaiters = new Set<() => void>();
 
   private timer: Timer;
@@ -2156,7 +2240,7 @@ export class DevicePool {
     timeoutMs: number = 300000,
     platform?: Platform,
   ): Promise<Map<string, string>> {
-    const ticket = {
+    const ticket: MultiDeviceAllocationTicket = {
       requests: sessionIds.map((sessionId) => ({ sessionId, criteria: { platform } })),
     };
     try {
@@ -2196,7 +2280,7 @@ export class DevicePool {
 
       this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
 
-      this.multiDeviceAllocationQueue.push(ticket);
+      this.enqueueMultiDeviceAllocationTicket(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
       const assigned = new Set<string>();
       let firstWaitLogged = false;
@@ -2335,7 +2419,7 @@ export class DevicePool {
     requests: DeviceAllocationRequest[],
     timeoutMs: number = 300000,
   ): Promise<Map<string, string>> {
-    const ticket = { requests };
+    const ticket: MultiDeviceAllocationTicket = { requests };
     try {
       const startTime = this.timer.now();
       const assignments = new Map<string, string>();
@@ -2399,7 +2483,7 @@ export class DevicePool {
 
       // There is no configured pool maximum. A short current inventory may
       // grow through another flow, so preserve waiting for additional devices.
-      this.multiDeviceAllocationQueue.push(ticket);
+      this.enqueueMultiDeviceAllocationTicket(ticket);
 
       let attemptCount = 0;
       let allocationCompleted = false;
@@ -2557,21 +2641,26 @@ export class DevicePool {
   }
 
   private multiDeviceAllocationBlock(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    ticket: MultiDeviceAllocationTicket,
   ): MultiDeviceAllocationBlock {
     return this.isQueuedBehindConflictingRequest(ticket) ? "queued" : "busy";
   }
 
-  private isQueuedBehindConflictingRequest(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
-  ): boolean {
+  private isQueuedBehindConflictingRequest(ticket: MultiDeviceAllocationTicket): boolean {
+    return this.earlierConflictingTickets(ticket).length > 0;
+  }
+
+  /** Earlier queued tickets that `ticket` must wait behind. */
+  private earlierConflictingTickets(
+    ticket: MultiDeviceAllocationTicket,
+  ): MultiDeviceAllocationTicket[] {
     const earlier = this.multiDeviceAllocationQueue.slice(
       0,
       this.multiDeviceAllocationQueue.indexOf(ticket),
     );
     // Comparing live candidate IDs alone misses devices joining later. Use a
     // conservative platform-disjoint rule across both APIs, including wildcards.
-    return earlier.some((waiter) =>
+    return earlier.filter((waiter) =>
       waiter.requests.some((prior) =>
         ticket.requests.some(
           (request) =>
@@ -2583,9 +2672,7 @@ export class DevicePool {
     );
   }
 
-  private canClaimMultiDeviceAllocation(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
-  ): boolean {
+  private canClaimMultiDeviceAllocation(ticket: MultiDeviceAllocationTicket): boolean {
     // Sessions that already hold a pooled device need no new claim and must
     // survive rollback; anything else (including a session whose device left
     // the pool) counts as a claim, matching recordHeldAssignment.
@@ -2639,7 +2726,7 @@ export class DevicePool {
   }
 
   private async executeMultiDeviceAllocation<T>(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    ticket: MultiDeviceAllocationTicket,
     deadlineMs: number,
     setRefreshFailure: (failure: string | undefined) => void,
     allocate: () => Promise<T>,
@@ -2660,8 +2747,12 @@ export class DevicePool {
         return { success: false, attempts, lastBlock };
       }
       waited = true;
+      // A session may gain or lose its device while the ticket waits (e.g.
+      // session-preserving recovery), so deadlock analysis reads a fresh pin.
+      this.recordHeldSessions(ticket);
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
         lastBlock = this.multiDeviceAllocationBlock(ticket);
+        this.throwIfMultiDeviceAllocationDeadlocked(ticket);
         if (this.timer.now() >= deadlineMs) {
           return { success: false, attempts, lastBlock };
         }
@@ -2682,7 +2773,7 @@ export class DevicePool {
   }
 
   private async refreshMultiDeviceInventory(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+    ticket: MultiDeviceAllocationTicket,
   ): Promise<DevicePoolRefreshResult | undefined> {
     // Busy-only rounds must retain the last actual discovery failure. Refresh
     // only for missing capacity; releases already publish availability directly.
@@ -2761,9 +2852,264 @@ export class DevicePool {
     }
   }
 
-  private removeMultiDeviceAllocationTicket(
-    ticket: (typeof this.multiDeviceAllocationQueue)[number],
-  ): void {
+  private enqueueMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
+    this.recordHeldSessions(ticket);
+    this.multiDeviceAllocationQueue.push(ticket);
+  }
+
+  /** Snapshots which of the ticket's sessions hold a pooled device right now. */
+  private recordHeldSessions(ticket: MultiDeviceAllocationTicket): void {
+    ticket.heldSessionIds = new Set(
+      ticket.requests
+        .map((request) => request.sessionId)
+        .filter((sessionId) => this.deviceHeldByExistingSession(sessionId) !== undefined),
+    );
+  }
+
+  /**
+   * Whether a device could serve a claim once its holder releases it. Error,
+   * unhealthy and unassignable transport-alias devices never pass
+   * isIdleDeviceEligible after a release, so they are not supply.
+   */
+  private isPotentialAllocationSupply(device: PooledDevice): boolean {
+    return (
+      device.status !== "error" &&
+      this.androidTransportAliases.isAssignable({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }) &&
+      !this.getDeviceHealthMarker(device.id)
+    );
+  }
+
+  /** Devices matching a request that could ever be allocated to it. */
+  private potentialSupplyFor(request: DeviceAllocationRequest): PooledDevice[] {
+    return this.getDevicesMatchingCriteria(request.criteria).filter((device) =>
+      this.isPotentialAllocationSupply(device),
+    );
+  }
+
+  /**
+   * Devices pinned by queued tickets' pre-existing sessions, by device ID. A
+   * session may have several queued tickets; each is a holder, in queue order,
+   * so the earliest-queued one is named first.
+   */
+  private pinnedDevicesByTicket(): Map<string, PinnedDeviceHolder[]> {
+    const pinned = new Map<string, PinnedDeviceHolder[]>();
+    for (const ticket of this.multiDeviceAllocationQueue) {
+      for (const sessionId of ticket.heldSessionIds ?? []) {
+        const device = this.deviceHeldByExistingSession(sessionId);
+        if (device) {
+          pinned.set(device.id, [...(pinned.get(device.id) ?? []), { ticket, sessionId }]);
+        }
+      }
+    }
+    return pinned;
+  }
+
+  /**
+   * Claims a queued ticket still waits on, or undefined when it is not waiting
+   * for devices this analysis can reason about: it claims nothing, a held
+   * device is disqualified (the attempt fails fast instead), or a claim has no
+   * candidate yet or a pending recovery (inventory may still change).
+   */
+  private unmetMultiDeviceClaims(
+    ticket: MultiDeviceAllocationTicket,
+  ): DeviceAllocationRequest[] | undefined {
+    const claims: DeviceAllocationRequest[] = [];
+    for (const request of ticket.requests) {
+      const held = this.deviceHeldByExistingSession(request.sessionId);
+      if (held && this.heldDeviceDisqualification(request, held)) {
+        return undefined;
+      }
+      if (!held || !ticket.heldSessionIds?.has(request.sessionId)) {
+        claims.push(request);
+      }
+    }
+    const unknowable = claims.some(
+      (request) =>
+        this.getDevicesMatchingCriteria(request.criteria).length === 0 ||
+        this.hasPendingAndroidRecoveryMatching(request.criteria),
+    );
+    return claims.length === 0 || unknowable ? undefined : claims;
+  }
+
+  /**
+   * Whether `ticket` cannot fill its claims (one distinct device each) without
+   * a device pinned by a ticket in `blockers`, yet could with them. Idle,
+   * recovering, in-flight and non-waiting sessions' devices may free up, so
+   * they count as supply; the ticket's own pinned devices never do, nor do
+   * devices allocation can never use (error, unhealthy, unassignable).
+   */
+  private isDeviceBlockedBy(
+    ticket: MultiDeviceAllocationTicket,
+    claims: readonly DeviceAllocationRequest[],
+    blockers: ReadonlySet<MultiDeviceAllocationTicket>,
+    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
+  ): boolean {
+    const pinnedBy = (deviceId: string, by: (other: MultiDeviceAllocationTicket) => boolean) =>
+      (pinned.get(deviceId) ?? []).some((holder) => by(holder.ticket));
+    const candidates = claims.map((request) =>
+      this.potentialSupplyFor(request)
+        .map((device) => device.id)
+        .filter((deviceId) => !pinnedBy(deviceId, (other) => other === ticket)),
+    );
+    const supply = candidates.map((ids) =>
+      ids.filter((deviceId) => !pinnedBy(deviceId, (other) => blockers.has(other))),
+    );
+    return !hasCompleteMatching(supply) && hasCompleteMatching(candidates);
+  }
+
+  /**
+   * Waiting tickets that can never complete (greatest fixpoint): each is queued
+   * behind a conflicting member, or is short of devices that only members pin.
+   */
+  private findDeadlockedTickets(
+    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
+  ): Map<MultiDeviceAllocationTicket, DeviceAllocationRequest[]> {
+    const claimsByTicket = new Map(
+      this.multiDeviceAllocationQueue.flatMap((ticket) => {
+        const claims = this.unmetMultiDeviceClaims(ticket);
+        return claims ? [[ticket, claims] as const] : [];
+      }),
+    );
+    const deadlocked = new Set(claimsByTicket.keys());
+    const stuck = (ticket: MultiDeviceAllocationTicket) =>
+      this.earlierConflictingTickets(ticket).some((other) => deadlocked.has(other)) ||
+      this.isDeviceBlockedBy(ticket, claimsByTicket.get(ticket) ?? [], deadlocked, pinned);
+    let changed = true;
+    while (changed) {
+      const released = [...deadlocked].filter((ticket) => !stuck(ticket));
+      released.forEach((ticket) => deadlocked.delete(ticket));
+      changed = released.length > 0;
+    }
+    return new Map([...deadlocked].map((ticket) => [ticket, claimsByTicket.get(ticket) ?? []]));
+  }
+
+  /** Why each deadlocked ticket waits: its edges in the wait-for graph. */
+  private deadlockWaits(
+    deadlocked: ReadonlyMap<MultiDeviceAllocationTicket, DeviceAllocationRequest[]>,
+    pinned: ReadonlyMap<string, PinnedDeviceHolder[]>,
+  ): Map<MultiDeviceAllocationTicket, DeadlockWait> {
+    const members = new Set(deadlocked.keys());
+    const pinnedWaits = (ticket: MultiDeviceAllocationTicket, request: DeviceAllocationRequest) =>
+      this.potentialSupplyFor(request).flatMap((device) => {
+        const holders = (pinned.get(device.id) ?? []).filter(
+          (holder) => holder.ticket !== ticket && members.has(holder.ticket),
+        );
+        return holders.length > 0 ? [{ request, deviceId: device.id, holders }] : [];
+      });
+    return new Map(
+      [...deadlocked].map(([ticket, claims]) => {
+        const wait: DeadlockWait = {
+          queuedBehind: this.earlierConflictingTickets(ticket).filter((other) =>
+            members.has(other),
+          ),
+          blockedOn: this.isDeviceBlockedBy(ticket, claims, members, pinned)
+            ? claims.flatMap((request) => pinnedWaits(ticket, request))
+            : [],
+        };
+        return [ticket, wait] as const;
+      }),
+    );
+  }
+
+  /**
+   * Fails a multi-device request that is in a cross-session cycle (#9950) of
+   * the wait-for graph between queued requests: an edge runs to a request that
+   * pins a device this one needs and cannot get elsewhere (counting devices, so
+   * several claims cannot share one), or to an earlier conflicting request this
+   * one is queued behind. Held devices are never released while a request
+   * waits, so no request in the cycle could complete before its timeout. Only
+   * the most recently queued member of the cycle fails, so earlier requests keep
+   * their place; requests merely waiting on a cycle keep waiting.
+   */
+  private throwIfMultiDeviceAllocationDeadlocked(ticket: MultiDeviceAllocationTicket): void {
+    const pinned = this.pinnedDevicesByTicket();
+    const deadlocked = this.findDeadlockedTickets(pinned);
+    if (!deadlocked.has(ticket)) {
+      return;
+    }
+    const waits = this.deadlockWaits(deadlocked, pinned);
+    const successors = (from: MultiDeviceAllocationTicket) => {
+      const wait = waits.get(from);
+      return [
+        ...(wait?.queuedBehind ?? []),
+        ...(wait?.blockedOn ?? []).flatMap(({ holders }) => holders.map((h) => h.ticket)),
+      ];
+    };
+    const cycle = stronglyConnectedWith(ticket, successors);
+    const queueIndex = (other: MultiDeviceAllocationTicket) =>
+      this.multiDeviceAllocationQueue.indexOf(other);
+    if (cycle.size < 2 || [...cycle].some((other) => queueIndex(other) > queueIndex(ticket))) {
+      return;
+    }
+    const others = [...cycle]
+      .filter((other) => other !== ticket)
+      .sort((a, b) => queueIndex(a) - queueIndex(b));
+    throw new ActionableError(this.formatAllocationDeadlock(ticket, others, cycle, waits));
+  }
+
+  private formatAllocationDeadlock(
+    ticket: MultiDeviceAllocationTicket,
+    others: readonly MultiDeviceAllocationTicket[],
+    cycle: ReadonlySet<MultiDeviceAllocationTicket>,
+    waits: ReadonlyMap<MultiDeviceAllocationTicket, DeadlockWait>,
+  ): string {
+    const held = (member: MultiDeviceAllocationTicket) => {
+      const devices = [...(member.heldSessionIds ?? [])].flatMap((sessionId) => {
+        const device = this.deviceHeldByExistingSession(sessionId);
+        return device ? [`'${device.id}' (session '${sessionId}')`] : [];
+      });
+      return devices.length > 0 ? devices.join(", ") : "no devices";
+    };
+    const sessions = (member: MultiDeviceAllocationTicket) =>
+      member.requests.map((request) => `'${request.sessionId}'`).join(", ");
+    const inCycle = (member: MultiDeviceAllocationTicket) => {
+      const wait = waits.get(member);
+      return {
+        blockedOn: (wait?.blockedOn ?? []).flatMap((entry) => {
+          const holders = entry.holders.filter((holder) => cycle.has(holder.ticket));
+          return holders.length > 0 ? [{ ...entry, holders }] : [];
+        }),
+        queued: (wait?.queuedBehind ?? []).filter((other) => cycle.has(other)),
+      };
+    };
+    const own = inCycle(ticket);
+    const claimLines = groupPinnedWaits(own.blockedOn).map(
+      ({ request, devices }) =>
+        `Session '${request.sessionId}'${this.criteriaMatcher.formatCriteriaSummary(request.criteria)} ` +
+        `is waiting for ${devices}, held by waiting requests.\n`,
+    );
+    const queueLines = own.queued.map(
+      (other) =>
+        `It is queued behind the earlier waiting request for sessions ${sessions(other)}.\n`,
+    );
+    const otherLines = others.map((other) => {
+      const wait = inCycle(other);
+      const devices = [...new Set(wait.blockedOn.map(describePinnedWait))].join(", ");
+      return (
+        `The waiting request for sessions ${sessions(other)} holds ${held(other)}` +
+        (devices ? ` and is waiting for ${devices}` : "") +
+        (wait.queued.length > 0 ? " and is queued behind another of these requests" : "") +
+        ".\n"
+      );
+    });
+    return (
+      `Cannot allocate devices: this request is deadlocked with other waiting multi-device requests.\n` +
+      `This request's sessions hold ${held(ticket)}.\n` +
+      [...claimLines, ...queueLines, ...otherLines].join("") +
+      `Held devices are not released while a request waits, so none of these requests could finish ` +
+      `before its allocation timeout. Failing now instead of waiting it out.\n` +
+      `Suggestions:\n` +
+      `  - Run these plans one after another instead of concurrently\n` +
+      `  - Release one of the sessions holding these devices and retry\n` +
+      `  - Start another matching device so each request can claim an idle one`
+    );
+  }
+
+  private removeMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
     const index = this.multiDeviceAllocationQueue.indexOf(ticket);
     if (index >= 0) {
       this.multiDeviceAllocationQueue.splice(index, 1);
@@ -5036,13 +5382,8 @@ export class DevicePool {
   private isIdleDeviceEligible(device: PooledDevice): boolean {
     return (
       device.status === "idle" &&
-      this.androidTransportAliases.isAssignable({
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform,
-      }) &&
-      !this.isReservedForAssignment(device) &&
-      !this.getDeviceHealthMarker(device.id)
+      this.isPotentialAllocationSupply(device) &&
+      !this.isReservedForAssignment(device)
     );
   }
 

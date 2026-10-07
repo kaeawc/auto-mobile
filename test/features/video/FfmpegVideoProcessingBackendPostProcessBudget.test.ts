@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { runOutsideRequestContext, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import {
   boundPostProcessBudgetToRequest,
@@ -21,6 +21,7 @@ import {
 import { EventEmitter } from "node:events";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 // Issue #10188: the iOS post-process budget grows with the recording when it is a re-encode,
 // and a post-process that still does not finish returns the unprocessed capture instead of
@@ -40,14 +41,31 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
   let encoder: FakeChildProcess;
   let encoderKills: Array<NodeJS.Signals | number | undefined>;
   let encoderStarts: number;
+  let realTimerSpies: Array<ReturnType<typeof spyOn>>;
 
   beforeEach(() => {
+    // Fake time is stepped event by event (settleByFakeEvents), not auto-advanced: auto-advance
+    // spends a real event-loop turn per event, and on a loaded runner those turns pushed a test
+    // past bun's 5 s timeout (#10471).
     timer = new FakeTimer();
-    timer.enableAutoAdvance();
     timer.setCurrentTime(1_000_000_000);
     removed = [];
     encoderKills = [];
     encoderStarts = 0;
+    realTimerSpies = [
+      spyOn(globalThis, "setTimeout"),
+      spyOn(globalThis, "setImmediate"),
+      spyOn(globalThis, "setInterval"),
+    ];
+  });
+
+  afterEach(() => {
+    // Every wait in the stop path goes through the injected timer: no real timer is armed.
+    const realTimerCalls = realTimerSpies.map((spy) => spy.mock.calls.length);
+    for (const spy of realTimerSpies) {
+      spy.mockRestore();
+    }
+    expect(realTimerCalls).toEqual([0, 0, 0]);
   });
 
   function config(overrides: Partial<VideoCaptureConfig> = {}): VideoCaptureConfig {
@@ -160,7 +178,7 @@ describe("FfmpegVideoProcessingBackend iOS post-process budget (#10188)", () => 
         config: recording,
       },
     };
-    return backend.stop(handle);
+    return settleByFakeEvents(timer, backend.stop(handle), { description: "the iOS stop" });
   }
 
   test("a re-encode of a long recording gets a budget scaled to its duration, not a fixed 60 s", async () => {

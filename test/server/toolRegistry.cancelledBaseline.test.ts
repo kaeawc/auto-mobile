@@ -5,6 +5,7 @@ import { createStructuredToolResponse, getStructuredPayload } from "../../src/ut
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { combineRequestAbortSignals } from "../../src/utils/AbortContext";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -92,6 +93,20 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
     Reflect.set(DaemonState.getInstance(), "sessionManager", originalManager);
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     serverConfig.setActionsCompactMetadataEnabled(originalCompact);
+  });
+
+  test("finalization uses the connection preference instead of the daemon default", async () => {
+    serverConfig.setActionsDiffObserveEnabled(false);
+    await call();
+    const full = await runWithToolSelectionContext({ actionsCompactMetadata: false }, () => call());
+    expect(full.observation.backStack).toEqual(metadata.backStack);
+    expect(full.observation.deviceLock).toEqual(metadata.deviceLock);
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
+    const compact = await runWithToolSelectionContext({ actionsCompactMetadata: true }, () =>
+      call(),
+    );
+    expect(compact.observation.backStack).toBeUndefined();
+    expect(compact.observation.deviceLock).toBeUndefined();
   });
 
   test("a cancelled call leaves the baseline and snapshot empty so the next call gets the full blocks", async () => {

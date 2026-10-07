@@ -105,3 +105,29 @@ test.each(localCases)(
     }
   },
 );
+
+test("feature-flag initialization defaults compact metadata on and preserves saved false", async () => {
+  const previous = serverConfig.isActionsCompactMetadataEnabled();
+  const definitions = FEATURE_FLAG_DEFINITIONS.filter((d) => d.key === "actions-compact-metadata");
+  const repository = new FakeFeatureFlagRepository();
+  try {
+    const service = new FeatureFlagService(
+      repository,
+      new DefaultFeatureFlagApplier(),
+      definitions,
+    );
+    await service.initialize();
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
+    await service.setFlag("actions-compact-metadata", false);
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    await new FeatureFlagService(
+      repository,
+      new DefaultFeatureFlagApplier(),
+      definitions,
+    ).initialize();
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
+  } finally {
+    serverConfig.setActionsCompactMetadataEnabled(previous);
+  }
+});

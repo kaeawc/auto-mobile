@@ -1,10 +1,24 @@
+import type { ResolverSelector } from "../server/elementSelectorSchemas";
 import { errorMessage } from "../utils/describeUnknownError";
-/**
- If thrown, the MCP server will catch it and send the message to the client.
- */
+// Structural match for ElementResolution.containerFailure from dependency PR #10292.
+export interface ContainerFailure {
+  level: number;
+  reason: "not-found" | "ambiguous";
+  selector: ResolverSelector;
+}
+
+/** If thrown, the MCP server will catch it and send the message to the client. */
 export class ActionableError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  declare readonly containerFailure?: ContainerFailure;
+
+  constructor(message: string, options?: ErrorOptions & { containerFailure?: ContainerFailure }) {
     super(message, options);
+    const containerFailure =
+      options?.containerFailure ??
+      (options?.cause instanceof ActionableError ? options.cause.containerFailure : undefined);
+    if (containerFailure) {
+      this.containerFailure = containerFailure;
+    }
   }
 }
 

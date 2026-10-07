@@ -1,3 +1,4 @@
+import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/textTransportTimeout";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
@@ -58,7 +59,13 @@ export function shapeToolCallError(
                         retryable: true,
                       },
                     })
-                  : `Error: ${message}`,
+                  : error instanceof ActionableError && error.containerFailure
+                    ? JSON.stringify({
+                        success: false,
+                        error: message,
+                        containerFailure: error.containerFailure,
+                      })
+                    : `Error: ${message}`,
       },
     ],
     isError: true,

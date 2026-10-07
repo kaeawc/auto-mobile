@@ -25,8 +25,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -59,7 +57,9 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentEle
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTextButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTonalButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileExtendedFloatingActionButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
+import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.storage.AnalyticsRepository
@@ -533,21 +533,22 @@ fun TapScreen() {
           )
 
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            FloatingActionButton(
+            AutoMobileFloatingActionButton(
               onClick = trackTap,
+              icon = Icons.Filled.Add,
+              contentDescription = "Add",
               modifier =
                 Modifier.semantics {
                   testTag = "fab_add"
                   contentDescription = "Add"
                 },
-            ) {
-              Icon(Icons.Filled.Add, contentDescription = "Add")
-            }
+            )
 
-            ExtendedFloatingActionButton(
+            AutoMobileExtendedFloatingActionButton(
               onClick = trackTap,
-              icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
-              text = { Text("Settings") },
+              icon = Icons.Filled.Settings,
+              contentDescription = "Settings",
+              text = "Settings",
               modifier =
                 Modifier.semantics {
                   testTag = "fab_extended_settings"

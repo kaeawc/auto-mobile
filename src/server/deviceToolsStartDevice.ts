@@ -54,6 +54,7 @@ import {
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
   runOperationWithinDeadline,
+  setAcquisitionStage,
   startDeviceSchema,
   validateBootIdentity,
   validatePooledDeviceMapping,
@@ -251,6 +252,7 @@ const bootAndPrepareDevice = async (
     state.boot.device.deviceId,
   );
   const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
+    setAcquisitionStage(budgets, "preparing the automation runner");
     const readinessResult = await prepareStartDeviceRunnerReadiness({
       autolockEnabled: options.autolockEnabled,
       boot: state.boot!,
@@ -313,6 +315,7 @@ async function waitForBootedIosRunnerCleanup(
   deps: DeviceToolsDependencies,
   { state, signal, requestedIdentity }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "waiting for iOS runner removal cleanup");
   IOSCtrlProxyClient.resumeAfterDeviceStart(state.boot!.device.deviceId);
   // Removal cleanup can still be draining after simctl reports the new boot.
   await waitForDevicePreparation(
@@ -341,6 +344,7 @@ async function reserveBootReadiness(
   daemonState: DaemonState,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "reserving the device for readiness");
   const initialReservations: DeviceReadinessReservation[] = [];
   let reservationAccepted = false;
   let reservationAbandoned = false;
@@ -417,7 +421,11 @@ async function bindPreparedDevice(
     acquisitionReadinessKey: string;
   },
 ): Promise<string> {
+  setAcquisitionStage(budgets, "binding the device session");
   try {
+    // The System UI ANR recovery branch below skips `runOperationWithinDeadline`,
+    // so check cancellation before any binding side effect (#6034).
+    await throwIfBindingAborted(signal, readinessResult);
     state.boot = readinessResult.boot;
     preparation.recovered = readinessResult.recovered;
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
@@ -489,6 +497,8 @@ async function bindPreparedDevice(
             },
           );
     if (readinessResult.preservedSessionId && !autolockEnabled) {
+      // Preserved-session validation can outlast the deadline; recheck before committing.
+      await throwIfBindingAborted(signal, readinessResult);
       // #6227 round 7: without autolock, System UI ANR recovery bypasses
       // `bindBootedDeviceSession` (and therefore its own
       // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -516,6 +526,28 @@ async function bindPreparedDevice(
   } finally {
     readinessResult.releaseRecoveryRouteLease?.();
   }
+}
+
+/**
+ * Reject a binding whose acquisition was already cancelled, retiring a System UI
+ * ANR replacement the same way a failed recovered-readiness check does.
+ */
+async function throwIfBindingAborted(
+  signal: AbortSignal | undefined,
+  readinessResult: Awaited<ReturnType<typeof prepareStartDeviceRunnerReadiness>>,
+): Promise<void> {
+  if (!signal?.aborted) {
+    return;
+  }
+  try {
+    await readinessResult.retireReplacement?.();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to retire System UI recovery replacement after cancellation: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  signal.throwIfAborted();
 }
 
 async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
@@ -757,13 +789,14 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
       "startDevice",
-      (deadlineMs, requestSignal) =>
+      (deadlineMs, requestSignal, stage) =>
         prepareDevice(
           target,
           {
             bootTimeoutMs: totalTimeoutMs,
             automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
             automationDeadlineMs: deadlineMs,
+            stage,
             operationName: "startDevice",
             stableTarget:
               args.platform === "android" && target.name && !args.deviceId

@@ -37,8 +37,6 @@ internal object DaemonSocketClientManager {
   // Use ThreadLocal to give each thread its own socket connection
   // This enables true parallel execution since socket server queues requests per connection
   private val threadLocalClient = ThreadLocal<DaemonSocketClient>()
-  private val clientLock = Any()
-  @Volatile private var daemonEnsured = false
   @JvmStatic internal var testClient: DaemonToolClient? = null
 
   fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse {
@@ -61,6 +59,24 @@ internal object DaemonSocketClientManager {
     return testClient?.sessionUuid ?: getOrCreateClient().sessionUuid
   }
 
+  // Decides when the daemon must be (re)started before a thread connects. A connect failure on an
+  // already-ensured daemon (it died leaving its socket file behind) re-runs the ensure step once
+  // instead of surfacing a raw "Connection refused" for every remaining test (#10169). Only a
+  // dead-daemon failure whose PID-file process is gone triggers it; a local failure such as EMFILE
+  // surfaces as-is so a healthy shared daemon is never restarted.
+  private val connectionProvider =
+    DaemonConnectionProvider(
+      socketExists = { File(DaemonSocketPaths.socketPath()).exists() },
+      ensureDaemon = { ensureDaemonRunning() },
+      connect = { DaemonSocketClient(DaemonSocketPaths.socketPath()) },
+      daemonProcessAlive = {
+        DaemonSocketPaths.isProcessAlive(
+          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath())
+        )
+      },
+      nowMs = System::currentTimeMillis,
+    )
+
   private fun getOrCreateClient(): DaemonSocketClient {
     // Each thread gets its own connection for parallel execution
     val existing = threadLocalClient.get()
@@ -68,150 +84,15 @@ internal object DaemonSocketClientManager {
       return existing
     }
 
-    val socketPath = DaemonSocketPaths.socketPath()
-
-    // Ensure daemon is running (restart if socket disappeared after crash/exit)
-    synchronized(clientLock) {
-      // Reset daemonEnsured if socket doesn't exist (daemon crashed/exited)
-      if (!File(socketPath).exists()) {
-        daemonEnsured = false
-      }
-
-      if (!daemonEnsured) {
-        ensureDaemonRunning()
-        daemonEnsured = true
-      }
-    }
-
-    // Create new client for this thread
-    val newClient = DaemonSocketClient(socketPath)
+    val newClient = connectionProvider.open()
     threadLocalClient.set(newClient)
     return newClient
   }
 
   private fun ensureDaemonRunning() {
-    val socketPath = DaemonSocketPaths.socketPath()
-    val forceRestart = DaemonSocketPaths.resolveForceRestart()
-    val daemonAvailable = DaemonSocketClient.isAvailable(socketPath)
-    val daemonAssetVersion =
-      DaemonSocketPaths.readDaemonAssetVersionFromPidFile(DaemonSocketPaths.pidFilePath())
-    val callerAssetVersion = DaemonSocketPaths.resolveCallerAssetVersionPin()
-    val assetVersionSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresAssetVersionPinFailure(
-          daemonAssetVersion,
-          callerAssetVersion,
-        )
-
-    // A daemon of a different build already owning the shared per-uid socket would
-    // silently serve the wrong tool set (#2744). Before reusing it, compare the version
-    // (and, for local overrides, the entry-script build identity) it recorded in its PID
-    // file against this runner's and restart on skew, mirroring the MCP proxy's
-    // ensureVersionMatches/ensureBuildMatches.
-    val pidFilePath = DaemonSocketPaths.pidFilePath()
-    val versionSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresVersionSkewRestart(
-          DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-          DaemonSocketPaths.resolveClientVersion(),
-        )
-    // Two checkouts at the same release version (e.g. a stale `0.0.40+gold` daemon vs this
-    // local `0.0.40`) are indistinguishable by release alone; the entry-script hash catches them.
-    val buildSkew =
-      daemonAvailable &&
-        DaemonSocketPaths.requiresBuildSkewRestart(
-          DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-          DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-          DaemonSocketPaths.resolveClientBuildId(),
-          DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-        )
-    if (
-      DaemonSocketPaths.requiresImmediateAssetVersionPinFailure(
-        assetVersionSkew,
-        versionSkew,
-        buildSkew,
-        forceRestart,
-      )
-    ) {
-      throw DaemonUnavailableException(
-        "AutoMobile daemon AUTOMOBILE_VERSION mismatch: the shared daemon was started with " +
-          "${daemonAssetVersion ?: "unknown"}, but this runner requested $callerAssetVersion. " +
-          "Restart the daemon from this runner's environment before reusing it."
-      )
-    }
-    val skew = versionSkew || buildSkew || assetVersionSkew
-
-    if (!forceRestart && daemonAvailable && !skew) {
-      return
-    }
-
-    val restartRequired = forceRestart || skew
-    val startCommand =
-      if (restartRequired) {
-        DaemonSocketPaths.buildDaemonRestartCommand()
-      } else {
-        DaemonSocketPaths.buildDaemonStartCommand()
-      }
-    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
-    if (skew && debugMode) {
-      println("Restarting AutoMobile daemon due to version/build skew with runner")
-    }
-    if (debugMode) {
-      println("Starting AutoMobile daemon with: ${startCommand.joinToString(" ")}")
-    }
-
-    val environmentOverrides = resolveDaemonEnvironmentOverrides()
-    AutoMobileSharedUtils.executeCommand(
-      startCommand,
-      DaemonSocketPaths.daemonLauncherTimeoutMs(isRestart = restartRequired),
-      environmentOverrides,
+    DaemonLauncher.ensureRunning(
+      DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides())
     )
-
-    val started =
-      DaemonSocketClient.waitForAvailability(
-        socketPath,
-        DaemonSocketPaths.daemonStartTimeoutMs(),
-      )
-    if (!started) {
-      throw DaemonUnavailableException(
-        "Daemon failed to start within ${DaemonSocketPaths.daemonStartTimeoutMs()}ms"
-      )
-    }
-
-    // executeCommand returns a CommandResult rather than throwing, and waitForAvailability only
-    // confirms socket liveness — a failed versioned bunx/npx restart that leaves the stale socket
-    // up, or a PATH `auto-mobile` fallback of a different version, would look "ready" while the
-    // daemon's handshake gate (#2744) rejects every request carrying clientVersion/clientBuildId.
-    // Confirm the running daemon's version AND build identity match this runner before marking it
-    // ensured; a daemon that records no version/build id is accepted (a skew cannot be proven).
-    val stillVersionSkewed =
-      DaemonSocketPaths.requiresVersionSkewRestart(
-        DaemonSocketPaths.readDaemonVersionFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveClientVersion(),
-      )
-    val stillBuildSkewed =
-      DaemonSocketPaths.requiresBuildSkewRestart(
-        DaemonSocketPaths.readDaemonBuildIdFromPidFile(pidFilePath),
-        DaemonSocketPaths.readDaemonEntryScriptFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveClientBuildId(),
-        DaemonSocketPaths.resolveLocalDaemonEntryScript(),
-      )
-    val stillAssetVersionSkewed =
-      DaemonSocketPaths.requiresAssetVersionPinFailure(
-        DaemonSocketPaths.readDaemonAssetVersionFromPidFile(pidFilePath),
-        DaemonSocketPaths.resolveCallerAssetVersionPin(),
-      )
-    if (stillVersionSkewed || stillBuildSkewed || stillAssetVersionSkewed) {
-      throw DaemonUnavailableException(
-        "AutoMobile daemon still differs from this runner after (re)start; the shared socket is " +
-          "served by a different build. Ensure the same @kaeawc/auto-mobile version starts the " +
-          "daemon and runs the tests (e.g. set automobile.daemon.package.version)."
-      )
-    }
-
-    // NOTE: Device pool initialization check removed to allow parallel test execution.
-    // The daemon initializes its device pool at startup, and tests will wait for
-    // devices as needed when they call executePlan.
   }
 
   /**
@@ -561,6 +442,32 @@ internal object DaemonSocketPaths {
     return parseBooleanFlag(ciValue) ?: false
   }
 
+  /**
+   * Whether a requested forced restart must actually stop the running daemon (#10170).
+   *
+   * The forced restart exists to replace a stale daemon left by an earlier job. A daemon that
+   * started after this run began ([resolveRunnerStartedAtMs]) was started by another runner of the
+   * same run (a parallel Gradle fork), so restarting it again would stop that runner's in-flight
+   * plans. When either start time is unknown the restart is kept, as before. An unavailable daemon
+   * is always (re)started.
+   */
+  internal fun requiresForcedRestart(
+    forceRestart: Boolean,
+    daemonAvailable: Boolean,
+    daemonStartedAtMs: Long?,
+    runnerStartedAtMs: Long?,
+  ): Boolean {
+    if (!forceRestart) return false
+    if (!daemonAvailable || daemonStartedAtMs == null || runnerStartedAtMs == null) return true
+    return daemonStartedAtMs <= runnerStartedAtMs
+  }
+
+  /**
+   * Lock file every runner JVM of this user takes around its daemon check-and-restart, so parallel
+   * forks decide one at a time (#10170). Mirrors [socketPath] (per-uid, /tmp).
+   */
+  fun runnerRestartLockPath(): String = socketPath().removeSuffix(".sock") + ".runner-restart.lock"
+
   private fun parseBooleanFlag(value: String?): Boolean? {
     val normalized = value?.trim()?.lowercase() ?: return null
     return when (normalized) {
@@ -604,6 +511,42 @@ internal object DaemonSocketPaths {
   /** Read the daemon's recorded entry-script path from its PID file, or null. */
   internal fun readDaemonEntryScriptFromPidFile(path: String): String? =
     readPidFileString(path, "entryScript")
+
+  /**
+   * Read when the daemon generation started (epoch ms, the PID file's `startedAt`), or null if
+   * absent/unreadable.
+   */
+  internal fun readDaemonStartedAtMsFromPidFile(path: String): Long? =
+    readPidFileString(path, "startedAt")?.let { it.toLongOrNull() ?: it.toDoubleOrNull()?.toLong() }
+
+  /** Read the daemon's process id from its PID file, or null if absent/unreadable. */
+  internal fun readDaemonPidFromPidFile(path: String): Long? =
+    readPidFileString(path, "pid")?.toLongOrNull()?.takeIf { it > 0 }
+
+  /**
+   * Whether [pid] names a live process. An unknown pid is reported as not alive, so a daemon that
+   * left no PID record can still be restarted.
+   */
+  internal fun isProcessAlive(
+    pid: Long?,
+    lookup: (Long) -> Boolean = { candidate ->
+      ProcessHandle.of(candidate).map { it.isAlive }.orElse(false)
+    },
+  ): Boolean = pid != null && lookup(pid)
+
+  /** System property carrying one start timestamp (epoch ms) shared by every fork of a build. */
+  const val RUN_STARTED_AT_PROPERTY = "automobile.junit.runStartedAtMs"
+
+  /**
+   * When this test run started (epoch ms), compared with the daemon's `startedAt` to decide whether
+   * a forced restart is still needed (#10170). A build-wide [RUN_STARTED_AT_PROPERTY] wins, so a
+   * fork started after a sibling restarted the daemon does not restart it again; without it this
+   * JVM's start time ([jvmStartedAtMs]) is used.
+   */
+  internal fun resolveRunnerStartedAtMs(
+    runStartedAtProperty: String?,
+    jvmStartedAtMs: () -> Long?,
+  ): Long? = runStartedAtProperty?.trim()?.toLongOrNull()?.takeIf { it > 0 } ?: jvmStartedAtMs()
 
   private fun readPidFileString(path: String, field: String): String? {
     return try {
@@ -1120,10 +1063,19 @@ internal class DaemonSocketClient(
 
   private fun connect(): SocketChannel {
     if (!Files.exists(File(socketPath).toPath())) {
-      throw DaemonUnavailableException("Daemon socket not found: $socketPath")
+      throw DaemonSocketMissingException(socketPath)
     }
 
-    return SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    // A daemon that died without unlinking its socket leaves the file behind, and the connect then
+    // fails with a raw ConnectException. Surface it as the type callers' retry handling catches.
+    return try {
+      SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    } catch (e: IOException) {
+      throw DaemonUnavailableException(
+        "Daemon socket connect failed ($socketPath): ${e.message}",
+        e,
+      )
+    }
   }
 
   private fun registerAndSend(
@@ -1222,6 +1174,21 @@ internal class DaemonSocketClient(
         else -> DaemonUnavailableException("Daemon request failed: ${e.message}", e)
       }
 
+    /**
+     * Probe the daemon socket once, separating "no daemon is serving it" from a failure local to
+     * this runner (e.g. EMFILE "Too many open files"), which must not trigger a restart of a shared
+     * daemon that may be healthy (#10169).
+     */
+    internal fun probe(socketPath: String): DaemonProbe =
+      try {
+        DaemonSocketClient(socketPath).close()
+        DaemonProbe.Available
+      } catch (e: DaemonUnavailableException) {
+        DaemonProbe.fromConnectFailure(e)
+      } catch (e: IOException) {
+        DaemonProbe.fromConnectFailure(e)
+      }
+
     fun isAvailable(socketPath: String): Boolean {
       return try {
         val client = DaemonSocketClient(socketPath)
@@ -1279,8 +1246,12 @@ internal interface DaemonToolClient {
   var sessionUuid: String
 }
 
-internal class DaemonUnavailableException(message: String, cause: Throwable? = null) :
+internal open class DaemonUnavailableException(message: String, cause: Throwable? = null) :
   Exception(message, cause)
+
+/** The daemon socket file does not exist: no daemon is serving it. */
+internal class DaemonSocketMissingException(socketPath: String) :
+  DaemonUnavailableException("Daemon socket not found: $socketPath")
 
 /** Interface for checking daemon connectivity. Allows for easy testing with fakes. */
 internal interface DaemonConnectivityChecker {

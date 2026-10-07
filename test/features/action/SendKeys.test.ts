@@ -406,6 +406,7 @@ function createTextClient(
   options: {
     supportsImeCommit?: boolean;
     supportsImeKeyEvents?: boolean;
+    supportsImePasswordCommit?: boolean;
     supportsKeyboardProfiles?: boolean;
     setKeyboardProfile?: (
       id: string,
@@ -450,6 +451,7 @@ function createTextClient(
     },
     supportsImeKeyEvents: async () => options.supportsImeKeyEvents ?? true,
     supportsImeClearField: async () => true,
+    supportsImePasswordCommit: async () => options.supportsImePasswordCommit ?? false,
     supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
     setKeyboardProfile: async (id) => {
       calls.push(`setKeyboardProfile:${id}`);
@@ -2066,11 +2068,16 @@ describe("DefaultSendKeysCommandExecutor", () => {
 
   test("auto password typing refuses undeliverable text before typing anything (#9941)", async () => {
     const cases = [
-      { text: "contraseña1", apiLevel: 36, codePoint: "U+00F1" },
-      { text: "Passw0rd!", apiLevel: 30, codePoint: "U+0050" },
-      { text: "пароль", apiLevel: 36, codePoint: "U+043F" },
+      { text: "contraseña1", apiLevel: 36, reason: "1 character(s)", detail: "1 non-ASCII" },
+      {
+        text: "Passw0rd!",
+        apiLevel: 30,
+        reason: "2 character(s)",
+        detail: "2 uppercase or shifted (key events need Android 12, API 31, or newer)",
+      },
+      { text: "пароль", apiLevel: 36, reason: "6 character(s)", detail: "6 non-ASCII" },
     ];
-    for (const { text, apiLevel, codePoint } of cases) {
+    for (const { text, apiLevel, reason, detail } of cases) {
       const adb = new FakeAdbExecutor();
       adb.setAndroidApiLevel(apiLevel);
       const textClient = createTextClient({
@@ -2095,7 +2102,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result.success).toBe(false);
       expect(result.partialApplication).toBeUndefined();
       expect(result.error).toContain("Nothing was typed");
-      expect(result.error).toContain(codePoint);
+      expect(result.error).toContain(reason);
+      expect(result.error).toContain(detail);
+      // The password's characters never appear, not even as code points.
+      expect(result.error).not.toMatch(/U\+[0-9A-F]{4}/);
       expect(result.error).toContain('operation: "replace"');
       expect(result.error).not.toContain(text);
       expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input key"))).toEqual([]);
@@ -2104,7 +2114,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
-  test("auto password typing lists a bounded set of distinct undeliverable characters", async () => {
+  test("auto password typing counts undeliverable characters without naming them", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(36);
     const executor = new DefaultSendKeysCommandExecutor(
@@ -2114,10 +2124,18 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient: createTextClient().client },
     );
 
-    const result = await executor.type({ action: "type", text: "ñññáéíóúü" });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await executor.type({ action: "type", text: "ñññáéíóúü" });
 
-    expect(result.error).toContain("7 distinct character(s)");
-    expect(result.error).toContain("U+00F1, U+00E1, U+00E9, U+00ED, U+00F3 and 2 more");
+      expect(result.error).toContain("9 character(s)");
+      expect(result.error).toContain("9 non-ASCII");
+      for (const text of [result.error ?? "", JSON.stringify(warning.mock.calls)]) {
+        expect(text).not.toMatch(/U\+[0-9A-F]{4}|[ñáéíóúü]/);
+      }
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("auto password typing still delivers key-event text and uppercase on API 31+", async () => {
@@ -2181,6 +2199,116 @@ describe("DefaultSendKeysCommandExecutor", () => {
       error: "password input rejected",
     });
     expect(textClient.commitViaImeCalls).toEqual([{ text: "new", priorImeId }]);
+  });
+
+  function passwordImeExecutor(
+    options: Parameters<typeof createTextClient>[0],
+    observation: ObserveResult = focusedAndroidObservation("••••", { password: "true" }),
+  ) {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: `${priorImeId}\n`, stderr: "" },
+      { stdout: `${commitImeId}\n`, stderr: "" },
+    ]);
+    const textClient = createTextClient(options);
+    const observer = createObserver(observation);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      observer,
+      { textClient: textClient.client, timer },
+    );
+    return { adb, textClient, observer, executor };
+  }
+
+  test.each(["insert", "replace"] as const)(
+    "auto %s into a password field types through the IME when CtrlProxy advertises it",
+    async (operation) => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const { adb, textClient, executor } = passwordImeExecutor({
+          supportsImePasswordCommit: true,
+        });
+
+        const result = await executor.type({ action: "type", text: "Pw1!ñ", operation });
+
+        expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+        expect(result.error).toBeUndefined();
+        expect(result.warning).toBeUndefined();
+        expect(textClient.commitViaImeCalls).toEqual([{ text: "Pw1!ñ", priorImeId }]);
+        expect(textClient.calls.filter((call) => /^(insert|replace|clear):/.test(call))).toEqual(
+          [],
+        );
+        expect(textClient.calls.includes("clearField")).toBe(operation === "replace");
+        expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("shell input"))).toEqual([]);
+        expect(loggerCallsWithPrefix(warning.mock.calls, "[SendKeys]")).toEqual([]);
+      } finally {
+        warning.mockRestore();
+      }
+    },
+  );
+
+  test("auto password IME failure redacts the typed text from diagnostics and logs", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { executor } = passwordImeExecutor({
+        supportsImePasswordCommit: true,
+        commitViaIme: async () => ({
+          success: false,
+          error: "Input connection lost during commit",
+          partialApplication: true,
+          committedUnits: 2,
+        }),
+      });
+
+      const result = await executor.type({ action: "type", text: "hunter2" });
+
+      expect(result).toMatchObject({ success: false, resolvedMode: "ime" });
+      expect(result.imeFailure).toMatchObject({
+        expectedText: "<password, 7 characters>",
+        observedText: null,
+      });
+      expect(JSON.stringify(result)).not.toContain("hunter2");
+      expect(JSON.stringify(warning.mock.calls)).not.toContain("hunter2");
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("explicit IME into a password field on an older CtrlProxy names the APK update", async () => {
+    const { textClient, observer, executor } = passwordImeExecutor({
+      commitViaIme: async () => ({
+        success: false,
+        error: "Cannot commit text into a password field",
+      }),
+    });
+
+    const result = await executor.type({ action: "type", text: "hunter2", mode: "ime" });
+
+    expect(result).toMatchObject({ success: false, resolvedMode: "ime" });
+    expect(result.error).toContain("ime_password_commit_v1");
+    expect(result.error).toContain("Update the CtrlProxy APK");
+    expect(result.imeFailure?.expectedText).toBe("<password, 7 characters>");
+    expect(JSON.stringify(result)).not.toContain("hunter2");
+    // No silent switch to another delivery mode, and no extra pre-dispatch observation.
+    expect(textClient.calls.filter((call) => /^(insert|replace):/.test(call))).toEqual([]);
+    expect(observer.calls).toBe(0);
+  });
+
+  test("IME read-back of a password field that stays masked is an unverified success", async () => {
+    const { textClient, observer, executor } = passwordImeExecutor({
+      supportsImePasswordCommit: true,
+    });
+
+    const result = await executor.type({ action: "type", text: "secret", mode: "ime" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    expect(result.warning).toBeUndefined();
+    expect(textClient.commitViaImeCalls).toEqual([{ text: "secret", priorImeId }]);
+    // One read-back: an unreadable password value ends verification without retries.
+    expect(observer.calls).toBe(1);
   });
 
   test("auto mode routes plain and formatting text through IME for insert and replace", async () => {

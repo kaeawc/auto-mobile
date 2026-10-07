@@ -95,25 +95,41 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `text password field is refused and prior IME is restored`() {
-    assertPasswordRefused(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+  fun `text password field commits and prior IME is restored`() {
+    assertPasswordCommits(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
   }
 
   @Test
-  fun `visible text password field is refused and prior IME is restored`() {
-    assertPasswordRefused(
+  fun `visible text password field commits and prior IME is restored`() {
+    assertPasswordCommits(
       InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
     )
   }
 
   @Test
-  fun `web password field is refused and prior IME is restored`() {
-    assertPasswordRefused(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
+  fun `web password field commits and prior IME is restored`() {
+    assertPasswordCommits(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)
   }
 
   @Test
-  fun `number password field is refused and prior IME is restored`() {
-    assertPasswordRefused(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+  fun `number password field commits and prior IME is restored`() {
+    assertPasswordCommits(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD)
+  }
+
+  @Test
+  fun `password commit failure never echoes the typed text`() {
+    val sink =
+      FakeImeCommitSink(
+        inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD,
+        failAtCommitIndex = 2,
+      )
+
+    val result = commit(sink, "s3cr3t", PRIOR_IME_ID)
+
+    assertFalse(result.success)
+    assertEquals("Input connection lost during commit", result.error)
+    assertFalse(result.error!!.contains("s3"))
+    assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
   @Test
@@ -425,14 +441,14 @@ class ImeCommitDriverTest {
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
-  private fun assertPasswordRefused(inputType: Int) {
+  private fun assertPasswordCommits(inputType: Int) {
     val sink = FakeImeCommitSink(inputType = inputType)
 
-    val result = commit(sink, "secret", PRIOR_IME_ID)
+    val result = commit(sink, "s3cr3t", PRIOR_IME_ID)
 
-    assertFalse(result.success)
-    assertEquals("Cannot commit text into a password field", result.error)
-    assertTrue(sink.committedChars.isEmpty())
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("s3cr3t", sink.committedChars.joinToString(separator = ""))
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 

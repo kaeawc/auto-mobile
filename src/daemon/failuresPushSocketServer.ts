@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
@@ -155,30 +156,20 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
 }
 
 // Singleton instance
-let socketServer: FailuresPushSocketServer | null = null;
+const socketServer = new SocketServerSingleton<FailuresPushSocketServer>();
 
 export function getFailuresPushServer(): FailuresPushSocketServer | null {
-  return socketServer;
+  return socketServer.instance;
 }
 
 export function getFailuresPushSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_PUSH_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(FAILURES_PUSH_SOCKET_CONFIG);
 }
 
 export async function startFailuresPushSocketServer(): Promise<FailuresPushSocketServer> {
-  if (!socketServer) {
-    socketServer = new FailuresPushSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
-  return socketServer;
+  return await socketServer.start(() => new FailuresPushSocketServer());
 }
 
 export async function stopFailuresPushSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

@@ -4,7 +4,8 @@ import { DeviceServiceClient } from "../../../src/features/observe/DeviceService
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeWebSocket } from "../../fakes/FakeWebSocket";
+import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 class TestDeviceServiceClient extends DeviceServiceClient {
   protected readonly logTag = "TestConcurrentConnectClient";
@@ -52,6 +53,77 @@ describe("DeviceServiceClient concurrent connect", () => {
     if (client) {
       await client.close();
       client = null;
+    }
+  });
+
+  for (const shared of [false, true]) {
+    test(`aborted connection caller ${shared ? "preserves a live joiner" : "cancels hung platform setup"}`, async () => {
+      const timer = new FakeTimer();
+      const gate = Promise.withResolvers<void>();
+      let setupSignal: AbortSignal | undefined;
+      let socketCount = 0;
+      client = new TestDeviceServiceClient(
+        timer,
+        (url) => {
+          socketCount++;
+          return new FakeWebSocket(url, "none", 0, timer);
+        },
+        async (signal) => {
+          setupSignal = signal;
+          await gate.promise;
+        },
+      );
+      const caller = new AbortController();
+      const reason = new Error("CtrlProxy WebSocket connect cancelled");
+      const first = runWithAbortSignal(caller.signal, () => client!.waitForConnection(1, 0));
+      let failure: unknown;
+      const observed = first.catch((error: unknown) => {
+        failure = error;
+      });
+      const second = shared ? client.ensureConnected() : undefined;
+      await settleMicrotasks();
+      caller.abort(reason);
+      await settleMicrotasks();
+      try {
+        expect(failure).toBe(reason);
+        expect(setupSignal?.aborted).toBe(!shared);
+      } finally {
+        gate.resolve();
+        await observed;
+        await settleMicrotasks();
+      }
+      if (second) {
+        expect(await second).toBe(true);
+      }
+      expect(socketCount).toBe(shared ? 1 : 0);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+  }
+
+  test("the last cancelled caller closes a hung WebSocket handshake", async () => {
+    const timer = new FakeTimer();
+    const socket = new FakeWebSocket("ws://localhost:9999/ws", "timeout", 120_000, timer);
+    client = new TestDeviceServiceClient(timer, () => socket);
+    const caller = new AbortController();
+    const reason = new Error("MCP request deadline");
+    const pending = runWithAbortSignal(caller.signal, () => client!.waitForConnection(1, 0));
+    const failure = pending.catch((error: unknown) => error);
+    let result: unknown;
+    void failure.then((value: unknown) => {
+      result = value;
+    });
+    await settleMicrotasks();
+    expect(socket.readyState).toBe(WebSocketState.CONNECTING);
+    caller.abort(reason);
+    await settleMicrotasks();
+    try {
+      expect(result).toBe(reason);
+      expect(socket.readyState).toBe(WebSocketState.CLOSING);
+      expect(client.isConnected()).toBe(false);
+      expect(timer.getSleepHistory()).toEqual([]);
+    } finally {
+      timer.advanceTime(120_000);
+      await failure;
     }
   });
 

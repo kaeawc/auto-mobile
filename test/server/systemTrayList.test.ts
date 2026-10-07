@@ -6,6 +6,7 @@ import generatedDefinitions from "../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
+  NotificationShadeNotOpenError,
   waitForNotificationMatch,
   resolveUniqueTrayAppLabel,
   resetSystemTrayDependencies,
@@ -1387,6 +1388,170 @@ describe("systemTray clearAll dumpsys ownership", () => {
     expect(
       adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
     ).toHaveLength(1);
+  });
+
+  // Shade state follows statusbar commands, not observation counts.
+  const setupClearAllShade = (
+    initiallyOpen: boolean,
+    unreadable?: "missing" | "closed",
+    failDuringList = false,
+    clearsOnSwipe = false,
+    listFailure?: NotificationShadeNotOpenError,
+  ) => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const observer = new FakeObserveScreen();
+    const commands = () => adb.getExecutedCommands();
+    observer.setObserveResult(() => {
+      const shadeCommands = commands().filter((command) => command.includes("shell cmd statusbar"));
+      const open =
+        shadeCommands.length === 0
+          ? initiallyOpen
+          : shadeCommands.at(-1)!.endsWith("expand-notifications");
+      const expands = shadeCommands.filter((command) =>
+        command.endsWith("expand-notifications"),
+      ).length;
+      if (open && listFailure && expands >= 1) {
+        throw listFailure;
+      }
+      if (open && unreadable && expands >= (failDuringList ? 1 : 2)) {
+        return unreadable === "missing" ? { ...page(), viewHierarchy: undefined } : closed;
+      }
+      const cleared =
+        clearsOnSwipe && commands().some((command) => command.startsWith("shell input swipe"));
+      return open ? (cleared ? page() : page(row("Shell notification", shellLabel))) : closed;
+    });
+    const closed: ObserveResult = {
+      ...page(),
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { package: "com.example.launcher", bounds: "[0,0][1080,1920]" }, node: [] },
+        },
+      },
+    };
+    const unchangedDump = execResult(dumpsys(record(1, "Shell notification", "Body")));
+    adb.setCommandResponse("dumpsys notification", unchangedDump);
+    setSystemTrayDependencies({ observeScreenFactory: () => observer });
+    installClearAllDependencies(timer, adb);
+    return { adb, commands };
+  };
+
+  for (const initiallyOpen of [false, true]) {
+    test(`failed clearAll restores shade found ${initiallyOpen ? "open" : "closed"}`, async () => {
+      const { commands } = setupClearAllShade(initiallyOpen);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        const response = await clearAll();
+        expect(JSON.parse(response.content[0].text).success).toBe(false);
+        expect(
+          commands()
+            .filter((command) => command.includes("shell cmd statusbar"))
+            .at(-1),
+        ).toBe(
+          initiallyOpen
+            ? "shell cmd statusbar expand-notifications"
+            : "shell cmd statusbar collapse",
+        );
+        expect(response.isError).toBe(true);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+  }
+
+  for (const unreadable of ["missing", "closed"] as const) {
+    test(`clearAll names unreadable shade (${unreadable}) instead of remaining-count failure`, async () => {
+      const { commands } = setupClearAllShade(false, unreadable);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        await expect(clearAll()).rejects.toThrow("shade not readable");
+        expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+  }
+
+  test("clearAll restores shade and names unreadable list-pass failure", async () => {
+    const { commands } = setupClearAllShade(false, "missing", true);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(clearAll()).rejects.toThrow("shade not readable");
+      expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("list reports an unreadable shade with a typed error", async () => {
+    const { timer } = setup([{ ...page(), viewHierarchy: undefined }], false);
+    timer.enableAutoAdvance();
+    const result = list();
+    await expect(result).rejects.toBeInstanceOf(NotificationShadeNotOpenError);
+    await expect(result).rejects.toThrow(
+      "Notification shade is not open; cannot list notifications.",
+    );
+  });
+
+  test("clearAll rewraps a typed list-pass failure regardless of its message", async () => {
+    const failure = new NotificationShadeNotOpenError("The shade disappeared during the scan.");
+    const { commands } = setupClearAllShade(false, undefined, false, false, failure);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(clearAll()).rejects.toMatchObject({
+        message:
+          "Could not clear notifications: shade not readable (shade not detected open during list).",
+        cause: failure,
+      });
+      expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("failed post-clear accounting restores the shade without masking the error", async () => {
+    const { adb, commands } = setupClearAllShade(false, undefined, false, true);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Shell notification", "Body"))),
+      execResult("unrecognized output"),
+    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(clearAll()).rejects.toThrow(
+        `Could not verify how many notifications remain for ${SHELL}`,
+      );
+      expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("successful clearAll preserves accounting and leaves the readable shade open", async () => {
+    const { adb, commands } = setupClearAllShade(false, undefined, false, true);
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Shell notification", "Body"))),
+      execResult(dumpsys()),
+    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      const response = await clearAll();
+      expect(JSON.parse(response.content[0].text)).toMatchObject({
+        dismissedCount: 1,
+        remainingCount: 0,
+        success: true,
+      });
+      expect(response.isError).not.toBe(true);
+      expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(
+        1,
+      );
+      expect(
+        commands()
+          .filter((command) => command.includes("shell cmd statusbar"))
+          .at(-1),
+      ).toBe("shell cmd statusbar expand-notifications");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
   });
 
   test("reports no progress when every notification remains after swiping", async () => {

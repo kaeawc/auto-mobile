@@ -25,8 +25,14 @@ export interface IosDeviceBackend {
    * `signal` is the request's cancellation signal; the ambient request signal is
    * always honoured as well. A cancellation seen before the uninstall is
    * dispatched rejects without removing the app.
+   * `terminateFirst` defaults to true for simulator best-effort termination.
+   * Physical-device uninstall has no pre-termination step.
    */
-  uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void>;
+  uninstallApp(
+    bundleId: string,
+    signal?: AbortSignal,
+    options?: { terminateFirst?: boolean },
+  ): Promise<void>;
 }
 
 export interface DeviceAppUninstaller {
@@ -54,19 +60,25 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: IosDeviceBackendDeps,
   ) {}
 
-  async uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void> {
+  async uninstallApp(
+    bundleId: string,
+    signal?: AbortSignal,
+    options: { terminateFirst?: boolean } = {},
+  ): Promise<void> {
     const requestSignal = combineWithAmbientAbort(signal);
     requestSignal?.throwIfAborted();
-    try {
-      await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
-        timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
-        ...(requestSignal ? { signal: requestSignal } : {}),
-      });
-    } catch (error) {
-      // A cancellation is not a terminate failure to shrug off: continuing would
-      // remove the app for a request the caller already abandoned (issue #10077).
-      requestSignal?.throwIfAborted();
-      logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+    if (options.terminateFirst !== false) {
+      try {
+        await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
+          timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
+          ...(requestSignal ? { signal: requestSignal } : {}),
+        });
+      } catch (error) {
+        // A cancellation is not a terminate failure to shrug off: continuing would
+        // remove the app for a request the caller already abandoned (issue #10077).
+        requestSignal?.throwIfAborted();
+        logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+      }
     }
     // The terminate may have succeeded just as the request was cancelled; fence
     // the destructive step so it is never dispatched for a cancelled request.
@@ -88,7 +100,11 @@ export class PhysicalIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: Pick<IosDeviceBackendDeps, "deviceAppUninstaller">,
   ) {}
 
-  uninstallApp(bundleId: string): Promise<void> {
+  uninstallApp(
+    bundleId: string,
+    _signal?: AbortSignal,
+    _options?: { terminateFirst?: boolean },
+  ): Promise<void> {
     return this.deps.deviceAppUninstaller.uninstallApp(this.deviceId, bundleId, false);
   }
 }

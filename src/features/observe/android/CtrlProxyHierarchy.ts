@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import { linkWindowRoots } from "../linkWindowRoots";
 /**
@@ -632,7 +633,7 @@ export class CtrlProxyHierarchy {
       const result = await this.context.adb.executeCommand(
         "shell dumpsys activity processes",
         timeoutMs,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );

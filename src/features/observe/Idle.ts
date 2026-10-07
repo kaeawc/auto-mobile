@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -190,7 +191,11 @@ export class Idle {
     try {
       // Reset the gfxinfo stats for the package
       await perf.track("adbGfxinfoReset", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`),
+        this.adb.executeCommand(
+          `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
+          undefined,
+          DUMPSYS_MAX_BUFFER,
+        ),
       );
 
       // Wait for measurement period to accumulate data. Use the injected timer
@@ -240,7 +245,7 @@ export class Idle {
         this.adb.executeCommand(
           `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
           options.timeoutMs,
-          undefined,
+          DUMPSYS_MAX_BUFFER,
           undefined,
           options.signal,
         ),

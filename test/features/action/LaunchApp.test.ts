@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -180,10 +181,21 @@ describe("LaunchApp", () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", {
-      stdout: "123:com.example.app/u0a123\n",
+      // Synthetic filler around the existing inline process unit vector, not a capture.
+      stdout: "  filler_feature_flag=true\n".repeat(50_000) + "123:com.example.app/u0a123\n",
       stderr: "",
     });
 
+    const execute = fakeAdb.executeCommand.bind(fakeAdb);
+    const execSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+      const result = await execute(...args);
+      if (args[0] === "shell dumpsys activity processes") {
+        expect(args[2]).toBe(DUMPSYS_MAX_BUFFER);
+        expect(Buffer.byteLength(result.stdout)).toBeGreaterThan(1024 * 1024);
+        expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(args[2] ?? 1024 * 1024);
+      }
+      return result;
+    });
     const result = await launchApp.execute(
       packageName,
       false,
@@ -198,6 +210,7 @@ describe("LaunchApp", () => {
     // is already there is the goal satisfied — a success carrying
     // `alreadyForeground: true` plus the observation, never an error a client has
     // to string-match to decide whether to continue.
+    execSpy.mockRestore();
     expect(result.success).toBe(true);
     expect(result.alreadyForeground).toBe(true);
     expect(result.error).toBeUndefined();
@@ -348,8 +361,8 @@ describe("LaunchApp", () => {
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
       expect(calls).toEqual([
-        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
-        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
+        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
+        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
       ]);
       expect(dispatches).toBe(2);
       expect(fakeTimer.now()).toBe(200);

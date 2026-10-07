@@ -50,6 +50,7 @@ type StorageSdkErrorCode =
   | "invalid_store_name"
   | "write_verification_failed"
   | "mutation_not_authorized"
+  | "busy_lock"
   | "encode_failed"
   | "response_too_large";
 
@@ -68,6 +69,8 @@ const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorC
         ? `The database is read-only for the inspector. Writes and transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) require mutation authorization. (${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT})`
         : IOS_STORAGE_MUTATION_AUTHORIZATION_HINT;
     },
+    busy_lock: () =>
+      "The app is holding a lock on the database and the iOS SDK gave up waiting (busy_lock). The request was not applied; retry in a moment.",
     invalid_store_name: () =>
       "The iOS SDK could not open that key-value store name (invalid_store_name). Use an empty name, \"standard\" (any case) or the app's bundle id for the app's standard UserDefaults; any other name must be a valid UserDefaults suite name with no leading or trailing whitespace (the global domain is not allowed).",
     write_verification_failed: ({ action }) => {
@@ -128,8 +131,36 @@ function iosSdkSetupAdvice(): string {
   return "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).";
 }
 
-/** Converts an iOS SQL failure into a user message without double-wrapping SDK refusals. */
-export function iosSqlErrorMessage(error: unknown, databasePath: string): string {
+// Fragment of CtrlProxy's `SdkDatabaseError.indeterminateMessage`: the runner sent `/db/execute` to the
+// SDK and stopped waiting for the answer. The runner cannot tell a read from a write, so it always
+// warns that a write may have been applied.
+const IOS_SQL_NO_ANSWER_FRAGMENT = "the outcome is indeterminate";
+
+const IOS_SQL_READ_TIMEOUT_MESSAGE =
+  "Failed to execute SQL on iOS: the read-only query got no answer from the app in time. It does not change data, so it is safe to retry.";
+
+type IosSqlErrorOptions = {
+  /** The statement the host sent is a single read-only query, so an unanswered request changed nothing. */
+  readOnlyQuery?: boolean;
+};
+
+/**
+ * Converts an iOS SQL failure into a user message without double-wrapping SDK refusals. Only the host
+ * knows it sent a read, so only it can word an unanswered read as retryable; a mutation keeps the
+ * runner's "do not retry" wording.
+ */
+export function iosSqlErrorMessage(
+  error: unknown,
+  databasePath: string,
+  options: IosSqlErrorOptions = {},
+): string {
+  if (options.readOnlyQuery && errorMessage(error).includes(IOS_SQL_NO_ANSWER_FRAGMENT)) {
+    return IOS_SQL_READ_TIMEOUT_MESSAGE;
+  }
+  return mapIosSqlError(error, databasePath);
+}
+
+function mapIosSqlError(error: unknown, databasePath: string): string {
   const mapped = iosStorageErrorMessage(error);
   if (mapped) {
     return mapped === IOS_DATABASE_CAPABILITY_UNAVAILABLE_MESSAGE
@@ -137,6 +168,10 @@ export function iosSqlErrorMessage(error: unknown, databasePath: string): string
       : mapped;
   }
   const message = errorMessage(error);
+  // The runner reports a busy database without the "embed the SDK" wrapper: the SDK did answer.
+  if (sdkErrorCode(message) === "busy_lock") {
+    return SDK_ERROR_MESSAGES.busy_lock({ operation: "database", databasePath });
+  }
   const prefix = `${SDK_UNAVAILABLE_PREFIX}: `;
   if (message.startsWith(prefix)) {
     const detail = message.slice(prefix.length);

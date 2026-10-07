@@ -3,6 +3,9 @@ import type { ExecutionTracker } from "./executionTracker";
 import { executionTracker } from "./executionTracker";
 import { serverConfig } from "../utils/ServerConfig";
 
+// Observation may inspect a running plan without driving its device.
+const exemptTools: ReadonlySet<string> = new Set(["observe"]);
+
 export interface PlanExecutionLockRequest {
   toolName: string;
   sessionId?: string;
@@ -37,6 +40,9 @@ export class ExecutionTrackerPlanExecutionLock implements PlanExecutionLock {
 
   evaluate(request: PlanExecutionLockRequest): PlanExecutionLockDecision {
     const scope = this.scopeProvider.getScope();
+    if (exemptTools.has(request.toolName)) {
+      return { blocked: false, scope };
+    }
     const hasActivePlan = this.tracker.hasActiveToolExecution("executePlan", {
       scope,
       sessionId: request.sessionId,

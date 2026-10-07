@@ -2,6 +2,7 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
@@ -262,25 +263,16 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: FailuresStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<FailuresStreamSocketServer>();
 
 export function getFailuresStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
 }
 
 export async function startFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new FailuresStreamSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new FailuresStreamSocketServer());
 }
 
 export async function stopFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

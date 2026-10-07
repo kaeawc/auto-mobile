@@ -505,6 +505,11 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDoc
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument(int, int, java.util.List, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, kotlinx.serialization.internal.SerializationConstructorMarker);
   public static final kotlin.Lazy[] access$get$childSerializers$cp();
 }
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityJsonKt {
+  public static final java.lang.String toSnapshotJson(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult decodeSdkCapabilitySnapshot(java.lang.String);
+}
 Compiled from "SdkCapabilities.kt"
 public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry {
   public static final int $stable;
@@ -524,6 +529,33 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityReg
   public static final java.util.Set access$getHostManagedCapabilities$cp();
   public static final java.util.LinkedHashMap access$getDefaultDescriptors$cp();
   public static final java.util.Set access$getReservedCapabilities$cp();
+}
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure implements dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure(java.lang.String);
+  public final java.lang.String getReason();
+  public final java.lang.String component1();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure copy(java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success implements dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument getDocument();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument component1();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success copy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "SdkCapabilityJson.kt"
+public interface dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
 }
 Compiled from "SdkCapabilities.kt"
 public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState$Companion {

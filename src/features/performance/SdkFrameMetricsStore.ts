@@ -1,13 +1,13 @@
 /**
  * Host-side store for real per-frame metrics pushed by the in-app
- * `auto-mobile-sdk` FrameMetricsCollector over the CtrlProxy WebSocket
+ * `auto-mobile-sdk` frame collectors through CtrlProxy
  * (`frame_metrics_event`, issue #5076).
  *
  * `PerformanceMonitor.sampleAndroidDevice` prefers a *fresh* SDK sample over the
- * host-side `dumpsys gfxinfo` scrape, so an SDK-integrated app reports its real
- * app-process fps/frame-time/jank in `perfSnapshot` with no adb frame call. When
- * no fresh SDK sample exists (non-SDK app, or the feed went quiet), the sampler
- * falls back to dumpsys. Keyed by `${deviceId}:${packageName}` like
+ * host-side `dumpsys gfxinfo` scrape. iOS uses the same store keyed by bundle id,
+ * with null frame readings when there is no fresh SDK sample. An SDK app reports
+ * its real app-process fps/frame-time/jank in `perfSnapshot`. Android falls back
+ * to dumpsys when no fresh SDK sample exists (non-SDK app, or a quiet feed). Keyed by `${deviceId}:${packageName}` like
  * `RecompositionTracker`.
  */
 export interface SdkFrameSample {
@@ -34,7 +34,7 @@ export class SdkFrameMetricsStore {
    * Return the latest SDK sample for this device/package if it arrived within
    * `ttlMs` of `now`, else null. The TTL guards against a stale feed (the SDK
    * broadcasts ~1/s, so a sample older than a couple seconds means the app
-   * stopped reporting and the sampler should fall back to dumpsys).
+   * stopped reporting: Android falls back to dumpsys, iOS reports no frames).
    */
   getFresh(
     deviceId: string,

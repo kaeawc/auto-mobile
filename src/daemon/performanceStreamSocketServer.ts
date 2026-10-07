@@ -2,6 +2,7 @@ import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { PerformanceAuditRepository } from "../db/performanceAuditRepository";
@@ -108,25 +109,16 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: PerformanceStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<PerformanceStreamSocketServer>();
 
 export function getPerformanceStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG);
 }
 
 export async function startPerformanceStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new PerformanceStreamSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new PerformanceStreamSocketServer());
 }
 
 export async function stopPerformanceStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

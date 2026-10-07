@@ -38,6 +38,7 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /network/error-simulation", .networkErrorSimulation),
             ("POST /network/fault-rules", .networkFaultRules),
             ("POST /highlight", .highlight),
+            ("POST /accessibility/magic-tap", .magicTap),
             ("POST /db/execute", .dbExecute),
             ("POST /db/list", .dbList),
             ("POST /db/capabilities", .dbCapabilities),

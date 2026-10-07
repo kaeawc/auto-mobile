@@ -5,6 +5,7 @@
 
 import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
+import { DefaultSystemDetection, type SystemDetection } from "../../utils/system/SystemDetection";
 import { CheckResult, DoctorOptions, DoctorProbeOptions } from "../types";
 import {
   detectAndroidCommandLineTools,
@@ -12,6 +13,7 @@ import {
   getAndroidSdkFromEnvironment,
   getBestAndroidToolsLocation,
   getCmdlineToolsRoot,
+  getTypicalAndroidSdkPaths,
   isHomebrewToolsPath,
 } from "../../utils/android-cmdline-tools/detection";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -189,8 +191,10 @@ export async function checkAndroidCommandLineTools(
 /**
  * Check ANDROID_HOME environment variable
  */
-async function checkAndroidHome(): Promise<CheckResult> {
-  const androidHome = getAndroidSdkFromEnvironment();
+export async function checkAndroidHome(
+  systemDetection: SystemDetection = new DefaultSystemDetection(),
+): Promise<CheckResult> {
+  const androidHome = getAndroidSdkFromEnvironment(systemDetection);
 
   if (androidHome) {
     return {
@@ -198,6 +202,33 @@ async function checkAndroidHome(): Promise<CheckResult> {
       status: "pass",
       message: `Android SDK found`,
       value: androidHome,
+    };
+  }
+
+  let sdkRoot = getTypicalAndroidSdkPaths(systemDetection).find((path) =>
+    systemDetection.fileExistsSync(path),
+  );
+  if (!sdkRoot) {
+    try {
+      const location = getBestAndroidToolsLocation(
+        await detectAndroidCommandLineTools(systemDetection),
+      );
+      if (location) {
+        sdkRoot = getCmdlineToolsRoot(location.path);
+      }
+    } catch (error) {
+      logger.warn(`Android SDK discovery failed: ${errorMessage(error)}`, error);
+    }
+  }
+
+  if (sdkRoot) {
+    const homeStatus = systemDetection.getEnvVar("ANDROID_HOME") ? "invalid" : "unset";
+    return {
+      name: "ANDROID_HOME",
+      status: "warn",
+      message: `ANDROID_HOME is ${homeStatus}; Android SDK found at ${sdkRoot}`,
+      value: sdkRoot,
+      recommendation: `export ANDROID_HOME=${sdkRoot}`,
     };
   }
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { ClearAppData } from "../../../src/features/action/ClearAppData";
+import { AppNotInstalledError } from "../../../src/models";
 import {
   PhysicalIosClearDataBackend,
   SimulatorIosClearDataBackend,
@@ -99,8 +100,9 @@ describe("iOS clear-data backends", () => {
     expect(h.creations()).toBe(0);
   });
 
-  test("returns the unchanged failure for a missing container", async () => {
+  test("returns the unchanged failure for a missing container of an installed app", async () => {
     const h = harness();
+    h.simctl.setInstalledApps([{ bundleId }]);
     expect(await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId)).toEqual({
       success: false,
       packageName: bundleId,
@@ -109,8 +111,9 @@ describe("iOS clear-data backends", () => {
     expect(h.removals).toHaveLength(0);
   });
 
-  test("container lookup errors return the missing-container result", async () => {
+  test("container lookup errors on an installed app return the missing-container result", async () => {
     const h = harness();
+    h.simctl.setInstalledApps([{ bundleId }]);
     h.simctl.setContainerError(bundleId, new Error("lookup failed"));
     expect(await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId)).toEqual({
       success: false,
@@ -118,6 +121,34 @@ describe("iOS clear-data backends", () => {
       error: `Could not resolve data container for ${bundleId} (is it installed?)`,
     });
     expect(h.removals).toHaveLength(0);
+  });
+
+  test("throws AppNotInstalledError when the listing succeeds without the bundle", async () => {
+    const h = harness();
+    h.simctl.setInstalledApps([{ bundleId: "com.example.other" }]);
+    const outcome = resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId);
+    await expect(outcome).rejects.toBeInstanceOf(AppNotInstalledError);
+    await expect(outcome).rejects.toThrow(bundleId);
+    expect(h.simctl.getMethodCalls("listAppsOrThrow")).toEqual([{ deviceId: simulatorId }]);
+    expect(h.removals).toHaveLength(0);
+  });
+
+  test("an unreadable app listing stays a retryable failure, not not-installed", async () => {
+    const h = harness();
+    h.simctl.setListAppsError(new Error("simctl listapps timed out"));
+    expect(await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId)).toEqual({
+      success: false,
+      packageName: bundleId,
+      error: `Could not resolve data container for ${bundleId} (is it installed?)`,
+    });
+    expect(h.removals).toHaveLength(0);
+  });
+
+  test("does not list apps when the container resolves", async () => {
+    const h = harness();
+    h.simctl.setContainerPath(bundleId, containerPath);
+    await resolveIosClearDataBackend(simulatorId, h.deps).clearAppData(bundleId);
+    expect(h.simctl.getMethodCalls("listAppsOrThrow")).toHaveLength(0);
   });
 
   test("continues clearing when the app is already stopped", async () => {

@@ -1023,6 +1023,29 @@ export class SessionManager {
     this.deviceHealth = { markers, incarnation, canRecover, backoff };
   }
 
+  /**
+   * A plan's app cleanup did not complete on this device. Marks it unhealthy so it cannot
+   * be allocated dirty, and retries `retry` on the bounded health-recovery budget once the
+   * device is idle; the marker clears when `retry` resolves. `retry` must run under its
+   * own abort signal: the recovery inherits this call's (possibly aborted) ambient one.
+   * `retryTimeoutMs` is the caller's real budget for one retry: a cleanup (`pm clear`,
+   * simctl container removal, a physical-iOS reinstall) legitimately takes far longer than
+   * the 1 s a settings restore gets, and a deadline shorter than the retry ends all retries
+   * with the marker kept even though the retry would have succeeded.
+   */
+  markDeviceNeedsAppCleanup(
+    deviceId: string,
+    retry: () => Promise<void>,
+    retryTimeoutMs: number,
+  ): void {
+    this.abandonRestore(
+      { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) },
+      "app-cleanup",
+      retry,
+      retryTimeoutMs,
+    );
+  }
+
   private restoreIncarnationIsCurrent(target: { deviceId: string; incarnation?: number }): boolean {
     return (
       target.incarnation === undefined ||
@@ -1046,8 +1069,9 @@ export class SessionManager {
    */
   private abandonRestore(
     target: { deviceId: string; incarnation?: number },
-    reason: "biometric-enrollment" | "network-condition",
+    reason: Exclude<DeviceHealthReason, "clock">,
     restore: () => Promise<void>,
+    restoreTimeoutMs: number = NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
   ): void {
     const health = this.deviceHealth;
     if (target.incarnation === undefined) {
@@ -1085,7 +1109,7 @@ export class SessionManager {
         try {
           await raceWithDeadline(restore(), {
             timer: this.timer,
-            timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+            timeoutMs: restoreTimeoutMs,
             label: "Device health recovery",
             timeoutError: () => timeout,
           });

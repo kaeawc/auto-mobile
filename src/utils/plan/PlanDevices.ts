@@ -42,3 +42,16 @@ export const normalizePlanDevices = (devices?: PlanDevice[]): NormalizedPlanDevi
 export const getPlanDeviceLabels = (devices?: PlanDevice[]): string[] => {
   return normalizePlanDevices(devices).labels;
 };
+
+/**
+ * The platform a plan declares for a device label (`devices: [{ label, platform }]`), or
+ * undefined for a label-only plan or an unknown label. The orchestrator allocates each label's
+ * device by this same definition, so it is the platform the label's steps must run with.
+ */
+export const getPlanDevicePlatform = (
+  devices: PlanDevice[] | undefined,
+  label: string,
+): PlanDeviceDefinition["platform"] | undefined => {
+  return normalizePlanDevices(devices).definitions.find((definition) => definition.label === label)
+    ?.platform;
+};

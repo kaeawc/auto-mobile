@@ -434,3 +434,90 @@ test("a TTL restore abandoned after its owner releases still marks the device", 
   await flush();
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
 });
+
+const APP_CLEANUP_RETRY_BUDGET_MS = 21_000;
+
+async function allocationError(h: Awaited<ReturnType<typeof harness>>): Promise<string> {
+  const error = await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+  expect(error).toBeInstanceOf(ActionableError);
+  return error instanceof Error ? error.message : "";
+}
+
+test("an app-cleanup retry slower than the settings-restore deadline still clears the marker", async () => {
+  const h = await harness();
+  let finished = false;
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      await h.timer.sleep(5_000);
+      finished = true;
+    },
+    APP_CLEANUP_RETRY_BUDGET_MS,
+  );
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("app-cleanup");
+  await h.timer.advanceTimeAsync(1_000);
+  await flush();
+  // Past the 1 s a settings restore is allowed, still inside the cleanup's own budget.
+  await h.timer.advanceTimeAsync(2_000);
+  await flush();
+  expect(finished).toBe(false);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("app-cleanup");
+  await h.timer.advanceTimeAsync(3_000);
+  await flush();
+  expect(finished).toBe(true);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+  expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
+});
+
+test("an app-cleanup retry that outlives its own budget retains the marker without overlapping retries", async () => {
+  const h = await harness();
+  let calls = 0;
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+      await new Promise<void>(() => {});
+    },
+    APP_CLEANUP_RETRY_BUDGET_MS,
+  );
+  await h.timer.advanceTimeAsync(1_000);
+  await flush();
+  expect(calls).toBe(1);
+  await h.timer.advanceTimeAsync(APP_CLEANUP_RETRY_BUDGET_MS + 10_000);
+  await flush();
+  expect(calls).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("app-cleanup");
+});
+
+test("allocating an app-cleanup device names the reason and the exact recovery", async () => {
+  const h = await harness();
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      throw new Error("pm clear refused");
+    },
+    APP_CLEANUP_RETRY_BUDGET_MS,
+  );
+  for (const delay of [1_000, 2_000, 4_000]) {
+    await h.timer.advanceTimeAsync(delay);
+    await flush();
+  }
+  // Pinned: three attempts, then the marker is held for the device's incarnation.
+  await h.timer.advanceTimeAsync(60_000);
+  await flush();
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("app-cleanup");
+  const message = await allocationError(h);
+  expect(message).toContain("(app-cleanup, since");
+  expect(message).toContain(
+    "call killDevice with device { name: 'Pixel A', deviceId: 'emulator-5554', platform: 'android' }, then startDevice",
+  );
+});
+
+test("the extra app-cleanup recovery text is absent for other health reasons", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  expect(await allocationError(h)).not.toContain("app-cleanup");
+});

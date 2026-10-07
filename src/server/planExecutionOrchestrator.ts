@@ -9,6 +9,8 @@ import {
 import {
   ExecutePlanStepDebugInfo,
   PlanExecutionOptions,
+  type PlanStepToolResult,
+  type PlanToolResultsTruncation,
   type PlanStepWarnings,
   type PlanSkippedStep,
   type PlanDeviceFailure,
@@ -212,6 +214,20 @@ function planSkippedStepsField(skippedSteps: PlanSkippedStep[] | undefined): {
   skippedSteps?: PlanSkippedStep[];
 } {
   return skippedSteps?.length ? { skippedSteps } : {};
+}
+
+/** The toolResults response field, omitted when no completed step produced an object payload. */
+function planToolResultsField(toolResults: PlanStepToolResult[] | undefined): {
+  toolResults?: PlanStepToolResult[];
+} {
+  return toolResults?.length ? { toolResults } : {};
+}
+
+/** The toolResultsTruncated marker, present only when the plan's shared budget ran out. */
+function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | undefined): {
+  toolResultsTruncated?: PlanToolResultsTruncation;
+} {
+  return truncated ? { toolResultsTruncated: truncated } : {};
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -447,6 +463,8 @@ export class PlanExecutionOrchestrator {
         // (#6887 review).
         ...planWarningsField(result.warnings),
         ...planSkippedStepsField(result.skippedSteps),
+        ...planToolResultsField(result.toolResults),
+        ...planToolResultsTruncatedField(result.toolResultsTruncated),
         ...planDeviceFailuresField(result.deviceFailures),
         videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0

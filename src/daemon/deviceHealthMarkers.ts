@@ -1,6 +1,10 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
-export type DeviceHealthReason = "biometric-enrollment" | "network-condition" | "clock";
+export type DeviceHealthReason =
+  | "biometric-enrollment"
+  | "network-condition"
+  | "clock"
+  | "app-cleanup";
 export interface DeviceHealthMarker {
   readonly reason: DeviceHealthReason;
   /** Milliseconds from the injected Timer. */

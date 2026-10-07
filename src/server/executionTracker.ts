@@ -46,6 +46,8 @@ export interface ExecutionScopeOptions {
 }
 
 export interface ExecutionCancellationOptions {
+  /** Restrict a device cancellation to the owning kind of operation (e.g. executePlan). */
+  onlyToolName?: string;
   /**
    * Keeps the control-plane operation that triggered a device shutdown alive
    * while cancelling the device-bound work that must fail fast.
@@ -62,6 +64,7 @@ export interface ExecutionCancellationOptions {
 export type ExecutionCancellationReason = string | Error;
 
 export interface ActiveExecutionQuery {
+  onlyToolName?: string;
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
@@ -383,6 +386,10 @@ export class ExecutionTracker {
     for (const execution of this.executions.values()) {
       if (
         execution.id !== options.excludeExecutionId &&
+        (options.onlyToolName === undefined || execution.toolName === options.onlyToolName) &&
+        // Tool-scoped loss cancels only work already bound to this device. A
+        // session rebind (no tool filter) still fences unresolved calls too.
+        (options.onlyToolName === undefined || execution.deviceIds?.has(deviceId)) &&
         this.belongsToSessionFilter(execution, options.onlySessionUuid)
       ) {
         execution.revokedDeviceBindings ??= new Map();
@@ -531,6 +538,7 @@ export class ExecutionTracker {
         const execution = this.executions.get(executionId);
         return (
           executionId !== query?.excludeExecutionId &&
+          (query?.onlyToolName === undefined || execution?.toolName === query.onlyToolName) &&
           (query?.startedAtOrBefore === undefined ||
             (execution !== undefined && execution.startTime <= query.startedAtOrBefore))
         );
@@ -621,6 +629,7 @@ export class ExecutionTracker {
     if (
       query?.startedAtOrBefore === undefined &&
       query?.excludeExecutionId === undefined &&
+      query?.onlyToolName === undefined &&
       query?.onlySessionUuid === undefined
     ) {
       return true;
@@ -630,6 +639,7 @@ export class ExecutionTracker {
       return (
         execution !== undefined &&
         executionId !== query?.excludeExecutionId &&
+        (query?.onlyToolName === undefined || execution.toolName === query.onlyToolName) &&
         this.belongsToSessionFilter(execution, query?.onlySessionUuid) &&
         (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore)
       );
@@ -694,6 +704,7 @@ export class ExecutionTracker {
       }
       if (
         execution.id === options.excludeExecutionId ||
+        (options.onlyToolName !== undefined && execution.toolName !== options.onlyToolName) ||
         !this.belongsToSessionFilter(execution, options.onlySessionUuid)
       ) {
         continue;

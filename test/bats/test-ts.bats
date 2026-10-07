@@ -2048,6 +2048,15 @@ EOF
   [[ "$output" != *"Runner stall suspected"* ]]
 }
 
+@test "timing gate logs each isolated recheck sample as it lands" {
+  seed_outlier_report
+  run_timing_gate_with_recheck_times "0.010 0.150 0.020"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Recheck run 1/3 of "*"slowest testcase 10.00ms."* ]]
+  [[ "$output" == *"Recheck run 2/3 of "*"slowest testcase 150.00ms."* ]]
+  [[ "$output" == *"Recheck run 3/3 of "*"slowest testcase 20.00ms."* ]]
+}
+
 @test "timing gate even run counts never early stop" {
   seed_outlier_report
   BUN_TEST_TIMING_RECHECK_RUNS=4 run_timing_gate_with_recheck_times "0.010 0.010 0.010 0.150"

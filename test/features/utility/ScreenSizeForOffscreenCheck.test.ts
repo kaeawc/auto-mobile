@@ -2,7 +2,7 @@ import { expect, test, spyOn } from "bun:test";
 import type { ElementBounds, ViewHierarchyResult } from "../../../src/models";
 import {
   screenSizeForOffscreenCheck,
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../../../src/features/utility/ElementGeometry";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
@@ -284,9 +284,9 @@ test("fallback logs once per resolution, primary paths do not log", () => {
     });
     expect(debug).not.toHaveBeenCalled();
     expect(screenSizeForOffscreenCheck(missing)).toBeUndefined();
-    expect(
-      isElementCenterOffScreen({ left: 700, right: 800, top: 24, bottom: 82 }, undefined),
-    ).toBe(false);
+    expect(!hasVisibleScreenPart({ left: 700, right: 800, top: 24, bottom: 82 }, undefined)).toBe(
+      false,
+    );
   } finally {
     debug.mockRestore();
   }

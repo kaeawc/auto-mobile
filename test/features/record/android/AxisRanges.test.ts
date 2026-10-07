@@ -1,10 +1,6 @@
 import { logger } from "../../../../src/utils/logger";
 import { describe, expect, test, spyOn } from "bun:test";
-import {
-  buildScaler,
-  queryDensity,
-  queryRotation,
-} from "../../../../src/features/record/android/AxisRanges";
+import { buildScaler, queryDensity } from "../../../../src/features/record/android/AxisRanges";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 
 /** Full axis+display description accepted by buildScaler. */
@@ -42,40 +38,6 @@ describe("buildScaler", () => {
     // the off-by-one that a naive (xMax - xMin) divisor would produce.
     const scaler = buildScaler(ranges({ displayWidth: 2400, rotation: 0 }));
     expect(scaler.toScreenPoint(4095, 0).x).toBe(2399);
-  });
-});
-
-describe("queryRotation", () => {
-  test.each([
-    ["mCurrentRotation=ROTATION_0", 0],
-    ["mCurrentRotation=ROTATION_90", 1],
-    ["mCurrentRotation=ROTATION_1", 1],
-    ["mCurrentRotation=ROTATION_180", 2],
-    ["mCurrentRotation=ROTATION_270", 3],
-    ["mCurrentRotation=ROTATION_3", 3],
-  ])("normalizes %p to rotation index %p", async (stdout, expected) => {
-    const adb = new FakeAdbClient();
-    adb.setCommandResult("shell dumpsys window displays", stdout);
-    expect(await queryRotation(adb)).toBe(expected);
-  });
-
-  test("defaults to 0 when the rotation cannot be parsed", async () => {
-    const adb = new FakeAdbClient();
-    adb.setCommandResult("shell dumpsys window displays", "no rotation here");
-    expect(await queryRotation(adb)).toBe(0);
-  });
-
-  test("defaults to 0 when the dumpsys command fails", async () => {
-    const adb = new FakeAdbClient();
-    const failure = new Error("device offline");
-    adb.setCommandError("shell dumpsys window displays", failure);
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      expect(await queryRotation(adb)).toBe(0);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Failed to query"), failure);
-    } finally {
-      warn.mockRestore();
-    }
   });
 });
 

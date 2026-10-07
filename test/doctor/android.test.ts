@@ -133,6 +133,128 @@ const baseDependencies: AndroidDoctorDependencies = {
   },
 };
 
+describe("Android doctor ANDROID_HOME check (#10127)", () => {
+  const macDetection = (): FakeSystemDetection => {
+    const detection = new FakeSystemDetection();
+    detection.setPlatform("darwin");
+    detection.setHomeDir("/Users/test");
+    return detection;
+  };
+
+  test("passes with the environment variable and does not probe further", async () => {
+    const detection = macDetection();
+    detection.setEnvVar("ANDROID_HOME", "/env/sdk");
+    detection.addExistingFile("/env/sdk");
+    const result = await checkAndroidHome(
+      {},
+      {
+        ...baseDependencies,
+        systemDetection: detection,
+        detectAndroidCommandLineTools: async () => {
+          throw new Error("must not be called");
+        },
+      },
+    );
+    expect(result.status).toBe("pass");
+    expect(result.value).toBe("/env/sdk");
+  });
+
+  test("does not fail when the SDK is at the typical location without env vars", async () => {
+    const detection = macDetection();
+    // The source builds the typical location with path.join, which uses the host separator.
+    const typicalSdk = join("/Users/test", "Library/Android/sdk");
+    detection.addExistingFile(typicalSdk);
+    const result = await checkAndroidHome({}, { ...baseDependencies, systemDetection: detection });
+    expect(result.status).toBe("warn");
+    expect(result.value).toBe(typicalSdk);
+    expect(result.recommendation).toContain(`export ANDROID_HOME=${typicalSdk}`);
+  });
+
+  test("does not fail when only cmdline-tools detection finds the SDK", async () => {
+    const homebrew = {
+      path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+      source: "homebrew" as const,
+      available_tools: ["sdkmanager"],
+    };
+    const result = await checkAndroidHome(
+      {},
+      {
+        ...baseDependencies,
+        systemDetection: macDetection(),
+        detectAndroidCommandLineTools: async () => [homebrew],
+        getBestAndroidToolsLocation: () => homebrew,
+      },
+    );
+    expect(result.status).toBe("warn");
+    expect(result.value).toBe("/opt/homebrew/share/android-commandlinetools");
+    expect(result.message).toContain("homebrew");
+  });
+
+  test("does not fail when only adb is on PATH", async () => {
+    const detection = macDetection();
+    detection.setExecResponse("which adb", "/opt/homebrew/bin/adb\n");
+    const result = await checkAndroidHome({}, { ...baseDependencies, systemDetection: detection });
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("/opt/homebrew/bin/adb");
+    expect(result.value).toBeUndefined();
+  });
+
+  test("fails only when no SDK can be located anywhere", async () => {
+    const result = await checkAndroidHome(
+      {},
+      { ...baseDependencies, systemDetection: macDetection() },
+    );
+    expect(result.status).toBe("fail");
+    expect(result.recommendation).toContain("export ANDROID_HOME");
+  });
+
+  test("keeps main's invalid ANDROID_HOME warning when a fallback SDK exists", async () => {
+    const detection = macDetection();
+    detection.setEnvVar("ANDROID_HOME", "/missing/sdk");
+    const sdkRoot = join("/Users/test", "Library/Android/sdk");
+    detection.addExistingFile(sdkRoot);
+    const result = await checkAndroidHome(detection);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("ANDROID_HOME is invalid");
+    expect(result.value).toBe(sdkRoot);
+    expect(result.recommendation).toBe(`export ANDROID_HOME=${sdkRoot}`);
+    expect(detection.executeCommandCallCount).toBe(0);
+  });
+
+  test("bounds fallback discovery at the caller's deadline without probing adb afterward", async () => {
+    const detection = macDetection();
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const check = checkAndroidHome(deadline.probe, {
+      ...baseDependencies,
+      systemDetection: detection,
+      detectAndroidCommandLineTools: () => new Promise(() => {}),
+    });
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Doctor diagnostic deadline elapsed");
+    expect(detection.executeCommandCallCount).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("warns instead of failing when fallback detection itself errors", async () => {
+    const result = await checkAndroidHome(
+      {},
+      {
+        ...baseDependencies,
+        systemDetection: macDetection(),
+        detectAndroidCommandLineTools: async () => {
+          throw new Error("probe exploded");
+        },
+      },
+    );
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("probe exploded");
+  });
+});
+
 describe("Android doctor command line tools check", () => {
   test("warns when Homebrew tools are used and system images are in ANDROID_HOME", async () => {
     const homebrewLocation = {

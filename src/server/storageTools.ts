@@ -28,6 +28,7 @@ import {
   withAndroidSharedPreferencesInspectionFallback,
   type SharedPreferencesInspectionFallbackResult,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /** The subset of AndroidCtrlProxyClient the key-value tool handlers depend on. */
 export interface AndroidKeyValueClient {
@@ -334,7 +335,7 @@ interface ClearKeyValueFileArgs {
  * Build resource URI for storage entries (mirrors storageResources.ts)
  */
 function buildEntriesUri(deviceId: string, packageName: string, fileName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/${encodeURIComponent(fileName)}/entries`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/${encodeUriSegment(fileName)}/entries`;
 }
 
 /**

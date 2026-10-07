@@ -13,7 +13,7 @@ import {
   type IosPhysicalDeviceLister,
   type PhysicalIosDeviceDiscovery,
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import type { DiscoverySource } from "../utils/discoverySource";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type {
@@ -1052,17 +1052,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":
-        // Physical devices are discoverable now (issue #5620), so a kill request
-        // can reach one. `simctl shutdown` cannot act on a physical UDID — it
-        // would fail with an opaque CoreSimulator error — and there is no
-        // devicectl equivalent of shutting a device down, so say so plainly.
-        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
-          throw new ActionableError(
-            `Cannot shut down physical iOS device ${device.deviceId}: only simulators have a ` +
-              `remote shutdown path. Disconnect or power the device off manually.`,
-          );
-        }
-        return this.simctl.killSimulator(device, options);
+        // A physical UDID is refused by its backend: there is no remote
+        // shutdown path for it (issue #5620).
+        return resolveIosLifecycleBackend(device.deviceId, { simctl: this.simctl }).shutdown(
+          device,
+          options,
+        );
     }
   }
 
@@ -1158,27 +1153,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
               `a name-only target cannot be verified against 'simctl' state after boot`,
           );
         }
-        // A connected physical device has no simulator lifecycle: `simctl
-        // bootstatus` cannot answer for its UDID, and discovery already proved
-        // it reachable. Treat successful discovery as readiness rather than
-        // shelling out to a tool that would only fail (issue #5620).
-        if (isIosPhysicalUdid(device.deviceId)) {
-          return {
-            name: device.name,
-            platform: "ios",
-            deviceId: device.deviceId,
-            ...(device.iosVersion ? { iosVersion: device.iosVersion } : {}),
-            ...(device.osVersion ? { osVersion: device.osVersion } : {}),
-            ...(device.formFactor ? { formFactor: device.formFactor } : {}),
-          };
-        }
-        // A `childProcess` is only supplied on the cold-boot path, where
-        // `startSimulator` has already run `bootstatus -b`. Signal that so the
-        // wait doesn't redundantly repeat the full boot-readiness wait; the
-        // already-running path (no childProcess) still performs it.
-        return this.simctl.waitForSimulatorReady(device.deviceId, timeoutMs, {
-          assumeBooted: Boolean(childProcess),
-        });
+        // A physical device's backend treats successful discovery as readiness
+        // (issue #5620). A `childProcess` is only supplied on the cold-boot
+        // path, where `startSimulator` has already run `bootstatus -b`. Signal
+        // that so the wait doesn't redundantly repeat the full boot-readiness
+        // wait; the already-running path (no childProcess) still performs it.
+        return resolveIosLifecycleBackend(device.deviceId, { simctl: this.simctl }).waitForReady(
+          { ...device, deviceId: device.deviceId },
+          timeoutMs,
+          { assumeBooted: Boolean(childProcess) },
+        );
       default:
         throw new ActionableError("Unknown platform");
     }

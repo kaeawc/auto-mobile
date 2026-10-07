@@ -73,6 +73,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import {
+  visibleTapBounds,
   DefaultElementGeometry,
   screenSizeForOffscreenCheck,
   isUsableScreenSize,
@@ -107,6 +108,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import {
+  intersectBounds as intersectTapBounds,
   boundsArea,
   boundsEqual,
   boundsNearlyEqual,
@@ -184,19 +186,8 @@ import {
   tapPointOutsideIme,
 } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
-import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
-
-function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
-  const bounds = {
-    left: Math.max(a.left, b.left),
-    top: Math.max(a.top, b.top),
-    right: Math.min(a.right, b.right),
-    bottom: Math.min(a.bottom, b.bottom),
-  };
-  return bounds.left < bounds.right && bounds.top < bounds.bottom ? bounds : null;
-}
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -1360,13 +1351,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const matched = this.matchedTapElement(selection, target, options);
     const matchedBounds = matched.bounds;
     const matchForTap = hasTapArea(matchedBounds) ? matched : target;
-    let visible = intersectTapBounds(target.bounds, matchForTap.bounds);
-    // Legacy captures without dimensions still constrain the matched/actionable overlap.
-    if (!visible || !isUsableScreenSize(screenSize)) {
-      return visible;
-    }
-    visible = intersectTapBounds(visible, getScreenBounds(screenSize, undefined, true));
-    if (!visible || this.device.platform !== "ios") {
+    const visible = visibleTapBounds(target.bounds, screenSize, matchForTap.bounds);
+    if (!visible || !isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
       return visible;
     }
     const belowChrome = clipIosChromeBounds({

@@ -61,6 +61,8 @@ class WebSocketServer(
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
   /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
   private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
+  /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
+  private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -79,7 +81,8 @@ class WebSocketServer(
      * Maximum accepted inbound WebSocket frame (64 MiB). ktor caps frame size by default;
      * `Long.MAX_VALUE` removed the ceiling so a single hostile frame advertising a multi-GB length
      * would be buffered into memory -> OutOfMemoryError, downing the runner. Cap it above any
-     * legitimate command/hierarchy payload (issue #3711, the twin of iOS #3626).
+     * legitimate command/hierarchy payload (issue #3711, the twin of iOS #3626). Request types with
+     * a contract-bounded payload get a tighter cap from [InboundFrameLimits] (#9935).
      */
     internal const val MAX_FRAME_SIZE_BYTES: Long = 64L * 1024 * 1024
 
@@ -599,11 +602,7 @@ class WebSocketServer(
                     // Listen for incoming messages
                     for (frame in incoming) {
                       when (frame) {
-                        is Frame.Text -> {
-                          val text = frame.readText()
-                          Log.d(TAG, inboundFrameLogLine(connectionId, text))
-                          handleClientMessage(text, client)
-                        }
+                        is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
                         is Frame.Close -> {
                           Log.d(TAG, "Client #$connectionId closed connection")
                         }
@@ -1037,6 +1036,42 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
+  /**
+   * Checks [frame] against its request type's cap on the raw bytes, so an oversized frame is
+   * answered with a correlated error without being decoded into a String or deserialized (#9935).
+   */
+  internal suspend fun handleInboundTextFrame(
+    connectionId: Int,
+    frame: Frame.Text,
+    connection: ConnectedClient,
+  ) {
+    val rejection = inboundFrameLimits.check(frame.data)
+    if (rejection == null) {
+      val text = frame.readText()
+      Log.d(TAG, inboundFrameLogLine(connectionId, text))
+      handleClientMessage(text, connection)
+      return
+    }
+    // Sizes and type only: the frame may carry asset bytes or typed input.
+    Log.w(TAG, "Rejected frame from client #$connectionId: ${rejection.message}")
+    sendErrorResponse(
+      connection,
+      if (rejection.type in overlayRequestTypes) {
+        OverlayResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = rejection.requestId,
+          success = false,
+          error = rejection.message,
+        )
+      } else {
+        CorrelatedErrorReporter.frame(
+          requestId = rejection.requestId,
+          errorMessage = rejection.message,
+        )
+      },
+    )
+  }
+
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {

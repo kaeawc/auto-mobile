@@ -212,6 +212,7 @@ class WebSocketServer(
         is HighlightResponse -> response.requestId
         is OverlayResult -> response.requestId
         is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
+        is dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
         is PreferencesResult -> response.requestId
         is SubscribeStorageResult -> response.requestId

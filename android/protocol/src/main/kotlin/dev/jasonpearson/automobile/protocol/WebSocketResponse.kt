@@ -759,6 +759,14 @@ data class KeystoreDiscoveryResult(
 ) : WebSocketResponse()
 
 @Serializable
+@SerialName("sdk_capabilities")
+data class SdkCapabilitiesResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val state: SdkCapabilitiesState,
+) : WebSocketResponse()
+
+@Serializable
 @SerialName("preference_files")
 data class PreferenceFilesResult(
   override val timestamp: Long,

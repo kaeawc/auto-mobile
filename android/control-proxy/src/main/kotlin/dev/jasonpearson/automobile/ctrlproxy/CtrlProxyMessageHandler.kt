@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.protocol.GetDeviceOwnerStatus
 import dev.jasonpearson.automobile.protocol.GetPermission
 import dev.jasonpearson.automobile.protocol.GetPreference
 import dev.jasonpearson.automobile.protocol.GetPreferences
+import dev.jasonpearson.automobile.protocol.GetSdkCapabilities
 import dev.jasonpearson.automobile.protocol.GetTraversalOrder
 import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
@@ -515,6 +516,7 @@ class CtrlProxyMessageHandler(
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)
       is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
+      is GetSdkCapabilities -> actions.getSdkCapabilities(request.requestId, request.packageName)
       is ListDataStores ->
         actions.listDataStores(request.requestId, request.packageName, request.adapterName)
       is GetDataStore ->

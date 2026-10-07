@@ -549,6 +549,13 @@ export interface DiscoverKeystoreMessage {
   packageName: string;
 }
 
+/** Reads the app SDK's capability and capture-policy snapshot (issue #5191). */
+export interface GetSdkCapabilitiesMessage {
+  type: "get_sdk_capabilities";
+  requestId: string;
+  packageName: string;
+}
+
 /**
  * `@SerialName("list_data_stores")` → `ListDataStores`.
  *
@@ -791,6 +798,7 @@ export type CtrlProxyRequest =
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
   | DiscoverKeystoreMessage
+  | GetSdkCapabilitiesMessage
   | ListDataStoresMessage
   | GetDataStoreMessage
   | SubscribeStorageMessage
@@ -832,6 +840,7 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "put_overlay_asset",
   "remove_overlay_asset",
   "discover_keystore",
+  "get_sdk_capabilities",
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
   "request_insert_text_state",
@@ -1006,6 +1015,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   list_preference_files: true,
   get_preferences: true,
   discover_keystore: true,
+  get_sdk_capabilities: true,
   list_data_stores: true,
   get_data_store: true,
   subscribe_storage: true,
@@ -1354,6 +1364,10 @@ export const ctrlProxyRequests = {
 
   discoverKeystore(args: { requestId: string; packageName: string }): DiscoverKeystoreMessage {
     return { type: "discover_keystore", ...args };
+  },
+
+  getSdkCapabilities(args: { requestId: string; packageName: string }): GetSdkCapabilitiesMessage {
+    return { type: "get_sdk_capabilities", ...args };
   },
 
   listDataStores(args: {

@@ -12,6 +12,7 @@
     "test/fixtures/daemon-ps-lstart/*.txt",
     "test/fixtures/android-window-policy/*.txt",
     "test/fixtures/android-locale/*.txt",
+    "test/fixtures/android-focus-multidisplay/*.txt",
     "test/fixtures/android-am-start/*.txt",
     "test/fixtures/android-install/*.txt",
     "test/fixtures/ios-sdk-network/*.json",

@@ -7,11 +7,15 @@ import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.lang.management.ManagementFactory
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
+import java.nio.channels.FileChannel
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -31,6 +35,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager {
@@ -83,15 +88,62 @@ internal object DaemonSocketClientManager {
       }
     }
 
-    // Create new client for this thread
-    val newClient = DaemonSocketClient(socketPath)
+    // Create new client for this thread. A daemon killed without unlinking its socket leaves the
+    // file behind, so the check above keeps `daemonEnsured` and the connect is refused (#10169):
+    // re-ensure the daemon once and reconnect instead of failing every remaining test.
+    val newClient =
+      connectWithDaemonRecovery(
+        connect = { DaemonSocketClient(socketPath) },
+        reEnsureDaemon = {
+          synchronized(clientLock) {
+            daemonEnsured = false
+            ensureDaemonRunning()
+            daemonEnsured = true
+          }
+        },
+      )
     threadLocalClient.set(newClient)
     return newClient
   }
 
+  /**
+   * Connect to the daemon; when the connect fails (e.g. refused on a stale socket file left by a
+   * killed daemon), run [reEnsureDaemon] once and connect again; a second failure propagates.
+   * [connect] reports failures as [DaemonUnavailableException] (`DaemonSocketClient.connect` wraps
+   * the socket's IOException), so callers' retry and failure reporting apply (#10169).
+   */
+  internal fun <C> connectWithDaemonRecovery(connect: () -> C, reEnsureDaemon: () -> Unit): C {
+    try {
+      return connect()
+    } catch (e: DaemonUnavailableException) {
+      logDebug("Daemon connect failed (${e.message}); re-ensuring the daemon")
+    }
+    reEnsureDaemon()
+    return connect()
+  }
+
+  private fun logDebug(message: String) {
+    if (SystemPropertyCache.getBoolean("automobile.debug", false)) {
+      println(message)
+    }
+  }
+
   private fun ensureDaemonRunning() {
-    val socketPath = DaemonSocketPaths.socketPath()
     val forceRestart = DaemonSocketPaths.resolveForceRestart()
+    if (!forceRestart) {
+      ensureDaemonRunning(forceRestart = false)
+      return
+    }
+    // Serialize the forced-restart decision across runner JVMs (parallel Gradle forks share the
+    // per-uid daemon), so a fork that waited here sees the daemon the first fork just started
+    // and reuses it instead of stopping it under that fork's running plan (#10170).
+    DaemonSocketPaths.withCrossProcessLock(DaemonSocketPaths.runnerRestartLockPath()) {
+      ensureDaemonRunning(forceRestart = true)
+    }
+  }
+
+  private fun ensureDaemonRunning(forceRestart: Boolean) {
+    val socketPath = DaemonSocketPaths.socketPath()
     val daemonAvailable = DaemonSocketClient.isAvailable(socketPath)
     val daemonAssetVersion =
       DaemonSocketPaths.readDaemonAssetVersionFromPidFile(DaemonSocketPaths.pidFilePath())
@@ -140,12 +192,21 @@ internal object DaemonSocketClientManager {
       )
     }
     val skew = versionSkew || buildSkew || assetVersionSkew
+    // A forced restart replaces a daemon left by an earlier run; one started after this runner JVM
+    // was started by another fork of the same run, so reuse it rather than stop it (#10170).
+    val forcedRestart =
+      DaemonSocketPaths.requiresForcedRestart(
+        forceRestart = forceRestart,
+        daemonAvailable = daemonAvailable,
+        daemonStartedAtMs = DaemonSocketPaths.readDaemonStartedAtFromPidFile(pidFilePath),
+        runnerStartedAtMs = DaemonSocketPaths.runnerStartedAtMs(),
+      )
 
-    if (!forceRestart && daemonAvailable && !skew) {
+    if (!forcedRestart && daemonAvailable && !skew) {
       return
     }
 
-    val restartRequired = forceRestart || skew
+    val restartRequired = forcedRestart || skew
     val startCommand =
       if (restartRequired) {
         DaemonSocketPaths.buildDaemonRestartCommand()
@@ -576,11 +637,93 @@ internal object DaemonSocketPaths {
     }
   }
 
+  /**
+   * Whether a configured force restart ([forceRestart]) should actually stop the running daemon. A
+   * daemon recorded as started after this runner JVM started was started by another runner of the
+   * same run (e.g. a parallel Gradle fork) and is reused, so forks do not stop each other's daemon
+   * mid-plan (#10170). An unavailable daemon, or one whose start time is unknown, keeps the forced
+   * restart. Version/build skew is decided separately and still restarts.
+   */
+  internal fun requiresForcedRestart(
+    forceRestart: Boolean,
+    daemonAvailable: Boolean,
+    daemonStartedAtMs: Long?,
+    runnerStartedAtMs: Long?,
+  ): Boolean {
+    if (!forceRestart) return false
+    if (!daemonAvailable || daemonStartedAtMs == null || runnerStartedAtMs == null) return true
+    return daemonStartedAtMs <= runnerStartedAtMs
+  }
+
+  /** Epoch-millis start time of this runner JVM, or null when the JVM cannot report it. */
+  internal fun runnerStartedAtMs(): Long? =
+    try {
+      ManagementFactory.getRuntimeMXBean().startTime.takeIf { it > 0 }
+    } catch (e: Exception) {
+      // Optional: without a start time the forced restart keeps its previous behaviour.
+      null
+    }
+
+  /** Cross-process lock file serializing runner JVMs' forced-restart decisions (#10170). */
+  fun runnerRestartLockPath(): String {
+    val userId = getUserId()
+    return "/tmp/auto-mobile-daemon-$userId.runner-restart.lock"
+  }
+
+  /**
+   * Run [block] while holding an exclusive OS file lock on [lockPath], so only one runner JVM at a
+   * time executes it. Callers within one JVM must already be serialized (a second in-JVM lock
+   * attempt on the same file throws [java.nio.channels.OverlappingFileLockException]).
+   */
+  internal fun <T> withCrossProcessLock(lockPath: String, block: () -> T): T {
+    val channel =
+      try {
+        FileChannel.open(Paths.get(lockPath), StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+      } catch (e: IOException) {
+        throw DaemonUnavailableException(
+          "Cannot open daemon restart lock $lockPath: ${e.message}",
+          e,
+        )
+      }
+    channel.use {
+      val lock =
+        try {
+          it.lock()
+        } catch (e: IOException) {
+          throw DaemonUnavailableException(
+            "Cannot acquire daemon restart lock $lockPath: ${e.message}",
+            e,
+          )
+        }
+      lock.use {
+        return block()
+      }
+    }
+  }
+
   /** PID file the daemon writes its identity to. Mirrors [socketPath] (per-uid, /tmp). */
   fun pidFilePath(): String {
     val userId = getUserId()
     return "/tmp/auto-mobile-daemon-$userId.pid"
   }
+
+  /** Read the daemon's recorded `startedAt` (epoch millis) from its PID file, or null. */
+  internal fun readDaemonStartedAtFromPidFile(path: String): Long? =
+    try {
+      val file = File(path)
+      if (!file.exists()) {
+        null
+      } else {
+        Json { ignoreUnknownKeys = true }
+          .parseToJsonElement(file.readText())
+          .jsonObject["startedAt"]
+          ?.jsonPrimitive
+          ?.longOrNull
+      }
+    } catch (e: Exception) {
+      // Unreadable PID file: the start time is unknown, which keeps the forced restart.
+      null
+    }
 
   /**
    * The release portion of a version string — everything before the semver `+g<sha>` dev stamp.
@@ -1123,7 +1266,13 @@ internal class DaemonSocketClient(
       throw DaemonUnavailableException("Daemon socket not found: $socketPath")
     }
 
-    return SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    return try {
+      SocketChannel.open(UnixDomainSocketAddress.of(socketPath))
+    } catch (e: IOException) {
+      // A stale socket file left by a killed daemon refuses the connect (#10169); surface it as
+      // the type callers' retry/recovery catch rather than a raw ConnectException.
+      throw DaemonUnavailableException("Daemon connection failed: ${e.message}", e)
+    }
   }
 
   private fun registerAndSend(

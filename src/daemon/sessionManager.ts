@@ -2470,8 +2470,16 @@ export class SessionManager {
     // for this session — it must not later fire against the now-released old
     // device (issue #6085 item 2).
     this.cancelNetworkConditionExpiry(existing.sessionId);
-    const pendingNetworkRestoration = existing.cacheData.networkCondition
-      ? (await this.restoreNetworkConditionBestEffort(existing)).pending
+    const networkTarget = this.networkConditionRestoreTarget(existing);
+    const pendingNetworkRestoration = networkTarget
+      ? ((
+          await this.runUnderTeardownShield(async () => [
+            {
+              ...(await this.restoreNetworkConditionBestEffort(existing)),
+              abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+            },
+          ])
+        )[0] ?? null)
       : null;
 
     const pendingClockRestoration = existing.cacheData.clock
@@ -3188,15 +3196,20 @@ export class SessionManager {
     if (!this.releaseNeedsTeardown(session)) {
       return [];
     }
+    return this.runUnderTeardownShield(() => this.startReleaseTeardown(sessionId, session));
+  }
+
+  /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
+  private async runUnderTeardownShield(
+    start: () => Promise<readonly ReleaseTeardownStage[]>,
+  ): Promise<readonly Promise<void>[]> {
     const shield = new AbortController();
     const startedAtMs = this.timer.now();
     const capHandle = this.timer.setTimeout(() => {
       shield.abort(new ActionableError("Session release teardown exceeded its budget"));
     }, SESSION_RELEASE_TEARDOWN_CAP_MS);
     try {
-      const stages = await runWithAbortSignal(shield.signal, () =>
-        this.startReleaseTeardown(sessionId, session),
-      );
+      const stages = await runWithAbortSignal(shield.signal, start);
       const cleanups = stages.flatMap((stage) => {
         const bounded = this.boundTeardownStage(stage, startedAtMs);
         return bounded ? [bounded] : [];
@@ -4801,7 +4814,14 @@ export class SessionManager {
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
     this.trackPendingDeviceCleanup(target.deviceId, [
-      this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
+      this.runUnderTeardownShield(async () => [
+        {
+          pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
+          abandon: () => this.abandonCappedRestore(target, "network-condition"),
+        },
+      ]).then(async (cleanups) => {
+        await Promise.all(cleanups);
+      }),
     ]);
   }
 

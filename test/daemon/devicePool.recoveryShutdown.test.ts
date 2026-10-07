@@ -1,6 +1,6 @@
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -3476,6 +3476,34 @@ test("idle cleanup retries a failed terminal release and honors its backoff", as
   await flush();
   assertNoRecoveryReservationsRemain(pool, "session");
   expect(pool.getDevice(original.deviceId)?.sessionId).toBeNull();
+});
+
+test("idle expiry consumes a recovery capture and preserves its prior terminal reason", async () => {
+  const { sessions, pool, timer, persistence } = await setupFailedReleaseFence();
+  const session = sessions.getSession("session")!;
+  persistence.failure = "release";
+  await expect(sessions.releaseSession("session", "device-disconnected:test")).rejects.toThrow(
+    "persist release failed",
+  );
+  persistence.failure = null;
+  const releaseDevice = spyOn(pool, "releaseDevice");
+  try {
+    session.expiresAt = 0;
+    timer.setCurrentTime(1);
+    sessions.cleanupExpiredSessions();
+    await pool.waitForSessionPreservingRecovery("session");
+    await flush();
+    expect(releaseDevice).toHaveBeenCalledTimes(1);
+    expect(releaseDevice).toHaveBeenCalledWith(original.deviceId, "session");
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      release_reason: "device-disconnected:test",
+    });
+    expect(pool.getDevice(original.deviceId)).toMatchObject({ sessionId: null, status: "idle" });
+    assertNoRecoveryReservationsRemain(pool, "session");
+  } finally {
+    releaseDevice.mockRestore();
+    sessions.stopCleanupTimer();
+  }
 });
 
 test("failed-release expiry preserves a declined commit fence", async () => {

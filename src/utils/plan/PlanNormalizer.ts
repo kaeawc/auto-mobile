@@ -1,5 +1,6 @@
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
+import { redactPlanStepTypedText } from "../redactTypedTextArguments";
 
 /**
  * Internal helper for normalizing plan steps
@@ -32,7 +33,8 @@ export class PlanNormalizer {
         key !== "label" &&
         key !== "params" &&
         key !== "optional" &&
-        key !== "expectations"
+        key !== "expectations" &&
+        key !== "geometry"
       ) {
         inlineParams[key] = step[key];
       }
@@ -50,7 +52,10 @@ export class PlanNormalizer {
    * @returns Normalized PlanStep
    */
   static normalizeStep(step: any, index: number): PlanStep {
-    logger.debug(`Processing step ${index}:`, JSON.stringify(step, null, 2));
+    logger.debug(
+      `Processing step ${index}:`,
+      JSON.stringify(redactPlanStepTypedText(step), null, 2),
+    );
 
     const parts = PlanNormalizer.toolAndParams(step);
     if (!parts) {
@@ -62,6 +67,10 @@ export class PlanNormalizer {
       tool: toolName,
       params: parts.params,
     };
+
+    if (step.geometry !== undefined) {
+      normalizedStep.geometry = step.geometry;
+    }
 
     if (typeof step.label === "string") {
       normalizedStep.label = step.label;
@@ -79,7 +88,10 @@ export class PlanNormalizer {
     }
 
     logger.info(`Normalized step ${index}: ${toolName}`);
-    logger.debug(`Normalized step ${index}:`, JSON.stringify(normalizedStep, null, 2));
+    logger.debug(
+      `Normalized step ${index}:`,
+      JSON.stringify(redactPlanStepTypedText(normalizedStep), null, 2),
+    );
     return normalizedStep;
   }
 

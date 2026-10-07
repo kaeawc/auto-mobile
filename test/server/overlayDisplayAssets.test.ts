@@ -72,7 +72,7 @@ describe("overlay display together with assets", () => {
   });
 
   async function call(input: Record<string, unknown>) {
-    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(device, input);
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
     return { response, payload: overlayOutputSchema.parse(response.structuredContent) };
   }
   const inventoryReads = () =>

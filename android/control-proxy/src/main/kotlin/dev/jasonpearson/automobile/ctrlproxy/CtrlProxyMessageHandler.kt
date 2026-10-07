@@ -27,6 +27,7 @@ import dev.jasonpearson.automobile.protocol.RemovePreference
 import dev.jasonpearson.automobile.protocol.RequestAction
 import dev.jasonpearson.automobile.protocol.RequestActivateAccessibilityLink
 import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
+import dev.jasonpearson.automobile.protocol.RequestClickFocusedInput
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestDeviceInfo
@@ -381,6 +382,7 @@ class CtrlProxyMessageHandler(
           request.text,
           request.priorImeId,
           request.delivery,
+          request.timeoutMs,
         )
       is RequestCancelImeCommit ->
         actions.requestCancelImeCommit(request.requestId, request.targetRequestId)
@@ -395,6 +397,7 @@ class CtrlProxyMessageHandler(
           actions.requestImeAction(request.requestId, request.action, request.frameContext)
         }
       is RequestSelectAll -> actions.requestSelectAll(request.requestId)
+      is RequestClickFocusedInput -> actions.requestClickFocusedInput(request.requestId)
       is RequestAction ->
         actions.requestAction(
           request.requestId,
@@ -457,7 +460,8 @@ class CtrlProxyMessageHandler(
         )
       is SetNetworkMockRules ->
         actions.setNetworkMockRules(
-          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules)
+          request.requestId,
+          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules),
         )
       is SetNetworkErrorSimulation ->
         actions.setNetworkErrorSimulation(
@@ -465,6 +469,7 @@ class CtrlProxyMessageHandler(
           request.errorType,
           request.limit,
           request.expiresAtEpochMs,
+          request.remainingMs,
         )
       is GetCurrentFocus -> actions.getCurrentFocus(request.requestId)
       is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)

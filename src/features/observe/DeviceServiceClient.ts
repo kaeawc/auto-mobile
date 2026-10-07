@@ -15,7 +15,7 @@
  */
 
 import WebSocket from "ws";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -24,10 +24,12 @@ import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { getAbortSignal } from "../../utils/AbortContext";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
+import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { DelegateContext } from "./shared/types";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 
@@ -38,9 +40,77 @@ import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigat
 export type WebSocketFactory = (url: string) => WebSocket;
 
 /**
- * Default WebSocket factory that creates real WebSocket instances.
+ * Env flag a unit test sets (`1`/`true`/`yes`) to opt into a real WebSocket from
+ * {@link defaultWebSocketFactory} under `bun test`. Prefer injecting a
+ * `WebSocketFactory` instead; this exists for suites that must exercise the
+ * default factory against a local fake server.
  */
-export const defaultWebSocketFactory: WebSocketFactory = (url: string) => new WebSocket(url);
+export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET";
+
+function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
+  const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
+ * Thrown by {@link assertUnitTestRealWebSocketAllowed}. It is a test-harness
+ * misconfiguration, not a connect failure: every catch on the connect path
+ * rethrows it before recording a failed attempt, so a leaking unit test fails
+ * loudly and never counts toward the platform clients' service recovery or
+ * restart (which would act on an attached device).
+ */
+export class RealCtrlProxyWebSocketInTestError extends ActionableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "RealCtrlProxyWebSocketInTestError";
+  }
+}
+
+/** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
+export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
+  if (error instanceof RealCtrlProxyWebSocketInTestError) {
+    throw error;
+  }
+}
+
+/**
+ * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
+ * CtrlProxy socket. On a developer machine with an emulator or simulator running,
+ * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
+ * unstubbed client method sent real taps from a unit test (#10470). Like the
+ * real-DB guard (#3067) it needs Bun's test context signal (`NODE_ENV=test`),
+ * but it also requires this process to be the `bun test` runner itself (see
+ * {@link isBunTestRunnerProcess}), so CLI/daemon children of an on-device
+ * integration test are never armed. It fires only on the default path.
+ * Injecting a `WebSocketFactory` (or setting
+ * {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
+ */
+export function assertUnitTestRealWebSocketAllowed(
+  url: string,
+  env: NodeJS.ProcessEnv = process.env,
+  entrypoint: string | undefined = currentProcessEntrypoint(),
+): void {
+  if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
+    return;
+  }
+  throw new RealCtrlProxyWebSocketInTestError(
+    `Unit test tried to open a real CtrlProxy WebSocket to ${url}. With an ` +
+      "emulator or simulator running this reaches a live device (issue #10470). " +
+      "Stub the client method the code under test calls (e.g. " +
+      "AndroidCtrlProxyClient.prototype.requestTapCoordinates or the matching " +
+      "IOSCtrlProxyClient method), inject a fake WebSocketFactory, or, for a " +
+      `suite that runs its own local fake server, set ${REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}=1.`,
+  );
+}
+
+/**
+ * Default WebSocket factory that creates real WebSocket instances. Guarded under
+ * `bun test`; see {@link assertUnitTestRealWebSocketAllowed}.
+ */
+export const defaultWebSocketFactory: WebSocketFactory = (url: string) => {
+  assertUnitTestRealWebSocketAllowed(url);
+  return new WebSocket(url);
+};
 
 /**
  * Configuration for connection behavior.
@@ -133,6 +203,7 @@ export abstract class DeviceServiceClient {
   // orphan-naming diagnostic to this exact condition instead of any stored
   // error.
   private lastConnectionFailureIsForwardingLeaseConflict: boolean = false;
+  private lastConnectionFailureIsTransientLeaseConflict: boolean = false;
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -180,6 +251,8 @@ export abstract class DeviceServiceClient {
   // Injected dependencies
   protected readonly timer: Timer;
   protected readonly requestManager: RequestManager;
+  /** Last fire-and-forget send through {@link sendMessage}. */
+  private lastSendAt: number | undefined;
   protected readonly webSocketFactory: WebSocketFactory;
   protected readonly config: ConnectionConfig;
   protected readonly retryExecutor: RetryExecutor;
@@ -285,17 +358,28 @@ export abstract class DeviceServiceClient {
    * Keep a caller's interest in a pending connection attempt until it settles.
    */
   protected acquirePendingConnectInterest(): { release: () => void } {
+    const signal = this.backgroundConnectRequested ? undefined : getAbortSignal();
+    signal?.throwIfAborted();
     this.pendingConnectJoiners++;
     let released = false;
-    return {
-      release: () => {
-        if (released) {
-          return;
-        }
-        released = true;
-        this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
-      },
+    const release = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      signal?.removeEventListener("abort", onAbort);
+      this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
     };
+    const onAbort = () => {
+      release();
+      // A shared dial belongs to every live waiter; only the last cancelled
+      // caller may stop its platform commands and pending socket.
+      if (this.pendingConnectJoiners === 0) {
+        this.abortPendingConnect();
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    return { release };
   }
 
   /**
@@ -317,6 +401,7 @@ export abstract class DeviceServiceClient {
     this.backgroundReconnectPaused = false;
     this.lastConnectionFailureMessage = undefined;
     this.lastConnectionFailureIsForwardingLeaseConflict = false;
+    this.lastConnectionFailureIsTransientLeaseConflict = false;
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
@@ -352,9 +437,15 @@ export abstract class DeviceServiceClient {
     maxAttempts: number = 10,
     delayMs: number = 300,
   ): Promise<boolean> {
+    const signal = getAbortSignal();
+    signal?.throwIfAborted();
     const result = await this.retryExecutor.execute(
       async (attempt) => {
-        const connected = await this.ensureConnected();
+        const connected = await raceWithDeadline(() => this.ensureConnected(), {
+          timer: this.timer,
+          signal,
+          label: "CtrlProxy WebSocket connect",
+        });
         if (connected) {
           logger.info(
             `[${this.logTag}] WebSocket connected after ${attempt} attempt(s) (${(attempt - 1) * delayMs}ms)`,
@@ -366,7 +457,9 @@ export abstract class DeviceServiceClient {
       },
       {
         maxAttempts,
+        signal,
         delays: delayMs,
+        shouldRetry: (error) => !(error instanceof RealCtrlProxyWebSocketInTestError),
         onRetry: (_error, attempt) => {
           logger.debug(
             `[${this.logTag}] Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms`,
@@ -374,7 +467,11 @@ export abstract class DeviceServiceClient {
         },
       },
     );
+    signal?.throwIfAborted();
 
+    if (result.error instanceof RealCtrlProxyWebSocketInTestError) {
+      throw result.error;
+    }
     if (!result.success) {
       logger.warn(
         `[${this.logTag}] WebSocket not ready after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`,
@@ -757,6 +854,8 @@ export abstract class DeviceServiceClient {
               this.backgroundReconnectPaused = false;
               this.lastConnectionFailureMessage = undefined;
               this.lastConnectionFailureIsForwardingLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
               this.markLivenessSeen();
 
               // Start health check monitoring
@@ -826,9 +925,7 @@ export abstract class DeviceServiceClient {
           }),
       );
     } catch (error) {
-      this.isConnecting = false;
-      this.recordFailedConnect(error, background);
-      return false;
+      return this.failConnectAttempt(error, background);
     }
   }
 
@@ -859,6 +956,22 @@ export abstract class DeviceServiceClient {
     }
   }
 
+  private failConnectAttempt(error: unknown, background: boolean): false {
+    this.isConnecting = false;
+    if (error instanceof RealCtrlProxyWebSocketInTestError) {
+      // A test-harness misconfiguration, not a connect failure: never let it
+      // count toward cooldown or the platform clients' service recovery.
+      // Refund the attempt too, or the third leak would enter cooldown and
+      // return false silently instead of failing the test.
+      if (!background) {
+        this.connectionAttempts = Math.max(0, this.connectionAttempts - 1);
+      }
+      throw error;
+    }
+    this.recordFailedConnect(error, background);
+    return false;
+  }
+
   private recordFailedConnect(error: unknown, background: boolean): void {
     if (!background) {
       this.lastConnectionAttempt = this.timer.now();
@@ -866,6 +979,8 @@ export abstract class DeviceServiceClient {
     this.lastConnectionFailureMessage = errorMessage(error);
     this.lastConnectionFailureIsForwardingLeaseConflict =
       error instanceof CtrlProxyForwardingLeaseConflictError;
+    this.lastConnectionFailureIsTransientLeaseConflict =
+      error instanceof CtrlProxyForwardingLeaseConflictError && error.transient;
     logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
     this.onConnectAttemptFailed();
   }
@@ -914,6 +1029,14 @@ export abstract class DeviceServiceClient {
     return this.lastConnectionFailureIsForwardingLeaseConflict;
   }
 
+  /**
+   * Whether that lease conflict is a time-based refusal (recent owner use, or
+   * an owner too busy to answer) that a readiness wait should retry (#10485).
+   */
+  public isLastConnectionFailureTransientLeaseConflict(): boolean {
+    return this.lastConnectionFailureIsTransientLeaseConflict;
+  }
+
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {
     // Platform-specific setup (e.g., port forwarding) must be cancellable: a
     // close while adb is hung otherwise leaves the client in-flight forever.
@@ -925,6 +1048,9 @@ export abstract class DeviceServiceClient {
     );
     try {
       await perf.track("platformSetup", () => this.setupBeforeConnect(perf, setupAbort.signal));
+      // An abort-ignoring platform command must not open a socket after its
+      // last acquisition caller has already left.
+      setupAbort.signal.throwIfAborted();
     } finally {
       this.timer.clearTimeout(setupTimeout);
       if (this.pendingPlatformSetupAbort === setupAbort) {
@@ -1295,7 +1421,24 @@ export abstract class DeviceServiceClient {
       logger.warn(`[${this.logTag}] Cannot send message: WebSocket not connected`);
       return false;
     }
+    this.lastSendAt = this.timer.now();
     this.ws.send(message);
     return true;
+  }
+
+  /**
+   * Requests in flight through this client and when it was last used, so a
+   * daemon can tell a device it is actively driving from an idle one before
+   * giving up or yielding its CtrlProxy forwarding lease (#10497). Covers every
+   * request-response exchange (tool calls, resource reads, initial frames)
+   * because they all register with the shared request manager.
+   */
+  getRequestActivity(): { inFlightRequests: number; lastActivityAt: number | undefined } {
+    const requestActivityAt = this.requestManager.getLastActivityAt();
+    const lastActivityAt =
+      requestActivityAt === undefined || this.lastSendAt === undefined
+        ? (requestActivityAt ?? this.lastSendAt)
+        : Math.max(requestActivityAt, this.lastSendAt);
+    return { inFlightRequests: this.requestManager.getPendingCount(), lastActivityAt };
   }
 }

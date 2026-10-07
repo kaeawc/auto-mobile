@@ -48,6 +48,12 @@ import {
   PINCH_DURATION_MAX_MS,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
+import {
+  SHAKE_DURATION_MAX_MS,
+  SHAKE_DURATION_MIN_MS,
+  SHAKE_INTENSITY_MAX,
+  SHAKE_INTENSITY_MIN,
+} from "../models/ShakeOptions";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { DaemonState } from "../daemon/daemonState";
@@ -64,6 +70,8 @@ import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
 import { Keyboard, KeyboardOpenIndeterminateError } from "../features/action/Keyboard";
+import { dismissKeyboardAfterSendKeys } from "../features/action/dismissKeyboardAfterSendKeys";
+import { serverConfig } from "../utils/ServerConfig";
 import { withAndroidImeLock } from "../features/action/androidImeLock";
 import {
   KEYBOARD_PROFILE_CATALOG_ID,
@@ -71,10 +79,14 @@ import {
   KEYBOARD_PROFILE_IDS,
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
-import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import {
+  AndroidImeCatalog,
+  createForegroundUserSource,
+} from "../features/action/AndroidImeCatalog";
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
+  SEND_KEYS_CLEAR_MODES,
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
   SEND_KEYS_OPERATIONS,
@@ -115,6 +127,7 @@ import {
 import { defaultTimer } from "../utils/SystemTimer";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   withIsErrorOnFailure,
   awaitWhileRequestIsLive,
@@ -138,6 +151,7 @@ import {
 import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
+  hierarchyLayerSchema,
   tapOnSelectorSchema,
   resolverSelectionStrategySchema,
   nestedElementContainerSchema,
@@ -175,6 +189,8 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
+import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+
 import {
   SystemTrayObserver,
   SystemTrayAdb,
@@ -183,7 +199,10 @@ import {
   resetSystemTrayDependencies,
   getSystemTrayDependencies,
   waitForNotificationMatch,
+  clearMatchingSystemTrayNotifications,
+  clearIosSystemTrayNotifications,
   listSystemTrayNotifications,
+  NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
   resolveUniqueTrayAppLabel,
   resolveSystemTrayAwaitTimeout,
@@ -200,8 +219,6 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-  SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
-  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -237,8 +254,25 @@ export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotifica
 export const shakeSchema = addDeviceTargetingToSchema(
   z
     .object({
-      duration: z.number().optional().describe("Shake duration ms (default 1000)"),
-      intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
+      duration: z
+        .number()
+        .finite()
+        .int()
+        .min(SHAKE_DURATION_MIN_MS)
+        .max(SHAKE_DURATION_MAX_MS)
+        .optional()
+        .describe(
+          `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
+        ),
+      intensity: z
+        .number()
+        .finite()
+        .min(SHAKE_INTENSITY_MIN)
+        .max(SHAKE_INTENSITY_MAX)
+        .optional()
+        .describe(
+          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
+        ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -391,6 +425,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       .object({
         selector: tapOnSelectorSchema,
         display: z.string().optional().describe("Target panel key, role, or active"),
+        layer: hierarchyLayerSchema.optional(),
         sibling: z
           .boolean()
           .optional()
@@ -525,6 +560,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       ["ensureChecked"],
     );
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
+    addIssue(value.layer !== undefined, "semantic link activation cannot use layer", ["layer"]);
     addIssue(
       value.subtext && value.index !== undefined,
       "owner-scoped semantic link activation cannot use index; use a unique owner selector",
@@ -690,6 +726,7 @@ export const tapAnySchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Search only scrollable containers/lists"),
+        layer: hierarchyLayerSchema.optional(),
         action: z
           .enum(["tap", "doubleTap", "longPress"])
           .default("tap")
@@ -778,6 +815,7 @@ export const dragAndDropSchema = withJsonSchemaOverride(
         display: z.string().optional().describe("Target panel key, role, or active"),
         source: dragAndDropSelectorSchema("Source"),
         target: dragAndDropSelectorSchema("Target"),
+        layer: hierarchyLayerSchema.optional(),
         pressDurationMs: z
           .number()
           .min(PRESS_DURATION_MIN_MS)
@@ -931,7 +969,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Use full screen including status/nav bars"),
-        container: nestedElementContainerSchema.optional().describe("Scope search to a container"),
+        container: nestedElementContainerSchema
+          .optional()
+          .describe(
+            "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
+          ),
         autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -1156,7 +1198,17 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           ),
       })
       .strict(),
-    z.object({ action: z.literal("clear") }).strict(),
+    z
+      .object({
+        action: z.literal("clear"),
+        mode: z
+          .enum(SEND_KEYS_CLEAR_MODES)
+          .optional()
+          .describe(
+            "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
+          ),
+      })
+      .strict(),
   ]),
 );
 
@@ -1180,6 +1232,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
           .describe(
             "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target. Requires a selector naming the field to focus.",
           ),
+        layer: hierarchyLayerSchema.optional(),
         commands: z
           .array(sendKeysCommandSchema)
           .min(1)
@@ -1196,7 +1249,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
     if (value.selector !== undefined) {
       return;
     }
-    for (const field of ["container", "selectionStrategy"] as const) {
+    for (const field of ["container", "selectionStrategy", "layer"] as const) {
       if (value[field] !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -1207,7 +1260,11 @@ export const sendKeysSchema = withJsonSchemaOverride(
     }
   }),
   (jsonSchema) => {
-    jsonSchema.dependentRequired = { container: ["selector"], selectionStrategy: ["selector"] };
+    jsonSchema.dependentRequired = {
+      container: ["selector"],
+      selectionStrategy: ["selector"],
+      layer: ["selector"],
+    };
   },
 );
 
@@ -1427,6 +1484,14 @@ export const rotateSchema = addDeviceTargetingToSchema(
         .optional()
         .describe(
           "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+        ),
+      display: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
         ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
@@ -2126,6 +2191,7 @@ export async function tapOnHandler(
       ensureTap: args.ensureTap,
       ensureChecked: args.ensureChecked,
       subtext: args.subtext,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2170,6 +2236,7 @@ export async function tapAtHandler(
     },
     progress,
     signal,
+    args.__tapAtPlanContext ?? args.__tapAtRecordingContext,
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -2255,6 +2322,7 @@ export async function tapAnyHandler(
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2310,6 +2378,7 @@ export async function dragAndDropHandler(
       display: args.display,
       source: args.source,
       target: args.target,
+      layer: args.layer,
       pressDurationMs: args.pressDurationMs,
       dragDurationMs: args.dragDurationMs,
       holdDurationMs: args.holdDurationMs,
@@ -2519,7 +2588,13 @@ export async function rotateHandler(
       sessionRotation: (mutation) =>
         runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
     });
-    const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
+    const result = await rotate.execute(
+      args.orientation,
+      progress,
+      args.lockOrientation,
+      signal,
+      args.display,
+    );
     const response = createStructuredToolResponse({
       observation: result.observation,
       ...result,
@@ -2715,7 +2790,8 @@ async function handleInstalledImeAction(
       await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
     );
   }
-  const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
+  const adb = defaultAdbClientFactory.create(device);
+  const catalog = new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb));
   if (args.action === "listImes") {
     return createStructuredToolResponse(await catalog.list(signal));
   }
@@ -2814,6 +2890,7 @@ export function registerInteractionTools() {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    let restoreFailedClearAll: (() => Promise<void>) | undefined;
     try {
       throwIfAborted(signal);
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
@@ -3099,7 +3176,49 @@ export function registerInteractionTools() {
         throw new ActionableError(`Unknown systemTray action: ${args.action}`);
       }
 
-      let swipeCount = 0;
+      const clearDetector =
+        device.platform === "android"
+          ? createNotificationUIDetector(device, getSystemTrayDependencies, signal)
+          : undefined;
+      if (clearDetector) {
+        const initialObservation = await awaitWhileRequestIsLive(
+          getSystemTrayDependencies()
+            .observeScreenFactory(device)
+            .execute({
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              skipPerformanceAudit: true,
+              minTimestamp: await clearDetector.getObservationTimestamp(),
+              signal,
+            }),
+          signal,
+        );
+        const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
+        // Use statusbar commands directly: an unreadable hierarchy must not
+        // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
+        restoreFailedClearAll = async () => {
+          // Mark cleanup done before starting it, including when it throws or times out.
+          restoreFailedClearAll = undefined;
+          // Cleanup must still run after request cancellation.
+          try {
+            const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
+            await raceWithDeadline(
+              () => (initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray()),
+              {
+                timer: getSystemTrayDependencies().timer,
+                timeoutMs: awaitTimeoutMs,
+                label: "Notification shade restoration",
+              },
+            );
+          } catch (restoreError) {
+            logger.warn(
+              `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+              restoreError,
+            );
+          }
+        };
+      }
+
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
       if (device.platform === "android" && notification.appId) {
@@ -3132,40 +3251,50 @@ export function registerInteractionTools() {
           ]),
         ];
       }
-      const { timer } = getSystemTrayDependencies();
-
-      for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-        const { match } = await waitForNotificationMatch(
-          device,
-          notification,
-          clearMatchTexts,
-          500,
-          progress,
-          signal,
-        );
-
-        if (!match) {
-          break;
-        }
-
-        const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
-        if (!swipeTarget) {
-          break;
-        }
-
-        await swipeElement(device, swipeTarget, signal);
-        swipeCount++;
-        throwIfAborted(signal);
-        await awaitWhileRequestIsLive(
-          timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
-          signal,
-        );
-      }
+      const drained =
+        device.platform === "android"
+          ? await clearMatchingSystemTrayNotifications(
+              device,
+              notification,
+              clearMatchTexts,
+              awaitTimeoutMs,
+              {
+                maxSwipes: expectedKeys?.length,
+                progress,
+                signal,
+              },
+            )
+          : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
+              progress,
+              signal,
+            });
 
       const remainingKeys =
         expectedKeys === undefined || !notification.appId
           ? undefined
           : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
+
+      const result = formatClearAllResult(
+        notification.appId,
+        drained.dismissedCount,
+        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
+      );
+      if (drained.stalled) {
+        // The app inventory is authoritative even if UI/text fallback still matches a row.
+        if (remainingKeys === undefined || remainingKeys.length > 0) {
+          result.success = false;
+        }
+        result.message =
+          expectedKeys === undefined
+            ? `Cleared ${drained.dismissedCount} matching notification(s).`
+            : result.message;
+        result.message += result.success
+          ? " Warning: a matching notification remains in the UI, but the app notification inventory is empty."
+          : " A matching notification remains; dismissal was not confirmed or the swipe limit or deadline was reached.";
+      }
+      if (!result.success && restoreFailedClearAll) {
+        await restoreFailedClearAll();
+      }
 
       const { observeScreenFactory } = getSystemTrayDependencies();
       const observeScreen = observeScreenFactory(device);
@@ -3181,21 +3310,28 @@ export function registerInteractionTools() {
       );
       await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
-      const result = formatClearAllResult(
-        notification.appId,
-        swipeCount,
-        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
-      );
-      return createJSONToolResponse({
+      restoreFailedClearAll = undefined;
+      const response = createJSONToolResponse({
         ...result,
         observation: nextObservation,
       });
+      return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throwIfAborted(signal);
+      if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
+        throw new ActionableError(
+          "Could not clear notifications: shade not readable (shade not detected open during list).",
+          { cause: error },
+        );
+      }
       if (error instanceof ActionableError) {
         throw error;
       }
       throw toActionableError(error, `systemTray failed`);
+    } finally {
+      if (restoreFailedClearAll) {
+        await restoreFailedClearAll();
+      }
     }
   };
 
@@ -3221,13 +3357,21 @@ export function registerInteractionTools() {
       progress,
       signal,
       args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy },
+      { container: args.container, selectionStrategy: args.selectionStrategy, layer: args.layer },
+    );
+    const dismissal = await dismissKeyboardAfterSendKeys(
+      device,
+      serverConfig.isDismissKeyboardAfterInputEnabled(),
+      result.success,
+      async (closeSignal) => keyboardFactory(device).execute("close", closeSignal),
+      signal,
     );
     const response = createStructuredToolResponse({
       message: result.success
-        ? `Executed ${result.completedCommands} sendKeys command(s)`
+        ? `Executed ${result.completedCommands} sendKeys command(s)${dismissal.warnings?.length ? `. Warning: ${dismissal.warnings.join("; ")}` : ""}`
         : `sendKeys stopped at command ${result.failedIndex}: ${result.error}`,
       ...result,
+      ...dismissal,
     });
     return result.success ? response : { ...response, isError: true };
   };

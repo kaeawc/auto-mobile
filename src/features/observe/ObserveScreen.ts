@@ -507,11 +507,17 @@ export function resolveMissingForegroundWindow(
 function describeStatusBarOnlyCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string,
-): { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } {
+): {
+  foreground: string;
+  ctrlProxyIncomplete: boolean;
+  sdkInt: number | undefined;
+  accessibilityTool: boolean | undefined;
+} {
   return {
     foreground,
     ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true,
     sdkInt: hierarchy?.sdkInt,
+    accessibilityTool: hierarchy?.accessibilityTool,
   };
 }
 
@@ -550,7 +556,13 @@ function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string | undefined,
   confirmedFrameworkErrorDialog: boolean,
-): { sdkInt: number | undefined; reason: CtrlProxyIncompleteReason | undefined } | undefined {
+):
+  | {
+      sdkInt: number | undefined;
+      reason: CtrlProxyIncompleteReason | undefined;
+      accessibilityTool: boolean | undefined;
+    }
+  | undefined {
   if (hierarchy?.ctrlProxyIncomplete !== true) {
     return undefined;
   }
@@ -564,7 +576,11 @@ function describeIncompleteCapture(
   // `ctrlProxyIncompleteReason` names the actual cause so the freshness warning can
   // give cause-appropriate advice (issue #6184); pre-#6172 runners omit it, and the
   // freshness layer treats an absent reason as the historical `null_root` default.
-  return { sdkInt: hierarchy.sdkInt, reason: hierarchy.ctrlProxyIncompleteReason };
+  return {
+    sdkInt: hierarchy.sdkInt,
+    reason: hierarchy.ctrlProxyIncompleteReason,
+    accessibilityTool: hierarchy.accessibilityTool,
+  };
 }
 
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
@@ -1535,7 +1551,9 @@ export class RealObserveScreen implements ObserveScreen {
       // no serial latency; Android only (dumpsys resumed/focused activity),
       // best-effort.
       const foregroundSnapshot =
-        this.device.platform === "android" && (!observerMode || routedAggregateSecondary)
+        !options?.hierarchyOnly &&
+        this.device.platform === "android" &&
+        (!observerMode || routedAggregateSecondary)
           ? this.deviceStateCollector.collectForegroundSnapshot(signal, {
               displayId: requestedDisplayId,
             })
@@ -1567,7 +1585,7 @@ export class RealObserveScreen implements ObserveScreen {
           captureStart,
         });
       } else if (
-        options?.freshness &&
+        (options?.freshness || options?.hierarchyOnly) &&
         !(this.device.platform === "android" && options.requireFreshExtraction)
       ) {
         try {
@@ -1577,6 +1595,25 @@ export class RealObserveScreen implements ObserveScreen {
           // A failed pre-capture can be retried and reported by the hierarchy collector.
           logger.warn(`[ObserveScreen] Freshness capture failed; collecting hierarchy: ${error}`);
         }
+      }
+
+      if (options?.hierarchyOnly) {
+        // Commit verification reuses the same hierarchy/focus extraction, then
+        // returns before device-state reads, cache writes, predictions or audits.
+        await this.hierarchyCollector.collect(
+          result,
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+          true,
+          capturedHierarchy,
+          options.timeoutMs,
+        );
+        throwIfAborted(signal);
+        perf.end();
+        return result;
       }
 
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
@@ -3881,9 +3918,7 @@ export class RealObserveScreen implements ObserveScreen {
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
-  ): Promise<
-    { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } | undefined
-  > {
+  ): Promise<ReturnType<typeof describeStatusBarOnlyCapture> | undefined> {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
 

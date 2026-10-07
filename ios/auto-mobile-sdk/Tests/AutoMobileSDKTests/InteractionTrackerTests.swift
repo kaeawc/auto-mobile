@@ -1,16 +1,26 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
+
+/// Collects flushed events; the buffer may flush on its own queue.
+private final class ReceivedEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [any SdkEvent] = []
+    var events: [any SdkEvent] { lock.lock(); defer { lock.unlock() }; return _events }
+    func append(_ events: [any SdkEvent]) { lock.lock(); _events.append(contentsOf: events); lock.unlock() }
+}
 
 final class InteractionTrackerTests: XCTestCase {
     private var tracker: AutoMobileInteractionTracker!
     private var buffer: SdkEventBuffer!
-    private var receivedEvents: [any SdkEvent]!
+    private var received: ReceivedEvents!
+    private var receivedEvents: [any SdkEvent] { received.events }
 
     override func setUp() {
         super.setUp()
-        receivedEvents = []
-        buffer = SdkEventBuffer { [weak self] events in
-            self?.receivedEvents.append(contentsOf: events)
+        let received = ReceivedEvents()
+        self.received = received
+        buffer = SdkEventBuffer { events in
+            received.append(events)
         }
         buffer.start()
         tracker = AutoMobileInteractionTracker.shared

@@ -13,6 +13,7 @@ public enum SdkEventType: String, Codable, Sendable {
     case handledException = "handled_exception"
     case crash
     case hang
+    case frameMetrics = "frame_metrics_event"
     case networkRequest = "network_request"
     case webSocketFrame = "websocket_frame"
     case log
@@ -643,5 +644,21 @@ public struct SdkEventBatch: Codable, Sendable {
         self.bundleId = bundleId
         self.events = events
         self.timestamp = timestamp
+    }
+}
+
+/// App-process frame metrics for one elapsed display-link window.
+public struct SdkFrameMetricsEvent: SdkEvent {
+    public private(set) var eventType: SdkEventType = .frameMetrics
+    public let timestamp: Int64
+    public let fps: Double
+    public let frameTimeMs: Double
+    public let jankFrames: Int
+
+    public init(timestamp: Int64, fps: Double, frameTimeMs: Double, jankFrames: Int) {
+        self.timestamp = timestamp
+        self.fps = fps
+        self.frameTimeMs = frameTimeMs
+        self.jankFrames = jankFrames
     }
 }

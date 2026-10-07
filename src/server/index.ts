@@ -33,6 +33,8 @@ import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
 import { ToolUnavailableError } from "./toolUnavailableError";
+import { stripInternalToolParams } from "./internalToolParams";
+export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
@@ -46,8 +48,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-  deleteInternalToolParams,
-  INTERNAL_TOOL_PARAM_NAMES,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -65,6 +66,7 @@ import {
   responseCarriesStructuredContent,
 } from "./stripToolResultStructuredContent";
 import { shapeToolCallError } from "./shapeToolCallError";
+import { forwardingLeaseConflictCause } from "./forwardingLeaseConflictOutcome";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
@@ -312,7 +314,6 @@ import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
 import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
-import { registerSharedStorageTools } from "./sharedStorageTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
@@ -380,6 +381,7 @@ import {
   type ToolSelectionSessionManager,
 } from "../features/toolSelection/selectionSessionResolver";
 import { DaemonState } from "../daemon/daemonState";
+import { redactTypedTextArguments } from "../utils/redactTypedTextArguments";
 import {
   defaultToolSelectionProfileRegistry,
   type ToolSelectionProfileRegistry,
@@ -529,6 +531,53 @@ function rememberToolResultsNoStructuredContent(
   }
 }
 
+function extractInternalActionsCompactMetadata(params: unknown): boolean | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+  const value = (params as Record<string, unknown>)[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function resolveActionsCompactMetadata(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+): boolean {
+  const daemonDefault = serverConfig.isActionsCompactMetadataEnabled();
+  if (!connectionProfileUuid) {
+    return daemonDefault;
+  }
+  try {
+    return registry.getActionsCompactMetadata(connectionProfileUuid) ?? daemonDefault;
+  } catch (error) {
+    // Presentation lookup is fail-safe: keep serving with the daemon default.
+    logger.warn("[MCP] Could not resolve connection compact-metadata preference", {
+      connectionProfileUuid,
+      error,
+    });
+    return daemonDefault;
+  }
+}
+
+function rememberActionsCompactMetadata(
+  registry: ToolSelectionProfileRegistry,
+  connectionProfileUuid: string | undefined,
+  preference: boolean | undefined,
+): void {
+  if (!connectionProfileUuid || preference === undefined) {
+    return;
+  }
+  try {
+    registry.setActionsCompactMetadata(connectionProfileUuid, preference);
+  } catch (error) {
+    // Presentation storage is best-effort: this request uses the daemon default.
+    logger.warn("[MCP] Could not store connection compact-metadata preference", {
+      connectionProfileUuid,
+      error,
+    });
+  }
+}
+
 function extractInternalAcceptanceDiscoveryOrder(
   params: unknown,
   expectedCapability: string | undefined,
@@ -547,28 +596,6 @@ function extractInternalAcceptanceDiscoveryOrder(
   }
   const value = values[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
   return value === "forward" || value === "reverse" ? value : undefined;
-}
-
-export function stripInternalToolParams(params: unknown): unknown {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return params;
-  }
-
-  // Consult the CANONICAL list rather than an ad-hoc subset: the daemon's
-  // `ide/getNavigationGraph` route forwards `__mcpRequestTimeoutMs` as the ONLY
-  // internal marker, and a guard that omitted the timeout/deadline names left it
-  // on the arguments -- which a `.strict()` input schema (#6712) then rejected
-  // with "Unrecognized key" before the handler ran (#6917 review).
-  if (!INTERNAL_TOOL_PARAM_NAMES.some((name) => name in params)) {
-    return params;
-  }
-
-  const rest = { ...(params as Record<string, unknown>) };
-  // Strips `DAEMON_NON_FINITE_ENCODED_PARAM` too as a safety net: revival already
-  // removes that transport-provenance flag (#5863), but this guards the tool
-  // boundary against any future path that sets it without reviving.
-  deleteInternalToolParams(rest);
-  return rest;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
@@ -617,7 +644,6 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerAppFileTools();
   registerSessionLogTools();
   registerDownloadsFixtureTools();
-  registerSharedStorageTools();
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
@@ -887,7 +913,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ...request,
       params: {
         ...request.params,
-        arguments: stripInternalToolParams(request.params.arguments),
+        // Typed text is redacted: nobody knows yet whether the target is a password field.
+        arguments: redactTypedTextArguments(
+          request.params.name,
+          stripInternalToolParams(request.params.arguments),
+        ),
       },
     });
   };
@@ -906,11 +936,21 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid: string | undefined;
+    try {
+      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    } catch (error) {
+      // Match the existing tool-error boundary below: the SDK handler alias
+      // is narrower than the protocol's text-only tool error result.
+      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
+    }
     let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const requestedToolResultsNoStructuredContent = daemonMode
       ? extractInternalToolResultsNoStructuredContent(toolParams)
+      : undefined;
+    const requestedActionsCompactMetadata = daemonMode
+      ? extractInternalActionsCompactMetadata(toolParams)
       : undefined;
     const rawRequestedToolSelectionProfileUuid = (toolParams as Record<string, unknown>)
       .sessionUuid;
@@ -1069,6 +1109,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       name === SET_TOOL_ENABLED_TOOL_NAME ? requestedToolResultsNoStructuredContent : undefined,
     );
     const toolResultsNoStructuredContent = resolveToolResultsNoStructuredContent(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+    );
+    rememberActionsCompactMetadata(
+      toolSelectionProfileRegistry,
+      connectionProfileUuid,
+      name === SET_TOOL_ENABLED_TOOL_NAME ? requestedActionsCompactMetadata : undefined,
+    );
+    const actionsCompactMetadata = resolveActionsCompactMetadata(
       toolSelectionProfileRegistry,
       connectionProfileUuid,
     );
@@ -1400,6 +1449,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // ToolRegistry. Carry only a distinct connection profile so it
             // cannot suppress that derived-label resolution.
             toolSelectionProfileUuid: connectionProfileUuid,
+            actionsCompactMetadata,
             labelSessionUuids,
             routingBaseSessionUuid,
             // Keep profile persistence lazy for ordinary core-tool calls while
@@ -1608,6 +1658,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
           isError: true,
         };
+      }
+      const leaseConflict = forwardingLeaseConflictCause(error, execution.deviceIds);
+      if (leaseConflict) {
+        // The device is fine; another AutoMobile process kept its CtrlProxy
+        // forwarding. Report that instead of a missing hierarchy or device loss (#10485).
+        return shapeToolCallError(leaseConflict, {
+          toolName: name,
+          source: "MCP",
+        }) as McpToolCallResult;
       }
       const deviceLoss =
         deviceLossOutcomeFromError(error, executionSessionUuid) ??

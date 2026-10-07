@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.OverlayScalar
@@ -26,6 +27,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 /**
@@ -38,6 +40,16 @@ import org.junit.Test
  * tests — no Robolectric.
  */
 class CtrlProxyMessageHandlerTest {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun initializeDispatchClasses() = runTest {
+      // Initialize coroutines and generated serializers once, outside per-test timings.
+      // Each test still gets its own recording fake and handler.
+      CtrlProxyMessageHandlerTest()
+        .dispatch("""{"type":"request_select_all","requestId":"warmup"}""")
+    }
+  }
 
   private val json = Json {
     classDiscriminator = "type"
@@ -482,6 +494,31 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches the optional IME commit budget`() = runTest {
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-1", "long text", null, ImeTextDelivery.COMMIT, 14_500L),
+      lastCall,
+    )
+    dispatch("""{"type":"request_commit_text","requestId":"commit-2","text":"short"}""")
+    assertEquals(
+      "requestCommitText" to listOf<Any?>("commit-2", "short", null, ImeTextDelivery.COMMIT, null),
+      lastCall,
+    )
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-3","text":"abc","delivery":"keyEvents","timeoutMs":9000}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-3", "abc", null, ImeTextDelivery.KEY_EVENTS, 9_000L),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches correlated IME cancellation`() = runTest {
     dispatch(
       """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}"""
@@ -517,6 +554,12 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}"""
     )
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search", "frame-1"), lastCall)
+  }
+
+  @Test
+  fun `dispatches request_click_focused_input`() = runTest {
+    dispatch("""{"type":"request_click_focused_input","requestId":"fc1"}""")
+    assertEquals("requestClickFocusedInput" to listOf<Any?>("fc1"), lastCall)
   }
 
   @Test
@@ -709,12 +752,34 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `set_network_mock_rules passes its requestId so the rejected-rule report can be routed`() =
+    runTest {
+      dispatch("""{"type":"set_network_mock_rules","requestId":"mock-7","rules":[]}""")
+      assertEquals("setNetworkMockRules", lastCall.first)
+      assertEquals("mock-7", lastCall.second[1])
+
+      dispatch("""{"type":"set_network_mock_rules","rules":[]}""")
+      assertEquals(null, lastCall.second[1])
+    }
+
+  @Test
   fun `dispatches set_network_error_simulation`() = runTest {
     dispatch(
       """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":5,"expiresAtEpochMs":99999}"""
     )
     assertEquals(
-      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", 5, 99999L),
+      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", 5, 99999L, null),
+      lastCall,
+    )
+  }
+
+  @Test
+  fun `dispatches set_network_error_simulation remainingMs`() = runTest {
+    dispatch(
+      """{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","expiresAtEpochMs":99999,"remainingMs":30000}"""
+    )
+    assertEquals(
+      "setNetworkErrorSimulation" to listOf<Any?>(true, "timeout", null, 99999L, 30000L),
       lastCall,
     )
   }
@@ -966,14 +1031,14 @@ class CtrlProxyMessageHandlerTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  fun `dispatches start_recording`() = runTest {
-    dispatch("""{"type":"start_recording"}""")
+  fun `accepts start_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"start_recording"}"""))
     assertEquals("startRecording" to emptyList<Any?>(), lastCall)
   }
 
   @Test
-  fun `dispatches stop_recording`() = runTest {
-    dispatch("""{"type":"stop_recording"}""")
+  fun `accepts stop_recording without a response`() = runTest {
+    assertNull(dispatchForResponse("""{"type":"stop_recording"}"""))
     assertEquals("stopRecording" to emptyList<Any?>(), lastCall)
   }
 

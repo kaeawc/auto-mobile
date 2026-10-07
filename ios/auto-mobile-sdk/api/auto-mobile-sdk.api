@@ -110,6 +110,7 @@ public enum SdkEventType: String, Codable, Sendable
   case handledException = "handled_exception"
   case crash
   case hang
+  case frameMetrics = "frame_metrics_event"
   case networkRequest = "network_request"
   case webSocketFrame = "websocket_frame"
   case log
@@ -305,6 +306,13 @@ public struct SdkEventBatch: Codable, Sendable
   public let events: [SdkEventEnvelope]
   public let timestamp: Int64
   public init( bundleId: String?, events: [SdkEventEnvelope], timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000) )
+public struct SdkFrameMetricsEvent: SdkEvent
+  public private(set) var eventType: SdkEventType = .frameMetrics
+  public let timestamp: Int64
+  public let fps: Double
+  public let frameTimeMs: Double
+  public let jankFrames: Int
+  public init(timestamp: Int64, fps: Double, frameTimeMs: Double, jankFrames: Int)
 
 // Failures/AutoMobileFailures.swift
 public final class AutoMobileFailures: Sendable
@@ -493,9 +501,10 @@ public final class AutoMobileNetwork: Sendable
   @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead") public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
-public class AutoMobileURLProtocol: URLProtocol
-  public override class func canInit(with request: URLRequest) -> Bool
-  public override class func canonicalRequest(for request: URLRequest) -> URLRequest
+public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable
+  public override static func canInit(with request: URLRequest) -> Bool
+  public override static func canInit(with task: URLSessionTask) -> Bool
+  public override static func canonicalRequest(for request: URLRequest) -> URLRequest
   public override func startLoading()
   public override func stopLoading()
   public func urlSession( _: URLSession, dataTask _: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void )

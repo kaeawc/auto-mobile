@@ -4,6 +4,7 @@
  * Thin wrapper over SharedTextDelegate.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { SetTextOptions } from "../DeviceService";
 import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
@@ -33,6 +34,8 @@ export interface ImeCommitActionResult extends BaseResult {
   committedUnits?: number;
   /** Cancellation could not be acknowledged; the host must retain the temporary IME. */
   sessionUnsafe?: boolean;
+  /** Host transport failed to deliver an unambiguous device result. */
+  transportFailure?: boolean;
 }
 
 /** Preserve old APK result shapes: absent/zero count conveys no known dispatch progress. */
@@ -201,6 +204,8 @@ export class CtrlProxyText extends SharedTextDelegate {
         timeoutError: (timeout) => unconfirmed(`IME action timed out after ${timeout}ms`, timeout),
       });
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CtrlProxyText] IME action transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }
@@ -259,6 +264,8 @@ export class CtrlProxyText extends SharedTextDelegate {
         timeoutError: (timeout) => unconfirmed(`Insert text timed out after ${timeout}ms`, timeout),
       });
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CtrlProxyText] Insert text transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }
@@ -270,7 +277,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     timeoutMs: number = imeCommitTimeoutMs(text),
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult> {
     let dispatchedId: string | undefined;
     let timedOut = false;
@@ -280,7 +287,12 @@ export class CtrlProxyText extends SharedTextDelegate {
         idPrefix: "commitText",
         responseType: "commit_text",
         messageType: "request_commit_text",
-        params: { text, priorImeId, ...(delivery === "keyEvents" ? { delivery } : {}) },
+        params: {
+          text,
+          priorImeId,
+          ...(delivery === "commit" ? {} : { delivery }),
+          timeoutMs: Math.max(1, timeoutMs - 500),
+        },
         timeoutMs,
         perf,
         abortSignal: signal,
@@ -294,6 +306,7 @@ export class CtrlProxyText extends SharedTextDelegate {
             success: false,
             totalTimeMs: timeout,
             partialApplication: true,
+            transportFailure: true,
             error: `IME commit response timed out after ${timeout}ms; editor state is unknown`,
           };
         },
@@ -309,6 +322,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         success: false,
         totalTimeMs: 0,
         partialApplication: true,
+        transportFailure: true,
         error: errorMessage(error),
       };
     }

@@ -2,8 +2,6 @@ import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { SetUIState } from "../../../src/features/action/SetUIState";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
   getHierarchySnapshot,
@@ -157,13 +155,3 @@ test.each([false, true])(
     }
   },
 );
-
-test("Explore's legacy selector consumes the dimensions already reconciled by iOS projection", () => {
-  const hierarchy = projectActionableHierarchy("ios", issue8379SelectionHierarchy(), true);
-  const target = new DefaultElementParser().parseNodeBounds(
-    issue8379SelectionHierarchy().hierarchy.node!.node![1],
-  )!;
-  expect(
-    new DefaultElementSelector().selectByText(hierarchy, duoSelectionText).element?.bounds,
-  ).toEqual(target.bounds);
-});

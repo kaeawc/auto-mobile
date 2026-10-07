@@ -9,7 +9,6 @@ export class FakeElementFinder implements ElementFinder {
   nextElementByResourceId: Element | null = null;
   nextContainerNode: ViewHierarchyNode | null = null;
   nextHasContainer: boolean = false;
-  nextElementByIndex: { element: Element; text?: string } | null = null;
   nextScrollableElements: Element[] = [];
   nextScrollableContainer: Element | null = null;
   nextClickableElements: Element[] = [];
@@ -17,12 +16,7 @@ export class FakeElementFinder implements ElementFinder {
   nextClickableParentsContainingText: Element[] = [];
   nextClickableSiblingsOfText: Element[] = [];
   nextClickableSiblingsOfResourceId: Element[] = [];
-  nextChildElements: Element[] = [];
-  nextSpannables: Element[] | null = null;
-  nextFocusedTextInput: any = null;
-  nextIsElementFocused: boolean = false;
-  nextIsElementKeyboardFocused: boolean = false;
-  nextValidateElementText: boolean = true;
+  nextFocusedTextInput: Element | null = null;
 
   lastFindByTextArgs?: {
     text: string;
@@ -88,13 +82,6 @@ export class FakeElementFinder implements ElementFinder {
     return this.nextHasContainer;
   }
 
-  findElementByIndex(
-    _viewHierarchy: ViewHierarchyResult,
-    _index: number,
-  ): { element: Element; text?: string } | null {
-    return this.nextElementByIndex;
-  }
-
   findScrollableElements(_viewHierarchy: ViewHierarchyResult): Element[] {
     return this.nextScrollableElements;
   }
@@ -144,30 +131,7 @@ export class FakeElementFinder implements ElementFinder {
     return this.nextClickableSiblingsOfResourceId;
   }
 
-  findChildElements(_viewHierarchy: ViewHierarchyResult, _parentElement: Element): Element[] {
-    return this.nextChildElements;
-  }
-
-  findSpannables(_element: Element): Element[] | null {
-    return this.nextSpannables;
-  }
-
-  findFocusedTextInput(_viewHierarchy: any): any {
+  findFocusedTextInput(_viewHierarchy: ViewHierarchyResult): Element | null {
     return this.nextFocusedTextInput;
-  }
-
-  isElementFocused(_element: any): boolean {
-    return this.nextIsElementFocused;
-  }
-
-  isElementKeyboardFocused(_element: any): boolean {
-    return this.nextIsElementKeyboardFocused;
-  }
-
-  validateElementText(
-    _foundElement: { element: Element; text?: string },
-    _expectedText?: string,
-  ): boolean {
-    return this.nextValidateElementText;
   }
 }

@@ -8,6 +8,8 @@ import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelper
 import { optionalEnum, optionalInteger, optionalString } from "./queryParamValidation";
 import type { Platform } from "../models";
 import type { LocalFileListEntry } from "./appFileService";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /**
  * Session-scoped execution-log contract (#7006).
@@ -45,6 +47,9 @@ export const SESSION_LOG_MAX_BYTES_LIMIT = 4 * 1024 * 1024;
 export const SESSION_LOG_MAX_PATHS = 32;
 /** Longest unified-log window, in seconds (one hour). */
 export const UNIFIED_LOG_MAX_WINDOW_SECONDS = 3600;
+/** Android logcat is always tailed through a fixed line window. */
+export const ANDROID_LOGCAT_DEFAULT_MAX_LINES = 1000;
+export const ANDROID_LOGCAT_MAX_LINES_LIMIT = 5000;
 
 export interface SessionLogFilesRequest {
   container: AppFileContainer;
@@ -110,6 +115,16 @@ export interface UnifiedLogWindowResult {
   text: string;
 }
 
+export interface AndroidLogcatWindowResult {
+  lastSeconds: number;
+  level: UnifiedLogLevel;
+  pid: number;
+  lineLimit: number;
+  byteCount: number;
+  truncated: boolean;
+  text: string;
+}
+
 export interface SessionLogCollectionResult {
   sessionUuid: string;
   deviceId: string;
@@ -119,6 +134,7 @@ export interface SessionLogCollectionResult {
   files?: SessionLogSourceOutcome<SessionLogFilesResult>;
   appGroup?: SessionLogSourceOutcome<SessionLogAppGroupResult>;
   unifiedLog?: SessionLogSourceOutcome<UnifiedLogWindowResult>;
+  androidLogcat?: SessionLogSourceOutcome<AndroidLogcatWindowResult>;
 }
 
 export interface ResetAppLogsPathOutcome {
@@ -313,7 +329,7 @@ export function parseSessionLogQuery(
     }
   }
 
-  const appId = normalizeSessionLogAppId(decodeURIComponent(appIdParam));
+  const appId = normalizeSessionLogAppId(decodeSegmentOrThrow(appIdParam));
   const maxBytes =
     optionalInteger(query.maxBytes, "maxBytes", { min: 1, max: SESSION_LOG_MAX_BYTES_LIMIT }) ??
     SESSION_LOG_DEFAULT_MAX_BYTES;
@@ -355,8 +371,8 @@ export function buildSessionLogResourceUri(
   }
   query.set("maxBytes", String(request.maxBytes));
   return (
-    `automobile:device-session/${encodeURIComponent(sessionUuid)}` +
-    `/apps/${encodeURIComponent(request.appId)}/logs?${query.toString()}`
+    `automobile:device-session/${encodeUriSegment(sessionUuid)}` +
+    `/apps/${encodeUriSegment(request.appId)}/logs?${query.toString()}`
   );
 }
 

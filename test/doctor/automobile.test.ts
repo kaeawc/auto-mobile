@@ -1190,6 +1190,11 @@ describe("runAutoMobileChecks", () => {
       status: "pass" as const,
       message: "Build 1111111111111111 (/wt/dist/src/index.js)",
     }),
+    checkOrphanedDaemons: async () => ({
+      name: "Orphaned Daemons",
+      status: "pass" as const,
+      message: "No orphaned AutoMobile daemons found",
+    }),
   };
 
   test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {

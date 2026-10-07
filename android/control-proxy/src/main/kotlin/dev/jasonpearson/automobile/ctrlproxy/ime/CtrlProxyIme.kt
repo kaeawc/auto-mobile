@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
@@ -36,6 +37,8 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.InputConnectionDriver
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardSession
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwner {
   private val lifecycleRegistry = LifecycleRegistry(this)
@@ -172,11 +175,28 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     restoreLastIme()
   }
 
+  /** Null means no active editor connection; false means the editor rejected the action. */
+  internal suspend fun performNavigationAction(actionId: Int): Boolean? =
+    withContext(Dispatchers.Main.immediate) {
+      val selectedIme =
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+          ?.let(ComponentName::unflattenFromString)
+      dispatchNavigationAction(
+        actionId,
+        isActive =
+          instance === this@CtrlProxyIme &&
+            selectedIme == ComponentName(this@CtrlProxyIme, CtrlProxyIme::class.java),
+        isInputStarted,
+        connectionAdapter(),
+      )
+    }
+
   fun commitText(
     text: String,
     priorImeId: String?,
     isCancelled: () -> Boolean = { false },
     delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
+    timeoutMs: Long? = null,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
@@ -215,6 +235,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         generation = generation,
         isCancelled = isCancelled,
         delivery = delivery,
+        commitBudgetMs = commitTimeoutMs(timeoutMs, ImeGraphemes.split(text).size),
         onResult = ::finish,
       )
     }
@@ -228,6 +249,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     generation: Long,
     isCancelled: () -> Boolean,
     delivery: ImeTextDelivery,
+    commitBudgetMs: Long,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (generation != commitGeneration) return
@@ -235,11 +257,33 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
       return
     }
-    if (isInputStarted && currentInputConnection != null) {
+    val connection = currentInputConnection
+    if (isInputStarted && connection != null) {
+      if (delivery == ImeTextDelivery.CLEAR_FIELD) {
+        val cleared =
+          clearImeField(
+            finishComposing = connection::finishComposingText,
+            readBefore = { connection.getTextBeforeCursor(it, 0) },
+            readAfter = { connection.getTextAfterCursor(it, 0) },
+            deleteSurrounding = connection::deleteSurroundingText,
+          )
+        val result =
+          if (cleared.success && !editorSyncSucceeded(InputConnectionAdapter(connection, this)))
+            cleared.copy(
+              success = false,
+              error = "Input connection lost while syncing clear",
+              partialApplication = true,
+            )
+          else cleared
+        driver.restoreIfNeeded(priorImeId)
+        onResult(result)
+        if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
+        return
+      }
       driver.commit(
         text,
         priorImeId,
-        SystemClock.uptimeMillis() + COMMIT_TIMEOUT_MS,
+        SystemClock.uptimeMillis() + commitBudgetMs,
         isCancelled,
         delivery,
       ) { result ->
@@ -266,6 +310,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           generation,
           isCancelled,
           delivery,
+          commitBudgetMs,
           onResult,
         )
       },
@@ -395,6 +440,28 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   }
 
   companion object {
+    internal fun dispatchNavigationAction(
+      actionId: Int,
+      isActive: Boolean,
+      isInputStarted: Boolean,
+      connection: ImeConnection?,
+    ): Boolean? {
+      if (actionId != EditorInfo.IME_ACTION_NEXT && actionId != EditorInfo.IME_ACTION_PREVIOUS)
+        return null
+      if (!isActive || !isInputStarted || connection == null) return null
+      return connection.performEditorAction(actionId)
+    }
+
+    internal fun commitTimeoutMs(timeoutMs: Long?, unitCount: Int): Long =
+      if (timeoutMs != null && timeoutMs > 0L) {
+        minOf(COMMIT_TIMEOUT_CAP_MS, timeoutMs)
+      } else {
+        minOf(
+          COMMIT_TIMEOUT_CAP_MS,
+          maxOf(COMMIT_TIMEOUT_MS, COMMIT_TIMEOUT_MS + 30L * unitCount.coerceAtLeast(0)),
+        )
+      }
+
     /** A prompt null/empty read is valid; an exception or timed-out read is not. */
     internal fun editorSyncSucceeded(
       connection: ImeConnection?,
@@ -412,6 +479,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     private const val INPUT_CONNECTION_SYNC_TIMEOUT_MS = 2_000L
     internal const val INPUT_CONNECTION_TIMEOUT_MS = 2_000L
     internal const val COMMIT_TIMEOUT_MS = 4_000L
+    private const val COMMIT_TIMEOUT_CAP_MS = 25_000L
     internal const val INPUT_CONNECTION_POLL_MS = 50L
     private const val IDLE_RESTORE_DELAY_MS = 10_000L
 

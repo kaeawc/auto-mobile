@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerSharedStorageResources } from "../../src/server/sharedStorageResources";
 import type { SharedStorageReadService } from "../../src/server/sharedStorageReadService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const fakeService: SharedStorageReadService = {
   list: async (request) => ({
@@ -55,6 +56,28 @@ describe("Shared-storage read resources", () => {
     expect(templates).toContain("automobile:devices/{deviceId}/downloads/{namespace}/{path}");
   });
 
+  test("canonical media templates route the domain and publish canonical file links", async () => {
+    const domains: Array<string | undefined> = [];
+    registerSharedStorageResources({
+      ...fakeService,
+      list: async (request) => {
+        domains.push(request.domain);
+        return fakeService.list(request);
+      },
+      read: async (request) => {
+        domains.push(request.domain);
+        return fakeService.read(request);
+      },
+    });
+    const base = "automobile:devices/emulator-5554/storage-domains/media_library/automobile-media";
+    const listing = ResourceRegistry.matchTemplate(base)!;
+    const payload = JSON.parse((await listing.template.handler(listing.params)).text!);
+    expect(payload.files[0].resourceUri).toBe(`${base}/docs/read%20me.txt`);
+    const file = ResourceRegistry.matchTemplate(`${base}/photo.png`)!;
+    expect((await file.template.handler(file.params)).blob).toBe("AAH/");
+    expect(domains).toEqual(["media_library", "media_library"]);
+  });
+
   test("lists a namespace as JSON with verification metadata", async () => {
     registerSharedStorageResources(fakeService);
     const match = ResourceRegistry.matchTemplate(
@@ -79,6 +102,34 @@ describe("Shared-storage read resources", () => {
       resourceUri: "automobile:devices/emulator-5554/downloads/run-42/docs/read%20me.txt",
     });
   });
+
+  test.each([
+    ["list, deviceId", "automobile:devices/emu%/downloads/run-42"],
+    ["list, namespace", "automobile:devices/emulator-5554/downloads/run%zz"],
+    ["read, path", "automobile:devices/emulator-5554/downloads/run-42/docs/a%.txt"],
+    [
+      "canonical read, namespace",
+      "automobile:devices/emulator-5554/storage-domains/user_files/r%/a.txt",
+    ],
+  ])(
+    "rejects a malformed percent-escape in %s with a structured error, not a URIError (#10117)",
+    async (_label, uri) => {
+      registerSharedStorageResources(fakeService);
+      const match = ResourceRegistry.matchTemplate(uri);
+      expect(match).toBeDefined();
+
+      const error = await match!.template.handler(match!.params).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).not.toBeInstanceOf(URIError);
+      expect((error as Error).message).toBe(
+        "Malformed resource URI: a path segment is not valid percent-encoding.",
+      );
+    },
+  );
 
   test("reads a binary file as a lossless MCP blob", async () => {
     registerSharedStorageResources(fakeService);

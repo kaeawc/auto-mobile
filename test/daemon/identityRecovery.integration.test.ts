@@ -100,6 +100,9 @@ test.skipIf(process.platform === "win32")(
         ...(before.processGenerationToken
           ? { processGenerationToken: before.processGenerationToken }
           : {}),
+        ...(before.processGenerationTokenUtc
+          ? { processGenerationTokenUtc: before.processGenerationTokenUtc }
+          : {}),
         buildId: before.buildId,
       });
       unlinkSync(pid); // The reproduction removes ONLY the isolated PID file.
@@ -114,6 +117,9 @@ test.skipIf(process.platform === "win32")(
         startedAt: before.startedAt,
         ...(before.processGenerationToken
           ? { processGenerationToken: before.processGenerationToken }
+          : {}),
+        ...(before.processGenerationTokenUtc
+          ? { processGenerationTokenUtc: before.processGenerationTokenUtc }
           : {}),
       });
       expect(child.exitCode).toBeNull();

@@ -7,12 +7,13 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { toSearchable } from "../utility/SearchableNode";
 import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
+  createForegroundUserSource,
   type ImeCatalogState,
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
@@ -24,6 +25,7 @@ const READY_TIMEOUT_MS = 2_000;
 const READY_POLL_MS = 100;
 const OPEN_SETTLE_MS = 500;
 const ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS = 512;
+const focusedInputQuery = new DefaultFocusedInputQuery();
 
 export class ImeSessionFocusLostError extends ActionableError {
   constructor(readonly reason: "editorFocusLost" | "imeWindowDisappeared") {
@@ -63,11 +65,16 @@ export async function tapFrameBoundImeKey(
   );
 }
 
+type SessionImeCatalog = Pick<
+  AndroidImeCatalog,
+  "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
+>;
+
 export interface InstalledImeKeySessionDependencies {
-  catalog: Pick<
-    AndroidImeCatalog,
-    "list" | "selectWithinLock" | "readSubtype" | "restoreSubtypeWithinLock" | "identity"
-  >;
+  /** `pinForeground` fixes the user once so the temporary switch and its restore share it. */
+  catalog: SessionImeCatalog & {
+    pinForeground(signal?: AbortSignal): Promise<SessionImeCatalog>;
+  };
   keyboard: {
     execute(action: "open", signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
   };
@@ -106,13 +113,17 @@ export class InstalledImeKeySession {
   }
 
   private async tapKeyLocked(imeId: string, key: string, signal?: AbortSignal) {
-    const { catalog } = this.dependencies;
-    const { before, subtype, editorBefore } = await this.validateStartingState(imeId, signal);
+    const catalog = await this.dependencies.catalog.pinForeground(signal);
+    const { before, subtype, editorBefore } = await this.validateStartingState(
+      catalog,
+      imeId,
+      signal,
+    );
     const original = before.activeImeId!;
     let result: Awaited<ReturnType<typeof this.performTap>> | undefined;
     let failure: unknown;
     try {
-      result = await this.performTap(imeId, key, editorBefore, signal);
+      result = await this.performTap(catalog, imeId, key, editorBefore, signal);
     } catch (error) {
       failure = error;
     }
@@ -162,6 +173,7 @@ export class InstalledImeKeySession {
   }
 
   private async validateStartingState(
+    catalog: SessionImeCatalog,
     imeId: string,
     signal?: AbortSignal,
   ): Promise<{
@@ -169,7 +181,7 @@ export class InstalledImeKeySession {
     subtype: ImeSubtypeSnapshot;
     editorBefore: FocusedEditorEvidence | null;
   }> {
-    const { catalog, hierarchy } = this.dependencies;
+    const { hierarchy } = this.dependencies;
     const before = await catalog.list(signal);
     const original = before.activeImeId;
     if (!original || !before.installed.some((ime) => ime.id === original && ime.enabled)) {
@@ -186,19 +198,20 @@ export class InstalledImeKeySession {
     const subtype = await catalog.readSubtype(original, signal);
     const initialHierarchy = await hierarchy.read(signal);
     const editorBefore = initialHierarchy ? focusedEditorEvidence(initialHierarchy) : null;
-    if (!initialHierarchy || !new DefaultElementFinder().findFocusedTextInput(initialHierarchy)) {
+    if (!initialHierarchy || !focusedInputQuery.findFocusedTextInput(initialHierarchy)) {
       throw new Error("Focus a text input before tapping a native IME key.");
     }
     return { before, subtype, editorBefore };
   }
 
   private async performTap(
+    catalog: SessionImeCatalog,
     imeId: string,
     key: string,
     editorBefore: FocusedEditorEvidence | null,
     signal?: AbortSignal,
   ) {
-    const { catalog, tap } = this.dependencies;
+    const { tap } = this.dependencies;
     signal?.throwIfAborted();
     await catalog.selectWithinLock(imeId, signal);
     signal?.throwIfAborted();
@@ -318,7 +331,7 @@ function observeImeWaitFocus(
   imeId: string,
   seen: { focusedEditor: boolean; imeWindow: boolean },
 ) {
-  const focusedEditor = Boolean(new DefaultElementFinder().findFocusedTextInput(current));
+  const focusedEditor = Boolean(focusedInputQuery.findFocusedTextInput(current));
   const imeWindow = matchingImeWindows(current, imeId).length > 0;
   if (seen.focusedEditor && !focusedEditor) {
     throw new ImeSessionFocusLostError("editorFocusLost");
@@ -337,9 +350,9 @@ interface FocusedEditorEvidence {
   text: string;
 }
 function focusedEditorEvidence(hierarchy: ViewHierarchyResult): FocusedEditorEvidence | null {
-  const editor = new DefaultElementFinder().findFocusedTextInput(hierarchy);
+  const editor = focusedInputQuery.findFocusedTextInput(hierarchy);
   const identity = editor?.["resource-id"] ?? editor?.["view-id"];
-  return typeof identity === "string" && identity && typeof editor.text === "string"
+  return typeof identity === "string" && identity && typeof editor?.text === "string"
     ? { identity, text: editor.text }
     : null;
 }
@@ -488,7 +501,7 @@ export function createInstalledImeKeySession(device: BootedDevice): InstalledIme
   const viewHierarchy = new ViewHierarchy(device);
   const cache = AndroidCtrlProxyClient.getInstance(device);
   return new InstalledImeKeySession(device.deviceId, {
-    catalog: new AndroidImeCatalog(adb, device.deviceId),
+    catalog: new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb)),
     keyboard: new Keyboard(device),
     hierarchy: {
       read: (signal) => {

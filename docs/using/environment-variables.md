@@ -20,6 +20,7 @@ launch metadata are intentionally excluded.
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `AUTOMOBILE_DATA_DIR`, `AUTO_MOBILE_DATA_DIR`                 | Base directory for observe, accessibility, navigation, CtrlProxy builds, screen streaming, WebRTC, tool outputs and daemon failure artifacts; filesystem path, relative to daemon launch directory. | `~/.auto-mobile` (OS temp fallback if home is unavailable) |
 | `AUTOMOBILE_LOG_DIR`, `AUTO_MOBILE_LOG_DIR`                   | Daemon and client log directory; filesystem path, relative to daemon launch directory.                                                                                                              | `$AUTOMOBILE_DATA_DIR/logs`                                |
+| `AUTOMOBILE_PLAN_HEALTH_DIR`                                  | Opt-in: each `executePlan` run writes a JSON health summary (per-tool step latency, failures, skips) here and attaches it as `healthSummary` in the result; filesystem path.                        | unset (no summary)                                         |
 | `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`             | Log serialization: `text` or newline-delimited `json`; case-insensitive, trimmed.                                                                                                                   | `text`                                                     |
 | `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                 | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                               | `file`                                                     |
 | `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`               | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                  | `info`                                                     |
@@ -54,21 +55,23 @@ unset.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                                    | Use and accepted values                                                                                                                         | Default                                         |
-| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
-| `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTO_MOBILE_DAEMON_SOCKET_PATH`                                           | Daemon control socket; filesystem path.                                                                                                         | `/tmp/auto-mobile-daemon-<uid>.sock`            |
-| `AUTOMOBILE_DAEMON_PID_FILE_PATH`, `AUTO_MOBILE_DAEMON_PID_FILE_PATH`                                       | Daemon PID record; filesystem path.                                                                                                             | `/tmp/auto-mobile-daemon-<uid>.pid`             |
-| `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTO_MOBILE_DAEMON_LOCK_FILE_PATH`                                     | Daemon start lock; filesystem path.                                                                                                             | `/tmp/auto-mobile-daemon-<uid>.lock`            |
-| `AUTOMOBILE_AUX_SOCKET_DIR`                                                                                 | Directory for auxiliary stream/push sockets; filesystem path.                                                                                   | `~/.auto-mobile`                                |
-| `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`, `AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH`                             | Override WebRTC stream socket; filesystem path.                                                                                                 | auxiliary socket directory `webrtc-stream.sock` |
-| `AUTOMOBILE_DAEMON_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_TIMEOUT_MS`                                             | Connection/request timeout; positive base-10 integer milliseconds.                                                                              | `120000` ms                                     |
-| `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS`                             | Cold startup budget; positive base-10 integer prefix in milliseconds, capped at `2147483647`.                                                   | `30000` ms                                      |
-| `AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS` | Reachability wait for an already-live daemon; positive base-10 integer milliseconds, capped at two-thirds of the startup budget (minimum 1 ms). | `10000` ms, subject to cap                      |
-| `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE`, `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE`                               | Disable version/build identity handshake with `1`, `true`, `yes` (case-insensitive, trimmed).                                                   | off; handshake enabled                          |
-| `AUTOMOBILE_DAEMON_STREAM_AUTH`                                                                             | Require session authentication on video/WebRTC sockets; `0`, `false`, `no`, `off` disable (case-insensitive, trimmed).                          | on                                              |
-| `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`                               | MCP timeout floor for `openLink`; positive base-10 integer milliseconds.                                                                        | `90000` ms                                      |
-| `AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS`                                   | MCP timeout floor for `observe`; positive base-10 integer milliseconds.                                                                         | `90000` ms                                      |
-| `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS`, `AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS`                         | Steady-state CtrlProxy readiness budget; integer milliseconds in `1000..120000`; CLI flag wins.                                                 | `30000` ms                                      |
+| Variable                                                                                                    | Use and accepted values                                                                                                                                                                                                                                                                                                      | Default                                         |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTO_MOBILE_DAEMON_SOCKET_PATH`                                           | Daemon control socket; filesystem path.                                                                                                                                                                                                                                                                                      | `/tmp/auto-mobile-daemon-<uid>.sock`            |
+| `AUTOMOBILE_DAEMON_PID_FILE_PATH`, `AUTO_MOBILE_DAEMON_PID_FILE_PATH`                                       | Daemon PID record; filesystem path.                                                                                                                                                                                                                                                                                          | `/tmp/auto-mobile-daemon-<uid>.pid`             |
+| `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTO_MOBILE_DAEMON_LOCK_FILE_PATH`                                     | Daemon start lock; filesystem path.                                                                                                                                                                                                                                                                                          | `/tmp/auto-mobile-daemon-<uid>.lock`            |
+| `AUTOMOBILE_AUX_SOCKET_DIR`                                                                                 | Directory for auxiliary stream/push sockets; filesystem path.                                                                                                                                                                                                                                                                | `~/.auto-mobile`                                |
+| `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`, `AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH`                             | Override WebRTC stream socket; filesystem path.                                                                                                                                                                                                                                                                              | auxiliary socket directory `webrtc-stream.sock` |
+| `AUTOMOBILE_DAEMON_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_TIMEOUT_MS`                                             | Connection/request timeout; positive base-10 integer milliseconds.                                                                                                                                                                                                                                                           | `120000` ms                                     |
+| `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_STARTUP_TIMEOUT_MS`                             | Cold startup budget; positive base-10 integer prefix in milliseconds, capped at `2147483647`.                                                                                                                                                                                                                                | `30000` ms                                      |
+| `AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS`, `AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS` | Reachability wait for an already-live daemon; positive base-10 integer milliseconds, capped at two-thirds of the startup budget (minimum 1 ms).                                                                                                                                                                              | `10000` ms, subject to cap                      |
+| `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE`, `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE`                               | Disable version/build identity handshake with `1`, `true`, `yes` (case-insensitive, trimmed).                                                                                                                                                                                                                                | off; handshake enabled                          |
+| `AUTOMOBILE_DAEMON_STREAM_AUTH`                                                                             | Require session authentication on video/WebRTC sockets; `0`, `false`, `no`, `off` disable (case-insensitive, trimmed).                                                                                                                                                                                                       | on                                              |
+| `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`                               | MCP timeout floor for `openLink`; positive base-10 integer milliseconds.                                                                                                                                                                                                                                                     | `90000` ms                                      |
+| `AUTOMOBILE_OBSERVE_MCP_TIMEOUT_MS`, `AUTO_MOBILE_OBSERVE_MCP_TIMEOUT_MS`                                   | MCP timeout floor for `observe`; positive base-10 integer milliseconds.                                                                                                                                                                                                                                                      | `90000` ms                                      |
+| `AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS`, `AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS`                         | Steady-state CtrlProxy readiness budget; integer milliseconds in `1000..120000`; CLI flag wins.                                                                                                                                                                                                                              | `30000` ms                                      |
+| `AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS`                                                                       | Idle period after which a daemon closes a device's CtrlProxy connection and gives up its forwarding lease (no session, stream, tool call or CtrlProxy request); also how recent its own use must be for it to refuse another process's request to give the lease up; positive number of milliseconds, otherwise the default. | `60000` ms                                      |
+| `AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS`                                                                  | Idle timeout after which a private daemon (non-default socket and `AUTOMOBILE_AUX_SOCKET_DIR` set) whose launching parent exited, with no clients or sessions, shuts itself down; non-negative milliseconds, `0` disables.                                                                                                   | `900000` ms                                     |
 
 </div>
 
@@ -115,17 +118,17 @@ for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB=1`.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                        | Use and accepted values                                                                                                                                                                                                                                                                                         | Default            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `AUTOMOBILE_ENABLED_TOOLS`                      | Enable comma-separated exact, case-sensitive tool names; unknown names and conflicts fail startup. CLI flags win; persisted choices override startup defaults.                                                                                                                                                  | unset; no override |
-| `AUTOMOBILE_DISABLED_TOOLS`                     | Disable comma-separated exact, case-sensitive tool names; same validation and precedence as enabled tools.                                                                                                                                                                                                      | unset; no override |
-| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions eagerly; exact `true` enables.                                                                                                                                                                                                                                               | off                |
-| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include flattened `elements` in observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Use differential action observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                             | off                |
-| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip post-action observation; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit deeply equal previously inline-sent action metadata per session/device and identical duplicate matched elements; exact `1` or `--actions-compact-metadata` enables. First/changed/new-session/device-switch blocks are sent in full. Applies after action diffs; no-observe leaves only duplicate removal. | off                |
-| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated, trimmed event markers that promote matching events to all-event capture; `--event-all-markers` wins.                                                                                                                                                                                           | empty list         |
+| Variable                                        | Use and accepted values                                                                                                                                                                                                                                                                                                                                                                        | Default            |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `AUTOMOBILE_ENABLED_TOOLS`                      | Enable comma-separated exact, case-sensitive tool names; unknown names and conflicts fail startup. CLI flags win; persisted choices override startup defaults.                                                                                                                                                                                                                                 | unset; no override |
+| `AUTOMOBILE_DISABLED_TOOLS`                     | Disable comma-separated exact, case-sensitive tool names; same validation and precedence as enabled tools.                                                                                                                                                                                                                                                                                     | unset; no override |
+| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions eagerly; exact `true` enables.                                                                                                                                                                                                                                                                                                                              | off                |
+| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include flattened `elements` in observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Use differential action observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                            | off                |
+| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip post-action observation; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit unchanged metadata per session/device and duplicate matches. Exact `0` opts out, `1` opts in. CLI negative wins over positive, then env, persisted state, default on. Unset/other values relay no preference or restart request. `actions-compact-metadata=false` persists an opt-out. First/changed/new-session/device-switch blocks remain full; diff/no-observe behavior is unchanged. | on                 |
+| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated, trimmed event markers that promote matching events to all-event capture; `--event-all-markers` wins.                                                                                                                                                                                                                                                                          | empty list         |
 
 </div>
 
@@ -161,32 +164,246 @@ The proxy's default heartbeat cadence derives from this timeout.
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
 ```
 
-Liveness ownership has a single token per session. The latest claim with a new
-token wins, even if the previous owner is still heartbeating. A stdio/HTTP proxy
-bound with `--initial-session-uuid` claims on its first heartbeat and restores
-the strict heartbeat policy. An external keeper can claim with
+Liveness ownership has a single token per session, and the daemon protects it.
+A claim from a different token is rejected while the current owner's lease is
+live. The lease is the session's heartbeat timeout measured from the owner's
+last heartbeat (or its recorded claim), the same deadline the heartbeat monitor
+reaps on, so a claim succeeds exactly when the session would otherwise be
+released. Only the owner's own heartbeats extend the owner's lease: a tool call
+that names the session, from any caller, keeps the session in use but does not
+keep a dead owner's lease alive, so a restarted proxy with a new token can claim
+once the lease plus the 10 s grace window have passed even while it is already
+working on the session. A healthy single proxy is unaffected, since its own
+heartbeats keep the lease live. Two claimants racing for a lapsed session are
+serialised: the first records the takeover and its lease in the same step, and
+the second is refused. A claim succeeds
+when the session is unowned, the owner's lease has expired, or the token matches
+the current owner (a restarted owner resuming). A session on the CLI idle policy
+never has a live lease for this purpose: its one-shot CLI owners exit between
+invocations, so the next invocation's new token can always claim it.
+
+A rejected claim returns
+`{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
+session and changes nothing: the owner, policy, and every deadline stay as the
+owner left them. A claim from a token that already claimed and was displaced
+returns `{ success: false, code: "liveness_owner_superseded", error: "..." }`
+and records nothing; it cannot take an owned session back. An explicit release
+opens the session to a new claim, including one from a previously used token.
+To take a session from a displaced owner, claim with a fresh token after
+that owner's lease has expired.
+
+A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
+heartbeat and restores the strict heartbeat policy. By default the proxy mints a
+new owner token per process, so a restarted proxy is a different token and is
+locked out while the previous process's lease is live. A harness that restarts
+its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
+`--initial-session-uuid`); the restarted proxy then claims with the same token
+and resumes the session without a conflict. Use a distinct token per harness. A
+keeper for a one-shot CLI session can claim with
 `--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
-that CLI claim adopts the CLI idle policy described below. Ordinary ticks from
-the current owner refresh deadlines without changing the policy.
+that CLI claim adopts the CLI idle policy described below, and is refused on a
+proxy-owned session (see "Supported liveness stack"). Ordinary ticks from the
+current owner refresh deadlines without changing the policy.
 
 A displaced token's non-claiming `daemon/heartbeat` returns
 `{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
 no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
-guidance to re-claim or stop, instead of printing `heartbeat recorded`. Claims
-are idempotent per token: repeating a displaced token's claim is still a
-successful no-op. To take ownership back, use a fresh token with
-`--claim-liveness-ownership`, then use that token on subsequent ticks. This
-displaces the other keeper; there is no co-ownership.
+guidance to re-claim or stop, instead of printing `heartbeat recorded`. There is
+no co-ownership.
 
-The proxy treats supersession as informational, logs it once at debug level,
-and continues without fencing, reconnecting or releasing the session. Only the
+The proxy reports lost ownership once at warn level and continues without
+fencing, reconnecting or re-claiming the session. This acknowledgement proves
+transport reachability only; its keeper no longer protects the deadline. Only the
 current owner's ticks protect liveness: a proxy stall past the heartbeat timeout
 can therefore reap the session even while a displaced external keeper ticks.
 Legacy tokenless heartbeats after a token has claimed ownership remain
 successful no-ops. Missing or releasing sessions still return
 `daemon_session_not_found`. A keeper cannot currently claim through the
-heartbeat CLI without adopting its CLI policy; policy-independent claims and
-co-ownership require a separate ownership-policy decision.
+heartbeat CLI without adopting its CLI policy.
+
+### Explicit liveness handoff
+
+A one-shot CLI exits after declaring the CLI idle policy, retaining its token.
+An independent MCP proxy can immediately adopt that session with
+`--initial-session-uuid S`: CLI idle sessions do not block a different token's
+claim. That claim switches the session back to heartbeat policy.
+
+A harness that owns liveness through a proxy or a CLI keeper can deliberately
+hand the session to another client:
+
+```bash
+auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
+```
+
+The equivalent daemon method is `daemon/releaseLivenessOwnership` with
+`{ sessionId: S, livenessOwnerToken: T }`. On an owned session, only its current
+token can release. A foreign or stale token returns `liveness_owner_not_owner`
+and changes nothing. A missing session returns `daemon_session_not_found`.
+Releasing an already-unowned session is a successful no-op for any valid token.
+The result is `{ sessionId: S, alreadyUnowned: false }` on the first release and
+`{ sessionId: S, alreadyUnowned: true }` on a no-op.
+
+**Unowned** means the existing owner-token column is empty. Release changes only
+that token: it retains the session UUID, device reservation, liveness policy,
+activity clocks and existing deadline, including heartbeat suspect grace. It
+adds no schema state or former-owner proof. On restart the row follows the usual
+unowned rehydration path. A tokenless keeper tick does not adopt ownership.
+While the daemon keeps running, former-owner ticks cannot adopt the released
+session: they return `liveness_owner_unowned` with guidance to make an explicit
+claim. After a daemon restart, a released session can be re-adopted by its former
+owner's token-bearing keeper tick, because the daemon's claim history is empty.
+Legacy recovery of rows without ownership continues to follow the existing rules.
+
+Stop the old keeper after release. The next proxy's explicit claim succeeds and
+moves the session to heartbeat policy; any second proxy with another token is
+refused while the first proxy's lease or grace window is live. An unclaimed CLI
+idle session is reaped on its usual idle deadline. Tool activity and daemon-stall
+forgiveness continue to use the existing policy rules.
+
+Ownership and lease state are separate. A session is token-owned or unowned;
+startup admission is `awaiting-owner` until the owner returns. For heartbeat
+policy, `session-info` reports all three lease states: `live` (lease remains),
+`suspect` (lease expired but grace remains), and `lapsed` (lease and grace ended,
+remaining time is zero). CLI idle policy uses its activity-based idle deadline
+and has no lease field in `session-info`. Release adds no session-info fields.
+
+### Supported liveness stack
+
+The only supported liveness stack is harness → stdio proxy → daemon. The harness
+proves liveness to its proxy over stdio; the proxy is the only liveness owner of
+the sessions it holds, and heartbeats and claims them at the daemon with its
+owner token. Nothing else should heartbeat a proxy's session.
+
+`--daemon heartbeat` is the keeper for one-shot `--cli` sessions only, and it
+refuses a proxy-owned session. A session is proxy-owned when a token has
+claimed it under the strict `heartbeat` policy. The command sends a keeper
+marker, and the daemon answers every claim or tick against such a session with
+`{ success: false, code: "liveness_owner_is_proxy", error: "..." }` before
+any ownership logic runs, whatever token the keeper presents and whether or not
+the proxy's lease is still live. The refusal changes nothing: owner, policy and
+every deadline stay as the proxy left them. The command exits non-zero and prints
+the message, the `[liveness_owner_is_proxy]` code, and the instruction to stop
+the keeper. This is distinct from `liveness_owner_conflict`, which is a
+different token's claim on a live lease and can succeed once the lease expires.
+Keeping a one-shot CLI session alive with `--daemon heartbeat` behaves as before.
+
+A harness checks a session's state with `--daemon session-info <session-id>`. It
+prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and,
+while the session is being released, `releasing: true`. A missing session fails
+with `daemon_session_not_found`. The harness reads this to decide whether a session
+survived; it must not heartbeat the session itself to find out. It also prints
+`liveness`: `{ state: "live" | "suspect" | "lapsed", remainingMs }`, the time
+left on the lease or grace window, or zero once lapsed.
+
+### Stalled liveness: `daemon_stalled` and `proxy_stalled`
+
+When a lease expires the daemon does not release the session at once: it holds
+it as suspect for a 10 s grace window with its device still reserved for the
+owner token. A heartbeat from the owner token inside the window restores the
+session with the same UUID; no tool call runs against a suspect session until
+then. The proxy uses that window for its own recovery, so a stall is reported to
+the harness only when recovery has failed. Recovery always fits inside the lease
+plus the grace window (20 s at the default 10 s timeout) at the 2 s and 5 s
+heartbeat cadences. The proxy applies this to every session it holds, one
+session at a time. The daemon does not hold its own stalls against owners: when
+its heartbeat monitor runs more than 2 s later than scheduled it moves every
+session's lease forward by exactly that lateness, so a daemon stall of a few
+seconds cannot push a heartbeating owner past lease plus grace.
+
+When the lease and grace are already spent by the time recovery starts (a long
+proxy stall, such as a sleeping laptop), the daemon may have forgiven its own
+stall and still hold the sessions, so each attempt is given the heartbeat
+request timeout (half the lease, at most twice the heartbeat interval) instead
+of a share of the exhausted budget.
+
+Two distinct states, each with exactly three automatic recovery attempts:
+
+- `daemon_stalled`: the daemon's socket is open or reconnectable but heartbeat
+  acknowledgements stop. Each attempt reconnects if needed and heartbeats again
+  with the same owner token. From the second attempt a silent socket may be
+  replaced with a fresh one, but at most once per recovery episode (shared by
+  every session recovering together, because the socket is one connection for
+  all of them) and never while a tool call is in flight on it, unless an attempt
+  has already seen the socket fail at the transport level. A held session the
+  daemon answers "not found" is dropped once rather than retried, and a session
+  that failed recovery is not recovered again before its handover. An attempt that is acknowledged ends the episode and the
+  session stays usable; nothing is surfaced to the harness and the recovery is
+  logged. The proxy also starts this recovery when a tool call is refused with
+  `daemon_session_suspect`, the daemon's signal that the session still exists and
+  its owner can restore it.
+- `proxy_stalled`: the proxy's own heartbeat tick fired later than the lease
+  allows, which it can only notice after it resumes. It re-heartbeats every
+  session it holds with the same owner token. A session the daemon kept as suspect
+  is restored with the same UUID. A session is lost only when the daemon says so:
+  it answers that the session was released, or that another token has taken it
+  over while this proxy was stalled (the session is fenced and listed in the
+  handover). A daemon that does not answer any of the three attempts is stalled,
+  not the proxy: those sessions are handed over as `daemon_stalled`.
+
+After the third failed attempt the proxy hands over. It stops heartbeating the
+affected sessions and returns this structured error on the next tool call that
+names an affected session (or reaches it implicitly), and it sends the same body
+as an MCP `notifications/message` (`level: "error"`,
+`logger: "auto-mobile.liveness"`, `data: <the error body>`) so a harness that is
+idle between calls is told too. The notification honours a level the client set
+with `logging/setLevel`: a client that asked for `critical` or above is not sent
+it and learns from the tool-call error:
+
+```json
+{
+  "error": {
+    "code": "daemon_stalled",
+    "message": "...",
+    "sessions": [
+      {
+        "sessionUuid": "…",
+        "deviceId": "emulator-5554",
+        "lastAcknowledgedHeartbeatAt": 1760000000000
+      }
+    ],
+    "attempts": 3,
+    "maxAttempts": 3,
+    "lastAcknowledgedHeartbeatAt": 1760000000000,
+    "retryable": true,
+    "recovery": { "action": "restart_daemon_then_resume_by_session_uuid" }
+  }
+}
+```
+
+| Field                                    | Meaning                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`                                   | `daemon_stalled` or `proxy_stalled`.                                                                                                                                                  |
+| `sessions[]`                             | `daemon_stalled`: the sessions that could not be reached. `proxy_stalled`: the sessions that were lost. Each has `sessionUuid` and `deviceId` (`null` if the proxy never learned it). |
+| `sessions[].lastAcknowledgedHeartbeatAt` | When the daemon last acknowledged that session's heartbeat, in milliseconds on the proxy's clock.                                                                                     |
+| `attempts`, `maxAttempts`                | Recovery attempts made (most of any listed session) and the limit, always 3.                                                                                                          |
+| `lastAcknowledgedHeartbeatAt`            | The latest of the listed sessions' last acknowledgements.                                                                                                                             |
+| `recovery.action`                        | `restart_daemon_then_resume_by_session_uuid` for `daemon_stalled`; `reacquire_lost_sessions` for `proxy_stalled`.                                                                     |
+
+For `daemon_stalled` the harness restarts the daemon, then resumes each session
+by passing its `sessionUuid` on a tool call: the first call after the error
+re-claims it with the same owner token. For `proxy_stalled` the listed sessions and devices are gone;
+reacquire them with `getAndroid` or `getApple`. During a liveness recovery episode
+or while a session remains handed over, **the proxy never starts or restarts the
+daemon**: it is shared, and restarting it is a harness action. Tool calls and resource reads wait for automatic recovery;
+successful recovery surfaces no error, and exhausted recovery returns the structured
+handover on calls/reads and by notification. Discovery does not wait for recovery or
+report the handover: it serves cached/static lists when unreachable, and uncached
+direct lists may observe the daemon unbound. Discovery never starts or restarts the
+daemon during an episode or handover. A named resume uses an observation-only connection
+and ends the handover on a definitive daemon answer: acknowledgement of the same
+UUID and owner token resumes it; `daemon_session_not_found`, `liveness_owner_superseded`,
+or `liveness_owner_conflict` confirms it was released or taken by another owner
+after the ownership grace window. A `session-released` notification also ends it,
+regardless of the current binding. A definitive loss delivers `proxy_stalled` once
+on the next tool call for that session, naming the sessions and devices to
+reacquire, then normal lifecycle behavior returns. An unreachable daemon retains
+the handover and the no-start fence; the harness must restart it. Recovery cannot join a pending
+connection allowed to start or restart the daemon. Healthy proxies and proxies
+without device sessions retain normal auto-start and skew reconciliation.
+
+A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
+the other owner's lease plus its grace window (plus one heartbeat interval), so a
+restarted proxy can win a session whose previous owner has gone.
 
 ## CLI session lifetime
 

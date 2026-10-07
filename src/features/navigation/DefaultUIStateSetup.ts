@@ -12,6 +12,11 @@ import { PressButton } from "../action/PressButton";
 import { throwIfAborted, awaitWhileRequestIsLive, getStructuredField } from "../../utils/toolUtils";
 import { UIStateSetup } from "./interfaces/UIStateSetup";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import { ActionableError } from "../../models/ActionableError";
+import { isTruthy } from "../../models/Element";
+import { ElementResolver, matchedSourceNode } from "../utility/ElementResolver";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 
 /**
  * Default implementation of UIStateSetup that handles UI state alignment
@@ -24,6 +29,9 @@ import { defaultTimer, Timer } from "../../utils/SystemTimer";
 export interface ObserveScreenLike {
   execute(options?: { signal?: AbortSignal }): Promise<ObserveResult>;
 }
+
+/** A setup gesture left the source screen; replay must stop, including fallback edges. */
+export class UIStateSetupScreenChangedError extends ActionableError {}
 
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
@@ -330,26 +338,26 @@ export class DefaultUIStateSetup implements UIStateSetup {
       return false;
     }
 
-    logger.info(`[UI_STATE_SETUP] Setting up UI state: tapping "${identifier}"`);
-
+    let before: ObserveResult;
     try {
       throwIfAborted(signal);
+      before = await awaitWhileRequestIsLive(
+        this.observeScreenProvider().execute(signal ? { signal } : undefined),
+        signal,
+      );
+      const selector = this.selectionTapSelector(element, before);
+      if (!selector) {
+        logger.warn(`[UI_STATE_SETUP] No exact selectable control for "${identifier}"; skipping`);
+        return false;
+      }
+      logger.info(`[UI_STATE_SETUP] Setting up UI state: tapping "${identifier}"`);
       const args: Record<string, unknown> = {
+        selector,
         action: "tap",
         platform,
         deviceId: this.device.deviceId,
         ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
       };
-
-      if (element.text) {
-        args.selector = { text: element.text };
-      } else if (element.resourceId) {
-        args.selector = { elementId: element.resourceId };
-      } else if (element.contentDesc) {
-        // tapOn exposes accessible labels through its text selector; contentDesc
-        // is not a public selector field on the internal tool contract.
-        args.selector = { text: element.contentDesc };
-      }
 
       // Internal setup tap (#3087) via the callInternal seam (#3108): no
       // diff/strip, no baseline advance.
@@ -360,13 +368,130 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
       // Small delay for UI to update
       await this.sleep(100, signal);
-
-      return true;
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`[UI_STATE_SETUP] Failed to tap on "${identifier}": ${error}`);
       return false;
     }
+
+    // A successful setup tap must stay on its source screen. Keep this failure outside
+    // the best-effort tap catch so navigateTo stops before dispatching the recorded step.
+    await this.verifySelectionScreen(before, identifier, signal);
+    return true;
+  }
+
+  private async verifySelectionScreen(
+    before: ObserveResult,
+    identifier: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    let after: ObserveResult;
+    try {
+      throwIfAborted(signal);
+      after = await awaitWhileRequestIsLive(
+        this.observeScreenProvider().execute(signal ? { signal } : undefined),
+        signal,
+      );
+      throwIfAborted(signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      // Observation is best effort: only positive screen-change evidence aborts replay.
+      logger.warn(
+        `[UI_STATE_SETUP] Could not verify screen after tapping "${identifier}": ${errorMessage(error)}`,
+      );
+      return;
+    }
+    let from = before.screenIdentity?.key;
+    let to = after.screenIdentity?.key;
+    if (!from || !to) {
+      const extractor = new UIStateExtractor();
+      from = extractor.extractFromObservation(before)?.destinationId;
+      to = extractor.extractFromObservation(after)?.destinationId;
+    }
+    if (from && to && from !== to) {
+      throw new UIStateSetupScreenChangedError(
+        `UI-state setup tap on "${identifier}" changed screen from "${from}" to "${to}"; navigation replay aborted`,
+      );
+    }
+  }
+
+  private selectionTapSelector(
+    element: { text?: string; resourceId?: string; contentDesc?: string },
+    observation: ObserveResult,
+  ): { text: string } | { elementId: string } | undefined {
+    if (!observation.viewHierarchy) {
+      return undefined;
+    }
+    const selector: { text: string } | { elementId: string } = element.text
+      ? { text: element.text }
+      : element.resourceId
+        ? { elementId: element.resourceId }
+        : { text: element.contentDesc! };
+    const nodes = new SearchableHierarchy().project(observation.viewHierarchy);
+    // Resolve the same default tap candidate as tapOn, including clickable promotion.
+    // An exact label elsewhere must not authorize a substring-matched button.
+    const result = new ElementResolver().resolve(
+      { id: observation.observationId, nodes },
+      selector,
+      { action: "tap" },
+    );
+    const matched = matchedSourceNode(result, "text" in selector ? selector : undefined);
+    if (!matched || !result.chosen) {
+      return undefined;
+    }
+    const exact =
+      "text" in selector
+        ? matched.textFields.includes(selector.text)
+        : matched.nativeId === selector.elementId || matched.nodeKey === selector.elementId;
+    return exact && this.isSelectableControl(result.chosen, nodes) ? selector : undefined;
+  }
+
+  private isSelectableControl(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+    const attrs = node.properties;
+    if (
+      attrs.selected !== undefined ||
+      isTruthy(attrs.checkable) ||
+      /^(tab|switch|checkbox|radio|toggle)$/i.test(String(attrs.role ?? "")) ||
+      /TabButton|TabWidget|Switch|CheckBox|RadioButton|ToggleButton/i.test(node.className ?? "")
+    ) {
+      return true;
+    }
+    if (this.hasSelectedCollectionSibling(node, nodes)) {
+      return true;
+    }
+    // UIKit captures expose unselected tab buttons as UIButton children of UITabBar.
+    let parent = node.parentIndex;
+    while (parent !== undefined) {
+      const ancestor = nodes[parent];
+      if (/TabBar/i.test(ancestor.className ?? "")) {
+        return true;
+      }
+      parent = ancestor.parentIndex;
+    }
+    return false;
+  }
+
+  private hasSelectedCollectionSibling(
+    node: SearchableEntry,
+    nodes: readonly SearchableEntry[],
+  ): boolean {
+    // Android captures expose tabs as clickable collection items next to the selected item,
+    // with no selected attribute on unselected items (playground-tap-resource.json).
+    if (
+      !node.categories.clickable ||
+      node.parentIndex === undefined ||
+      !node.properties["collection-item-info"]
+    ) {
+      return false;
+    }
+    const parent = nodes[node.parentIndex];
+    return (
+      Boolean(parent.properties["collection-info"]) &&
+      nodes.some(
+        (sibling) =>
+          sibling.parentIndex === node.parentIndex && isTruthy(sibling.properties.selected),
+      )
+    );
   }
 
   /**

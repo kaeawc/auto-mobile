@@ -1,3 +1,5 @@
+import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
+import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -66,21 +68,26 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { isElementKeyboardFocused } from "../utility/FocusedInput";
 import {
+  visibleTapBounds,
   DefaultElementGeometry,
   screenSizeForOffscreenCheck,
   isUsableScreenSize,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
+const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -104,6 +111,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import {
+  intersectBounds as intersectTapBounds,
   boundsArea,
   boundsEqual,
   boundsNearlyEqual,
@@ -116,6 +124,10 @@ import {
   resolveOverlayTapUnderSystemBar,
   type OverlayBarTapDecision,
 } from "./overlayTapUnderSystemBars";
+import {
+  assertAppGestureNotUnderOverlay,
+  scopeHierarchyForSelector,
+} from "../observe/hierarchyLayer";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -181,19 +193,8 @@ import {
   tapPointOutsideIme,
 } from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
-import { getScreenBounds } from "../../utils/screenBounds";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
-
-function intersectTapBounds(a: ElementBounds, b: ElementBounds): ElementBounds | null {
-  const bounds = {
-    left: Math.max(a.left, b.left),
-    top: Math.max(a.top, b.top),
-    right: Math.min(a.right, b.right),
-    bottom: Math.min(a.bottom, b.bottom),
-  };
-  return bounds.left < bounds.right && bounds.top < bounds.bottom ? bounds : null;
-}
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -402,7 +403,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     "checkIdentity" | "record"
   >;
   private readonly lastRenderedObservation?: RenderedObservationReader;
-  private finder: ElementFinder;
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
   private accessibilityService: AndroidCtrlProxyClient;
@@ -497,7 +497,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
-    this.finder = new DefaultElementFinder();
     this.geometry = new DefaultElementGeometry();
     this.elementParser = new DefaultElementParser();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
@@ -634,6 +633,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
+    if (options.layer !== undefined && this.hasSemanticLinkTarget(options)) {
+      // Semantic links are activated on the device across every window, so the
+      // host cannot keep the activation inside the app or the overlay (#9305).
+      return "tapOn layer cannot be used with accessibilityLink or subtext";
+    }
     if (options.selectionStrategy === "unique" && (options.sibling || options.accessibilityLink)) {
       return "tapOn unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead";
     }
@@ -1357,13 +1361,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const matched = this.matchedTapElement(selection, target, options);
     const matchedBounds = matched.bounds;
     const matchForTap = hasTapArea(matchedBounds) ? matched : target;
-    let visible = intersectTapBounds(target.bounds, matchForTap.bounds);
-    // Legacy captures without dimensions still constrain the matched/actionable overlap.
-    if (!visible || !isUsableScreenSize(screenSize)) {
-      return visible;
-    }
-    visible = intersectTapBounds(visible, getScreenBounds(screenSize, undefined, true));
-    if (!visible || this.device.platform !== "ios") {
+    const visible = visibleTapBounds(target.bounds, screenSize, matchForTap.bounds);
+    if (!visible || !isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
       return visible;
     }
     const belowChrome = clipIosChromeBounds({
@@ -1400,15 +1399,33 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    if (this.device.platform !== "ios" && pointInTapBounds(point, visibleBounds)) {
-      return point;
-    }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
     if (this.device.platform !== "ios") {
-      return ime
-        ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
-        : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const proposed = pointInTapBounds(point, visibleBounds)
+        ? point
+        : ime
+          ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
+          : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const safe = applicationWindowSafeTapPoint(
+        hierarchy,
+        target,
+        visibleBounds,
+        proposed,
+        ime && {
+          left: ime.bounds[0],
+          top: ime.bounds[1],
+          right: ime.bounds[2],
+          bottom: ime.bounds[3],
+        },
+      );
+      if (!safe.point) {
+        throw new TapTargetUnavailableError(
+          `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
+          "no-visible-tap-area",
+        );
+      }
+      return safe.point;
     }
     const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
@@ -1757,6 +1774,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapVerificationOptions,
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     try {
       return this.selectElementInHierarchy(options, viewHierarchy);
     } catch (error) {
@@ -1764,9 +1782,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
-        (options.selectionStrategy !== "unique" &&
-          options.index === undefined &&
-          !options.container?.container) ||
+        (!isStrictlyScoped(options) && options.index === undefined) ||
         !this.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
@@ -1829,7 +1845,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : "tap";
     const lookupAction = options.subtext
       ? "inspect"
-      : options.selectionStrategy === "unique" || options.container?.container
+      : isStrictlyScoped(options)
         ? intentAction
         : options.action === "focus"
           ? "focus-input"
@@ -2120,8 +2136,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         b.element.bounds,
         TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
       ) &&
-      this.finder.isElementKeyboardFocused(a.element) ===
-        this.finder.isElementKeyboardFocused(b.element) &&
+      isElementKeyboardFocused(a.element) === isElementKeyboardFocused(b.element) &&
       (
         [
           "resource-id",
@@ -2145,7 +2160,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       (node) =>
         node.element &&
         isFocusEditableElement(node.properties) &&
-        this.finder.isElementKeyboardFocused(node.element),
+        isElementKeyboardFocused(node.element),
     );
     const distinctFocusedFields = this.distinctFocusFields(focusedFields);
     if (distinctFocusedFields.length !== 1) {
@@ -2369,7 +2384,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         (node) =>
           node.element &&
           isFocusEditableElement(node.properties) &&
-          this.finder.isElementKeyboardFocused(node.element) &&
+          isElementKeyboardFocused(node.element) &&
           this.isSameFocusTarget(selected, node.element, nodes, selectedNode),
       ) &&
       selected[identifier.key] === identifier.value &&
@@ -2435,7 +2450,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return Boolean(
       node.element &&
       isFocusEditableElement(node.properties) &&
-      this.finder.isElementKeyboardFocused(node.element) &&
+      isElementKeyboardFocused(node.element) &&
       this.isSameFocusTarget(target, node.element, nodes),
     );
   }
@@ -2449,7 +2464,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return Boolean(
       candidate &&
       isFocusEditableElement(candidate) &&
-      this.finder.isElementKeyboardFocused(candidate) &&
+      isElementKeyboardFocused(candidate) &&
       this.isSameFocusTarget(target, candidate, new SearchableHierarchy().project(hierarchy)),
     );
   }
@@ -2483,7 +2498,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         (node) =>
           node.element &&
           isFocusEditableElement(node.properties) &&
-          this.finder.isElementKeyboardFocused(node.element) &&
+          isElementKeyboardFocused(node.element) &&
           node.element[identifier.key] === identifier.value &&
           this.isSameFocusTarget(target, node.element, nodes),
       );
@@ -3186,12 +3201,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     observeResult?: ObserveResult,
     containerFound: boolean = true,
     signal?: AbortSignal,
+    selection?: ElementSelectionResult,
   ): Promise<never> {
     if (options.container && !containerFound) {
       const containerLabel = options.container.elementId
         ? `elementId '${options.container.elementId}'`
         : `text '${options.container.text}'`;
-      throw new ActionableError(`Container element not found with provided ${containerLabel}`);
+      throw new ActionableError(
+        options.container.elementId?.startsWith("s2-")
+          ? `Container element id '${options.container.elementId}' is stale; re-observe and use the id from the new observation.`
+          : `Container element not found with provided ${containerLabel}`,
+      );
     }
 
     const containerHint = options.container
@@ -3212,7 +3232,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     } else if (options.accessibilityLink) {
       baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
-      baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+      baseError = options.elementId?.startsWith("s2-")
+        ? `Element id '${options.elementId}' is stale; re-observe and use the id from the new observation.${containerHint}`
+        : `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+    }
+
+    if (selection?.onlyKeyboardKeyMatch) {
+      throw new TapTargetUnavailableError(
+        `${baseError}. The only match is a soft-keyboard key, which observe does not list; ` +
+          "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
+        "not-found",
+      );
     }
 
     if (this.visionConfig.enabled && observeResult) {
@@ -3246,7 +3276,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     return (
       this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      this.finder.hasContainerElement(viewHierarchy, container)
+      defaultContainerSelector.hasContainer(viewHierarchy, container)
     );
   }
 
@@ -3268,8 +3298,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const scopedOptions = {
       container: container.container,
       index: container.index,
-      strategy:
-        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
@@ -3609,7 +3638,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
         };
       }
-      if (this.finder.isElementKeyboardFocused(element)) {
+      if (isElementKeyboardFocused(element)) {
         return {
           success: true,
           action: options.action,
@@ -3646,6 +3675,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ...context,
       onWarning: (warning) => displayWarnings.push(warning),
     });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3780,7 +3813,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
-        await this.handleElementNotFound(options, undefined, outcome.containerFound, signal);
+        await this.handleElementNotFound(
+          options,
+          undefined,
+          outcome.containerFound,
+          signal,
+          outcome.selection,
+        );
       } catch (error) {
         logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
         return {
@@ -4202,6 +4241,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               observeResult,
               searchOutcome.containerFound,
               signal,
+              searchOutcome.selection,
             );
           }
           const liveSelection = await this.refreshEnsureCheckedSelection(
@@ -4272,7 +4312,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             }
 
             // Check if element is already focused
-            const isFocused = this.finder.isElementKeyboardFocused(element);
+            const isFocused = isElementKeyboardFocused(element);
 
             if (isFocused) {
               logger.info(`Element is already focused, no action needed`);
@@ -4431,6 +4471,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             );
           }
           const tapPoint = barDecision.point;
+          // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
+          assertAppGestureNotUnderOverlay(viewHierarchy, options.layer, tapPoint, "tap");
           if (barDecision.warning) {
             activationWarnings.push(barDecision.warning);
           }
@@ -4452,8 +4494,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(
@@ -4704,7 +4748,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return undefined;
     }
 
-    if (options?.container?.container || options?.selectionStrategy === "unique") {
+    if (isStrictlyScoped(options)) {
       await this.executeScopedAndroidTap({
         action,
         x,
@@ -5150,7 +5194,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
       reResolve: hasSelector
         ? (hierarchy) => {
-            const selection = this.selectElementInHierarchy(options, hierarchy).selection;
+            const selection = this.selectElementInHierarchy(
+              options,
+              scopeHierarchyForSelector(hierarchy, options.layer),
+            ).selection;
             resolvedSelection = selection;
             resolvedHierarchy = hierarchy;
             return selection.element

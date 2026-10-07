@@ -6,18 +6,25 @@ import {
 } from "../observe/android/StableNodeIdentity";
 
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import type { SearchableEntry } from "./SearchableNode";
+import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
-import { compareSelectionRank } from "./selectionRank";
-import { isElementCenterOffScreen } from "./ElementGeometry";
+import { compareSelectionRank, selectableCandidates } from "./selectionRank";
+import { hasVisibleScreenPart } from "./ElementGeometry";
+import {
+  ambiguousStableViewIdMessage,
+  legacyBareStableViewIdMessage,
+} from "./StableViewIdGuidance";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
+);
+const bareSyntheticNodeKey = new RegExp(
+  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
 );
 const syntheticNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}(?:-\\d+|~[0-9a-f]{${STABLE_VIEW_ID_TEXT_HASH_LENGTH}})?$`,
@@ -49,6 +56,11 @@ export interface ResolutionIntent {
   preferTap?: boolean;
   /** Prefer bounded checkable matches and their checkable descendants. */
   preferToggle?: boolean;
+  /**
+   * Leave the soft keyboard's keys out of the search and out of `index` numbering,
+   * as `observe` folds them into one `<ime>` row (issue #10225).
+   */
+  excludeImeKeys?: boolean;
   /** An action lookup cannot use an unbounded ID match as its target. */
   requireBounds?: boolean;
   viewport?: { width: number; height: number };
@@ -69,6 +81,18 @@ export type MatchKind =
   | "regex"
   | "class-exact"
   | "all";
+export interface ContainerFailure {
+  level: number;
+  reason: "not-found" | "ambiguous";
+  selector: ResolverSelector;
+}
+
+export interface ResolvedScope {
+  selector: ResolverSelector;
+  node: SearchableEntry;
+  matchCount: number;
+}
+
 export interface ElementResolution {
   chosen: SearchableEntry | null;
   snapshotNodes?: readonly SearchableEntry[];
@@ -82,7 +106,11 @@ export interface ElementResolution {
   }[];
   matchMode: MatchMode;
   scope?: SearchableEntry;
+  scopeChain?: ResolvedScope[];
+  containerFailure?: ContainerFailure;
   error?: string;
+  /** Typed failure classification, set where selection fails. */
+  failureReason?: ContainerFailure["reason"];
 }
 
 export function isMissingContainerError(error: string | undefined): boolean {
@@ -130,7 +158,7 @@ function centerWithinViewport(
   bounds: ElementBounds,
   viewport: { width: number; height: number },
 ): boolean {
-  return !isElementCenterOffScreen(bounds, viewport);
+  return hasVisibleScreenPart(bounds, viewport);
 }
 
 function hasVisibleBounds(
@@ -299,6 +327,17 @@ function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boole
 }
 
 /** Pure selection over projected capture data. No hierarchy acquisition or legacy finder calls. */
+/**
+ * Bare ids are unique per namespace (app vs IME), so when IME keys are excluded
+ * the synthetic-id guard must not count them as family peers.
+ */
+function guardNamespaceNodes(
+  nodes: readonly SearchableEntry[],
+  intent: ResolutionIntent,
+): readonly SearchableEntry[] {
+  return intent.excludeImeKeys ? nodes.filter((node) => !isImeKeyEntry(node)) : nodes;
+}
+
 export class ElementResolver {
   constructor(private readonly random: () => number = () => defaultRandom.next()) {}
 
@@ -307,23 +346,34 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
   ): ElementResolution {
-    return this.resolveInNodes(snapshot, selector, intent, snapshot.nodes);
+    // Keyboard keys are not part of what `observe` presents, so an action's selector
+    // cannot see them (issue #10225). Indices stay snapshot indices, so only the
+    // searched list shrinks.
+    const searched = intent.excludeImeKeys
+      ? snapshot.nodes.filter((node) => !isImeKeyEntry(node))
+      : snapshot.nodes;
+    return this.resolveInNodes(snapshot, selector, intent, searched);
   }
 
   private containerFailure(
     selector: ResolverSelector,
     result: ElementResolution,
   ): ElementResolution {
-    if (result.error?.startsWith("Container level ")) {
+    if (result.containerFailure) {
       return result;
     }
     let level = 1;
     for (let parent = selector.container; parent; parent = parent.container) {
       level += 1;
     }
-    const ambiguous = /ambiguous/i.test(result.error ?? "");
+    const ambiguous = result.failureReason === "ambiguous";
     return {
       ...result,
+      containerFailure: {
+        level,
+        reason: ambiguous ? "ambiguous" : "not-found",
+        selector,
+      },
       error: `Container level ${level} ${ambiguous ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}${ambiguous ? `; ${this.candidateDetails(result.candidates)}` : ""}`,
     };
   }
@@ -356,6 +406,7 @@ export class ElementResolver {
         return true;
       });
     let scope: SearchableEntry | undefined = boundary;
+    const scopeMetadata: Pick<ElementResolution, "scopeChain"> = {};
     let siblingCandidateNodes: SearchableEntry[] | undefined;
     if (selector.container) {
       const container = this.resolveInNodes(
@@ -373,6 +424,14 @@ export class ElementResolver {
       // rooted at the node that actually supplied the text, so siblings in
       // that row do not become descendants of the requested container.
       scope = containerSource(selector.container, container) ?? container.chosen;
+      scopeMetadata.scopeChain = [
+        ...(container.scopeChain ?? []),
+        {
+          selector: this.containerSelector(selector),
+          node: scope,
+          matchCount: container.candidates.length,
+        },
+      ];
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {
@@ -410,6 +469,7 @@ export class ElementResolver {
       candidates: matched.matches.map(({ node }) => node),
       ...matched,
       scope,
+      ...scopeMetadata,
     };
     if (matched.error) {
       return result;
@@ -433,7 +493,17 @@ export class ElementResolver {
           ? actionTarget(candidate) !== null
           : actionTarget(candidate) !== null ||
             (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
-    result.candidates = result.candidates.filter(actionableCandidate);
+    const selectable = (candidates: SearchableEntry[]) =>
+      preserveTextScope ||
+      (scope &&
+        selector.selectionStrategy === "unique" &&
+        selector.index === undefined &&
+        usesClickablePromotion(intent.action))
+        ? candidates.filter(actionableCandidate)
+        : selectableCandidates(candidates, (candidate) =>
+            actionableCandidate(candidate) ? (actionTarget(candidate) ?? candidate) : null,
+          );
+    result.candidates = selectable(result.candidates);
     this.rankCandidates(result, selector, actionTarget, intent);
     this.choose(result, selector, actionTarget);
     if (siblingCandidateNodes) {
@@ -448,7 +518,7 @@ export class ElementResolver {
         preserveTextScope,
       );
       result.matches = preparedAll.matches;
-      result.candidates = preparedAll.matches.map(({ node }) => node).filter(actionableCandidate);
+      result.candidates = selectable(preparedAll.matches.map(({ node }) => node));
       if (result.chosen) {
         result.indexInMatches = result.candidates.findIndex(
           (candidate) => actionTarget(candidate) === result.chosen,
@@ -544,13 +614,13 @@ export class ElementResolver {
   }
 
   private prepareMatches(
-    matched: Pick<ElementResolution, "matches" | "matchMode" | "error">,
+    matched: Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason">,
     selector: ResolverSelector,
     snapshot: ResolverSnapshot,
     scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
     preserveTextScope: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
       const toggles = this.toggleMatches(matched.matches, snapshot, intent);
       if (toggles.length > 0) {
@@ -596,7 +666,7 @@ export class ElementResolver {
         result.error = `Target not found${result.scope ? " within container" : ""}: index ${selector.index} is out of range or ineligible`;
       }
     } else if (selector.selectionStrategy === "unique") {
-      this.chooseUnique(result, actionable);
+      this.chooseUnique(result, actionable, selector);
     } else if (selector.selectionStrategy === "random") {
       result.chosen =
         actionable[
@@ -613,7 +683,11 @@ export class ElementResolver {
     return result;
   }
 
-  private chooseUnique(result: ElementResolution, candidates: SearchableEntry[]): void {
+  private chooseUnique(
+    result: ElementResolution,
+    candidates: SearchableEntry[],
+    selector: ResolverSelector,
+  ): void {
     // Scoped uniqueness belongs to the matched nodes, even if two of them
     // share one clickable owner. Promotion must not erase ambiguity.
     if (result.scope && result.candidates.length > 1) {
@@ -623,9 +697,14 @@ export class ElementResolver {
       result.chosen = candidates[0];
       return;
     }
+    result.failureReason = candidates.length === 0 ? "not-found" : "ambiguous";
     result.error =
       candidates.length === 0
-        ? `Target not found${result.scope ? " within container" : ""}`
+        ? `Target not found${result.scope ? " within container" : ""}${
+            selector.elementId !== undefined && syntheticNodeKey.test(selector.elementId)
+              ? ": stale element id from an earlier observation. s2- ids are valid only for the observation that returned them. Re-observe and use the new id."
+              : ""
+          }`
         : `Target ambiguous: ${candidates.length} matches; ${this.candidateDetails(candidates)}`;
   }
 
@@ -910,7 +989,9 @@ export class ElementResolver {
     intent: ResolutionIntent,
     snapshot: ResolverSnapshot,
     scope?: SearchableEntry,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> & { usedHintFallback?: boolean } {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> & {
+    usedHintFallback?: boolean;
+  } {
     if (selector.elementId !== undefined) {
       return this.matchId(
         nodes,
@@ -918,6 +999,7 @@ export class ElementResolver {
         selector.match ?? "exact",
         intent,
         selector.caseSensitive,
+        guardNamespaceNodes(snapshot.nodes, intent),
       );
     }
     if (selector.testTag !== undefined) {
@@ -1000,7 +1082,7 @@ export class ElementResolver {
     textQuery: string,
     snapshot: ResolverSnapshot,
     options: { scope?: SearchableEntry; hintFallback?: boolean },
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     const { scope, hintFallback } = options;
     const fields = (node: SearchableEntry) =>
       this.matchableTextFields(node, selector, hintFallback);
@@ -1078,7 +1160,8 @@ export class ElementResolver {
     matchMode: MatchMode,
     intent: ResolutionIntent,
     caseSensitive?: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+    captureNodes: readonly SearchableEntry[] = nodes,
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (matchMode === "regex") {
       return {
         matches: [],
@@ -1105,6 +1188,20 @@ export class ElementResolver {
         matchMode,
       };
     }
+    const guard = this.bareSyntheticIdGuard(captureNodes, query);
+    if (guard) {
+      return { matches: [], matchMode, failureReason: "ambiguous", error: guard };
+    }
+    return this.matchNodeKeyOrNamespace(nodes, query, matchMode, intent, native);
+  }
+
+  private matchNodeKeyOrNamespace(
+    nodes: SearchableEntry[],
+    query: string,
+    matchMode: MatchMode,
+    intent: ResolutionIntent,
+    native: SearchableEntry[],
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     const qualified = qualifiedId(query);
     const direct = nodes.filter(
       (node) => node.nodeKey === query && (!intent.requireBounds || node.bounds),
@@ -1117,6 +1214,7 @@ export class ElementResolver {
       return {
         matches: [],
         matchMode,
+        failureReason: "ambiguous",
         error: `Skeleton element id "${query}" is ambiguous: ${direct.length} id-less nodes share this view-id. Use text with index instead.`,
       };
     }
@@ -1162,10 +1260,65 @@ export class ElementResolver {
       matchMode,
       ...(packages.size > 1
         ? {
+            failureReason: "ambiguous" as const,
             error: `Ambiguous element ID ${query}: ${candidates.map((node) => node.nativeId).join(", ")}. Use a full resource ID.`,
           }
         : {}),
     };
+  }
+
+  /** Distinct synthetic keys in the capture sharing `base`, bare or suffixed. */
+  private stableViewIdFamilyKeys(captureNodes: readonly SearchableEntry[], base: string): string[] {
+    // The same element can appear in the main hierarchy and a window copy; count
+    // it once (same object, or same key at the same bounds), as ElementFinder does.
+    const seen = new Set<string>();
+    const seenSources = new Set<unknown>();
+    const keys: string[] = [];
+    for (const node of captureNodes) {
+      const key = node.nodeKey;
+      if (
+        key === undefined ||
+        !syntheticNodeKey.test(key) ||
+        !(key === base || key.startsWith(`${base}-`) || key.startsWith(`${base}~`)) ||
+        seenSources.has(node.source)
+      ) {
+        continue;
+      }
+      seenSources.add(node.source);
+      const placement = `${key}|${JSON.stringify(node.bounds ?? null)}`;
+      if (!seen.has(placement)) {
+        seen.add(placement);
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  /**
+   * Guidance for a bare `s2-<hash>` selector that cannot name one element:
+   * a legacy bare-plus-later-ordinal family, or several peers sharing the base
+   * (the producer suffixes every duplicate, so the bare id matches none of
+   * them). Counted over the whole capture, like ElementFinder (#10476).
+   */
+  private bareSyntheticIdGuard(
+    captureNodes: readonly SearchableEntry[],
+    query: string,
+  ): string | null {
+    if (!bareSyntheticNodeKey.test(query)) {
+      return null;
+    }
+    const keys = this.stableViewIdFamilyKeys(captureNodes, query);
+    const hasBare = keys.includes(query);
+    const hasFirstOrdinal = keys.includes(`${query}-1`);
+    const hasLaterOrdinal = keys.some((key) => key.startsWith(`${query}-`) && key !== `${query}-1`);
+    if (hasBare && hasLaterOrdinal && !hasFirstOrdinal) {
+      return legacyBareStableViewIdMessage(query);
+    }
+    if (keys.length > 1) {
+      const suffixed = [...new Set(keys.filter((key) => key !== query))];
+      return ambiguousStableViewIdMessage(query, query, keys.length, suffixed);
+    }
+    return null;
   }
 
   private resolveReference(

@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -68,12 +69,16 @@ import {
 import { AdbClient, AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
+  visibleTapBounds,
   DefaultElementGeometry,
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
+const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -84,8 +89,6 @@ import {
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
@@ -114,6 +117,10 @@ import {
 } from "../talkback/TalkBackTapStrategy";
 import { hasAccessibilityAction } from "../utility/elementProperties";
 import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGhostTapRetry";
+import {
+  assertAppGestureNotUnderOverlay,
+  scopeHierarchyForSelector,
+} from "../observe/hierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
@@ -152,6 +159,8 @@ type RefreshViewHierarchy = (
 ) => Promise<ViewHierarchyResult | null>;
 
 interface CapturedTapTarget {
+  observationScreenSize?: ObserveResult["screenSize"];
+  observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
   talkBackState?: boolean | null;
   element: Element;
@@ -388,7 +397,6 @@ export class TapAnyElement extends BaseVisualChange {
   private readonly lastRenderedObservation: RenderedObservationReader;
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
-  private finder: ElementFinder;
   private accessibilityService: TapAnyAccessibilityService;
   private hierarchyAccessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
@@ -431,7 +439,6 @@ export class TapAnyElement extends BaseVisualChange {
         platform: device.platform,
         iosMultiPanel: this.iosMultiPanel,
       });
-    this.finder = new DefaultElementFinder();
     this.accessibilityService =
       options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.hierarchyAccessibilityService = AndroidCtrlProxyClient.getInstance(
@@ -819,7 +826,7 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
     const options = fenceOptions.selectionOptions;
-    if (options && (options.container || options.selectionStrategy === "unique")) {
+    if (options && isStrictlyScoped(options, "any-container")) {
       const capture = identifyObservedHierarchy(
         this.device.platform,
         probe.hierarchy,
@@ -835,7 +842,7 @@ export class TapAnyElement extends BaseVisualChange {
       target = { ...target, element: refound.element, capture };
     }
     // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
-    let retryPoint = this.geometry.getElementCenter(target.element);
+    let retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
@@ -850,7 +857,7 @@ export class TapAnyElement extends BaseVisualChange {
     if (target.talkBackState) {
       Object.assign(reportedTarget, target);
     }
-    retryPoint = this.geometry.getElementCenter(target.element);
+    retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
     if (fenceOptions.dispatch) {
       this.assertSelectedCapture(target.capture);
       await fenceOptions.dispatch(retryPoint);
@@ -951,7 +958,7 @@ export class TapAnyElement extends BaseVisualChange {
     }
     return (
       this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      this.finder.hasContainerElement(viewHierarchy, container)
+      defaultContainerSelector.hasContainer(viewHierarchy, container)
     );
   }
 
@@ -960,6 +967,7 @@ export class TapAnyElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
     sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
   ): { element: Element | null; containerFound: boolean } {
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const screenSizeOptions = {
       ...sizeOptions,
@@ -974,13 +982,30 @@ export class TapAnyElement extends BaseVisualChange {
       intentAction: options.action === "longPress" ? "long-press" : "tap",
       scrollableContainer: options.scrollableContainer,
     });
-    if (
-      selection.element &&
-      isElementCenterOffScreen(selection.element.bounds, effectiveScreenSize)
-    ) {
+    if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
       return { element: null, containerFound };
     }
     return { element: selection.element, containerFound };
+  }
+
+  private resolveTapPoint(
+    target: CapturedTapTarget,
+    sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
+  ): { x: number; y: number } {
+    const screenSize = screenSizeForOffscreenCheck(target.capture.hierarchy, {
+      observationScreenSize: target.observationScreenSize,
+      display: target.observationDisplay,
+      ...sizeOptions,
+      platform: this.device.platform,
+      iosMultiPanel: this.iosMultiPanel,
+    });
+    const bounds = visibleTapBounds(target.element.bounds, screenSize);
+    if (!bounds) {
+      throw new ActionableError(
+        "Matched element has no visible tap area; scroll it into view, then retry tapAny.",
+      );
+    }
+    return this.geometry.getElementCenter({ bounds });
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
@@ -1679,13 +1704,17 @@ export class TapAnyElement extends BaseVisualChange {
         }));
       }
     }
-    const tapPoint = this.geometry.getElementCenter(element);
     const target = {
       element,
       capture: selectedCapture,
-      scoped: Boolean(options.container?.container) || options.selectionStrategy === "unique",
+      observationDisplay: observeResult.viewHierarchy,
+      observationScreenSize: observeResult.screenSize,
+      scoped: isStrictlyScoped(options),
       talkBackState,
     };
+    const tapPoint = this.resolveTapPoint(target);
+    // The element resolved in the scoped tree; the touch lands on whatever is on top (#9305).
+    assertAppGestureNotUnderOverlay(target.capture.hierarchy, options.layer, tapPoint, "tap");
     const action = options.action;
     await this.dispatchTapTarget({
       options,

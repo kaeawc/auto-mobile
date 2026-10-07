@@ -1,0 +1,5 @@
+$ adb shell am start -n com.example.missing.pkg/.MainActivity; echo exit=$?
+Starting: Intent { cmp=com.example.missing.pkg/.MainActivity }
+Error type 3
+Error: Activity class {com.example.missing.pkg/com.example.missing.pkg.MainActivity} does not exist.
+exit=1

@@ -57,7 +57,10 @@ export interface ScreenshotPathProtection {
   removeIfUnprotected(path: string, remove: () => Promise<boolean>): Promise<boolean>;
   isProtected(path: string): boolean;
   start(directory: string, options?: ScreenshotRetentionStart): void;
+  /** Best-effort; failures are logged at warn and never reject. */
   sweep(directory: string, fileSystem?: FileSystem): Promise<void>;
+  /** Best-effort; failures are logged at warn and never reject. */
+  sweepOnce(directory: string, fileSystem?: FileSystem): Promise<void>;
   write(path: string, operation: ScreenshotRetentionWrite): Promise<void>;
 }
 interface DirectoryRetention {
@@ -84,6 +87,7 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
   private readonly deadlines = new Map<string, number>();
   private readonly removals = new Map<string, Promise<boolean>>();
   private readonly directories = new Map<string, DirectoryRetention>();
+  private readonly sweptDirectories = new Set<string>();
   private readonly startedAt: number;
   private lastPrunedAt?: number;
   constructor(
@@ -155,6 +159,15 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
     } catch (error) {
       logger.warn("Failed to cleanup screenshot cache:", error);
     }
+  }
+
+  sweepOnce(directory: string, fileSystem?: FileSystem): Promise<void> {
+    const key = this.key(directory);
+    if (this.sweptDirectories.has(key)) {
+      return Promise.resolve();
+    }
+    this.sweptDirectories.add(key);
+    return this.sweep(directory, fileSystem);
   }
 
   async write(path: string, operation: ScreenshotRetentionWrite): Promise<void> {

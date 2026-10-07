@@ -2,10 +2,12 @@ import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
 } from "./sharedStorageContract";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /**
  * Read-only MCP resources for files staged into a bounded, user-visible
- * Downloads namespace (the read counterpart of {@link stageSharedStorageSchema}).
+ * Downloads namespace (the read counterpart of putAppFile with target.domain user_files).
  * The namespace-list resource enumerates normalized relative paths with bounded
  * verification metadata; the file resource returns UTF-8 text or a binary blob.
  */
@@ -18,6 +20,18 @@ export const CANONICAL_USER_FILES_RESOURCE_TEMPLATES = {
   NAMESPACE: "automobile:devices/{deviceId}/storage-domains/user_files/{namespace}",
   FILE: "automobile:devices/{deviceId}/storage-domains/user_files/{namespace}/{path}",
 } as const;
+
+export const CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES = {
+  NAMESPACE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}",
+  FILE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}/{path}",
+} as const;
+
+export function buildCanonicalMediaLibraryResourceUri(parts: SharedStorageResourceParts): string {
+  return buildCanonicalUserFilesResourceUri(parts).replace(
+    "/storage-domains/user_files/",
+    "/storage-domains/media_library/",
+  );
+}
 
 /** How completely a namespace or file could be observed on the device. */
 export type SharedStorageObservation = "complete" | "missing" | "unavailable" | "unsupported";
@@ -70,7 +84,7 @@ export interface SharedStorageFileReadResult {
 function encodePathSegments(path: string): string {
   return normalizeSharedStorageRelativePath(path)
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => encodeUriSegment(segment))
     .join("/");
 }
 
@@ -85,20 +99,20 @@ export function buildCanonicalUserFilesResourceUri(parts: SharedStorageResourceP
 function buildUserFilesUri(parts: SharedStorageResourceParts, canonical: boolean): string {
   const namespace = normalizeSharedStorageNamespace(parts.namespace);
   const base =
-    `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
-    `/${canonical ? "storage-domains/user_files" : "downloads"}/${encodeURIComponent(namespace)}`;
+    `automobile:devices/${encodeUriSegment(parts.deviceId)}` +
+    `/${canonical ? "storage-domains/user_files" : "downloads"}/${encodeUriSegment(namespace)}`;
   return parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
 }
 
 export function parseSharedStorageResourceParams(
   params: Record<string, string>,
 ): SharedStorageResourceParts {
-  const namespace = normalizeSharedStorageNamespace(decodeURIComponent(params.namespace));
+  const namespace = normalizeSharedStorageNamespace(decodeSegmentOrThrow(params.namespace));
   return {
-    deviceId: decodeURIComponent(params.deviceId),
+    deviceId: decodeSegmentOrThrow(params.deviceId),
     namespace,
     ...(params.path !== undefined
-      ? { path: normalizeSharedStorageRelativePath(decodeURIComponent(params.path)) }
+      ? { path: normalizeSharedStorageRelativePath(decodeSegmentOrThrow(params.path)) }
       : {}),
   };
 }

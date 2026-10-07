@@ -5,7 +5,8 @@ import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
 import { PlanNormalizer } from "./PlanNormalizer";
-import { migratePlan } from "./PlanMigrator";
+import { redactPlanObjectTypedText } from "../redactTypedTextArguments";
+import { migratePlan, type PlanMigrationOptions } from "./PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
@@ -40,7 +41,7 @@ export interface PlanSerializer {
    * @returns Parsed Plan object
    * @throws Error if YAML is invalid or plan structure is incorrect
    */
-  importPlanFromYaml(yamlContent: string): Plan;
+  importPlanFromYaml(yamlContent: string, options?: PlanMigrationOptions): Plan;
 }
 
 interface LoggedToolCall {
@@ -50,6 +51,9 @@ interface LoggedToolCall {
   optional?: boolean;
   result: { success: boolean; data?: any; error?: string };
 }
+
+const migrateYamlPlan = (rawPlan: unknown, options?: PlanMigrationOptions) =>
+  migratePlan(rawPlan, options);
 
 // Tools that should be omitted from plans
 const OMITTED_TOOLS = new Set([
@@ -235,10 +239,10 @@ export class YamlPlanSerializer implements PlanSerializer {
    * @returns Parsed Plan object
    * @throws Error if YAML is invalid or plan structure is incorrect
    */
-  importPlanFromYaml(yamlContent: string): Plan {
+  importPlanFromYaml(yamlContent: string, options?: PlanMigrationOptions): Plan {
     try {
       logger.info("=== Starting importPlanFromYaml ===");
-      logger.info("Parsing YAML content:", yamlContent.substring(0, 200) + "...");
+      logger.info(`Parsing YAML content (${yamlContent.length} characters)`);
 
       let rawPlan: any;
       try {
@@ -248,9 +252,9 @@ export class YamlPlanSerializer implements PlanSerializer {
         throw new Error(`YAML parsing failed: ${yamlError}`);
       }
 
-      logger.info("Raw plan loaded:", JSON.stringify(rawPlan, null, 2));
+      logger.info("Raw plan loaded:", JSON.stringify(redactPlanObjectTypedText(rawPlan), null, 2));
 
-      const { plan: migratedPlan, report } = migratePlan(rawPlan);
+      const { plan: migratedPlan, report } = migrateYamlPlan(rawPlan, options);
 
       // Handle both legacy and new field names
       const planName = migratedPlan.name;

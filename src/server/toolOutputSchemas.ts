@@ -115,6 +115,25 @@ export const sendKeysResultSchema = z
             pinnedDisplay: pinnedDisplaySchema.optional(),
             displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
+            imeFailure: z
+              .object({
+                stage: z.enum([
+                  "unsupportedCapability",
+                  "activationBinding",
+                  "commit",
+                  "verification",
+                  "transport",
+                  "restoration",
+                ]),
+                cause: z.string(),
+                expectedText: z.string(),
+                observedText: z.string().nullable(),
+                focusedFieldClass: z.string().nullable(),
+                textMayHaveBeenApplied: z.boolean(),
+                committedUnits: z.number().int().nonnegative().optional(),
+                verifiedGraphemes: z.number().int().nonnegative().optional(),
+              })
+              .optional(),
             backend: z.literal("autoMobileIme").optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),
@@ -194,7 +213,12 @@ export const elementSchema = z
     bounds: elementBoundsSchema,
     text: z.string().optional(),
     "resource-id": z.string().optional(),
-    "view-id": z.string().optional(),
+    "view-id": z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     "content-desc": z.string().optional(),
     occlusionState: z.string().optional(),
     occludedBy: z.string().optional(),
@@ -577,6 +601,14 @@ export const accessibilityStateSchema = z
         activity: z.string(),
       })
       .optional(),
+    // Present on the `accessibility` tool's state check only when a feature flag changes what
+    // the action tools assume. `enabled` stays the device's reading (#10222).
+    detectionOverride: z
+      .object({
+        mode: z.enum(["forced-on", "auto-detect-off"]),
+        effectiveEnabled: z.boolean(),
+      })
+      .optional(),
   })
   .passthrough();
 
@@ -587,6 +619,7 @@ export const accessibilityFocusResultSchema = z
     warning: z.string().optional(),
     focusedElement: elementSchema.optional(),
     confirmed: z.boolean().optional(),
+    alreadySatisfied: z.boolean().optional(),
   })
   .passthrough();
 
@@ -609,7 +642,10 @@ export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
       occludedByViewId: z.string().optional(),
       node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional(),
     })
-    .passthrough(),
+    .passthrough()
+    .describe(
+      "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+    ),
 );
 
 const hierarchyNodeField = z
@@ -1130,7 +1166,12 @@ export const deviceLockSchema = z.object({
  */
 export const skeletonElementSchema = z
   .object({
-    elementId: z.string().optional(),
+    elementId: z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     label: z.string().optional(),
     sublabel: z.string().optional(),
     testTag: z.string().optional(),
@@ -1176,7 +1217,12 @@ export const skeletonElementSchema = z
  */
 export const observeDiffSelectorSchema = z
   .object({
-    elementId: z.string().optional(),
+    elementId: z
+      .string()
+      .optional()
+      .describe(
+        "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
+      ),
     label: z.string().optional(),
     index: z
       .number()

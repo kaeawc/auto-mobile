@@ -63,7 +63,7 @@ describe("overlay MCP tool", () => {
   });
 
   async function call(input: unknown, target = device) {
-    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(target, input);
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(target, input);
     const payload = overlayOutputSchema.parse(response.structuredContent);
     expect(JSON.parse(response.content[0].text)).toEqual(payload);
     expect(response.content.every((item: { type: string }) => item.type === "text")).toBe(true);
@@ -86,7 +86,7 @@ describe("overlay MCP tool", () => {
   // Runs `act` once the selection wait has started (progress start is reported after the
   // coordinator registered its waiter), so events and aborts land during the wait.
   const duringWait = (input: unknown, act: () => void, signal?: AbortSignal) =>
-    ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+    ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       async (amount: number) => {
@@ -207,7 +207,7 @@ describe("overlay MCP tool", () => {
         client.emitOverlayEvent({ ...selected({ index: 2 }), sequence: 2 });
       }
     });
-    const result = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+    const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       waiting,
       progress,
@@ -391,7 +391,7 @@ describe("overlay MCP tool", () => {
         client.emitOverlayEvent(event(1));
       }
     });
-    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       { action: "awaitEvent", id: "panel" },
       progress,
@@ -430,7 +430,7 @@ describe("overlay MCP tool", () => {
     "%s request abort rejects with the abort reason and cleans the wait",
     async (source) => {
       const controller = new AbortController();
-      const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+      const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
       const waiting =
         source === "explicit"
           ? handler(device, { action: "awaitEvent", id: "panel" }, undefined, controller.signal)
@@ -460,6 +460,9 @@ describe("overlay MCP tool", () => {
         pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY,
         lastSequence: OVERLAY_EVENT_BUFFER_CAPACITY + 1,
         droppedCount: 1,
+        pages: {},
+        state: { title: "Hello" },
+        lastKnown: true,
       },
     ]);
     expect(client.getOverlayHistory()).toEqual(history);
@@ -468,6 +471,71 @@ describe("overlay MCP tool", () => {
       droppedCount: 1,
       pendingCount: OVERLAY_EVENT_BUFFER_CAPACITY - 1,
     });
+  });
+
+  test("status retains the latest event snapshot across consumption and updates without device requests", async () => {
+    await call({ action: "show", spec });
+    const pushed = {
+      ...event(2),
+      pages: { carousel: 1, nested: 2 },
+      state: { title: "Chosen", enabled: true, count: 3 },
+    };
+    client.emitOverlayEvent(pushed);
+    client.emitOverlayEvent(event(1));
+    pushed.pages.carousel = 99;
+    pushed.state.title = "mutated";
+    await call({ action: "awaitEvent", id: "panel" });
+    await call({ action: "update", id: "panel", state: { title: "requested" } });
+    const history = client.getOverlayHistory();
+    const snapshot = (await call({ action: "status" })).payload.overlays?.[0];
+    expect(snapshot).toMatchObject({
+      pages: { carousel: 1, nested: 2 },
+      state: { title: "Chosen", enabled: true, count: 3 },
+      lastKnown: true,
+      lastAction: "update",
+    });
+    expect(client.getOverlayHistory()).toEqual(history);
+    await call({ action: "show", spec });
+    expect((await call({ action: "status" })).payload.overlays?.[0]).not.toHaveProperty(
+      "lastKnown",
+    );
+  });
+
+  test("a failed replacement show preserves the shown overlay's last known state", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent({ ...event(1), pages: { pager: 2 } });
+    const show = spyOn(client, "requestShowOverlay").mockResolvedValue({
+      success: false,
+      error: "refused",
+    });
+    try {
+      await call({ action: "show", spec: { ...spec, id: "replacement" } });
+      expect((await call({ action: "status" })).payload.overlays?.[0]).toMatchObject({
+        id: "panel",
+        pages: { pager: 2 },
+        state: { title: "Hello" },
+        lastKnown: true,
+      });
+    } finally {
+      show.mockRestore();
+    }
+  });
+
+  test("status captures events during the show acknowledgement", async () => {
+    const show = spyOn(client, "requestShowOverlay").mockImplementation(async () => {
+      client.emitOverlayEvent({ ...event(1), pages: { pager: 2 } });
+      return { success: true };
+    });
+    try {
+      await call({ action: "show", spec });
+      expect((await call({ action: "status" })).payload.overlays?.[0]).toMatchObject({
+        pages: { pager: 2 },
+        state: { title: "Hello" },
+        lastKnown: true,
+      });
+    } finally {
+      show.mockRestore();
+    }
   });
 
   test("device-side dismissal removes status and remains deliverable", async () => {
@@ -1013,21 +1081,23 @@ describe("overlay MCP tool", () => {
   test("default off mirrors highlight; setToolEnabled enables discovery without changing highlight", async () => {
     registerHighlightTools();
     registerToolSelectionTools();
-    const overlay = ToolRegistry.getTool("overlay")!;
+    const overlay = ToolRegistry.getTool("prototype")!;
     expect(overlay.defaultEnabled).toBe(false);
     expect(ToolRegistry.getTool("highlight")!.defaultEnabled).toBe(false);
-    expect(ToolRegistry.getConfigurableToolNames()).toContain("overlay");
+    expect(ToolRegistry.getConfigurableToolNames()).toContain("prototype");
     const selection = new SessionToolSelectionService(new FakeToolSelectionRepository());
     await runWithToolSelectionContext(
       { toolSelectionProfileUuid: "profile", sessionToolSelectionService: selection },
       async () => {
-        expect(await selection.isEnabled("profile", "overlay", overlay.defaultEnabled)).toBe(false);
+        expect(await selection.isEnabled("profile", "prototype", overlay.defaultEnabled)).toBe(
+          false,
+        );
         const response = await ToolRegistry.getTool("setToolEnabled")!.handler({
-          toolName: "overlay",
+          toolName: "prototype",
           enabled: true,
         });
         expect(response.isError).not.toBe(true);
-        expect(await selection.isEnabled("profile", "overlay", false)).toBe(true);
+        expect(await selection.isEnabled("profile", "prototype", false)).toBe(true);
         expect(await selection.isEnabled("profile", "highlight", false)).toBe(false);
       },
     );
@@ -1055,20 +1125,20 @@ describe("overlay discovery over MCP", () => {
 
   test("omitted by default, enabled through setToolEnabled, then disabled", async () => {
     const names = async () => (await fixture.client.listTools()).tools.map((tool) => tool.name);
-    expect(await names()).not.toContain("overlay");
+    expect(await names()).not.toContain("prototype");
     const enabled = await fixture.client.callTool({
       name: "setToolEnabled",
-      arguments: { toolName: "overlay", enabled: true },
+      arguments: { toolName: "prototype", enabled: true },
     });
     expect(enabled.isError).not.toBe(true);
-    expect(await names()).toContain("overlay");
+    expect(await names()).toContain("prototype");
     expect(await names()).not.toContain("highlight");
     const disabled = await fixture.client.callTool({
       name: "setToolEnabled",
-      arguments: { toolName: "overlay", enabled: false },
+      arguments: { toolName: "prototype", enabled: false },
     });
     expect(disabled.isError).not.toBe(true);
-    expect(await names()).not.toContain("overlay");
+    expect(await names()).not.toContain("prototype");
   });
 });
 
@@ -1079,15 +1149,22 @@ describe("overlay CLI and advertised schema registration", () => {
     restore = preserveToolRegistry();
     ToolRegistry.clearTools();
     initializeCliTools();
-    definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "overlay")!;
+    definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "prototype")!;
     compileJsonSchema(definition.inputSchema);
     compileJsonSchema(definition.outputSchema);
   });
   afterAll(() => restore());
-  test("CLI registers overlay default-off alongside unchanged highlight", () => {
-    expect(ToolRegistry.getTool("overlay")!.defaultEnabled).toBe(false);
+  test("overlay stays a hidden deprecated alias sharing the prototype schema", () => {
+    const alias = ToolRegistry.getRegisteredTool("overlay")!;
+    expect(alias.hidden).toBe(true);
+    expect(alias.defaultEnabled).toBe(false);
+    expect(alias.schema).toBe(ToolRegistry.getRegisteredTool("prototype")!.schema);
+    expect(ToolRegistry.getToolDefinitions().map((tool) => tool.name)).not.toContain("overlay");
+  });
+  test("CLI registers prototype default-off alongside unchanged highlight", () => {
+    expect(ToolRegistry.getTool("prototype")!.defaultEnabled).toBe(false);
     expect(ToolRegistry.getTool("highlight")!.defaultEnabled).toBe(false);
-    expect(definition.name).toBe("overlay");
+    expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
   });
 });

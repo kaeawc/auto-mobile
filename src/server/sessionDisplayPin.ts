@@ -137,8 +137,11 @@ interface SessionDisplayPinInput<T = unknown> {
  */
 function pinExempt(name: string, args: Record<string, unknown>): boolean {
   return (
+    (name === "rotate" && args.display === undefined) ||
     (name === "videoRecording" && args.action === "stop") ||
-    (name === "overlay" && args.action !== "show" && args.action !== "showVariants")
+    ((name === "prototype" || name === "overlay") &&
+      args.action !== "show" &&
+      args.action !== "showVariants")
   );
 }
 

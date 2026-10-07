@@ -176,9 +176,57 @@ describe("Android CtrlProxyText", () => {
 
     const resultPromise = new CtrlProxyText(context).commitViaIme(text);
     const request = await waitForRequest(socket, "request_commit_text");
+    expect(request.timeoutMs).toBe(expected - 500);
     expect(timer.getPendingTimeouts()).toContain(expected);
     requestManager.resolve(request.requestId as string, { success: true });
     expect(await resultPromise).toMatchObject({ success: true });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each([
+    { label: "short text", text: "x", timeoutMs: undefined },
+    { label: "long multiline text", text: "line of text\n".repeat(12), timeoutMs: undefined },
+    { label: "capped host budget", text: "*x* ".repeat(100), timeoutMs: undefined },
+    { label: "explicit host budget", text: "x", timeoutMs: 1_500 },
+    { label: "positive floor", text: "x", timeoutMs: 250 },
+  ])("sends the device budget before the host deadline: $label", async ({ text, timeoutMs }) => {
+    const timer = new FakeTimer();
+    const harness = createIosDelegateHarness({ timer });
+    const resultPromise = new CtrlProxyText(harness.context).commitViaIme(
+      text,
+      undefined,
+      timeoutMs,
+    );
+    await waitForSent(harness.sentMessages, 1);
+    const request = harness.sentMessages[0]!;
+    expect(request.timeoutMs).toBe(Math.max(1, (timeoutMs ?? imeCommitTimeoutMs(text)) - 500));
+    expect(Number(request.timeoutMs)).toBeGreaterThan(0);
+    harness.context.requestManager.resolve(request.requestId as string, { success: true });
+    expect(await resultPromise).toMatchObject({ success: true });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("clearField sends an empty commit with explicit protocol delivery", async () => {
+    const timer = new FakeTimer();
+    const harness = createIosDelegateHarness({ timer });
+    const result = new CtrlProxyText(harness.context).commitViaIme(
+      "",
+      undefined,
+      10_000,
+      undefined,
+      undefined,
+      "clearField",
+    );
+    await waitForSent(harness.sentMessages, 1);
+    expect(harness.sentMessages[0]).toMatchObject({
+      type: "request_commit_text",
+      text: "",
+      delivery: "clearField",
+      timeoutMs: 9_500,
+    });
+    harness.resolveLast({ success: true });
+    expect(await result).toMatchObject({ success: true });
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -205,6 +253,7 @@ describe("Android CtrlProxyText", () => {
       success: false,
       partialApplication: true,
       sessionUnsafe: true,
+      transportFailure: true,
       error: expect.stringContaining("cancellation was not acknowledged"),
     });
   });
@@ -236,7 +285,11 @@ describe("Android CtrlProxyText", () => {
       targetRequestId: commit.requestId,
       partialApplication: true,
     });
-    expect(await resultPromise).toMatchObject({ success: false, partialApplication: true });
+    expect(await resultPromise).toMatchObject({
+      success: false,
+      partialApplication: true,
+      transportFailure: true,
+    });
     expect((await resultPromise).sessionUnsafe).toBeUndefined();
   });
 

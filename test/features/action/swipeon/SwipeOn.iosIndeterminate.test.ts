@@ -3,7 +3,7 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -28,7 +28,7 @@ function harness() {
   const voiceOverExecutor = new FakeTalkBackSwipeExecutor();
   const action = new SwipeOn({ name: "iOS fake", deviceId: "ios-9972", platform: "ios" }, null, {
     observeScreen,
-    finder: new FakeElementFinder(),
+    finder: new FakeScrollableElementsQuery(),
     timer,
     voiceOverExecutor,
     accessibilityDetector: new FakeAccessibilityDetector(),
@@ -79,5 +79,19 @@ describe("iOS screen swipe with an unconfirmed outcome (#9972)", () => {
 
     expect(result.success).toBe(true);
     expect(invalidations).toEqual(["ios"]);
+  });
+
+  test("opts into observing a partially applied failure (boomerang return leg)", async () => {
+    const { action } = harness();
+    const seen: Array<boolean | undefined> = [];
+    const run = action.observedInteraction;
+    action.observedInteraction = async (block, options) => {
+      seen.push(options.observePartialApplication);
+      return run(block, options);
+    };
+
+    await action.execute({ direction: "up", autoTarget: false });
+
+    expect(seen).toEqual([true]);
   });
 });

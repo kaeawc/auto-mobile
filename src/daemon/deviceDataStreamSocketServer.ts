@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { errorMessage } from "../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../utils/logger";
@@ -2037,42 +2038,31 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 }
 
 // Singleton instance
-let socketServer: DeviceDataStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<DeviceDataStreamSocketServer>();
 
 /** @internal Install an unstarted fake-backed server for unit tests; no socket is opened. */
 export function installDeviceDataStreamSocketServerForTesting(
   server: DeviceDataStreamSocketServer | null,
 ): void {
-  socketServer = server;
+  socketServer.instance = server;
 }
 
 export function getDeviceDataStreamServer(): DeviceDataStreamSocketServer | null {
-  return socketServer;
+  return socketServer.instance;
 }
 
 export function getDeviceDataStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG);
 }
 
 export async function startDeviceDataStreamSocketServer(
   timer: Timer = defaultTimer,
 ): Promise<DeviceDataStreamSocketServer> {
-  if (!socketServer) {
-    socketServer = new DeviceDataStreamSocketServer(
-      getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG),
-      timer,
-    );
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
-  return socketServer;
+  return await socketServer.start(
+    () => new DeviceDataStreamSocketServer(getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer),
+  );
 }
 
 export async function stopDeviceDataStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

@@ -15,6 +15,7 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteB
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
+import type { ForwardLeaseReclaimResult } from "../../../src/features/observe/android/CtrlProxyForwardLease";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { serverConfig } from "../../../src/utils/ServerConfig";
@@ -59,6 +60,7 @@ import type { ExecResult } from "../../../src/models";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -109,6 +111,20 @@ describe("AndroidCtrlProxyClient", function () {
 
     public getLastOwnerPid(): number | undefined {
       return this.canAcquire ? undefined : this.ownerPid;
+    }
+
+    public reclaimAttempts = 0;
+    public reclaimResult: ForwardLeaseReclaimResult | undefined;
+
+    public get tryReclaimFromStaleOwner(): (() => Promise<ForwardLeaseReclaimResult>) | undefined {
+      const result = this.reclaimResult;
+      if (!result) {
+        return undefined;
+      }
+      return async () => {
+        this.reclaimAttempts++;
+        return result;
+      };
     }
   }
 
@@ -522,7 +538,7 @@ describe("AndroidCtrlProxyClient", function () {
       }),
     );
 
-    return { navHarness, navManager, resultPromise, testClient, testTimer };
+    return { navHarness, navManager, resultPromise, socket, testClient, testTimer };
   };
 
   interface ScreenshotUpdateMessage {
@@ -1500,6 +1516,51 @@ describe("AndroidCtrlProxyClient", function () {
     });
   }
 
+  test("logs exactly once when an own-device forward has extra columns", async function () {
+    const row = `${testDevice.deviceId} tcp:52001 tcp:8765 unexpected`;
+    stubForwardLifecycleCommands(() => `${row}\nother-device tcp:52002 tcp:8765 unexpected\n`);
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      await accessibilityServiceClient.sweepOrphanedCtrlProxyPortForwards();
+
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug).toHaveBeenCalledWith(
+        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52001");
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  for (const site of ["removal check", "active check"] as const) {
+    test(`logs an extra-column row during the ${site}`, async function () {
+      if (site === "active check") {
+        await accessibilityServiceClient.setupPortForwarding();
+      }
+      const row = `${testDevice.deviceId} tcp:8765 tcp:8765 unexpected`;
+      let listings = 0;
+      const targetListing = site === "active check" ? 1 : 2;
+      stubForwardLifecycleCommands(() => (++listings === targetListing ? `${row}\n` : ""));
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        await accessibilityServiceClient.setupPortForwarding();
+
+        const skippedRows = debug.mock.calls.filter(([message]) =>
+          message.includes("Skipping adb forward row with extra columns"),
+        );
+        expect(skippedRows).toEqual([
+          [
+            `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+          ],
+        ]);
+        expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8765");
+      } finally {
+        debug.mockRestore();
+      }
+    });
+  }
+
   test("sweeps a CtrlProxy forward orphaned by a simulated daemon SIGKILL", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
@@ -1731,6 +1792,78 @@ describe("AndroidCtrlProxyClient", function () {
       await expect(client.setupPortForwarding()).rejects.toThrow(
         /Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding.*stale\/orphaned AutoMobile daemon.*--daemon restart.*kill 71579/s,
       );
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("names the owner's socket and live session when it refuses a takeover (#10497)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    const lease = new FakeCtrlProxyForwardLease(false, 15836);
+    lease.reclaimResult = {
+      acquired: false,
+      ownerPid: 15836,
+      ownerSocketPath: "/tmp/ovl-priv/daemon.sock",
+      reason: `it has live session session-abc on ${testDevice.deviceId}`,
+    };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      const caught = await client.setupPortForwarding().catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+      expect((caught as Error).message).toMatch(
+        /PID 15836, socket \/tmp\/ovl-priv\/daemon\.sock\).*live session session-abc/,
+      );
+      expect(lease.reclaimAttempts).toBe(1);
+      expect((caught as CtrlProxyForwardingLeaseConflictError).transient).toBe(false);
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52004");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("proceeds with forwarding after taking the lease over from an idle owner (#10497)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => "");
+    const lease = new FakeCtrlProxyForwardLease(false, 15836);
+    lease.reclaimResult = { acquired: true, ownerPid: 15836, reason: "idle" };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      const caught = await client.setupPortForwarding().catch((error: unknown) => error);
+      expect(caught).not.toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+      expect(lease.reclaimAttempts).toBe(1);
     } finally {
       await client.close();
     }
@@ -3099,6 +3232,92 @@ describe("AndroidCtrlProxyClient", function () {
 
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {
+        await testClient.close();
+      }
+    });
+
+    test("a navigation event is handed to the graph stamped with this client's device (#10195)", async function () {
+      const record = spyOn(navHarness.manager, "recordNavigationEvent");
+      const { resultPromise, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(record).toHaveBeenCalledTimes(1);
+        expect(record.mock.calls[0][0]).toMatchObject({
+          destination: "SdkHome",
+          applicationId: "com.example.sdk",
+          deviceId: testDevice.deviceId,
+        });
+      } finally {
+        record.mockRestore();
+        await testClient.close();
+      }
+    });
+
+    test("an SDK app's hierarchy update after another app was in front restores its screen (#10193)", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        await navManager.recordHierarchyNavigation({
+          packageName: "com.example.launcher",
+          fromFingerprint: null,
+          toFingerprint: "launcher-hash",
+          timestamp: testTimer.now(),
+        });
+        expect(navManager.getCurrentAppId()).toBe("com.example.launcher");
+        expect(navManager.getCurrentScreen()).toBeNull();
+
+        // Warm return: the SDK sends no navigation event, only a hierarchy update.
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(navManager.getCurrentAppId()).toBe("com.example.sdk");
+        expect(navManager.getCurrentScreen()).toBe("SdkHome");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("the foreground signal for an SDK app names this client's device, so another device's tick cannot switch the shared manager", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+      const foreground = spyOn(navManager, "recordAppForeground");
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(foreground).toHaveBeenCalledWith("com.example.sdk", testDevice.deviceId);
+      } finally {
+        foreground.mockRestore();
         await testClient.close();
       }
     });
@@ -5645,6 +5864,37 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function () {
+    test("readiness forwards cancellation to the hierarchy request without retrying", async () => {
+      const caller = new AbortController();
+      const reason = new Error("readiness deadline exceeded");
+      let received: AbortSignal | undefined;
+      const gate = Promise.withResolvers<null>();
+      const request = spyOn(accessibilityServiceClient, "requestHierarchySync").mockImplementation(
+        async (_perf, _filter, signal) => {
+          received = signal;
+          await gate.promise;
+          signal?.throwIfAborted();
+          return null;
+        },
+      );
+      const pending = runWithAbortSignal(caller.signal, () =>
+        accessibilityServiceClient.verifyServiceReady(1, 0),
+      );
+      const failure = pending.catch((error: unknown) => error);
+      try {
+        await flushMicrotasks();
+        expect(received).toBe(caller.signal);
+        caller.abort(reason);
+        gate.resolve(null);
+        expect(await failure).toBe(reason);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        gate.resolve(null);
+        await failure;
+        request.mockRestore();
+      }
+    });
     // Follow-up to #3062. That surfaced the runner's structured error text to verifyServiceReady
     // via diagnostics, but the method still retried to exhaustion even when every attempt failed
     // with the SAME deterministic runner handler error. #3097 short-circuits the retry loop once

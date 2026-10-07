@@ -1,8 +1,11 @@
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   runWithPostActionCaptureScope,
   postActionCaptures,
 } from "../utils/PostActionCaptureContext";
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
+import { runWithToolDispatchReporter } from "../utils/ToolDispatchContext";
+import type { NavigationToolCallHandle } from "../utils/interfaces/NavigationGraph";
 import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import {
@@ -37,15 +40,22 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { logger, type Logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "./formTools";
-import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
+import {
+  type AppCleanupConfig,
+  type AppCleanupStep,
+  AppCleanupService,
+  DefaultAppCleanupService,
+} from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
-import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import type { Environment } from "../daemon/poolConfig";
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -94,7 +104,8 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
 import { deviceLostErrorFromAbortSignal } from "../models/DeviceLostError";
-import { getAbortSignal, isClientCancelled } from "../utils/AbortContext";
+import { getAbortSignal, isClientCancelled, runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 import {
@@ -451,7 +462,7 @@ interface NavigationToolCallRecorder {
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined;
+  ): NavigationToolCallHandle | undefined;
 }
 
 /** Removes routing and execution implementation details before persisting a navigation edge. */
@@ -614,6 +625,8 @@ export interface PlanLifecycleInput {
   device: BootedDevice | undefined;
   sessionUuid: string | undefined;
   shouldResolveDevice: boolean;
+  /** An enclosing plan owns cleanup and release for this invocation. */
+  nestedInPlan?: boolean;
   // Injected teardown for the server-side per-transport SessionToolBinding
   // (issue #4611 Gap D). Invoked AFTER a real release for every session freed —
   // base and derived label sessions alike — never optimistically.
@@ -627,6 +640,7 @@ interface PlanLifecycleManager {
 }
 
 interface ToolRegistryPipelineOverrides {
+  env?: Environment;
   executionTargetResolver?: ExecutionTargetResolver;
   displayInventory?: DisplayInventoryProvider;
   auditRunner?: AuditRunner;
@@ -681,6 +695,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveNormalExecutionTarget(
     input: ExecutionTargetInput,
   ): Promise<ExecutionTargetContext> {
+    const autolockEnabled = captureAutolockPolicy();
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
@@ -759,6 +774,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId,
         mcpSessionId,
         execution,
+        autolockEnabled,
       );
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
@@ -786,14 +802,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms,
       );
-      await this.enforceSessionUuidForAutolock(
+      await this.enforceSessionUuidForAutolock({
         platform,
         sessionUuid,
         providedDeviceId,
         deviceSessionManager,
         signal,
         getConnectedPlatforms,
-      );
+        autolockEnabled,
+      });
     }
 
     logger.info(
@@ -927,6 +944,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+          sessionId: sessionUuid,
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
           readiness:
             typeof options.deviceReadiness === "function"
@@ -945,8 +963,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     // Enforce autolock: a locked device may only be driven by the session that locked it.
-    if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
+    if (device && autolockEnabled && DaemonState.getInstance().isInitialized()) {
+      DaemonState.getInstance()
+        .getDevicePool()
+        .assertAutolockAccess(device.deviceId, sessionUuid, autolockEnabled);
     }
 
     // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
@@ -1054,12 +1074,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
     mcpSessionId: string | undefined,
-    execution?: import("../daemon/sessionManager").SessionExecutionMetadata,
+    execution: import("../daemon/sessionManager").SessionExecutionMetadata | undefined,
+    autolockEnabled: boolean,
   ): string | undefined {
     if (sessionUuid) {
       return undefined;
     }
-    if (!isDevicePoolAutolockEnabled() || !DaemonState.getInstance().isInitialized()) {
+    if (!autolockEnabled || !DaemonState.getInstance().isInitialized()) {
       return undefined;
     }
 
@@ -1084,15 +1105,24 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
   }
 
-  private async enforceSessionUuidForAutolock(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    deviceSessionManager: DeviceSessionManager,
-    signal: AbortSignal | undefined,
-    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
-  ): Promise<void> {
-    if (!isDevicePoolAutolockEnabled()) {
+  private async enforceSessionUuidForAutolock({
+    platform,
+    sessionUuid,
+    providedDeviceId,
+    deviceSessionManager,
+    signal,
+    getConnectedPlatforms,
+    autolockEnabled,
+  }: {
+    platform: SomePlatform;
+    sessionUuid: string | undefined;
+    providedDeviceId: string | undefined;
+    deviceSessionManager: DeviceSessionManager;
+    signal: AbortSignal | undefined;
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
+    autolockEnabled: boolean;
+  }): Promise<void> {
+    if (!autolockEnabled) {
       return;
     }
     if (sessionUuid || providedDeviceId) {
@@ -1169,7 +1199,11 @@ export class DefaultAuditRunner implements AuditRunner {
   private async getForegroundPackageName(device: BootedDevice): Promise<string | null> {
     try {
       const adb = defaultAdbClientFactory.create(device);
-      const { stdout } = await adb.executeCommand("shell dumpsys window | grep mCurrentFocus");
+      const { stdout } = await adb.executeCommand(
+        "shell dumpsys window | grep mCurrentFocus",
+        undefined,
+        DUMPSYS_MAX_BUFFER,
+      );
 
       const match = stdout.match(/\s+(\S+)\/\S+\}/);
       return match ? match[1] : null;
@@ -1193,13 +1227,50 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "sendKeys",
 ]);
 
+/**
+ * Tools that always end an app's process. `appLifecycle` `killBackgrounded` is deliberately not
+ * here: it is the state-preserving kill, so the app comes back on the screen it was left on.
+ */
+const APP_STOPPING_TOOLS: ReadonlySet<string> = new Set([
+  "terminateApp",
+  "crashApp",
+  "uninstallApp",
+]);
+
+/**
+ * Tools that replace a process without naming the app in their arguments: `installApp` takes an
+ * artifact path, and installing over a running app restarts it, so every remembered screen is
+ * forgotten rather than guessing which app it was (#10206 review).
+ */
+const PROCESS_REPLACING_TOOLS: ReadonlySet<string> = new Set(["installApp"]);
+
+/**
+ * The app a tool call is about to stop or reset, so the navigation graph forgets the screen it
+ * was on (#10193): a fresh process must not get an edge from a stale screen. `launchApp` only
+ * counts when it asks for a cold boot or cleared data.
+ */
+function appStoppedByToolCall(name: string, args: any): string | undefined {
+  const stops =
+    APP_STOPPING_TOOLS.has(name) ||
+    (name === "launchApp" && (args?.coldBoot === true || args?.clearAppData === true));
+  const appId = args?.appId ?? args?.packageName;
+  return stops && typeof appId === "string" && appId.length > 0 ? appId : undefined;
+}
+
 class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   record(
     name: string,
     args: any,
     device: BootedDevice | undefined,
     sessionUuid: string | undefined,
-  ): (() => void) | undefined {
+  ): NavigationToolCallHandle | undefined {
+    const stoppedApp = appStoppedByToolCall(name, args);
+    if (stoppedApp) {
+      this.navigationManager(sessionUuid).forgetAppScreen(stoppedApp);
+    }
+    if (PROCESS_REPLACING_TOOLS.has(name)) {
+      this.navigationManager(sessionUuid).forgetAllAppScreens();
+    }
     // Record tool call for navigation graph correlation before the handler mutates UI state.
     if (!NAVIGATION_RELEVANT_TOOLS.has(name)) {
       return;
@@ -1209,10 +1280,18 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
       ? RealObserveScreen.getRecentCachedResultForDevice(device.deviceId)
       : RealObserveScreen.getRecentCachedResult();
     const uiState = new UIStateExtractor().extractFromObservation(cachedResult);
-    const navManager = sessionUuid
+    return this.navigationManager(sessionUuid).recordToolCall(
+      name,
+      stripNavigationInternalParams(args),
+      uiState,
+      device?.deviceId,
+    );
+  }
+
+  private navigationManager(sessionUuid: string | undefined): NavigationGraphManager {
+    return sessionUuid
       ? NavigationGraphManager.getInstanceForSession(sessionUuid)
       : NavigationGraphManager.getInstance();
-    return navManager.recordToolCall(name, stripNavigationInternalParams(args), uiState);
   }
 }
 
@@ -1405,6 +1484,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       args,
       sessionUuid,
       baselineStore,
+      actionsCompactMetadata: getToolSelectionContext()?.actionsCompactMetadata,
       internal: internalCall,
       artifactWriter,
       artifactMode,
@@ -1436,6 +1516,37 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       finalizedResponse,
     };
   }
+}
+
+/**
+ * Upper bound on one executePlan's whole app cleanup, which runs under a private
+ * signal because the request signal may already have aborted. Sized above a normal
+ * terminate / `pm clear` and far below ClearAppData's own 60s action bound.
+ */
+export const PLAN_APP_CLEANUP_CAP_MS = 20_000;
+
+/**
+ * Deadline for one background app-cleanup retry (device-health recovery). The retry is a
+ * full cleanup, so it gets the cleanup's own cap plus a margin: the cap's clean failure
+ * must win the race, and a slow-but-successful retry must be able to clear the marker.
+ */
+export const PLAN_APP_CLEANUP_RETRY_DEADLINE_MS = PLAN_APP_CLEANUP_CAP_MS + 1_000;
+
+/** One device whose app cleanup did not complete; `step` is absent when the service rejected. */
+export interface PlanCleanupFailure {
+  deviceId: string;
+  step?: AppCleanupStep;
+  reason: string;
+}
+
+/** What an executePlan app cleanup visibly did not do (the service logs its own soft failures). */
+export interface PlanCleanupOutcome {
+  /** Devices whose cleanup reported `failed` or rejected. */
+  failures: PlanCleanupFailure[];
+  /** Devices still running when {@link PLAN_APP_CLEANUP_CAP_MS} cut the cleanup short. */
+  unfinishedDeviceIds: string[];
+  /** The cleanup hit {@link PLAN_APP_CLEANUP_CAP_MS} and was cut short. */
+  capExceeded: boolean;
 }
 
 // Exported for focused unit coverage (issue #3208). Production wires this via
@@ -1505,7 +1616,132 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
     );
   }
 
+  constructor(private readonly timer: Timer = defaultTimer) {}
+
+  /**
+   * Cleans independent devices concurrently and drains them all before any session is
+   * released. The request signal is often already aborted here (request deadline,
+   * client cancel, a sibling device lost), so every adb call under it would fail at
+   * once and leave the app running on a device about to return to the pool. Cleanup
+   * therefore runs under its own signal, bounded by {@link PLAN_APP_CLEANUP_CAP_MS} so
+   * a dead device cannot hang the release; reaching the cap aborts that private signal,
+   * which fails the remaining adb calls. Every failure is logged at warn and returned
+   * as a {@link PlanCleanupOutcome} so the caller can say what the cleanup did not do.
+   */
+  private async cleanupDevicesShielded(
+    devices: BootedDevice[],
+    cleanupService: AppCleanupService,
+    config: AppCleanupConfig,
+  ): Promise<PlanCleanupOutcome> {
+    const shield = new AbortController();
+    const failures: PlanCleanupFailure[] = [];
+    const finished = new Set<string>();
+    const cleanOne = async (cleanupDevice: BootedDevice): Promise<void> => {
+      const { deviceId } = cleanupDevice;
+      try {
+        const result = await cleanupService.cleanup(cleanupDevice, config);
+        if (result.status === "failed") {
+          failures.push({ deviceId, step: result.step, reason: result.reason });
+        }
+      } catch (error) {
+        failures.push({ deviceId, reason: errorMessage(error) });
+        logger.warn(`[PlanLifecycle] App cleanup failed for device ${deviceId}`, error);
+      }
+      finished.add(deviceId);
+    };
+    try {
+      await runWithAbortSignal(shield.signal, () =>
+        raceWithDeadline(() => Promise.allSettled(devices.map(cleanOne)), {
+          timer: this.timer,
+          timeoutMs: PLAN_APP_CLEANUP_CAP_MS,
+          label: "Plan app cleanup",
+          onTimeout: () => shield.abort(new ActionableError("Plan app cleanup exceeded its cap")),
+        }),
+      );
+      return { failures, unfinishedDeviceIds: [], capExceeded: false };
+    } catch (error) {
+      logger.warn(
+        `[PlanLifecycle] App cleanup did not finish for ${devices.map((d) => d.deviceId).join(", ")}; releasing anyway`,
+        error,
+      );
+      const unfinishedDeviceIds = devices
+        .map((d) => d.deviceId)
+        .filter((deviceId) => !finished.has(deviceId));
+      return { failures, unfinishedDeviceIds, capExceeded: true };
+    }
+  }
+
+  /**
+   * The plan's response was finalized (envelope, spill, structuredContent) and the plan's
+   * outcome decided before this runs, so an incomplete cleanup cannot be added to it. State
+   * that once, at warn, so the daemon log shows that the reported outcome does not cover it.
+   */
+  private reportIncompleteCleanup(
+    outcome: PlanCleanupOutcome,
+    appId: string,
+    sessionUuid: string | undefined,
+  ): void {
+    if (outcome.failures.length === 0 && !outcome.capExceeded) {
+      return;
+    }
+    const failed = outcome.failures.map(
+      ({ deviceId, step, reason }) => `${deviceId} (${step ?? "cleanup"}: ${reason})`,
+    );
+    const problems = [
+      failed.length > 0 ? `failed on ${failed.join(", ")}` : "",
+      outcome.unfinishedDeviceIds.length > 0
+        ? `unfinished on ${outcome.unfinishedDeviceIds.join(", ")}`
+        : "",
+      outcome.capExceeded ? `did not finish within ${PLAN_APP_CLEANUP_CAP_MS}ms` : "",
+    ].filter(Boolean);
+    logger.warn(
+      `[PlanLifecycle] executePlan app cleanup for ${appId} was incomplete (${problems.join("; ")}); ` +
+        `the plan result was already finalized and does not report this (session ${sessionUuid ?? "none"})`,
+    );
+  }
+
+  /**
+   * A device whose cleanup did not complete must not return to the pool looking clean. Mark
+   * it with the pool's existing device-health marker (it cannot be allocated while marked)
+   * and let the session manager's bounded health recovery retry the cleanup once the device
+   * is idle. The retry gets its own capped signal because recovery runs detached from this
+   * call but inherits its ambient (often aborted) request signal.
+   */
+  private markIncompleteCleanupDevices(
+    outcome: PlanCleanupOutcome,
+    devices: BootedDevice[],
+    cleanupService: AppCleanupService,
+    config: AppCleanupConfig,
+  ): void {
+    const dirty = new Set([
+      ...outcome.failures.map((failure) => failure.deviceId),
+      ...outcome.unfinishedDeviceIds,
+    ]);
+    if (dirty.size === 0 || !DaemonState.getInstance().isInitialized()) {
+      return;
+    }
+    const sessionManager = DaemonState.getInstance().getSessionManager();
+    for (const cleanupDevice of devices.filter((d) => dirty.has(d.deviceId))) {
+      sessionManager.markDeviceNeedsAppCleanup(
+        cleanupDevice.deviceId,
+        async () => {
+          const retry = await this.cleanupDevicesShielded([cleanupDevice], cleanupService, config);
+          if (retry.failures.length > 0 || retry.capExceeded) {
+            throw new ActionableError(
+              `App cleanup retry for ${config.appId} did not complete on ${cleanupDevice.deviceId}`,
+            );
+          }
+        },
+        PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
+      );
+    }
+  }
+
   async afterExecution(input: PlanLifecycleInput): Promise<void> {
+    if (input.name === "executePlan" && input.nestedInPlan) {
+      // The enclosing plan is still using these sessions and devices.
+      return;
+    }
     const {
       name,
       args,
@@ -1518,24 +1754,14 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
       sessionToolSelectionService,
     } = input;
     if (device && name === "executePlan" && args?.cleanupAppId) {
+      // Resolved under the request signal: a device-loss abort names the lost device
+      // to skip. A deadline or client cancel aborts it too but names no device, so
+      // those plans still clean every device they own (#10022).
       const devices = this.getCleanupDevices(device, baseSessionUuid ?? sessionUuid);
-      // Independent devices clean concurrently using the service's existing
-      // action/command bounds. Drain all cleanups before releasing any session.
-      await Promise.allSettled(
-        devices.map(async (cleanupDevice) => {
-          try {
-            await cleanupService.cleanup(cleanupDevice, {
-              appId: args.cleanupAppId,
-              clearAppData: args.cleanupClearAppData,
-            });
-          } catch (error) {
-            logger.warn(
-              `[PlanLifecycle] App cleanup failed for device ${cleanupDevice.deviceId}`,
-              error,
-            );
-          }
-        }),
-      );
+      const cleanupConfig = { appId: args.cleanupAppId, clearAppData: args.cleanupClearAppData };
+      const outcome = await this.cleanupDevicesShielded(devices, cleanupService, cleanupConfig);
+      this.reportIncompleteCleanup(outcome, args.cleanupAppId, baseSessionUuid ?? sessionUuid);
+      this.markIncompleteCleanupDevices(outcome, devices, cleanupService, cleanupConfig);
     }
 
     if (
@@ -1612,6 +1838,7 @@ function deviceAwareHandlerArgs(
   args: Record<string, unknown>,
   options: DeviceAwareToolOptions,
   context: ReturnType<typeof getToolSelectionContext>,
+  name: string,
 ): Record<string, unknown> {
   const routingSession =
     options.sessionlessDeviceRead &&
@@ -1620,7 +1847,11 @@ function deviceAwareHandlerArgs(
     !args.sessionUuid
       ? undefined
       : context?.routingSessionUuid;
-  return withAmbientDeviceContext(args, routingSession, context?.execution);
+  const handlerArgs = withAmbientDeviceContext(args, routingSession, context?.execution);
+  if (name === "tapAt") {
+    handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
+  }
+  return handlerArgs;
 }
 
 /**
@@ -1718,6 +1949,14 @@ function sessionDisplayPinnedHandler(input: {
     });
 }
 
+/** Run a tool so the action it executes can report its dispatch to the recorded call. */
+function runReportingDispatch<T>(
+  call: NavigationToolCallHandle | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  return runWithToolDispatchReporter(call?.markDispatched, run);
+}
+
 async function invokeResolvedDeviceHandler(input: {
   options: DeviceAwareToolOptions;
   selectionContext: ReturnType<typeof getToolSelectionContext>;
@@ -1746,14 +1985,18 @@ async function invokeResolvedDeviceHandler(input: {
     if (signal?.aborted) {
       withdraw?.();
     }
-    const response = await input.auditRunner.run({
-      name,
-      args,
-      device: target.device,
-      handler,
-      progress,
-      signal,
-    });
+    // The action reports when its gesture goes out, so a tool that waited for its target
+    // is attributed from the dispatch, not from the start (#10196).
+    const response = await runReportingDispatch(withdraw, () =>
+      input.auditRunner.run({
+        name,
+        args,
+        device: target.device,
+        handler,
+        progress,
+        signal,
+      }),
+    );
     succeeded = !isToolResponseFailure(response);
     return response;
   } finally {
@@ -1789,6 +2032,7 @@ export class ToolRegistryClass {
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
   private readonly logger: Logger;
+  private env?: Environment;
   private executionTargetResolver: ExecutionTargetResolver;
   private auditRunner: AuditRunner;
   private navigationToolCallRecorder: NavigationToolCallRecorder;
@@ -1806,7 +2050,7 @@ export class ToolRegistryClass {
     this.auditRunner = new DefaultAuditRunner(loggerInstance);
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
     this.afterToolCall = new DefaultAfterToolCallHandler();
-    this.planLifecycleManager = new DefaultPlanLifecycleManager();
+    this.planLifecycleManager = new DefaultPlanLifecycleManager(timer);
   }
 
   setToolCallRepositoryForTesting(repository: Pick<ToolCallRepository, "recordToolCall">): void {
@@ -1925,7 +2169,7 @@ export class ToolRegistryClass {
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
-      const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext);
+      const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext, name);
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;
@@ -2020,13 +2264,11 @@ export class ToolRegistryClass {
               throw toActionableError(error, `Failed to execute tool ${name}${deviceContext}`);
             } finally {
               await this.planLifecycleManager.afterExecution({
+                ...resolvedTarget,
                 name,
                 args: handlerArgs,
-                baseSessionUuid: resolvedTarget.baseSessionUuid,
+                nestedInPlan: selectionContext?.planRequest !== undefined,
                 cleanupService: this.cleanupService,
-                device: resolvedTarget.device,
-                sessionUuid: resolvedTarget.sessionUuid,
-                shouldResolveDevice: resolvedTarget.shouldResolveDevice,
                 sessionBindingReleaseHandler: this.sessionBindingReleaseNotifier,
                 sessionToolSelectionService: getToolSelectionContext()?.sessionToolSelectionService,
               });
@@ -2053,7 +2295,7 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler: wrappedHandler,
+      handler: this.withAutolockPolicy(wrappedHandler),
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
@@ -2064,6 +2306,7 @@ export class ToolRegistryClass {
       embeddedSdkOnly: options.embeddedSdkOnly ?? false,
       planExecutable: options.planExecutable ?? false,
       planOnly: options.planOnly ?? false,
+      hidden: options.hidden ?? false,
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
@@ -2162,6 +2405,11 @@ export class ToolRegistryClass {
         false,
       ),
     );
+  }
+
+  private withAutolockPolicy(handler: ToolHandler): ToolHandler {
+    return (args, progress, signal) =>
+      runWithAutolockPolicy(this.env, () => handler(args, progress, signal));
   }
 
   private createInternalToolInvocationContext(
@@ -2561,12 +2809,14 @@ export class ToolRegistryClass {
   // on private field names. Production uses the defaults wired in the constructor.
   setPipelineOverridesForTesting(overrides: ToolRegistryPipelineOverrides): () => void {
     const previous = {
+      env: this.env,
       executionTargetResolver: this.executionTargetResolver,
       auditRunner: this.auditRunner,
       afterToolCall: this.afterToolCall,
       planLifecycleManager: this.planLifecycleManager,
     };
 
+    this.env = overrides.env ?? this.env;
     if (overrides.executionTargetResolver) {
       this.executionTargetResolver = overrides.executionTargetResolver;
     } else if (overrides.displayInventory) {
@@ -2586,6 +2836,7 @@ export class ToolRegistryClass {
     }
 
     return () => {
+      this.env = previous.env;
       this.executionTargetResolver = previous.executionTargetResolver;
       this.auditRunner = previous.auditRunner;
       this.afterToolCall = previous.afterToolCall;

@@ -5,6 +5,7 @@
  * getting current focus, traversal order, and setting/clearing focus.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -13,6 +14,14 @@ import type { CurrentFocusResult, TraversalOrderResult, Element } from "../../..
 import type { DelegateContext, AccessibilityNode, A11yActionResult } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { DefaultElementParser } from "../../utility/ElementParser";
+
+/**
+ * Outcome of a successful set/clear focus request. `alreadySatisfied` is true when the node was
+ * already in the requested state, so the runner sent no action (#10148).
+ */
+export interface FocusActionOutcome {
+  alreadySatisfied: boolean;
+}
 
 /**
  * Delegate class for handling TalkBack focus and traversal operations.
@@ -34,13 +43,14 @@ export class CtrlProxyFocus {
    * @param resourceId - Resource ID of the element whose focus should be cleared
    * @param timeoutMs - Maximum time to wait for the action result in milliseconds
    * @param perf - Performance tracker for timing
+   * @returns `alreadySatisfied: true` when the node was not focused, so nothing was sent
    * @throws Error if resourceId is empty, the node is not found, or the action fails
    */
   async clearAccessibilityFocus(
     resourceId: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     if (!resourceId) {
       throw new Error("clearAccessibilityFocus requires a resource-id");
     }
@@ -48,6 +58,7 @@ export class CtrlProxyFocus {
     if (!result.success) {
       throw new Error(result.error ?? `Failed to clear accessibility focus on ${resourceId}`);
     }
+    return { alreadySatisfied: result.alreadySatisfied === true };
   }
 
   /**
@@ -60,13 +71,14 @@ export class CtrlProxyFocus {
    * @param resourceId - Resource ID of the element to focus
    * @param timeoutMs - Maximum time to wait for the action result in milliseconds
    * @param perf - Performance tracker for timing
+   * @returns `alreadySatisfied: true` when the node already held focus, so nothing was sent
    * @throws Error if resourceId is empty, the node is not found, or the action fails
    */
   async setAccessibilityFocus(
     resourceId: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     if (!resourceId) {
       throw new Error("setAccessibilityFocus requires a resource-id");
     }
@@ -74,6 +86,7 @@ export class CtrlProxyFocus {
     if (!result.success) {
       throw new Error(result.error ?? `Failed to set accessibility focus on ${resourceId}`);
     }
+    return { alreadySatisfied: result.alreadySatisfied === true };
   }
 
   /**
@@ -144,6 +157,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action '${action}' request failed after ${duration}ms: ${error}`);
       return {
@@ -219,6 +234,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Current focus request failed after ${duration}ms: ${error}`);
       return {
@@ -301,6 +318,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Traversal order request failed after ${duration}ms: ${error}`);
       return {

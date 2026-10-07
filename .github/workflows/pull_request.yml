@@ -894,7 +894,7 @@ jobs:
         shell: bash
         background: true
         id: install-fast-validation-deps
-        timeout-minutes: 13
+        timeout-minutes: 15
         run: scripts/ci/install-fast-validation-deps.sh
 
       # Pin the JDK so the ktfmt check formats deterministically (project targets
@@ -1374,6 +1374,19 @@ jobs:
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
           fi
           bash scripts/test-ts.sh unit
+
+      - name: "Measure cold module imports (advisory, #10429)"
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          mkdir -p scratch
+          bash scripts/measure-cold-imports.sh | tee scratch/cold-imports.md
+          {
+            echo "### Cold module import (Linux)"
+            cat scratch/cold-imports.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Upload Node Unit Timing Reports"
         if: success() && runner.os == 'Linux'

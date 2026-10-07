@@ -84,6 +84,44 @@ export async function drainUntilQuiescent(
   }
 }
 
+/**
+ * Settle a promise by firing pending fake-timer events in due order, one due time per
+ * step, draining only microtasks in between. Unlike enableAutoAdvance(), which spends a
+ * real event-loop turn per event, this never waits on the real loop, so its cost does not
+ * grow with runner load. Use it when the waits span very different durations, where a
+ * fixed `stepMs` would be either too coarse or too many steps.
+ */
+export async function settleByFakeEvents<T>(
+  timer: FakeTimer,
+  promise: Promise<T>,
+  { maxEvents = 1_000, description }: { maxEvents?: number; description: string },
+): Promise<T> {
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  const isSettled = () => settled;
+  for (let event = 0; event <= maxEvents; event++) {
+    await drainTimerState(timer, isSettled, FAKE_TIMER_QUIET_TURNS, MAX_MICROTASK_TURNS);
+    if (settled) {
+      return await promise;
+    }
+    const delayMs = timer.getMsUntilNextDueEvent();
+    if (delayMs === undefined) {
+      throw new Error(`Nothing is pending on fake time, but ${description} has not settled`);
+    }
+    if (event < maxEvents) {
+      timer.advanceTime(delayMs);
+    }
+  }
+  throw new Error(`Fake time fired ${maxEvents} events without settling ${description}`);
+}
+
 /** Drive a bounded fake-time wait, allowing async work to park before each step. */
 export async function settleWithFakeTime<T>(
   timer: FakeTimer,

@@ -10,7 +10,26 @@ import { ActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermissions";
+import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./LineFramer";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
+
+/** Open connections across every auxiliary socket server in this process. */
+const liveAuxConnections = new Set<Socket>();
+/** Connections ever accepted across every auxiliary socket server in this process. */
+let auxConnectionsAccepted = 0;
+
+/**
+ * Clients (stream subscribers, recorders, IDE plugins) connected to any
+ * auxiliary daemon socket, for the orphaned private-daemon watchdog (#10497).
+ */
+export function getLiveAuxSocketConnectionCount(): number {
+  return liveAuxConnections.size;
+}
+
+/** Monotonic count of auxiliary-socket connections accepted by this process. */
+export function getAcceptedAuxSocketConnectionCount(): number {
+  return auxConnectionsAccepted;
+}
 
 export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
 
@@ -27,6 +46,8 @@ export abstract class BaseSocketServer {
   protected readonly timer: Timer;
   protected readonly serverName: string;
   protected readonly idleTimeoutMs: number;
+  /** Largest inbound frame (bytes, newline excluded) a peer may send on this server. */
+  protected readonly maxFrameBytes: number = AUX_SOCKET_MAX_FRAME_BYTES;
   private readonly socketReachability: DaemonSocketReachabilityLike;
 
   constructor(
@@ -207,8 +228,21 @@ export abstract class BaseSocketServer {
    * Handle a new connection. Sets up line-based protocol.
    */
   protected handleConnection(socket: Socket): void {
-    let buffer = "";
-    const decoder = new TextDecoder();
+    const framer = new LineFramer(this.maxFrameBytes, {
+      onLine: (line) => {
+        if (line.trim()) {
+          this.processLine(socket, line).catch((error) => {
+            logger.error(`[${this.serverName}] Request error: ${error}`);
+          });
+        }
+      },
+      onOverflow: () => {
+        logger.warn(
+          `[${this.serverName}] Inbound frame exceeded ${this.maxFrameBytes} bytes, rejecting connection`,
+        );
+        this.onFrameOverflow(socket);
+      },
+    });
 
     if (this.idleTimeoutMs > 0 && typeof socket.setTimeout === "function") {
       socket.setTimeout(this.idleTimeoutMs);
@@ -221,17 +255,7 @@ export abstract class BaseSocketServer {
     }
 
     socket.on("data", (data) => {
-      buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (line.trim()) {
-          this.processLine(socket, line).catch((error) => {
-            logger.error(`[${this.serverName}] Request error: ${error}`);
-          });
-        }
-      }
+      framer.push(data);
     });
 
     socket.on("error", (error) => {
@@ -239,11 +263,22 @@ export abstract class BaseSocketServer {
       this.onConnectionError(socket, error);
     });
 
+    liveAuxConnections.add(socket);
+    auxConnectionsAccepted++;
     socket.on("close", () => {
+      liveAuxConnections.delete(socket);
       this.onConnectionClose(socket);
     });
 
     this.onConnectionEstablished(socket);
+  }
+
+  /**
+   * Called once when a peer's pending inbound frame exceeds `maxFrameBytes`.
+   * The default drops the connection; request/response servers answer first.
+   */
+  protected onFrameOverflow(socket: Socket): void {
+    socket.destroy();
   }
 
   /**

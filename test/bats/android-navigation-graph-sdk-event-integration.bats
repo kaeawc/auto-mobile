@@ -44,6 +44,7 @@ make_mock() {
 
 make_release_fixture() {
   make_mock adb '
+printf "%s\\n" "$*" >> "$ADB_LOG"
 if [ "$1" = "-s" ] && [ "$2" = "emulator-5554" ]; then
   case "$3" in
     root|wait-for-device) exit 0 ;;
@@ -150,6 +151,8 @@ fi
   [ "$status" -eq 0 ]
   [ "$(grep -c -- '^--daemon release-session ' "$AUTO_MOBILE_LOG")" -eq 1 ]
   [ -f "$RELEASE_CALLED_FILE" ]
+  grep -Fq -- '-s emulator-5554 shell wm dismiss-keyguard' "$ADB_LOG"
+  grep -Fq -- '-s emulator-5554 shell input keyevent 82' "$ADB_LOG"
 }
 
 @test "does not release when Android session acquisition fails" {

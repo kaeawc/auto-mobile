@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
 import {
@@ -52,25 +53,16 @@ export class DeviceSnapshotSocketServer extends ConfigSocketServer<
   }
 }
 
-let socketServer: DeviceSnapshotSocketServer | null = null;
+const socketServer = new SocketServerSingleton<DeviceSnapshotSocketServer>();
 
 export function getDeviceSnapshotSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG);
 }
 
 export async function startDeviceSnapshotSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new DeviceSnapshotSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new DeviceSnapshotSocketServer());
 }
 
 export async function stopDeviceSnapshotSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

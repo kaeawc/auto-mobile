@@ -22,7 +22,10 @@ import {
   CtrlProxyHierarchyResponse,
   CtrlProxyPerfTiming,
 } from "../../src/features/observe/ios";
+import type { SdkTriggerRequest } from "../../src/features/observe/ios/CtrlProxySdkTrigger";
 import type {
+  CtrlProxyMagicTapResult,
+  CtrlProxySdkTriggerResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
   CtrlProxyActionResult,
@@ -174,6 +177,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   // requestSetVoiceOverEnabled call history
   private setVoiceOverEnabledHistory: boolean[] = [];
+
+  private sdkTriggerHistory: SdkTriggerRequest[] = [];
+  private sdkTriggerResult: CtrlProxySdkTriggerResult = {
+    success: true,
+    available: true,
+    statusCode: 200,
+    totalTimeMs: 0,
+  };
 
   private actionHistory: Array<{
     action: string;
@@ -740,18 +751,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
-    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
-    // review): an already-expired caller deadline must never reach the
-    // device.
-    if (signal?.aborted) {
-      return {
-        success: false,
-        totalTimeMs: 0,
-        error: "Request aborted before dispatch",
-        dispatched: false,
-        acknowledged: false,
-      };
-    }
+    // Mirrors `sendIOSPressCommand`: an already-expired caller deadline never reaches the
+    // device and surfaces as the abort reason, not as a failed result.
+    signal?.throwIfAborted();
 
     await this.applyDelay("tap");
     this.checkFailure("tap");
@@ -764,6 +766,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         totalTimeMs: 50,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -779,6 +782,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    signal?.throwIfAborted();
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
 
@@ -791,6 +795,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         gestureTimeMs: duration,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -845,6 +850,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    signal?.throwIfAborted();
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
 
@@ -868,6 +874,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         gestureTimeMs: resolvedDuration,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -879,10 +886,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private settleDispatch<T extends BaseResult>(
     result: IOSDispatchResult<T>,
     onDispatch?: () => void,
+    signal?: AbortSignal,
   ): IOSDispatchResult<T> {
     const dispatched = result.dispatched ?? true;
     if (dispatched) {
       onDispatch?.();
+    } else {
+      // The real helper preserves cancellation even when a never-sent request returns a failure.
+      signal?.throwIfAborted();
     }
     return {
       ...result,
@@ -1320,6 +1331,47 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       action,
       totalTimeMs: 50,
+    };
+  }
+
+  /** Script the next `requestSdkTrigger` results (default: delivered, HTTP 200). */
+  setSdkTriggerResult(result: CtrlProxySdkTriggerResult): void {
+    this.sdkTriggerResult = result;
+  }
+
+  getSdkTriggerHistory(): SdkTriggerRequest[] {
+    return [...this.sdkTriggerHistory];
+  }
+
+  async requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult> {
+    request.signal?.throwIfAborted();
+    await this.applyDelay("sdkTrigger");
+    this.checkFailure("sdkTrigger");
+    this.sdkTriggerHistory.push({
+      module: request.module,
+      trigger: request.trigger,
+      ...(request.payload ? { payload: request.payload } : {}),
+    });
+    return { ...this.sdkTriggerResult };
+  }
+
+  async requestMagicTap(
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    signal?.throwIfAborted();
+    await this.applyDelay("magicTap");
+    this.checkFailure("magicTap");
+    signal?.throwIfAborted();
+    this.actionHistory.push({ action: "magic_tap" });
+    return {
+      success: true,
+      available: true,
+      handled: true,
+      unsupported: false,
+      requiresVoiceOver: false,
+      totalTimeMs: 0,
     };
   }
 

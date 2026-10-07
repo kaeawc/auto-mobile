@@ -22,6 +22,7 @@ import {
 import { runAutoMobileChecks, runPostRepairAutoMobileChecks } from "./checks/automobile";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { createDoctorDeadline } from "./deadline";
+import { ActionableError } from "../models/ActionableError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { runWithAbortSignal } from "../utils/AbortContext";
 
@@ -130,8 +131,20 @@ function isPostRepairProfile(
 function selectedPlatforms(options: DoctorOptions): { android: boolean; ios: boolean } {
   return {
     android: options.android === true || (options.android !== false && options.ios !== true),
-    ios: options.ios === true || (options.android !== true && process.platform === "darwin"),
+    ios:
+      options.ios === true ||
+      (options.ios !== false && options.android !== true && process.platform === "darwin"),
   };
+}
+
+/** Excluding every platform leaves nothing to diagnose, so reject it as a usage error (#10128). */
+function assertSomePlatformSelected(options: DoctorOptions): void {
+  if (options.android === false && options.ios === false) {
+    throw new ActionableError(
+      "doctor: --android false and --ios false exclude every platform. " +
+        "Drop one of them, or pass --android / --ios to select a single platform.",
+    );
+  }
 }
 
 async function runPlatformChecks(
@@ -209,6 +222,7 @@ export async function runDoctor(
   options: DoctorOptions = {},
   dependencies: RunDoctorDependencies = {},
 ): Promise<DoctorReport> {
+  assertSomePlatformSelected(options);
   const deadline = createDoctorDeadline(options, dependencies.timer ?? defaultTimer);
   try {
     const runners = resolveDoctorRunners(dependencies);

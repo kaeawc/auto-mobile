@@ -484,6 +484,20 @@ describe("criticalSection tool", () => {
       );
     });
 
+    test("fails an unsupported setPosture sub-step with its message", async () => {
+      ToolRegistry.register(
+        "setPosture",
+        "unsupported posture",
+        z.object({}).passthrough(),
+        async () =>
+          createStructuredToolResponse({ message: "not foldable", status: "unsupported" }),
+      );
+      await expect(runSteps("setPosture", false, true)).rejects.toThrow(
+        "Failed at step 1/2 (setPosture): not foldable",
+      );
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
     test.each(["observe", "openLink"])(
       "skips an optional %s timeout with a warning",
       async (tool) => {
@@ -1476,6 +1490,105 @@ describe("criticalSection tool", () => {
             : "step 2 (warningSecond): epilogue failed",
         ],
       });
+    });
+  });
+
+  describe("a sub-step that answers but fails keeps its diagnostics (#10024 parity)", () => {
+    let restoreTools: () => void;
+    let restoreCoordinator: () => void;
+    let coordinator: CriticalSectionCoordinator;
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "answered-failure-device",
+      name: "Answered Failure Device",
+    };
+
+    beforeEach(() => {
+      restoreTools = preserveToolRegistry();
+      coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
+      restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
+    });
+
+    afterEach(() => {
+      coordinator.reset();
+      restoreCoordinator();
+      restoreTools();
+    });
+
+    async function runSection(answer: Record<string, unknown>, optional = false): Promise<unknown> {
+      ToolRegistry.register("answeredFailure", "answers", z.object({}), async () => answer);
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      return section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "answered-failure-lock",
+          deviceCount: 1,
+          steps: [{ tool: "answeredFailure", params: { device: "A" }, optional }],
+        }),
+      ).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    }
+
+    test("success:false with warnings promotes the sub-step's warnings", async () => {
+      const error = await runSection({
+        success: false,
+        error: "tap failed",
+        warnings: ["keyboard dismissal failed"],
+      });
+      expect(error).toMatchObject({
+        message: expect.stringContaining("Failed at step 1/1 (answeredFailure): tap failed"),
+        warnings: ["step 1 (answeredFailure): keyboard dismissal failed"],
+      });
+    });
+
+    test("a waitFor timeout carries its bounded diagnostics and warnings", async () => {
+      const error = await runSection({
+        success: true,
+        awaitTimeout: true,
+        awaitDuration: 5000,
+        timedOut: true,
+        candidates: [{ text: "Almost", "resource-id": "a/b", extra: "dropped" }],
+        warnings: ["screen was animating"],
+      });
+      expect(error).toMatchObject({
+        message: expect.stringContaining("answeredFailure waitFor timed out after 5000ms"),
+        warnings: [
+          "step 1 (answeredFailure): screen was animating",
+          `step 1 (answeredFailure): waitFor timeout: ${JSON.stringify({
+            awaitDuration: 5000,
+            timedOut: true,
+            candidates: [{ text: "Almost", "resource-id": "a/b" }],
+            candidateCount: 1,
+          })}`,
+        ],
+      });
+    });
+
+    test("an optional sub-step's own warnings are kept next to the skip warning", async () => {
+      ToolRegistry.register("answeredFailure", "answers", z.object({}), async () => ({
+        success: false,
+        error: "optional failure",
+        warnings: ["note"],
+      }));
+      ToolRegistry.register("answeredOk", "ok", z.object({}), async () => ({ success: true }));
+      const section = ToolRegistry.getToolForPlan("criticalSection")!;
+      const result = await section.deviceAwareHandler!(
+        device,
+        section.schema.parse({
+          lock: "answered-optional-lock",
+          deviceCount: 1,
+          steps: [
+            { tool: "answeredFailure", params: { device: "A" }, optional: true },
+            { tool: "answeredOk", params: { device: "A" } },
+          ],
+        }),
+      );
+      expect(getStructuredPayload<Record<string, unknown>>(result)?.warnings).toEqual([
+        "step 1 (answeredFailure): note",
+        "step 1 (answeredFailure): optional step failed; skipped: optional failure",
+      ]);
     });
   });
 

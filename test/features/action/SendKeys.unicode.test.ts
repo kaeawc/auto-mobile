@@ -59,11 +59,7 @@ describe("sendKeys unsafe caret across commands", () => {
       expect(await h.sendKeys.execute([unsafe, reset, ascii])).toMatchObject({ success: true });
       expect(h.inserted).toEqual(["é"]);
       expectWellFormedInserts(h.inserted);
-      expect(h.deliveries.slice(-3)).toEqual([
-        { kind: "keyevent", text: "a" },
-        { kind: "keyevent", text: "b" },
-        { kind: "keyevent", text: "c" },
-      ]);
+      expect(h.deliveries.slice(-1)).toEqual([{ kind: "inputText", text: "abc" }]);
     });
   }
 
@@ -74,11 +70,7 @@ describe("sendKeys unsafe caret across commands", () => {
     });
     expect(h.clientCalls).toEqual(["insert:é", "clear"]);
     expectWellFormedInserts(h.inserted);
-    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
-      "keyevent",
-      "keyevent",
-      "keyevent",
-    ]);
+    expect(h.deliveries.slice(-1)).toEqual([{ kind: "inputText", text: "abc" }]);
   });
 
   test("resets unsafe caret between sendKeys calls on the same executor", async () => {
@@ -87,11 +79,7 @@ describe("sendKeys unsafe caret across commands", () => {
     expect(await h.sendKeys.execute([ascii])).toMatchObject({ success: true });
     expect(h.inserted).toEqual(["é"]);
     expectWellFormedInserts(h.inserted);
-    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
-      "keyevent",
-      "keyevent",
-      "keyevent",
-    ]);
+    expect(h.deliveries.slice(-1)).toEqual([{ kind: "inputText", text: "abc" }]);
   });
 
   test("old APK with undefined caretPlaced retains subsequent key events", async () => {
@@ -99,11 +87,7 @@ describe("sendKeys unsafe caret across commands", () => {
     expect(await h.sendKeys.execute([unsafe, ascii])).toMatchObject({ success: true });
     expect(h.inserted).toEqual(["é"]);
     expectWellFormedInserts(h.inserted);
-    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
-      "keyevent",
-      "keyevent",
-      "keyevent",
-    ]);
+    expect(h.deliveries.slice(-1)).toEqual([{ kind: "inputText", text: "abc" }]);
   });
 
   for (const mode of ["a11y", "eventLast"] as const) {
@@ -345,19 +329,8 @@ describe("sendKeys Unicode delivery", () => {
     ).toMatchObject({ success: true });
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell getprop ro.build.version.sdk",
-      "shell input keyevent KEYCODE_E",
-      "shell input keyevent KEYCODE_L",
-      "shell input keyevent KEYCODE_L",
-      "shell input keyevent KEYCODE_O",
-      "shell input keyevent KEYCODE_COMMA",
-      "shell input keyevent KEYCODE_SPACE",
-      "shell input keyevent KEYCODE_O",
-      "shell input keyevent KEYCODE_R",
-      "shell input keyevent KEYCODE_L",
-      "shell input keyevent KEYCODE_D",
-      "shell input keyevent KEYCODE_SPACE",
-      "shell input keyevent KEYCODE_4",
-      "shell input keyevent KEYCODE_2",
+      "shell input text 'ello,%s'",
+      "shell input text 'orld%s42'",
     ]);
     expect(h.inserted).toEqual(["H", "W", "!"]);
     expectWellFormedInserts(h.inserted);
@@ -514,9 +487,7 @@ describe("Android eventAll caret and preceding input", () => {
     expectWellFormedInserts(h.inserted);
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
-      "shell input keyevent KEYCODE_B",
-      "shell input keyevent KEYCODE_SPACE",
-      "shell input keyevent KEYCODE_C",
+      "shell input text 'b%sc'",
     ]);
   });
 

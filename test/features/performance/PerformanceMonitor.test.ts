@@ -1418,6 +1418,52 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
     expect(data!.metrics.touchLatencyMs).toBeNull();
   });
 
+  for (const source of ["fresh", "stale", "missing", "other-app", "other-device"] as const) {
+    it(`uses only fresh matching iOS SDK frames (${source}) while retaining app CPU/memory`, async () => {
+      const store = new SdkFrameMetricsStore();
+      const buffer = new PerfWindowBuffer();
+      const deviceId = "ios-device-1";
+      const bundleId = "com.example.iosapp";
+      const fakeExec = createFakeExecFileAsync({
+        stdout: iosSimPsLine({ pid: 12345, cpu: 5, rssKb: 102400, deviceId, bundleId }),
+      });
+      if (source !== "missing") {
+        store.ingest(
+          source === "other-device" ? "another-device" : deviceId,
+          source === "other-app" ? "another.app" : bundleId,
+          {
+            fps: 42,
+            frameTimeMs: 23.8,
+            jankFrames: 3,
+            receivedAt: source === "stale" ? -3000 : fakeTimer.now(),
+          },
+        );
+      }
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        fakeSimCtlFactory,
+        fakeExec,
+        undefined,
+        buffer,
+        store,
+      );
+      monitor.start();
+      monitor.startMonitoring(deviceId, bundleId, "ios");
+      await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
+      const metrics = fakePusher.getLastPushedData()!.metrics;
+      expect(metrics.cpuUsagePercent).toBe(5);
+      expect(metrics.memoryUsageMb).toBe(100);
+      expect(metrics.fps).toBe(source === "fresh" ? 42 : null);
+      expect(metrics.frameTimeMs).toBe(source === "fresh" ? 23.8 : null);
+      expect(metrics.jankFrames).toBe(source === "fresh" ? 3 : null);
+      const snapshot = buffer.snapshot(deviceId, fakeTimer.now(), 60000);
+      expect(snapshot.fps?.p50 ?? null).toBe(source === "fresh" ? 42 : null);
+      expect(snapshot.jank?.total ?? null).toBe(source === "fresh" ? 3 : null);
+    });
+  }
+
   it("should handle iOS process not found gracefully", async () => {
     // ps aux returns output but doesn't include our bundle ID
     const fakeExec = createFakeExecFileAsync({

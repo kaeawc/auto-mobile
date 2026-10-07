@@ -155,6 +155,20 @@ public final class GesturePerformer: GesturePerforming {
         }
     }
 
+    /// Cmd+V does not need the text, so only a pasteboard known to be empty refuses the paste.
+    /// `.unavailable` is only produced after `hasStrings` was true, so it must still paste; the
+    /// host's post-paste check decides whether the field changed (#10083).
+    nonisolated static func resolveClipboardPaste(readResult: ClipboardReadResult) throws {
+        switch readResult {
+        case let .value(text):
+            if text.isEmpty { throw GestureError.clipboardEmpty }
+        case .empty:
+            throw GestureError.clipboardEmpty
+        case .unavailable:
+            return
+        }
+    }
+
     /// Pressing a key needs a first responder, while text editing still needs
     /// evidence that an `.other` snapshot is a text input.
     nonisolated static func isFocusedSnapshotCandidate(
@@ -2378,10 +2392,10 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Clipboard
 
         /// Shadow of the most recent value this runner wrote via `copy` (or
-        /// cleared via `clear`). Used as a fallback for `get` and `paste`
-        /// when iOS's privacy-gated pasteboard read on a UI-test runner
-        /// hangs on a `Paste from <app>` system alert that no user is
-        /// available to dismiss.
+        /// cleared via `clear`). No longer read: `get` reports an unreadable
+        /// pasteboard as unavailable and `paste` sends Cmd+V without the text
+        /// (#10083), since iOS's privacy-gated read on a UI-test runner can
+        /// hang on a `Paste from <app>` system alert nobody can dismiss.
         ///
         /// The reference guarded this with a dedicated `clipboardShadowQueue`
         /// because `copy` (writer) and `get`/`paste` (readers) could run on
@@ -2389,10 +2403,6 @@ public final class GesturePerformer: GesturePerforming {
         /// path runs on the main actor, so the queue is gone and the shadow is
         /// plain main-actor state.
         private static var clipboardShadow: String?
-
-        private static func readShadow() -> String? {
-            clipboardShadow
-        }
 
         private static func writeShadow(_ value: String?) {
             clipboardShadow = value
@@ -2457,21 +2467,10 @@ public final class GesturePerformer: GesturePerforming {
                 guard let app = resolveTextInputApp() else {
                     throw GestureError.noApplication
                 }
-                // Use bounded read; fall back to shadow if iOS gates the read.
-                let pasteboardLive = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
-                let clipboardText: String?
-                switch pasteboardLive {
-                case let .value(text):
-                    clipboardText = text
-                case .empty:
-                    clipboardText = nil
-                case .unavailable:
-                    clipboardText = GesturePerformer.readShadow()
-                }
-                guard let pasteText = clipboardText, !pasteText.isEmpty else {
-                    throw GestureError.clipboardEmpty
-                }
-                _ = pasteText
+                // Bounded read; an unreadable pasteboard still pastes and the host verifies the field.
+                try GesturePerformer.resolveClipboardPaste(
+                    readResult: GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
+                )
 
                 try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pasting")
 

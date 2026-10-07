@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
+import { AvdManagerService } from "../../../src/utils/android-cmdline-tools/AvdManagerService";
 import { createDeviceImageResourcesHandler } from "../../../src/server/deviceImageResources";
 import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
@@ -180,6 +181,36 @@ describe("AVDManager", function () {
     timer.enableAutoAdvance();
     return timer;
   }
+
+  test("service offers only loadable AVDs through the functional facade", async () => {
+    const deps = createDependencies();
+    const originalSpawn = deps.spawn;
+    deps.spawn = (command, args, options) => {
+      const child = originalSpawn(command, args, options) as ReturnType<typeof originalSpawn> & {
+        triggerStdout(data: Buffer): void;
+        triggerClose(code: number): void;
+      };
+      queueMicrotask(() => {
+        child.triggerStdout(
+          Buffer.from(`Available Android Virtual Devices:
+    Name: Pixel_9
+    Path: /test/.android/avd/Pixel_9.avd
+---------
+The following Android Virtual Devices could not be loaded:
+    Name: Broken_Pixel
+    Path: /test/.android/avd/Broken_Pixel.avd
+   Error: Missing system image for Google APIs arm64-v8a Pixel.
+---------`),
+        );
+        child.triggerClose(0);
+      });
+      return child;
+    };
+    const service = new AvdManagerService(deps);
+    expect(await service.listDeviceImages()).toEqual([
+      { name: "Pixel_9", path: "/test/.android/avd/Pixel_9.avd" },
+    ]);
+  });
 
   async function resolveWithFakeTimer<T>(
     timer: FakeTimer,

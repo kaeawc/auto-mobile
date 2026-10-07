@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "../../utils/ios-cmdline-tools/simctlArgs";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -13,6 +14,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
 import { buildAppleLanguages, isIosSimulator } from "./system-configuration/iosHelpers";
+import { checkTimeZoneId } from "./system-configuration/parsing";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -80,7 +82,14 @@ export class SystemConfigurationManager {
         error: "zoneId must be a non-empty string",
       };
     }
-    return this.adapter.setTimeZone(trimmedZone);
+    // Validate once, before any adapter writes: both platforms store whatever
+    // string they are given and read it back unchanged (issue #10190).
+    const check = checkTimeZoneId(trimmedZone, this.device.platform);
+    if (check.error) {
+      return { success: false, zoneId, error: check.error };
+    }
+    const result = await this.adapter.setTimeZone(trimmedZone);
+    return check.note ? withTimeZoneNote(result, check.note) : result;
   }
 
   async setTextDirection(
@@ -131,14 +140,16 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "launchctl",
-        "stop",
-        "com.apple.SpringBoard",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "launchctl",
+          "stop",
+          "com.apple.SpringBoard",
+        ]),
+      );
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
       return false;
@@ -147,14 +158,16 @@ export class SystemConfigurationManager {
     for (let i = 0; i < SPRINGBOARD_MAX_RETRIES; i++) {
       await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
       try {
-        const result = await this.processExecutor.executeCommand("xcrun", [
-          "simctl",
-          "spawn",
-          this.device.deviceId,
-          "launchctl",
-          "list",
-          "com.apple.SpringBoard",
-        ]);
+        const result = await this.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs([
+            "spawn",
+            this.device.deviceId,
+            "launchctl",
+            "list",
+            "com.apple.SpringBoard",
+          ]),
+        );
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
         }
@@ -176,14 +189,16 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "notifyutil",
-        "-p",
-        "com.apple.language.changed",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "notifyutil",
+          "-p",
+          "com.apple.language.changed",
+        ]),
+      );
       return true;
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to post locale notification: ${error}`);
@@ -212,19 +227,15 @@ export class SystemConfigurationManager {
         result.appRestarted = false;
       } else {
         try {
-          await this.processExecutor.executeCommand("xcrun", [
-            "simctl",
-            "terminate",
-            this.device.deviceId,
-            restartAppBundleId,
-          ]);
+          await this.processExecutor.executeCommand(
+            "xcrun",
+            buildSimctlArgs(["terminate", this.device.deviceId, restartAppBundleId]),
+          );
           await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
-          await this.processExecutor.executeCommand("xcrun", [
-            "simctl",
-            "launch",
-            this.device.deviceId,
-            restartAppBundleId,
-          ]);
+          await this.processExecutor.executeCommand(
+            "xcrun",
+            buildSimctlArgs(["launch", this.device.deviceId, restartAppBundleId]),
+          );
           result.appRestarted = true;
         } catch (error) {
           logger.warn(
@@ -237,4 +248,11 @@ export class SystemConfigurationManager {
 
     return result;
   }
+}
+
+/** Say, on whichever outcome, that the host could not validate the id it let through. */
+function withTimeZoneNote(result: SetTimeZoneResult, note: string): SetTimeZoneResult {
+  return result.success
+    ? { ...result, warning: result.warning ? `${result.warning} ${note}` : note }
+    : { ...result, error: result.error ? `${result.error}. ${note}` : note };
 }

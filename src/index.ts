@@ -21,7 +21,10 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 import type { DaemonOptions } from "./daemon/types";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import { OUTPUT_REDUCTION_FLAG_SPECS } from "./utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  resolveActionsCompactMetadata,
+} from "./utils/outputReductionFlags";
 import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
@@ -219,9 +222,11 @@ async function main() {
     const {
       cliMode,
       cliArgs,
+      invalidInvocation,
       daemonPort,
       daemonHost,
       initialSessionUuid,
+      livenessOwnerToken,
       debugPerf,
       debug,
       strictPort,
@@ -240,6 +245,7 @@ async function main() {
       videoRecordingDefaults,
       daemonMode,
       daemonCommand,
+      daemonRequested,
       daemonArgs,
       skipCtrlProxyDownload,
       embeddedSdk,
@@ -261,6 +267,16 @@ async function main() {
       enabledTools,
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
+    if (invalidInvocation) {
+      console.error(invalidInvocation);
+      process.exit(1);
+      return;
+    }
+    if (daemonRequested && daemonCommand === undefined) {
+      const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
+      printUnknownDaemonCommand(undefined);
+      return;
+    }
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs);
       await exitAfterSuccessfulDaemonCommand(logger, process);
@@ -283,6 +299,12 @@ async function main() {
     if (runnerReadinessTimeoutMs !== undefined) {
       serverConfig.setRunnerReadinessTimeoutMs(runnerReadinessTimeoutMs);
     }
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(
+        outputReduction.actionsCompactMetadata,
+        serverConfig.isActionsCompactMetadataEnabled(),
+      ),
+    );
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
@@ -378,9 +400,11 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.map((spec): CliFeatureFlagOverride => [
+      ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
+        (spec) => !spec.disableCli || outputReduction[spec.field] !== undefined,
+      ).map((spec): CliFeatureFlagOverride => [
         spec.featureFlagKey,
-        outputReduction[spec.field],
+        outputReduction[spec.field] === true,
         spec.label,
         undefined,
       ]),
@@ -397,12 +421,20 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (!enabled) {
+        if (!enabled && key !== "actions-compact-metadata") {
           continue;
         }
-        await featureFlagService.setFlag(key, true, config);
-        logger.info(`Feature flag enabled (${flagLabel})`);
+        await featureFlagService.setFlag(key, enabled, config);
+        logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
       }
+
+      // Resolve local behavior after persistence is loaded; keep the relay tri-state.
+      serverConfig.setActionsCompactMetadataEnabled(
+        resolveActionsCompactMetadata(
+          outputReduction.actionsCompactMetadata,
+          featureFlagService.isEnabled("actions-compact-metadata"),
+        ),
+      );
 
       if (!navigationScreenshots) {
         await featureFlagService.setFlag("navigation-screenshots", false);
@@ -683,6 +715,7 @@ async function main() {
               autoStartDaemon: !noDaemon,
               daemonOptions: daemonStartupOptions,
               initialSessionUuid,
+              livenessOwnerToken,
               heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
             },
           });

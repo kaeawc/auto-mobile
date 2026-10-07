@@ -335,6 +335,9 @@ export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionPro
 export const INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM =
   "__autoMobileToolResultsNoStructuredContent";
 
+/** Loopback-only compact-metadata preference applied to the connection profile. */
+export const INTERNAL_ACTIONS_COMPACT_METADATA_PARAM = "__autoMobileActionsCompactMetadata";
+
 /**
  * Socket RPC field identifying a session UUID injected from a connection-bound
  * route rather than explicitly selected by the caller.
@@ -377,6 +380,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 ] as const;
@@ -388,10 +392,13 @@ export function deleteInternalToolParams(params: Record<string, unknown>): void 
   }
 }
 
-/** Copy replayable navigation arguments, excluding request-local metadata. */
+/** Copy replayable navigation arguments, excluding request-local metadata and device routing. */
 export function stripNavigationToolParams(args: Record<string, unknown>): Record<string, unknown> {
   const clean = { ...args };
   deleteInternalToolParams(clean);
+  delete clean.platform;
+  delete clean.deviceId;
+  delete clean.device;
   for (const key of Object.keys(clean)) {
     if (key.startsWith("__") || key === "sessionUuid") {
       delete clean[key];
@@ -436,6 +443,8 @@ export const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
  * a second device) can starve the heartbeat past the session's
  * heartbeat-timeout and get it reaped (issue #6135).
  */
+export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessOwnership";
+
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**
@@ -475,6 +484,16 @@ export const CLI_SESSION_LIVENESS_POLICY = "cli";
  * daemon restores strict liveness for that backward-compatible wire shape too.
  */
 export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
+
+/**
+ * Optional `daemon/heartbeat` parameter naming the kind of liveness owner behind the request.
+ *
+ * The external `--daemon heartbeat` keeper sends {@link CLI_KEEPER_LIVENESS_OWNER_KIND} so the
+ * daemon can tell it apart from a one-shot `--cli` proxy, whose declaration carries the same
+ * `cli` policy, token and claim (#10054). A keeper is for one-shot CLI sessions only and is
+ * refused a session a stdio/HTTP proxy owns. Absent for every proxy.
+ */
+export const CLI_KEEPER_LIVENESS_OWNER_KIND = "cli-keeper";
 
 /**
  * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
@@ -527,6 +546,22 @@ export function sanitizeCliSessionIdleTimeoutMs(requestedMs: unknown): number | 
  * (device-session-UUID routing epic #5256).
  */
 export const DAEMON_LIST_DEVICE_SESSIONS_METHOD = "daemon/listDeviceSessions";
+
+/**
+ * Control-socket method reporting whether this daemon still uses a device whose
+ * CtrlProxy forwarding lease it holds: its live session, in-flight tool calls,
+ * and time since its last tool activity there. Another AutoMobile process asks
+ * before taking the lease over from an idle or orphaned owner (issue #10497).
+ */
+export const DAEMON_DEVICE_LEASE_STATUS_METHOD = "daemon/deviceLeaseStatus";
+
+/**
+ * Control-socket method asking this daemon to give up a device's CtrlProxy
+ * forwarding lease when it no longer uses the device. The daemon checks its use
+ * and releases in one synchronous step, so activity it starts afterwards cannot
+ * lose the lease to the requester (issue #10497, #10506 review).
+ */
+export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLease";
 
 /**
  * Whether the daemon enforces the inbound version/build-identity handshake

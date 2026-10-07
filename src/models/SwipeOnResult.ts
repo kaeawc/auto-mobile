@@ -40,6 +40,9 @@ export interface SwipeOnResult extends BaseActionResult {
   a11yGestureTimeMs?: number;
   fallbackReason?: string;
 
+  /** The swipe was dispatched but its outcome was never confirmed; observe before retrying. */
+  outcomeIndeterminate?: boolean;
+
   // Debug information (when debug mode is enabled)
   debug?: ToolDebugInfo;
 }

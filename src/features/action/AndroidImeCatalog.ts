@@ -1,11 +1,18 @@
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { defaultRetryExecutor, type RetryExecutor } from "../../utils/retry/RetryExecutor";
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
+import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../../utils/logger";
 import { clearAndroidImeQuarantine, withAndroidImeLock } from "./androidImeLock";
+
+const SUBTYPE_KEY = "selected_input_method_subtype";
 
 /** `ime set` normally completes well under 1s; bound the post-dispatch
  * window while the per-device IME lock is held. */
 const IME_SET_COMMAND_TIMEOUT_MS = 5_000;
+const IME_READ_COMMAND_TIMEOUT_MS = 3_000;
 
 export interface InstalledIme {
   id: string;
@@ -104,6 +111,35 @@ export function parseAdvertisedImeSubtypes(
   return subtypes;
 }
 
+/** Supplies the Android user whose keyboard a catalog operation reads and changes. */
+export interface ForegroundUserSource {
+  foregroundUserId(signal?: AbortSignal): Promise<number>;
+}
+
+/** Resolves the current (foreground) user with the shared Android user resolver. */
+export function createForegroundUserSource(adb: AdbExecutor): ForegroundUserSource {
+  const resolver = new AndroidUserTargetResolver(adb);
+  return {
+    foregroundUserId: async (signal) =>
+      (await resolver.resolve({ currentUser: true, signal })).userId,
+  };
+}
+
+/** A source fixed to one user, so a multi-step operation and its restore cannot diverge. */
+export function pinnedUser(userId: number): ForegroundUserSource {
+  return { foregroundUserId: async () => userId };
+}
+
+/**
+ * `ime` acts on the current user and `settings` on user 0 when `--user` is omitted. Every
+ * command passes the same explicit user so they cannot disagree. User 0 omits the flag: both
+ * defaults already mean user 0 there, so single-user devices keep their exact commands and
+ * never depend on `ime --user`, which older Android releases do not accept.
+ */
+export function imeUserArgs(userId: number): string[] {
+  return userId === 0 ? [] : ["--user", String(userId)];
+}
+
 export interface ImeCatalogState {
   activeImeId: string | null;
   installed: InstalledIme[];
@@ -114,13 +150,30 @@ export class AndroidImeCatalog {
   constructor(
     private readonly adb: Pick<AdbExecutor, "execute">,
     private readonly deviceId: string,
+    private readonly users: ForegroundUserSource,
+    private readonly retry: RetryExecutor = defaultRetryExecutor,
   ) {}
 
+  /**
+   * A catalog fixed to the user that is foreground right now. A scoped session that switches
+   * the keyboard and later restores it uses this so both reach the same user even if the
+   * foreground user changes in between.
+   */
+  async pinForeground(signal?: AbortSignal): Promise<AndroidImeCatalog> {
+    const userId = await this.users.foregroundUserId(signal);
+    return new AndroidImeCatalog(this.adb, this.deviceId, pinnedUser(userId), this.retry);
+  }
+
   async list(signal?: AbortSignal): Promise<ImeCatalogState> {
+    return this.listForUser(await this.users.foregroundUserId(signal), signal);
+  }
+
+  private async listForUser(userId: number, signal?: AbortSignal): Promise<ImeCatalogState> {
+    const user = imeUserArgs(userId);
     const [installed, enabled, active] = await Promise.all([
-      this.readImeIds(["shell", "ime", "list", "-a", "-s"], signal),
-      this.readImeIds(["shell", "ime", "list", "-s"], signal),
-      this.readActiveIme(signal),
+      this.readImeIds(["shell", "ime", "list", ...user, "-a", "-s"], signal),
+      this.readImeIds(["shell", "ime", "list", ...user, "-s"], signal),
+      this.readActiveIme(userId, signal),
     ]);
     const enabledIds = new Set(enabled);
     return {
@@ -135,9 +188,10 @@ export class AndroidImeCatalog {
   }
 
   async readSubtype(imeId: string, signal?: AbortSignal): Promise<ImeSubtypeSnapshot> {
-    const selected = await this.adb.execute(
-      ["shell", "settings", "get", "secure", "selected_input_method_subtype"],
-      { signal },
+    const userId = await this.users.foregroundUserId(signal);
+    const selected = await this.readCommand(
+      ["shell", "settings", ...imeUserArgs(userId), "get", "secure", SUBTYPE_KEY],
+      signal,
     );
     if (selected.stderr.trim()) {
       throw new Error(`Failed to read IME subtype: ${selected.stderr.trim()}`);
@@ -152,6 +206,7 @@ export class AndroidImeCatalog {
 
   /** Caller holds the per-device lock; an unavailable subtype table is verified by readback. */
   async restoreSubtypeWithinLock(imeId: string, snapshot: ImeSubtypeSnapshot): Promise<void> {
+    const user = imeUserArgs(await this.users.foregroundUserId());
     if (snapshot.id !== null) {
       const advertised = await this.advertisedSubtypes(imeId);
       if (advertised && !advertised.has(snapshot.id)) {
@@ -160,25 +215,19 @@ export class AndroidImeCatalog {
     }
     const args =
       snapshot.id === null
-        ? ["shell", "settings", "delete", "secure", "selected_input_method_subtype"]
-        : [
-            "shell",
-            "settings",
-            "put",
-            "secure",
-            "selected_input_method_subtype",
-            String(snapshot.id),
-          ];
-    const result = await this.adb.execute(args);
+        ? ["shell", "settings", ...user, "delete", "secure", SUBTYPE_KEY]
+        : ["shell", "settings", ...user, "put", "secure", SUBTYPE_KEY, String(snapshot.id)];
+    const result = await this.adb.execute(args, { noRetry: true });
     if (result.stderr.trim()) {
       throw new Error(`Failed to restore IME subtype: ${result.stderr.trim()}`);
     }
-    const after = await this.adb.execute([
+    const after = await this.readCommand([
       "shell",
       "settings",
+      ...user,
       "get",
       "secure",
-      "selected_input_method_subtype",
+      SUBTYPE_KEY,
     ]);
     if (after.stderr.trim() || parseSelectedImeSubtype(after.stdout) !== snapshot.id) {
       throw new Error(`IME subtype restoration could not be verified for ${imeId}.`);
@@ -189,7 +238,9 @@ export class AndroidImeCatalog {
     const packageName = imeId.split("/")[0];
     const identity: KeyboardIdentity = { component: imeId, package: packageName };
     try {
-      const result = await this.adb.execute(["shell", "dumpsys", "package", packageName]);
+      const result = await this.adb.execute(["shell", "dumpsys", "package", packageName], {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      });
       if (!result.stderr.trim()) {
         const versionName = parsePackageVersionName(result.stdout, packageName);
         if (versionName) {
@@ -207,7 +258,10 @@ export class AndroidImeCatalog {
   }
 
   private async advertisedSubtypes(imeId: string, signal?: AbortSignal) {
-    const result = await this.adb.execute(["shell", "dumpsys", "input_method"], { signal });
+    const result = await this.adb.execute(["shell", "dumpsys", "input_method"], {
+      signal,
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
     if (result.stderr.trim()) {
       throw new Error(`Failed to inspect IME subtypes: ${result.stderr.trim()}`);
     }
@@ -230,7 +284,9 @@ export class AndroidImeCatalog {
 
   /** For a scoped session that already holds the device IME lock. */
   async selectWithinLock(id: string, signal?: AbortSignal): Promise<ImeCatalogState> {
-    const before = await this.list(signal);
+    // One user for the read, the `ime set` and the readback, so the check verifies the change.
+    const userId = await this.users.foregroundUserId(signal);
+    const before = await this.listForUser(userId, signal);
     const target = before.installed.find((ime) => ime.id === id);
     if (!target) {
       throw new Error(`IME ${id} is not installed on this Android device.`);
@@ -249,9 +305,10 @@ export class AndroidImeCatalog {
     signal?.addEventListener("abort", forwardAbort, { once: true });
     let result;
     try {
-      result = await this.adb.execute(["shell", "ime", "set", id], {
+      result = await this.adb.execute(["shell", "ime", "set", ...imeUserArgs(userId), id], {
         signal: commandController?.signal,
         timeoutMs: IME_SET_COMMAND_TIMEOUT_MS,
+        noRetry: true,
         waitForProcessSettlementAfterAbort: true,
         beforeDispatch: async () => {
           signal?.throwIfAborted();
@@ -266,7 +323,7 @@ export class AndroidImeCatalog {
     }
     // The IME may already have changed. Verify it under the lock even if cancellation
     // arrives after dispatch, as the native key tap path does after a physical tap.
-    const after = await this.list();
+    const after = await this.listForUser(userId);
     if (after.activeImeId !== id) {
       throw new Error(
         `IME selection did not take effect: expected ${id}, got ${after.activeImeId ?? "none"}.`,
@@ -275,8 +332,22 @@ export class AndroidImeCatalog {
     return after;
   }
 
+  /** Only idempotent IME/settings reads belong here; mutations are dispatched once. */
+  private readCommand(args: string[], signal?: AbortSignal) {
+    return this.retry.executeOrThrow(
+      () =>
+        this.adb.execute(args, { signal, timeoutMs: IME_READ_COMMAND_TIMEOUT_MS, noRetry: true }),
+      {
+        maxAttempts: 2,
+        delays: 0,
+        signal,
+        shouldRetry: (error) => error instanceof AdbCommandTimeoutError,
+      },
+    );
+  }
+
   private async readImeIds(args: string[], signal?: AbortSignal): Promise<string[]> {
-    const result = await this.adb.execute(args, { signal });
+    const result = await this.readCommand(args, signal);
     if (result.stderr.trim()) {
       throw new Error(`Failed to list Android IMEs: ${result.stderr.trim()}`);
     }
@@ -292,10 +363,10 @@ export class AndroidImeCatalog {
     return [...new Set(ids)];
   }
 
-  private async readActiveIme(signal?: AbortSignal): Promise<string | null> {
-    const result = await this.adb.execute(
-      ["shell", "settings", "get", "secure", "default_input_method"],
-      { signal },
+  private async readActiveIme(userId: number, signal?: AbortSignal): Promise<string | null> {
+    const result = await this.readCommand(
+      ["shell", "settings", ...imeUserArgs(userId), "get", "secure", "default_input_method"],
+      signal,
     );
     if (result.stderr.trim()) {
       throw new Error(`Failed to read active IME: ${result.stderr.trim()}`);

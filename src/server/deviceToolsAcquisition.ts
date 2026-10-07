@@ -1,3 +1,4 @@
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
@@ -33,9 +34,11 @@ import {
   reserveStableDeviceLifecycle,
   resolveAndroidStartStableDeviceLifecycleTarget,
   runWithinShutdownDeadline,
+  setAcquisitionStage,
   validateRequestedAndroidIdentifiersBeforeBoot,
 } from "./deviceTools";
 import type {
+  AcquisitionStage,
   DevicePreparationBudgets,
   DeviceToolsDependencies,
   GetAndroidArgs,
@@ -44,9 +47,124 @@ import type {
   StartDeviceArgs,
 } from "./deviceTools";
 import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import {
+  resolveTransportDeadlineMs,
+  resolveLiveTransportDeadlineGetter,
+  resolveLiveTransportDeadlineSubscriber,
+} from "./formTools";
 
 // Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+/** Cap acquisition budgets using the live, anchored, or legacy transport contract. */
+export function acquisitionDeadlineMs(rawArgs: unknown, requestedDeadlineMs: number): number {
+  return Math.min(
+    requestedDeadlineMs,
+    resolveLiveTransportDeadlineGetter(rawArgs)?.() ??
+      resolveTransportDeadlineMs(rawArgs) ??
+      Number.POSITIVE_INFINITY,
+  );
+}
+
+/**
+ * Last-resort bound past the acquisition deadline (#6034). Inner phases fail at
+ * the deadline with their own structured errors, then may spend one settlement
+ * grace draining a cancelled step and one more on failed-acquisition cleanup;
+ * the backstop fires only after both, so it replaces nothing that would settle.
+ */
+export const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE_MS;
+
+/**
+ * Keep in-flight acquisition cancellation aligned with progress extensions, and
+ * never let a step that ignores cancellation hold the response past the deadline.
+ * The backstop rejects with the running stage while the preparation keeps its
+ * reservations until it settles. It also aborts the preparation's signal, and
+ * session binding checks that signal before it commits (#6034), so a step that
+ * succeeds late does not bind a session.
+ */
+export async function runWithAcquisitionDeadline<T>(
+  rawArgs: unknown,
+  requestedDeadlineMs: number,
+  signal: AbortSignal | undefined,
+  operationName: string,
+  operation: (deadlineMs: number, signal: AbortSignal, stage: AcquisitionStage) => Promise<T>,
+): Promise<T> {
+  const live = resolveLiveTransportDeadlineGetter(rawArgs)?.() !== undefined;
+  const timer = getDeviceToolsDependencies().timer;
+  const stage: AcquisitionStage = { current: "starting acquisition" };
+  // Cancels the preparation; `expired` ends the caller's wait on it.
+  const controller = new AbortController();
+  const expired = new AbortController();
+  let abortTimeout: NodeJS.Timeout | undefined;
+  let backstopTimeout: NodeJS.Timeout | undefined;
+  const clearTimeouts = (): void => {
+    for (const handle of [abortTimeout, backstopTimeout]) {
+      if (handle !== undefined) {
+        timer.clearTimeout(handle);
+      }
+    }
+    abortTimeout = undefined;
+    backstopTimeout = undefined;
+  };
+  const abortAtLiveDeadline = (): void =>
+    controller.abort(
+      new ActionableError(
+        `${operationName} timed out at the live MCP request deadline. Retry device acquisition.`,
+      ),
+    );
+  const expire = (): void => {
+    const error = new ActionableError(
+      `${operationName} did not finish by its MCP request deadline; the ${stage.current} stage ` +
+        `ignored cancellation and is still running. The device stays reserved until that stage ` +
+        `settles. Retry device acquisition.`,
+    );
+    logger.warn(`[DeviceTools] ${error.message}`);
+    controller.abort(error);
+    expired.abort(error);
+  };
+  const armDeadline = (): void => {
+    clearTimeouts();
+    const remainingMs = acquisitionDeadlineMs(rawArgs, requestedDeadlineMs) - timer.now();
+    if (!Number.isFinite(remainingMs)) {
+      return;
+    }
+    if (live) {
+      if (remainingMs <= 0) {
+        abortAtLiveDeadline();
+      } else {
+        abortTimeout = timer.setTimeout(abortAtLiveDeadline, remainingMs);
+      }
+    }
+    backstopTimeout = timer.setTimeout(
+      expire,
+      Math.max(0, remainingMs) + ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS,
+    );
+  };
+  const unsubscribe = live
+    ? resolveLiveTransportDeadlineSubscriber(rawArgs)?.(armDeadline)
+    : undefined;
+  armDeadline();
+  try {
+    // Internal phase budgets stay fixed under a live deadline; the signal enforces
+    // the moving transport cap across boot, readiness, and binding without
+    // freezing a phase's timer. An anchored deadline caps the phase budgets.
+    const operationSignal = signal
+      ? AbortSignal.any([signal, controller.signal])
+      : controller.signal;
+    return await raceWithDeadline(
+      () =>
+        operation(
+          live ? requestedDeadlineMs : acquisitionDeadlineMs(rawArgs, requestedDeadlineMs),
+          operationSignal,
+          stage,
+        ),
+      { timer, signal: expired.signal, label: operationName },
+    );
+  } finally {
+    unsubscribe?.();
+    clearTimeouts();
+  }
+}
 
 async function awaitFailedAcquisitionCleanup(
   cleanup: () => Promise<void>,
@@ -293,9 +411,13 @@ async function prepareDevice(
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
   const deps = getDeviceToolsDependencies();
+  const autolockEnabled = captureAutolockPolicy(deps.env);
   const deviceUtils = deps.deviceManagerFactory();
   const deviceMatcher = deps.deviceMatcherFactory();
-  const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
+  const bootDeadlineMs = Math.min(
+    deps.timer.now() + budgets.bootTimeoutMs,
+    budgets.automationDeadlineMs,
+  );
   const requestedIdentity = describeStartDeviceRequest(args);
   const state: {
     boot: DeviceBootResult | undefined;
@@ -316,6 +438,7 @@ async function prepareDevice(
   let lifecycleReservations:
     | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
     | undefined;
+  setAcquisitionStage(budgets, "reserving the device lifecycle");
   try {
     // Scope the pre-boot lifecycle reservation (runs `getDeviceImagesDetailed`
     // → `simctl list` discovery) so its commands attribute into perfTiming,
@@ -332,6 +455,7 @@ async function prepareDevice(
     );
     const coordinatedSignal =
       coordinatedSignals.length === 1 ? coordinatedSignals[0] : AbortSignal.any(coordinatedSignals);
+    setAcquisitionStage(budgets, "validating the requested device identifiers");
     // Reject a contradictory Android avdName + deviceId pair before booting,
     // so a stopped AVD is not cold-booted and killed just to report it. Run
     // after its lifecycle lease, however, so a serial not yet visible during
@@ -350,7 +474,9 @@ async function prepareDevice(
         },
       ),
     );
+    setAcquisitionStage(budgets, "booting the device");
     return await getBootAndPrepareDevice()(args, budgets, deps, deviceUtils, {
+      autolockEnabled,
       deviceMatcher: deviceMatcher,
       bootDeadlineMs: bootDeadlineMs,
       requestedIdentity: requestedIdentity,
@@ -492,30 +618,38 @@ async function getAndroidHandler(
         createIfMissing: false,
         __mcpSessionId: mcpSessionId,
       };
-  return await prepareDevice(
-    target,
-    {
-      bootTimeoutMs,
-      automationReadyTimeoutMs,
-      automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
-      operationName: "getAndroid",
-      ...(args.avdName
-        ? {
-            androidAvdName: args.avdName,
-            stableTarget: { platform: "android", stableId: args.avdName },
-            ...(args.deviceId
-              ? {
-                  requestedAndroidIdentifierPair: {
-                    avdName: args.avdName,
-                    deviceId: args.deviceId,
-                  },
-                }
-              : {}),
-          }
-        : {}),
-    },
-    progress,
+  return await runWithAcquisitionDeadline(
+    rawArgs,
+    startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
+    "getAndroid",
+    (deadlineMs, requestSignal, stage) =>
+      prepareDevice(
+        target,
+        {
+          bootTimeoutMs,
+          automationReadyTimeoutMs,
+          automationDeadlineMs: deadlineMs,
+          stage,
+          operationName: "getAndroid",
+          ...(args.avdName
+            ? {
+                androidAvdName: args.avdName,
+                stableTarget: { platform: "android", stableId: args.avdName },
+                ...(args.deviceId
+                  ? {
+                      requestedAndroidIdentifierPair: {
+                        avdName: args.avdName,
+                        deviceId: args.deviceId,
+                      },
+                    }
+                  : {}),
+              }
+            : {}),
+        },
+        progress,
+        requestSignal,
+      ),
   );
 }
 
@@ -535,24 +669,32 @@ async function getAppleHandler(
   const automationReadyTimeoutMs =
     args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_PROVISION_TIMEOUT_MS;
   const startedAtMs = getDeviceToolsDependencies().timer.now();
-  return await prepareDevice(
-    {
-      platform: "ios",
-      deviceId: udid,
-      preferRunning: true,
-      ...(presentationOrder !== undefined ? { presentationOrder } : {}),
-      createIfMissing: false,
-      __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
-    },
-    {
-      bootTimeoutMs,
-      automationReadyTimeoutMs,
-      automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
-      operationName: "getApple",
-      stableTarget: { platform: "ios", stableId: udid },
-    },
-    progress,
+  return await runWithAcquisitionDeadline(
+    rawArgs,
+    startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
+    "getApple",
+    (deadlineMs, requestSignal, stage) =>
+      prepareDevice(
+        {
+          platform: "ios",
+          deviceId: udid,
+          preferRunning: true,
+          ...(presentationOrder !== undefined ? { presentationOrder } : {}),
+          createIfMissing: false,
+          __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+        },
+        {
+          bootTimeoutMs,
+          automationReadyTimeoutMs,
+          automationDeadlineMs: deadlineMs,
+          stage,
+          operationName: "getApple",
+          stableTarget: { platform: "ios", stableId: udid },
+        },
+        progress,
+        requestSignal,
+      ),
   );
 }
 
@@ -566,7 +708,9 @@ type PrepareDevice = (
 export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
   const { getBootAndPrepareDevice } = hooks;
   const prepare: PrepareDevice = (args, budgets, progress, signal) =>
-    prepareDevice(getBootAndPrepareDevice, args, budgets, progress, signal);
+    runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
+      prepareDevice(getBootAndPrepareDevice, args, budgets, progress, signal),
+    );
   return {
     prepareDevice: prepare,
     stripInternalAcquisitionParams,

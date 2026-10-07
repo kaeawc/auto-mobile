@@ -1,3 +1,12 @@
+import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
+import {
+  DefaultDeviceResourceObserver,
+  type DeviceResourceObserver,
+} from "../utils/deviceResourceObserver";
+import {
+  unadmittedAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
@@ -101,7 +110,8 @@ import {
   defaultDisplayInventoryProvider,
   type DisplayInventoryProvider,
 } from "../devices/DisplayInventoryProvider";
-import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import type { Environment } from "../daemon/poolConfig";
+import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import {
   deleteInternalToolParams,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
@@ -250,7 +260,9 @@ const listDeviceImagesOutputSchema = z.object({
 
 const listDevicesOutputSchema = z.object({
   message: z.string(),
-  devices: z.array(listDevicesEntrySchema),
+  devices: z.array(
+    listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),
+  ),
   count: z.number(),
   discovery: z.unknown(),
   enrichment: z
@@ -297,6 +309,25 @@ const startDeviceParametersSchema = z.object({
     .optional()
     .describe(
       "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
+    ),
+  cameraPosterPath: z
+    .string()
+    .optional()
+    .describe(
+      "Host PNG/JPG/JPEG poster image for the Android emulator back camera wall; cold boot only",
+    ),
+  cameraPosterQr: z
+    .object({
+      text: z
+        .string()
+        .min(1)
+        .max(1024)
+        .describe("Payload the generated QR code encodes (UTF-8, at most ~213 bytes)"),
+    })
+    .strict()
+    .optional()
+    .describe(
+      "Generate a QR code PNG and use it as the Android emulator back camera wall poster; cold boot only. Mutually exclusive with cameraPosterPath.",
     ),
   formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
   requires: z
@@ -369,6 +400,13 @@ export const startDeviceSchema = z.preprocess(
     };
   },
   startDeviceParametersSchema.superRefine((value, context) => {
+    if (value.cameraPosterQr !== undefined && value.cameraPosterPath !== undefined) {
+      context.addIssue({
+        code: "custom",
+        path: ["cameraPosterQr"],
+        message: "cameraPosterQr and cameraPosterPath are mutually exclusive",
+      });
+    }
     if (value.avdName !== undefined && value.platform !== "android") {
       context.addIssue({
         code: "custom",
@@ -827,6 +865,8 @@ export function createToolErrorResponse(
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
+  cameraPosterPath?: string;
+  cameraPosterQr?: { text: string };
   platform: "android" | "ios";
   minOsVersion?: string;
   maxOsVersion?: string;
@@ -1048,6 +1088,10 @@ export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePool | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  aliasesForDevice: (deviceId: string) => string[] = (deviceId) =>
+    devicePool?.getAndroidTransportAliases(deviceId) ?? [],
+  transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
+    devicePool?.getAndroidTransportAvdName(deviceId),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1071,8 +1115,26 @@ export function listDevicePayloads(
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
+    if (device.platform === "android") {
+      return projectAndroidTransportDescription(
+        description,
+        aliasesForDevice(device.deviceId),
+        transportAvdNameForDevice(device.deviceId),
+      );
+    }
     return projectListDevicesEntry(description);
   });
+}
+
+function projectAndroidTransportDescription(
+  description: ReturnType<typeof describeDevice>,
+  aliases: string[],
+  avdName: string | undefined,
+) {
+  const projected = projectListDevicesEntry(
+    avdName ? { ...description, isVirtual: true, identity: { stableId: avdName } } : description,
+  );
+  return { ...projected, ...(aliases.length ? { transportAliases: aliases } : {}) };
 }
 
 /**
@@ -1250,7 +1312,12 @@ export function detailedDiscoveryOptions(
 }
 
 export interface DeviceToolsDependencies {
+  /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
+  cameraPosterQrWriter?: QrPosterWriter;
+  androidAdbFactory: AdbClientFactory;
+  env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
+  deviceResourceObserverFactory: () => DeviceResourceObserver;
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
@@ -3464,7 +3531,10 @@ let moduleDependencies: DeviceToolsDependencies | null = null;
 export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
+      androidAdbFactory: unadmittedAdbClientFactory,
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
+      deviceResourceObserverFactory: () =>
+        new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -3541,6 +3611,11 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
+    cameraPosterQrWriter: deps.cameraPosterQrWriter ?? currentDeps.cameraPosterQrWriter,
+    env: deps.env ?? currentDeps.env,
+    deviceResourceObserverFactory:
+      deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
@@ -4286,6 +4361,7 @@ export function refreshResourcesAfterCommittedBoot(
 }
 
 interface StartDeviceRunnerReadinessInput {
+  autolockEnabled?: boolean;
   boot: DeviceBootResult;
   args: StartDeviceArgs;
   operationName: string;
@@ -4310,7 +4386,7 @@ export async function prepareStartDeviceRunnerReadiness(
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   const devicePool = getStartDevicePool(input.daemonState);
   const recoveryAutolockClient =
-    isDevicePoolAutolockEnabled() && devicePool
+    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(
@@ -4591,7 +4667,18 @@ export type DevicePreparationBudgets = {
   stableTarget?: StableDeviceTarget;
   /** Android `avdName` + `deviceId` pair, validated before and after discovery. */
   requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
+  /** Running preparation stage, named when the acquisition deadline backstop fires (#6034). */
+  stage?: AcquisitionStage;
 };
+
+/** Mutable holder for the acquisition stage currently in flight. */
+export type AcquisitionStage = { current: string };
+
+export function setAcquisitionStage(budgets: DevicePreparationBudgets, stage: string): void {
+  if (budgets.stage) {
+    budgets.stage.current = stage;
+  }
+}
 
 /**
  * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the

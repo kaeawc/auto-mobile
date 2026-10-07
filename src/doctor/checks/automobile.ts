@@ -41,6 +41,7 @@ import {
 import { logger } from "../../utils/logger";
 import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
+import { checkOrphanedDaemons } from "./orphanedDaemons";
 
 export const MAX_CTRL_PROXY_DOCTOR_DEVICES = 8;
 
@@ -67,6 +68,7 @@ export interface AutoMobileCheckDependencies {
   checkDaemonStatus?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonConnectivity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkDaemonBuildIdentity?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
+  checkOrphanedDaemons?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   /** Android-branch seams so unit tests avoid real CtrlProxy/ADB I/O. */
   checkCtrlProxy?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
   checkWorkProfileAccessibility?: (probe?: DoctorProbeOptions) => Promise<CheckResult>;
@@ -717,6 +719,9 @@ export async function runAutoMobileChecks(
     (dependencies.checkDaemonBuildIdentity ?? ((probe) => checkDaemonBuildIdentity({}, probe)))(
       options,
     ),
+  );
+  await run(() =>
+    (dependencies.checkOrphanedDaemons ?? ((probe) => checkOrphanedDaemons({}, probe)))(options),
   );
 
   if (options.ios === true && options.android !== true) {

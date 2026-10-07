@@ -1,6 +1,8 @@
 import type { Platform } from "../models";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
-import { observeMissingDevice } from "./missingDeviceLiveness";
+import { isPhysicalAndroidUsbSerial } from "../utils/androidSerial";
+import type { AdbTransportRestartLookup } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
+import { MISSING_DEVICE_MISS_THRESHOLD, observeMissingDevice } from "./missingDeviceLiveness";
 
 export type DisconnectCandidateIncarnation = number | string;
 
@@ -54,6 +56,46 @@ export interface DisconnectMonitorEvaluationInput {
   candidateIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   deviceDisconnectMissIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   forceDisconnectedDeviceIds?: Set<string>;
+  /**
+   * Candidates whose absence from a successful listing is definitive, so one
+   * miss confirms the disconnect instead of the multi-sweep debounce (#10493).
+   * Build it with {@link selectImmediateDisconnectCandidates}.
+   */
+  immediateDisconnectDeviceIds?: ReadonlySet<string>;
+}
+
+/**
+ * Physical USB Android candidates absent from this sweep's booted list and not
+ * merely ADB `offline` (#10493). Unplugging a phone or dropping its transport
+ * removes it from `adb devices`, which a physical device does not do
+ * transiently the way an emulator restart or wireless transport can, so its
+ * sessions are released on the first miss. Emulators and TCP/mDNS transports
+ * keep the debounce, as does a serial whose adbd AutoMobile is restarting
+ * (`adb root`/`unroot`, plus a short grace). An unknown offline state (probe
+ * failed or skipped) selects nothing, and the evaluator still requires the
+ * Android source to have succeeded, so a failed or partial listing never
+ * fast-paths a release.
+ */
+export function selectImmediateDisconnectCandidates(
+  candidateDeviceIds: ReadonlySet<string>,
+  candidatePlatforms: ReadonlyMap<string, Platform>,
+  bootedDeviceIds: ReadonlySet<string>,
+  offlineDeviceIds: ReadonlySet<string> | undefined,
+  transportRestarts?: AdbTransportRestartLookup,
+): Set<string> {
+  if (offlineDeviceIds === undefined) {
+    return new Set();
+  }
+  return new Set(
+    [...candidateDeviceIds].filter(
+      (deviceId) =>
+        candidatePlatforms.get(deviceId) === "android" &&
+        isPhysicalAndroidUsbSerial(deviceId) &&
+        !bootedDeviceIds.has(deviceId) &&
+        !offlineDeviceIds.has(deviceId) &&
+        transportRestarts?.isRestarting(deviceId) !== true,
+    ),
+  );
 }
 
 /**
@@ -162,11 +204,13 @@ export function evaluateDeviceDisconnects(
     if (priorMisses === 0) {
       input.deviceDisconnectMisses.delete(deviceId);
     }
-    const { misses, confirmedGone } = observeMissingDevice(
-      input.deviceDisconnectMisses,
-      deviceId,
-      "missing",
-    );
+    const observed = observeMissingDevice(input.deviceDisconnectMisses, deviceId, "missing");
+    const immediate = input.immediateDisconnectDeviceIds?.has(deviceId) === true;
+    if (immediate) {
+      input.deviceDisconnectMisses.set(deviceId, MISSING_DEVICE_MISS_THRESHOLD);
+    }
+    const misses = immediate ? MISSING_DEVICE_MISS_THRESHOLD : observed.misses;
+    const confirmedGone = immediate || observed.confirmedGone;
     if (candidateIncarnation === undefined) {
       deviceDisconnectMissIncarnations.delete(deviceId);
     } else {

@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -116,7 +117,7 @@ export class DeviceCapabilitiesDetector {
     return this.adb.executeCommand(
       command,
       Math.min(REFRESH_RATE_PROBE_TIMEOUT_MS, remainingBudget),
-      undefined,
+      DUMPSYS_MAX_BUFFER,
       true,
     );
   }

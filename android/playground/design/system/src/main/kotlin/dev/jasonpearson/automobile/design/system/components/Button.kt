@@ -41,7 +41,8 @@ fun AutoMobileButton(
             else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.38f),
           cornerRadius = AutoMobileDimensions.buttonHeight / 2f,
           seed = 11L,
-        ),
+        )
+        .crayonGrain(ButtonDefaults.shape),
     enabled = enabled,
     colors =
       ButtonDefaults.buttonColors(
@@ -66,7 +67,10 @@ fun AutoMobileSecondaryButton(
 ) {
   FilledTonalButton(
     onClick = onClick,
-    modifier = modifier.height(AutoMobileDimensions.buttonHeight),
+    modifier =
+      modifier
+        .height(AutoMobileDimensions.buttonHeight)
+        .crayonGrain(ButtonDefaults.filledTonalShape),
     enabled = enabled,
     colors =
       ButtonDefaults.filledTonalButtonColors(
@@ -96,7 +100,8 @@ fun AutoMobileOutlinedButton(
           color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.38f),
           cornerRadius = 14.dp,
           seed = 5L,
-        ),
+        )
+        .crayonGrain(ButtonDefaults.outlinedShape),
     enabled = enabled,
     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
     border = null,
@@ -116,7 +121,7 @@ fun AutoMobileTextButton(
 ) {
   TextButton(
     onClick = onClick,
-    modifier = modifier,
+    modifier = modifier.crayonGrain(ButtonDefaults.textShape),
     enabled = enabled,
     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
     contentPadding = contentPadding,

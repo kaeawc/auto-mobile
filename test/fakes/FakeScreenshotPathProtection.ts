@@ -4,6 +4,8 @@ import type { Timer } from "../../src/utils/SystemTimer";
 
 export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
   readonly calls: string[] = [];
+  readonly sweepCalls: string[] = [];
+  private readonly sweptDirectories = new Set<string>();
   private readonly deadlines = new Map<string, number>();
   constructor(private readonly timer: Timer) {}
   async protect(path: string): Promise<number> {
@@ -14,6 +16,13 @@ export class FakeScreenshotPathProtection implements ScreenshotPathProtection {
   }
   start(): void {}
   async sweep(): Promise<void> {}
+  async sweepOnce(directory: string): Promise<void> {
+    if (!this.sweptDirectories.has(directory)) {
+      this.sweptDirectories.add(directory);
+      this.sweepCalls.push(directory);
+      await this.sweep(directory);
+    }
+  }
   async write(
     _path: string,
     operation: import("../../src/features/observe/ScreenshotRetention").ScreenshotRetentionWrite,

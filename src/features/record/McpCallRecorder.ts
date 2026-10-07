@@ -64,8 +64,6 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
   "stageSessionDownloads",
 ]);
 
@@ -163,12 +161,7 @@ function findOversizedParam(params: Record<string, unknown>): string | undefined
 }
 
 /** Tools that write caller-supplied files, from a host path or inline content. */
-const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set([
-  "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
-  "stageSessionDownloads",
-]);
+const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set(["putAppFile", "stageSessionDownloads"]);
 
 function hasSourcePath(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && "sourcePath" in entry;
@@ -286,7 +279,28 @@ export class McpCallRecorder {
         `${toolName} was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand`,
       );
     }
-    this.steps.push({ tool: toolName, params: recorded });
+    const context = args.__tapAtRecordingContext as
+      | import("../../models/TapAtGeometry").TapAtPlanContext
+      | undefined;
+    const geometry = toolName === "tapAt" ? context?.recordedGeometry : undefined;
+    if (toolName === "tapAt" && context && !geometry) {
+      const warning =
+        "tapAt was recorded without geometry: native geometry provenance is unavailable; observe with rotation metadata and record again to capture provenance";
+      logger.warn(`[McpCallRecorder] ${warning}`);
+      this.warnings.push(warning);
+    }
+    if (geometry) {
+      const nativeParams = { ...recorded };
+      delete nativeParams.image;
+      delete nativeParams.coordinateSpace;
+      this.steps.push({
+        tool: toolName,
+        params: { ...nativeParams, x: geometry.x, y: geometry.y },
+        geometry,
+      });
+    } else {
+      this.steps.push({ tool: toolName, params: recorded });
+    }
     logger.info(`[McpCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 

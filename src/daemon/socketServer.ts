@@ -196,6 +196,11 @@ import {
 } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
 import {
+  processGenerationRecordFields,
+  recordedProcessGenerationToken,
+} from "./processGenerationFields";
+import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
 } from "./deviceSessionResolver";
@@ -813,12 +818,15 @@ export class UnixSocketServer {
   private serverClosePromise: Promise<void> | null = null;
   private closing = false;
   private acceptingRequests = false;
+  /** Largest inbound frame a control-socket peer may send; tests lower it. */
+  private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
   private lifecycleGeneration = 0;
   private socketFileIdentity: SocketFileIdentity | null = null;
   private readonly adbClientFactory: AdbClientFactory;
   private sessions: Map<string, SessionContext> = new Map();
   /** Live client sockets by session ID, for server-pushed notification frames (issue #3223). */
   private clientSockets: Map<string, Socket> = new Map();
+  private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
   private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
   private readonly backpressuredSocketIdle = new WeakMap<
@@ -1181,10 +1189,8 @@ export class UnixSocketServer {
 
     this.sessions.set(sessionId, session);
     this.clientSockets.set(sessionId, socket);
+    this.acceptedClientConnections++;
     logger.info(`New client connection: ${sessionId}`);
-
-    let buffer = "";
-    const decoder = new TextDecoder();
 
     // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
     // writes must no longer extend the lifetime of a peer that is not reading.
@@ -1250,23 +1256,31 @@ export class UnixSocketServer {
       socket.on("finish", () => this.traceFrame("socket_finish", "*"));
     }
 
-    socket.on("data", (data) => {
-      refreshIdle();
-      const receivedAtMs = this.timer.now();
-      buffer += typeof data === "string" ? data : decoder.decode(data, { stream: true });
-
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      // Parse each chunk synchronously and track each frame on its own. A held
-      // device call must not keep another frame attached to its chunk's
-      // completion promise (issue #6387).
-      for (const line of lines) {
+    // Frames are delivered synchronously from `framer.push`, so every frame of a
+    // chunk sees that chunk's receive time.
+    let receivedAtMs = this.timer.now();
+    const framer = new LineFramer(this.maxInboundFrameBytes, {
+      // Parse each frame synchronously and track it on its own. A held device
+      // call must not keep another frame attached to its chunk's completion
+      // promise (issue #6387).
+      onLine: (line) => {
         if (line.trim()) {
           this.trackRequestHandler(
             this.processSocketRequestLine(sessionId, socket, line, receivedAtMs),
           );
         }
+      },
+      onOverflow: () => this.rejectOversizedFrame(sessionId, socket),
+    });
+    socket.on("data", (data) => {
+      // After an overflow the socket only waits for its error reply to flush;
+      // further bytes must not keep it alive past the idle timeout.
+      if (framer.hasOverflowed) {
+        return;
       }
+      refreshIdle();
+      receivedAtMs = this.timer.now();
+      framer.push(data);
     });
 
     socket.on("close", (hadError) => {
@@ -1295,6 +1309,30 @@ export class UnixSocketServer {
         logger.error(`Socket error for ${sessionId}:`, error);
       }
       this.releaseSocketSession(sessionId, socket);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    });
+  }
+
+  /**
+   * A peer sent a frame larger than the control socket accepts. Answer with a
+   * structured error (the request id is unknowable because the frame was never
+   * completed), then drop the connection once the reply is flushed. Other
+   * sockets are unaffected.
+   */
+  private rejectOversizedFrame(sessionId: string, socket: Socket): void {
+    logger.warn(
+      `Daemon RPC socket ${sessionId} sent a frame over ${this.maxInboundFrameBytes} bytes; rejecting`,
+    );
+    const errorResponse: DaemonResponse = {
+      id: null,
+      type: "mcp_response",
+      success: false,
+      error: "Invalid request: frame too large",
+      code: -32600,
+    };
+    this.writeFrame(socket, sessionId, errorResponse, () => {
       if (!socket.destroyed) {
         socket.destroy();
       }
@@ -4202,7 +4240,7 @@ export class UnixSocketServer {
   ): Promise<{ accepted: boolean; reason?: string }> {
     if (
       !this.daemonGenerationMatches(params) ||
-      params.processGenerationToken !== this.processGenerationToken ||
+      recordedProcessGenerationToken(params) !== this.processGenerationToken ||
       params.processStartedAt !== this.identityProcessStartedAt
     ) {
       return { accepted: false, reason: "generation_changed" };
@@ -4724,9 +4762,7 @@ export class UnixSocketServer {
           reportedSockets: this.identitySockets,
           effectiveDebug: isDebugModeEnabled(),
           options: this.startupOptions,
-          ...(this.processGenerationToken === undefined
-            ? {}
-            : { processGenerationToken: this.processGenerationToken }),
+          ...processGenerationRecordFields(this.processGenerationToken),
           activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
             scope: "global",
           }),
@@ -7246,6 +7282,16 @@ export class UnixSocketServer {
    */
   isListening(): boolean {
     return this.server !== null && this.server.listening;
+  }
+
+  /** Connected control-socket clients (orphaned private-daemon watchdog, #10497). */
+  getClientConnectionCount(): number {
+    return this.clientSockets.size;
+  }
+
+  /** Monotonic count of control-socket connections accepted (orphan watchdog, #10497). */
+  getAcceptedClientConnectionCount(): number {
+    return this.acceptedClientConnections;
   }
 
   /**

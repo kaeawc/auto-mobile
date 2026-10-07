@@ -59,6 +59,7 @@ export function registerAccessibilityFocusTools() {
       focusedElement: result.focusedElement,
       confirmed: result.confirmed,
       warning: result.warning,
+      ...(result.alreadySatisfied ? { alreadySatisfied: true } : {}),
     });
   };
 

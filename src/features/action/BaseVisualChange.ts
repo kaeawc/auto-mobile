@@ -2,6 +2,7 @@ import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -72,6 +73,7 @@ import {
 } from "../observe/automaticScreenshotPolicy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
+import { withForwardDeliveredNote } from "./swipeon/boomerangReturnLeg";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -155,6 +157,13 @@ interface ObservedChangeOptions {
   changeExpected: boolean;
   /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
   foregroundAppMayChange?: boolean;
+  /**
+   * A non-retryable failed block that reports `partialApplication` (a boomerang whose return leg
+   * failed after the forward swipe landed) still gets the post-action observation on iOS, as on
+   * Android, so the caller sees where the content ended up. Unconfirmed text, which also reports
+   * `retryable: false`, keeps returning before any post-action read.
+   */
+  observePartialApplication?: boolean;
   /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
   usesObservationForResolution?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
@@ -249,7 +258,7 @@ export class BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
-    displayFence: DisplayFenceDependencies = {},
+    displayFence: DisplayFenceDependencies & { observeScreen?: ObserveScreen } = {},
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
@@ -269,7 +278,10 @@ export class BaseVisualChange {
       this.adb = this.adbFactory.create(device);
     }
     this.awaitIdle = new AwaitIdle(device, this.adbFactory);
-    this.observeScreen = new RealObserveScreen(device, this.adbFactory);
+    // Honor the observer seam before constructing defaults: RealObserveScreen's
+    // screenshot service starts host filesystem work and retention timers.
+    this.observeScreen =
+      displayFence.observeScreen ?? new RealObserveScreen(device, this.adbFactory);
     // Forward the injected clock so the internal Window shares this instance's
     // timer: home-verification derives its outer deadline from `this.timer`, and
     // Window derives the per-subread budgets from ITS timer — they must be the
@@ -317,6 +329,27 @@ export class BaseVisualChange {
    * @param options - Options controlling observation behavior
    */
   async observedInteraction(
+    block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
+    options: ObservedChangeOptions,
+  ): Promise<any> {
+    if (!options.observePartialApplication) {
+      return this.runObservedInteraction(block, options);
+    }
+    // A partial result carries "the forward swipe was delivered"; a cancel during the observation
+    // that follows must keep that note instead of reading as a plain cancellation.
+    let partiallyApplied = false;
+    try {
+      return await this.runObservedInteraction(async (observeResult, fence) => {
+        const result = await block(observeResult, fence);
+        partiallyApplied = result?.success === false && result.partialApplication === true;
+        return result;
+      }, options);
+    } catch (error) {
+      throw partiallyApplied && options.signal?.aborted ? withForwardDeliveredNote(error) : error;
+    }
+  }
+
+  private async runObservedInteraction(
     block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
     options: ObservedChangeOptions,
   ): Promise<any> {
@@ -401,9 +434,7 @@ export class BaseVisualChange {
         });
       } catch (error) {
         if (knownWrongWindow && options.usesObservationForResolution !== false) {
-          throw new ActionableError("Cannot perform action without view hierarchy", {
-            cause: error,
-          });
+          throw new MissingViewHierarchyError({ cause: error });
         }
         logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
@@ -427,7 +458,7 @@ export class BaseVisualChange {
           (!previousObserveResult.viewHierarchy ||
             previousObserveResult.viewHierarchy.hierarchy.error))
       ) {
-        throw new ActionableError("Cannot perform action without view hierarchy");
+        throw new MissingViewHierarchyError();
       }
       if (resolutionGeneration !== undefined && !hasWrongWindowEvidence(previousObserveResult)) {
         completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
@@ -485,7 +516,8 @@ export class BaseVisualChange {
     if (
       this.device.platform === "ios" &&
       blockResult?.success === false &&
-      blockResult.retryable === false
+      blockResult.retryable === false &&
+      !(options.observePartialApplication && blockResult.partialApplication === true)
     ) {
       perf.end();
       return blockResult;

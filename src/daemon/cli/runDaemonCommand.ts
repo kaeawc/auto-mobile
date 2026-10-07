@@ -33,6 +33,7 @@ import {
 } from "../types";
 import type { AcceptanceSessionRestartScope } from "../daemonRestartAdmission";
 import { parseDaemonArgs } from "./daemonArgs";
+import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 
 /**
  * Run daemon management command
@@ -336,6 +337,11 @@ async function runDaemonDiagnosticsCommand(command: string, manager: DaemonManag
       case "status": {
         const status = await manager.status();
         printDaemonStatus(status, manager);
+        for (const line of await describeForeignForwardLeaseHolders(
+          status.running ? status.pid : undefined,
+        )) {
+          console.log(line);
+        }
         break;
       }
 

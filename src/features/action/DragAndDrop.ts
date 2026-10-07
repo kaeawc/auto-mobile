@@ -16,6 +16,10 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import {
+  assertAppGestureNotUnderOverlay,
+  scopeHierarchyForSelector,
+} from "../observe/hierarchyLayer";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
@@ -518,20 +522,15 @@ export class DragAndDrop extends BaseVisualChange {
       observationScreenSize: options.observation.screenSize,
       display: options.observation.viewHierarchy,
     };
-    const source = this.resolveTarget(
-      hierarchy,
-      { ...options.source, screenSizeOptions },
-      "source",
-    );
-    const target = this.resolveTarget(
-      hierarchy,
-      { ...options.target, screenSizeOptions },
-      "target",
-    );
-    return {
-      sourcePoint: this.geometry.getElementCenter(source),
-      targetPoint: this.geometry.getElementCenter(target),
-    };
+    // `layer` scopes both endpoints; the overlay check runs on the unscoped capture (#9305).
+    const scoped = scopeHierarchyForSelector(hierarchy, options.layer);
+    const source = this.resolveTarget(scoped, { ...options.source, screenSizeOptions }, "source");
+    const target = this.resolveTarget(scoped, { ...options.target, screenSizeOptions }, "target");
+    const sourcePoint = this.geometry.getElementCenter(source);
+    const targetPoint = this.geometry.getElementCenter(target);
+    assertAppGestureNotUnderOverlay(hierarchy, options.layer, sourcePoint, "drag from");
+    assertAppGestureNotUnderOverlay(hierarchy, options.layer, targetPoint, "drop");
+    return { sourcePoint, targetPoint };
   }
 
   private resolveTarget(

@@ -25,6 +25,7 @@ import {
   RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
+import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
@@ -762,6 +763,21 @@ function validateCameraPosterPlatform(args: StartDeviceArgs): void {
       "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
     );
   }
+  if (args.cameraPosterQr !== undefined && args.platform !== "android") {
+    throw new ActionableError(
+      "cameraPosterQr is unsupported on iOS. Use a stopped Android emulator.",
+    );
+  }
+}
+
+/** Replace `cameraPosterQr` with the rendered poster's `cameraPosterPath`. */
+async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promise<T> {
+  const { cameraPosterQr, ...rest } = args;
+  if (cameraPosterQr === undefined) {
+    return args;
+  }
+  const writer = getDeviceToolsDependencies().cameraPosterQrWriter ?? new FileQrPosterWriter();
+  return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
 }
 
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
@@ -779,18 +795,24 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     };
     validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
-    const target = {
-      ...args,
-      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
-    };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await runWithAcquisitionDeadline(
       rawArgs,
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
       "startDevice",
-      (deadlineMs, requestSignal, stage) =>
-        prepareDevice(
+      async (deadlineMs, requestSignal, stage) => {
+        // Poster rendering runs under the acquisition deadline and cancellation.
+        const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
+          timer: getDeviceToolsDependencies().timer,
+          signal: requestSignal,
+          label: "startDevice camera poster",
+        });
+        const target = {
+          ...resolvedArgs,
+          ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+        };
+        return prepareDevice(
           target,
           {
             bootTimeoutMs: totalTimeoutMs,
@@ -816,7 +838,8 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
           },
           progress,
           requestSignal,
-        ),
+        );
+      },
     );
   };
 

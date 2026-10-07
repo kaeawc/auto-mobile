@@ -26,6 +26,8 @@ import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSess
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { ExecutionTracker } from "../../src/server/executionTracker";
+import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
+import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -1160,6 +1162,154 @@ describe("handleDaemonRequest", () => {
         identityUnresolved: true,
       },
     ]);
+  });
+
+  test("reports a device's lease status for a would-be lease taker (#10497)", async () => {
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+    );
+    spyOn(sessionManager, "getSessionForDevice").mockImplementation((deviceId) =>
+      deviceId === "emulator-5600" ? "session-abc" : null,
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.result).toMatchObject({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: "session-abc",
+      activeExecutions: 0,
+      streaming: false,
+    });
+    expect(
+      (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
+    ).toBe(false);
+  });
+
+  test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {
+    class ActivityState extends FakeDaemonState {
+      getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {
+        return {
+          sessionForDevice: () => null,
+          activeExecutionCount: () => 0,
+          toolIdleForMs: () => null,
+          hasStreamSubscriber: () => false,
+          clientActivity: () => ({ inFlightRequests: 2, idleForMs: 1_500 }),
+        };
+      }
+    }
+    const state = new ActivityState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.result).toEqual({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: null,
+      activeExecutions: 0,
+      inFlightRequests: 2,
+      streaming: false,
+      idleForMs: 1_500,
+    });
+  });
+
+  describe("daemon/relinquishDeviceLease (#10506 review)", () => {
+    function relinquishState(activity: { inFlightRequests: number; idleForMs: number | null }) {
+      const events: string[] = [];
+      class RelinquishState extends FakeDaemonState {
+        getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {
+          return {
+            sessionForDevice: () => null,
+            activeExecutionCount: () => 0,
+            toolIdleForMs: () => null,
+            hasStreamSubscriber: () => false,
+            clientActivity: () => {
+              events.push("activity-read");
+              // Anything the owner's event loop runs next lands after this.
+              queueMicrotask(() => events.push("next-microtask"));
+              return activity;
+            },
+          };
+        }
+        getDeviceLeaseRelinquishPort(): DeviceLeaseRelinquishPort {
+          return {
+            idleMs: 60_000,
+            release: async (deviceId) => {
+              events.push(`release:${deviceId}`);
+            },
+          };
+        }
+      }
+      const state = new RelinquishState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+      );
+      return { state, events };
+    }
+
+    test("releases an idle device in the same step as the use check", async () => {
+      const { state, events } = relinquishState({ inFlightRequests: 0, idleForMs: 120_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({
+        pid: process.pid,
+        deviceId: "emulator-5600",
+        released: true,
+        reason: "it reports no live session or recent activity",
+      });
+      // No other work can start between the check and the eviction.
+      expect(events).toEqual(["activity-read", "release:emulator-5600", "next-microtask"]);
+    });
+
+    test("keeps a device it is using and does not release it", async () => {
+      const { state, events } = relinquishState({ inFlightRequests: 1, idleForMs: 120_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({
+        released: false,
+        reason: "it has 1 CtrlProxy request(s) in flight on emulator-5600",
+      });
+      expect(events).not.toContain("release:emulator-5600");
+    });
+
+    test("keeps a recently used device as a transient refusal", async () => {
+      const { state } = relinquishState({ inFlightRequests: 0, idleForMs: 5_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({ released: false, transient: true });
+    });
+
+    test("rejects a request without a device id", async () => {
+      const { state } = relinquishState({ inFlightRequests: 0, idleForMs: null });
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", {}),
+        state,
+      );
+      expect(response.success).toBe(false);
+    });
   });
 
   test("returns an empty device-session list when no devices are connected", async () => {

@@ -396,6 +396,45 @@ describe("computeFreshness", () => {
         expect(v.warning).toContain("isAccessibilityTool");
       });
 
+      test("a build that already declares isAccessibilityTool is not told to update (#6233)", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          unavailable: true,
+          incompleteCapture: { sdkInt: 34, reason: "null_root", accessibilityTool: true },
+        });
+        expect(v.warning).toContain("already declares isAccessibilityTool");
+        expect(v.warning).toContain("will not help");
+        expect(v.warning).not.toContain("Update CtrlProxy");
+      });
+
+      test("isAccessibilityTool false or unknown still names the update (#6233)", () => {
+        for (const accessibilityTool of [false, undefined]) {
+          const v = computeFreshness({
+            actualTimestamp: NOW,
+            now: NOW,
+            unavailable: true,
+            incompleteCapture: { sdkInt: 34, reason: "null_root", accessibilityTool },
+          });
+          expect(v.warning).toContain("Update CtrlProxy");
+        }
+      });
+
+      test("status-bar-only capture from a declaring build is not told to update (#6233)", () => {
+        const v = computeFreshness({
+          actualTimestamp: NOW,
+          now: NOW,
+          statusBarOnlyHierarchy: {
+            foreground: "com.android.settings",
+            ctrlProxyIncomplete: true,
+            sdkInt: 34,
+            accessibilityTool: true,
+          },
+        });
+        expect(v.warning).toContain("already declares isAccessibilityTool");
+        expect(v.warning).not.toContain("Update CtrlProxy");
+      });
+
       test("an absent reason (pre-#6172 runner) preserves the historical null-root diagnosis", () => {
         const v = computeFreshness({
           actualTimestamp: NOW,

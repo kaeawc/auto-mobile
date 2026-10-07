@@ -29,7 +29,7 @@ export function buildObservationScreenshotUri(deviceId: string, observationId: s
 
 /**
  * How long reading an observation screenshot waits for a capture that is still in flight. Host
- * consumers that read the resource on a caller's behalf (the overlay tool's asset sources) budget
+ * consumers that read the resource on a caller's behalf (the prototype tool's asset sources) budget
  * their request deadline with it.
  */
 export const OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;

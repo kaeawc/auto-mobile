@@ -59,6 +59,18 @@ const DEFAULT_FRESH_WAIT_MS = 1000;
  * the caller via the `HierarchySyncDiagnostics` out-parameter. Module-private: it is an internal
  * control-flow signal, not part of any public contract.
  */
+/**
+ * The bound service's runtime `isAccessibilityTool` (#6233), carried only when the runner reported a
+ * boolean; the runner serializes an unknown value as JSON null, which stays omitted (unknown).
+ */
+function accessibilityToolSpread(hierarchy: AccessibilityHierarchy): {
+  accessibilityTool?: boolean;
+} {
+  return typeof hierarchy.accessibilityTool === "boolean"
+    ? { accessibilityTool: hierarchy.accessibilityTool }
+    : {};
+}
+
 class HierarchyRunnerError extends Error {
   constructor(readonly runnerError: string) {
     super(runnerError);
@@ -1259,6 +1271,7 @@ export class CtrlProxyHierarchy {
           // The API level decides whether a rootless incomplete capture can be Android 14+
           // data-sensitive withholding (issue #6151), so keep it on this branch too.
           sdkInt: accessibilityHierarchy.sdkInt,
+          ...accessibilityToolSpread(accessibilityHierarchy),
           // Carry the #4548 scale metadata through the rootless / UIAutomator-fallback branch too,
           // so #4549 can consume it regardless of which route produced the hierarchy. Same
           // all-or-nothing validator as the main return and client retention.
@@ -1311,6 +1324,7 @@ export class CtrlProxyHierarchy {
         sdkInt: accessibilityHierarchy.sdkInt,
         deviceModel: accessibilityHierarchy.deviceModel,
         isEmulator: accessibilityHierarchy.isEmulator,
+        ...accessibilityToolSpread(accessibilityHierarchy),
         truncationReasons: accessibilityHierarchy.truncationReasons,
         // Additive scale metadata (#4548), retained for #4549. All-or-nothing via the shared
         // validator (same rule as client retention): the three keys are spread only when the whole

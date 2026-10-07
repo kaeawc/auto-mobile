@@ -11,9 +11,11 @@ import {
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
+  compareProcessGenerationTokens,
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "./processGeneration";
+import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
 import type { AuxiliaryDaemonSocketName, PidFileData } from "./types";
 import { compareStrictNumericVersions } from "../utils/deviceMatcher";
@@ -644,7 +646,7 @@ export interface PidFileLiveDaemonSessionIdProviderDependencies {
   readProcessGenerationToken?: (pid: number) => string | undefined;
 }
 
-function readProcessGenerationTokenForPid(pid: number): string | undefined {
+export function readProcessGenerationTokenForPid(pid: number): string | undefined {
   if (process.platform === "darwin") {
     return readDarwinProcessGenerationToken(pid);
   }
@@ -652,6 +654,48 @@ function readProcessGenerationTokenForPid(pid: number): string | undefined {
     return readLinuxProcessGenerationToken(pid);
   }
   return undefined;
+}
+
+/**
+ * Whether a PID record names a process generation that has DEFINITELY exited
+ * while its PID is now held by another process. Only a recorded
+ * process generation token (either record field) that differs from a token actually read from the live
+ * PID is proof. Every uncertain input (no recorded token, no readable live
+ * token, a reader failure, a record carrying only a wall-clock birth time)
+ * returns false so the caller keeps treating the PID as the recorded process;
+ * this never decides "dead" on a guess. Tokens from different schemes (for
+ * example a record written by an older build) are not comparable and so are
+ * never proof either. Shared by peer-liveness discovery, the
+ * daemon manager's start/stop bookkeeping and the bind guard's incumbent check
+ * (issue #10108).
+ */
+export function isConfirmedRecycledProcess(
+  pid: number,
+  record: { processGenerationToken?: unknown; processGenerationTokenUtc?: unknown },
+  readProcessGenerationToken: (pid: number) => string | undefined,
+  source: string,
+): boolean {
+  const recordedToken = recordedProcessGenerationToken(record);
+  if (recordedToken === undefined) {
+    // Fully legacy or birth-time-only records have no opaque token to compare
+    // (the direct cross-platform PID probes expose only opaque tokens), so
+    // uncertainty must preserve the recorded process as live.
+    return false;
+  }
+  try {
+    const currentToken = readProcessGenerationToken(pid);
+    return (
+      typeof currentToken === "string" &&
+      compareProcessGenerationTokens(recordedToken, currentToken) === "different"
+    );
+  } catch (error) {
+    logger.warn(
+      `Failed to read process generation token for live PID ${pid} from ${source}: ${error}`,
+      error,
+    );
+    // The reader failure leaves ownership uncertain, so preserve the process.
+    return false;
+  }
 }
 
 /**
@@ -706,30 +750,7 @@ export class PidFileLiveDaemonSessionIdProvider implements LiveDaemonSessionIdPr
     pidData: Record<string, unknown>,
     pidFile: string,
   ): boolean {
-    const recordedToken = pidData.processGenerationToken;
-    if (typeof recordedToken === "string") {
-      try {
-        const currentToken = this.readProcessGenerationToken(pid);
-        return typeof currentToken === "string" && currentToken !== recordedToken;
-      } catch (error) {
-        logger.warn(
-          `Failed to read process generation token for live PID ${pid} from ${pidFile}: ${error}`,
-          error,
-        );
-        // The reader failure leaves ownership uncertain, so preserve the peer.
-        return false;
-      }
-    }
-
-    if (typeof pidData.processStartedAt === "number") {
-      // The direct cross-platform PID probes expose only opaque tokens. Without
-      // a recorded token, no current wall-clock start value exists to compare.
-      return false;
-    }
-
-    // Fully legacy records have no birth identity to compare. Uncertainty must
-    // preserve the peer rather than downgrade its sessions to recoverable.
-    return false;
+    return isConfirmedRecycledProcess(pid, pidData, this.readProcessGenerationToken, pidFile);
   }
 
   collectLiveDaemonSessionIds(): ReadonlySet<string> {

@@ -4,7 +4,7 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { nodeAttributes, type NodeAttributes } from "../../models/ViewHierarchyResult";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import {
@@ -204,15 +204,17 @@ function tapPropertiesFor(element: Element): NodeAttributes {
  * (list rows) onto the first row. Uniqueness and occurrence are measured through
  * the same {@link ElementSelector} tapOn uses, with tapOn's own options, so they
  * see exactly its matches: a bare Compose id matching a qualified one, and
- * off-screen matches dropped before `index` applies. Prefer a unique resource-id,
- * then unique text / content-desc / iOS label (all matched by the text selector),
- * and otherwise pin the occurrence with tapOn's on-screen `index`.
+ * off-screen and actionless matches dropped before `index` applies, labels promoted
+ * to their actionable owner (#10268). Prefer a resource-id with exactly one match,
+ * then text / content-desc / iOS label with exactly one match (all matched by the
+ * text selector; a selector with no match, such as an IME key's label, is not
+ * unique), and otherwise pin the occurrence with tapOn's on-screen `index`.
  * Returns null when the element has no selector at all.
  */
 export function tapSelectorFor(
   element: Element,
   viewHierarchy: ViewHierarchyResult,
-  selector: ElementSelector = new DefaultElementSelector(),
+  selector: ElementSelector = new ResolverElementSelector(),
 ): TapSelector | null {
   const properties = tapPropertiesFor(element);
   const id = asString(properties["resource-id"]);
@@ -238,7 +240,7 @@ export function tapSelectorFor(
         }),
     });
   }
-  const unique = candidates.find((candidate) => candidate.select().totalMatches <= 1);
+  const unique = candidates.find((candidate) => candidate.select().totalMatches === 1);
   if (unique) {
     return unique.selector;
   }

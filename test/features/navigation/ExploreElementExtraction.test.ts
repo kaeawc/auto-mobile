@@ -14,7 +14,7 @@ import {
   filterUnexhaustedElements,
   tapSelectorFor,
 } from "../../../src/features/navigation/ExploreElementExtraction";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
 import { isLoginScreen } from "../../../src/features/navigation/ExploreBlockerDetection";
@@ -87,11 +87,10 @@ describe("ExploreElementExtraction", () => {
 
         expect(element.node).toBeUndefined();
         expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Skip" });
-        // DefaultElementSelector matches the non-clickable label. TapOnElement
-        // promotes it to its clickable ancestor (covered in Explore.test.ts).
-        const selected = new DefaultElementSelector().selectByText(hierarchy, "Skip");
-        expect(selected.element?.bounds).toEqual(child.bounds);
-        expect(selected.element?.clickable).toBe("false");
+        // The resolver promotes the non-clickable label to its clickable owner (#10268).
+        const selected = new ResolverElementSelector().selectByText(hierarchy, "Skip");
+        expect(selected.element?.bounds).toEqual(parent.bounds);
+        expect(selected.element?.clickable).toBe("true");
       });
     }
 
@@ -111,7 +110,7 @@ describe("ExploreElementExtraction", () => {
         expect(candidate).toBeDefined();
         const target = tapSelectorFor(candidate!, capture.viewHierarchy);
         expect(target).toHaveProperty("text", text);
-        const selected = new DefaultElementSelector().selectByText(
+        const selected = new ResolverElementSelector().selectByText(
           capture.viewHierarchy,
           text,
           target ?? {},
@@ -135,11 +134,11 @@ describe("ExploreElementExtraction", () => {
       });
       const hierarchy = createMockViewHierarchy(parents);
       const elements = extractNavigationElements(hierarchy, elementParser);
-      const selector = new DefaultElementSelector();
+      const selector = new ResolverElementSelector();
       for (const [index, element] of elements.entries()) {
         expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Next", index });
         expect(selector.selectByText(hierarchy, "Next", { index }).element?.bounds).toEqual(
-          parents[index].node?.[0].bounds,
+          parents[index].bounds,
         );
         expect(getElementKey(element, hierarchy)).toBe(`sel-text:Next#${index}`);
       }

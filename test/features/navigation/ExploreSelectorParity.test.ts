@@ -7,17 +7,11 @@ import type { ElementSelectionResult } from "../../../src/models/ElementSelectio
 import type { ElementSelector } from "../../../src/utils/interfaces/ElementSelector";
 import { getStructuredPayload } from "../../../src/utils/toolUtils";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
   ElementResolver,
   type ElementResolution,
 } from "../../../src/features/utility/ElementResolver";
-import {
-  isElementCenterOffScreen,
-  screenSizeForOffscreenCheck,
-} from "../../../src/features/utility/ElementGeometry";
 import { getHierarchyNodeSource } from "../../../src/features/observe/output/elementProvenance";
 import {
   extractNavigationElements,
@@ -153,257 +147,172 @@ function selectionRecord(result: ElementSelectionResult, nodes: ViewHierarchyNod
   };
 }
 
-function compareInput(capture: ViewHierarchyResult, nodes: ViewHierarchyNode[], input: Input) {
-  const finder = new DefaultElementFinder();
-  const old = new DefaultElementSelector(finder);
+function traceInput(capture: ViewHierarchyResult, nodes: ViewHierarchyNode[], input: Input) {
   const recording = new RecordingResolver();
   const resolver = new ResolverElementSelector(recording);
-  const oldFirst = select(old, capture, input);
-  const resolverFirst = select(resolver, capture, input);
-  const raw =
-    input.kind === "id"
-      ? finder.findElementsByResourceId(capture, input.value, null, false, false)
-      : finder.findElementsByText(capture, input.value, null, true, false, false, true);
-  const screen = screenSizeForOffscreenCheck(capture);
-  const oldVisible = raw.filter((element) => !isElementCenterOffScreen(element.bounds, screen));
-  const resolverCandidates = recording.last!.candidates.map((entry) =>
+  const first = select(resolver, capture, input);
+  const candidates = recording.last!.candidates.map((entry) =>
     elementRecord(entry.element ?? null, nodes),
   );
-  const oldCandidates = oldVisible.map((element) => elementRecord(element, nodes));
-  const candidateOrderAgrees = JSON.stringify(oldCandidates) === JSON.stringify(resolverCandidates);
-  const indices: (number | undefined)[] = [
-    undefined,
-    ...Array.from(
-      { length: Math.max(oldFirst.totalMatches, resolverFirst.totalMatches) },
-      (_, index) => index,
-    ),
-  ];
-  const rows = indices.map((index) => {
-    const left = selectionRecord(
-      index === undefined ? oldFirst : select(old, capture, input, index),
-      nodes,
-    );
-    const right = selectionRecord(
-      index === undefined ? resolverFirst : select(resolver, capture, input, index),
-      nodes,
-    );
-    return {
-      index: index ?? "first",
-      old: left,
-      resolver: right,
-      agrees: candidateOrderAgrees && JSON.stringify(left) === JSON.stringify(right),
-    };
-  });
-  return {
-    ...input,
-    rawCandidates: raw.map((element) => ({
-      element: elementRecord(element, nodes),
-      onScreen: !isElementCenterOffScreen(element.bounds, screen),
-    })),
-    oldCandidates,
-    resolverCandidates,
-    candidateOrderAgrees,
-    rows,
-  };
+  const indexed = Array.from({ length: first.totalMatches }, (_, index) =>
+    selectionRecord(select(resolver, capture, input, index), nodes),
+  );
+  return { ...input, candidates, first: selectionRecord(first, nodes), indexed };
 }
 
-function compareFixture(name: string) {
+function traceFixture(name: string) {
   const capture = loadCapture(name);
   const nodes = captureNodes(capture);
-  const inputs = inputsFrom(nodes).map((input) => compareInput(capture, nodes, input));
-  const old = new DefaultElementSelector();
+  const inputs = inputsFrom(nodes).map((input) => traceInput(capture, nodes, input));
   const resolver = new ResolverElementSelector();
-  const explore = extractNavigationElements(capture, new DefaultElementParser()).map((element) => {
-    const left = tapSelectorFor(element, capture, old);
-    const right = tapSelectorFor(element, capture, resolver);
-    return {
-      element: elementRecord(element, nodes),
-      old: left,
-      resolver: right,
-      agrees: JSON.stringify(left) === JSON.stringify(right),
-    };
-  });
-  const rows = inputs.flatMap((input) => input.rows);
-  return {
-    fixture: name,
-    inputs,
-    explore,
-    summary: {
-      inputs: inputs.length,
-      rows: rows.length,
-      differingRows: rows.filter((row) => !row.agrees).length,
-      exploreRows: explore.length,
-      differingExploreRows: explore.filter((row) => !row.agrees).length,
-    },
-  };
+  const explore = extractNavigationElements(capture, new DefaultElementParser()).map((element) => ({
+    element: elementRecord(element, nodes),
+    // Explore's production default, with no selector injected.
+    selector: tapSelectorFor(element, capture),
+    resolver: tapSelectorFor(element, capture, resolver),
+  }));
+  return { fixture: name, inputs, explore };
 }
 
-const reports = new Map<string, ReturnType<typeof compareFixture>>();
+type Trace = ReturnType<typeof traceFixture>;
+interface Report {
+  explore: Trace["explore"];
+  inputs: Trace["inputs"];
+  digest: string;
+}
+const OFFSCREEN_PROBE = "SystemInputAssistantView";
+const reports = new Map<string, Report>();
 beforeAll(() => {
-  // Load and enumerate captures once; comparison traces are asserted below without repeating expensive fixture setup.
-  for (const name of fixtures) {
-    reports.set(name, compareFixture(name));
+  // Load and enumerate captures once; the per-fixture assertions below only read the traces.
+  // Keep only digests and the rows asserted below so the full traces are not retained.
+  const traces = fixtures.map(traceFixture);
+  for (const trace of traces) {
+    reports.set(trace.fixture, {
+      explore: trace.explore,
+      inputs: trace.inputs.filter(({ kind, value }) => kind === "id" && value === OFFSCREEN_PROBE),
+      digest: createHash("sha256").update(JSON.stringify(trace)).digest("hex"),
+    });
   }
-  const all = [...reports.values()];
-  console.info(
-    "Explore selector comparison:",
-    JSON.stringify(all.map(({ fixture, summary }) => ({ fixture, ...summary }))),
-  );
   if (process.env.EXPLORE_PARITY_REPORT) {
-    writeFileSync(process.env.EXPLORE_PARITY_REPORT, JSON.stringify(all, null, 2));
+    writeFileSync(process.env.EXPLORE_PARITY_REPORT, JSON.stringify(traces, null, 2));
   }
 });
 
-// Step 3: parity failed. Pin the complete observed traces and counts without changing either selector.
-// Digests include raw/visible candidate identities and order, every first/index pick, and Explore args.
+// Explore adopted the resolver's semantics (#10268, owner decision on #10287). Each digest pins the
+// resolver's candidate identities and order, every first/index pick, and every Explore selector.
 const observed = [
   [
     "android-focus/playground-text-field-pre-tap.json",
-    159,
-    159,
     9,
-    9,
-    "0f6cf6e93c9c470e67334326a0864469a8ca25c97795f9f34231bef3c8e95dc4",
+    "809294289751f54b324df7dfa79b3174d3e2e5a84dd80454183bb639b8d166b9",
   ],
   [
     "android-focus/playground-text-field-post-tap.json",
-    606,
-    372,
     51,
-    9,
-    "c41f6212902eaeb5422c9416e2e179809d65a531b774d02d46d75856d9ddd37d",
+    "ed7919e0ca9e34e97bda7cbbd9cbe7f6b4a23cb79dfb0b4029ddf3487bf554ea",
   ],
   [
     "identify-interactions/playground-tap-resource.json",
-    223,
-    208,
     13,
-    8,
-    "773bef6b33368d0c1c8da19aaf09c86a77bdc13153ffabe92317fd2bbe55f821",
+    "1f8fbd705a56ddd7f18439927b5680362b4860711be57770ba019a43b0defeb4",
   ],
   [
     "android-enabled/playground-disabled-control-api36.json",
-    149,
-    146,
     5,
-    5,
-    "d1bc4c7a697dc52eb10d970b2c548e4896fe7da82535755aa7919dd9e665b6a4",
+    "a0a039a4b7ae06e4555cc340bfca9f6a1d09b0eec9ec10e0bc6685697b71f60e",
   ],
   [
     "swipeon-auto-target/foldable.json",
-    11,
-    11,
     0,
-    0,
-    "35db75956116ba138c25dc4c0be795e521780a85623ed9c670fe230255eec812",
+    "a13ffeedaa2f93cf8d692fc66ecf15692d09e8328e085ba56b00c0e4f248c34e",
   ],
   [
     "swipeon-auto-target/landscape.json",
-    11,
-    11,
     0,
-    0,
-    "9f1bd903db4ca073fdb55887ccafcd1340882c7ef5bca014e367c544b59bc42a",
+    "0dfa717375673bfaaa959d85f5079ddf5cbb711c13e7b8d140f78e2bdcf0bd89",
   ],
   [
     "android-launcher/launcher-folder-emulator-5600.json",
-    119,
-    107,
     2,
-    0,
-    "f064aaec7874944003988f71d7e201446bdc802fb4568cc73f94c76dcbeaf7fa",
+    "797951caaaa65392a7574c24233504728b98ffa9c059b99e1aa728af51fb92fa",
   ],
   [
     "observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
-    106,
-    106,
     0,
-    0,
-    "9677e0670524e8bd1fad91f677ca87fa850bb047083bb48cacdc1986a5feb9f4",
+    "f3c6c045330e3defdde1bcb9add0a5c244ae7add125f8717368094bdc592ca35",
   ],
   [
     "observe/ctrlproxy-headerless-two-notification-group-expanded.json",
-    131,
-    131,
     0,
-    0,
-    "6babc611b52ea597e004265515948d52316a4d18581dff13df64c56ddd4a0f06",
+    "df04af2476497e079745672db711f01ff20a4cf887f26cc658f73acfd90c543a",
   ],
   [
     "ios/ios-demos-observe-full-sdk-nodes-injected.json",
-    177,
-    91,
     39,
-    1,
-    "0086bac1ca825b5db0001a3c9b39fbc4d89e1664e3b3c100282e4709aa381ea2",
+    "b91d65da046a76625d054e357c6a07aa40cdaa885f5645638c9f49018f8c6213",
   ],
   [
     "ios/ios-demos-observe-full-sdk-nodes-not-injected.json",
-    178,
-    92,
     39,
-    1,
-    "5419824ff76c5cf08e2800e8da618512e1be2feea3f409f51063e9c4d59bbe44",
+    "e3dffd4e1326b01825f3f96a3e2eab3cc945c6bac858e1517556bb40ec534107",
   ],
   [
     "observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json",
-    177,
-    66,
     63,
-    2,
-    "df74d7b64a73d4bb404b357f9494d989351b15e73f4bfd413e348e4d6e79744c",
+    "e0b8a24a8b068ff4594420c0e0f41bed266f4f4e497a2fea23fb8afc5461ee32",
   ],
   [
     "observe-output/ios-keyboard-states/ios-keyboard-minimized.raw.json",
-    123,
-    81,
     37,
-    6,
-    "c347c1162766662e31bbb8787d37833731244f043d10eda5a9bad07cc503946b",
+    "6aa2c630b78a5a197eea3fe90affcb605399a2cfa8b781666aef61f28bbe1011",
   ],
 ] as const;
 
-test.each(observed)(
-  "documents selector divergence on %s",
-  (name, rows, differences, exploreRows, exploreDifferences, digest) => {
-    const report = reports.get(name)!;
-    expect(report.summary).toEqual({
-      inputs: report.inputs.length,
-      rows,
-      differingRows: differences,
-      exploreRows,
-      differingExploreRows: exploreDifferences,
-    });
-    expect(createHash("sha256").update(JSON.stringify(report)).digest("hex")).toBe(digest);
-  },
-);
-
-test("captured Android Tap tab changes Explore occurrence from 1 to 0", () => {
-  const report = reports.get("android-focus/playground-text-field-pre-tap.json")!;
-  const row = report.explore.find(({ element }) => element?.text === "Tap")!;
-  expect(row.old).toEqual({ text: "Tap", index: 1 });
-  expect(row.resolver).toEqual({ text: "Tap", index: 0 });
+test.each(observed)("Explore selects through the resolver on %s", (name, exploreRows, digest) => {
+  const report = reports.get(name)!;
+  expect(report.explore).toHaveLength(exploreRows);
+  for (const row of report.explore) {
+    expect(row.selector).toEqual(row.resolver);
+  }
+  expect(report.digest).toBe(digest);
 });
 
-test("captured iOS switch label changes Explore uniqueness", () => {
-  const report = reports.get("observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json")!;
-  const row = report.explore.find(({ element }) => element?.text === "Enable Notifications")!;
-  expect(row.old).toEqual({ text: "Enable Notifications" });
-  expect(row.resolver).toEqual({ text: "Enable Notifications", index: 0 });
+function exploreSelector(fixture: string, text: string) {
+  const report = reports.get(fixture)!;
+  return report.explore.find(({ element }) => element?.text === text)!.selector;
+}
+
+test("a text match promotes to its actionable owner: the Android Tap tab is occurrence 0", () => {
+  // The legacy selector also counted the actionless label, which made the tab occurrence 1.
+  expect(exploreSelector("android-focus/playground-text-field-pre-tap.json", "Tap")).toEqual({
+    text: "Tap",
+    index: 0,
+  });
 });
 
-test("captured off-screen iOS keyboard node has different totalMatches despite identical misses", () => {
+test("an iOS switch and its labelled row are both counted, so the switch is pinned", () => {
+  expect(
+    exploreSelector(
+      "observe-output/ios-keyboard-states/ios-keyboard-visible.raw.json",
+      "Enable Notifications",
+    ),
+  ).toEqual({ text: "Enable Notifications", index: 0 });
+});
+
+test("an IME key keeps its indexed resource-id rather than a label tapOn cannot match", () => {
+  // Text selectors exclude IME keys, so the label has no match; zero matches is not unique.
+  const id = "com.google.android.inputmethod.latin:id/key_pos_0_0";
+  const report = reports.get("android-focus/playground-text-field-post-tap.json")!;
+  const row = report.explore.find(({ element }) => element?.id === id)!;
+  expect(row.selector).toEqual({ elementId: id, index: 0 });
+});
+
+test("an off-screen candidate is filtered before totals and indices", () => {
   const report = reports.get("observe-output/ios-keyboard-states/ios-keyboard-minimized.raw.json")!;
   const input = report.inputs.find(
     ({ kind, value }) => kind === "id" && value === "SystemInputAssistantView",
   )!;
-  expect(input.rawCandidates.map(({ onScreen }) => onScreen)).toEqual([false]);
-  expect(input.rows.map(({ old }) => old)).toEqual([
-    { totalMatches: 1, indexInMatches: -1, picked: null },
-    { totalMatches: 1, indexInMatches: -1, picked: null },
-  ]);
-  expect(input.rows.map(({ resolver }) => resolver)).toEqual([
-    { totalMatches: 0, indexInMatches: -1, picked: null },
-    { totalMatches: 0, indexInMatches: -1, picked: null },
-  ]);
+  expect(input.candidates).toEqual([]);
+  expect(input.first).toEqual({ totalMatches: 0, indexInMatches: -1, picked: null });
+  expect(input.indexed).toEqual([]);
 });

@@ -353,7 +353,9 @@ describe("internal typed focus failures", () => {
         display,
       });
       expect(result[tapFocusFailure]).toBe("not-found");
-      expect(result.error).toContain("Element not found with provided elementId 's2-stale'");
+      expect(result.error).toContain(
+        "Element id 's2-stale' is stale; re-observe and use the id from the new observation.",
+      );
       expect(points).toEqual([]);
     });
 

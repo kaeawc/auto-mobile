@@ -69,6 +69,19 @@ export function livenessBudgetMs(leaseMs: number): number {
 }
 
 /**
+ * The longest a tool call or resource read waits for liveness recovery before it goes ahead (#10508).
+ *
+ * Recovery spreads its attempts over the whole lease-plus-grace budget, which is right for the
+ * session but not for a caller: with a long lease (fault injection sets an hour) one slot alone
+ * would outlast any MCP client's request timeout, and the call that would let the daemon resume
+ * the session never reaches it. A caller waits for the budget, but never longer than it takes
+ * every attempt to get one heartbeat request's answer and one more request's spacing.
+ */
+export function livenessRecoveryCallWaitMs(leaseMs: number, requestTimeoutMs: number): number {
+  return Math.min(livenessBudgetMs(leaseMs), LIVENESS_RECOVERY_ATTEMPTS * 2 * requestTimeoutMs);
+}
+
+/**
  * How long a proxy keeps retrying a claim another owner refuses (#10050). The other owner's
  * session can stay refused for its whole lease plus the suspect grace window, and the retry that
  * wins lands one heartbeat cadence after the daemon lets go, so all three are covered.

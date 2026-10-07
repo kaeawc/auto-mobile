@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy, DaemonSessionStalledError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import {
+  DaemonClient,
+  DaemonRequestNotDeliveredError,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -14,6 +18,7 @@ import {
   LIVENESS_RECOVERY_ATTEMPTS,
   LivenessRecovery,
   runWithoutDaemonLifecycle,
+  livenessRecoveryCallWaitMs,
   recoveryAttemptSlotMs,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
@@ -26,6 +31,7 @@ import {
 import { declaresDeviceSessionSuspect } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { SessionSuspectError } from "../../src/daemon/sessionManager";
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -1421,6 +1427,201 @@ describe("proxy liveness stalls (#10053)", () => {
         ),
       ).toBe(true);
       expect(handovers).toEqual([]);
+    });
+  });
+
+  describe("session_recovery_pending on one stdio connection (#10508)", () => {
+    /** The fault-injection lease from the device repro: recovery would spread over an hour. */
+    const LONG_LEASE_MS = 3_600_000;
+    /** The device is gone: the daemon answers device tools with session_recovery_pending. */
+    let devicePending: boolean;
+    /** The daemon drops the socket under the next device tool call before it is dispatched. */
+    let droppedSocketCalls: number;
+    /** Heartbeats wait for their socket's close to be noticed instead of answering. */
+    let parkHeartbeats: boolean;
+    /** Parked heartbeats fail once a reconnect probes the daemon: the old socket's close lands late. */
+    const parked = new Set<(error: Error) => void>();
+    let tapCalls: number;
+
+    function pendingResult(sessionUuid: string) {
+      return shapeToolCallError(
+        new SessionRecoveryAssignmentError({
+          sessionUuid,
+          platform: "android",
+          deviceId: "emulator-5554",
+          stableDeviceId: "emulator-5554",
+          recoveryWindowRemainingMs: 167_000,
+        }),
+        { toolName: "observe", source: "ProxyServer" },
+      );
+    }
+
+    function deviceToolResult(name: string, params: Record<string, any>) {
+      if (name === "tapOn") {
+        tapCalls += 1;
+      }
+      if (droppedSocketCalls > 0) {
+        droppedSocketCalls -= 1;
+        throw new DaemonRequestNotDeliveredError("Socket connection closed");
+      }
+      return devicePending ? pendingResult(String(params.sessionUuid)) : OBSERVED;
+    }
+
+    function stdioDaemonClient(): FakeDaemonClient {
+      const client = daemonBackedClient();
+      const callTool = client.callTool.bind(client);
+      spyOn(client, "callTool").mockImplementation(async (name, params, ...rest) =>
+        name === "tapOn" || name === "observe"
+          ? deviceToolResult(name, params)
+          : callTool(name, params, ...rest),
+      );
+      const callDaemonMethod = client.callDaemonMethod.bind(client);
+      spyOn(client, "callDaemonMethod").mockImplementation(async (method, params) => {
+        if (method === "daemon/heartbeat" && parkHeartbeats) {
+          await new Promise<never>((_resolve, reject) => parked.add(reject));
+        }
+        return callDaemonMethod(method, params);
+      });
+      return client;
+    }
+
+    function stdioProxy(): DaemonMcpProxy {
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => {
+          clientsCreated += 1;
+          latestClient = stdioDaemonClient();
+          return latestClient;
+        },
+        daemonManager,
+        autoStartDaemon: false,
+        timer,
+        idGenerator: new FakeIdGenerator(["proxy-token"]),
+        heartbeatTimeoutMs: LONG_LEASE_MS,
+        heartbeatIntervalMs: 2_000,
+      });
+      proxy.onLivenessHandover((handover) => handovers.push(handover));
+      proxies.push(proxy);
+      return proxy;
+    }
+
+    async function drain(): Promise<void> {
+      for (let turn = 0; turn < 10; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+
+    /** Advance the fake clock until `pending` settles; returns the elapsed time, or -1. */
+    async function advanceUntilSettled(pending: Promise<unknown>, limitMs = 60_000) {
+      let settled = false;
+      void pending.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      const startedAt = timer.now();
+      await drain();
+      for (let elapsed = 0; elapsed < limitMs && !settled; elapsed += 1_000) {
+        await baseTimer.advanceTimeAsync(1_000);
+        await drain();
+      }
+      return settled ? timer.now() - startedAt : -1;
+    }
+
+    function errorCode(result: any): unknown {
+      return JSON.parse(result.content[0].text).error?.code;
+    }
+
+    function warned(fragment: string): boolean {
+      return warnSpy.mock.calls.some(([message]) => String(message).includes(fragment));
+    }
+
+    /** The emulator returns: the daemon resumes the same session and answers device tools. */
+    async function deviceReturns(): Promise<void> {
+      devicePending = false;
+      parkHeartbeats = false;
+      hangSessions.clear();
+      await sessionManager.createSession(
+        "android-session",
+        "emulator-5554",
+        "android",
+        60_000,
+        LONG_LEASE_MS,
+      );
+    }
+
+    beforeEach(() => {
+      isAvailableSpy.mockImplementation(async () => {
+        for (const reject of parked) {
+          reject(new DaemonUnavailableError("Socket connection closed"));
+        }
+        parked.clear();
+        return true;
+      });
+      devicePending = false;
+      droppedSocketCalls = 0;
+      parkHeartbeats = false;
+      tapCalls = 0;
+    });
+
+    test("a heartbeat that meets the call's reconnect starts no recovery, so the next call is forwarded", async () => {
+      const proxy = stdioProxy();
+      await acquire(proxy, "getAndroid");
+      // The emulator is killed: the daemon drops the live session into its recovery window.
+      devicePending = true;
+      await sessionManager.releaseSession("android-session", "device-lost");
+      // A heartbeat is in flight when the socket drops under the call. The call reconnects first,
+      // and the heartbeat's retry then meets that reconnect, which may manage the daemon's
+      // lifecycle and so cannot be joined by observation-only liveness work.
+      parkHeartbeats = true;
+      await baseTimer.advanceTimeAsync(2_000);
+      parkHeartbeats = false;
+      droppedSocketCalls = 1;
+
+      const observed = proxy.callTool("observe", {});
+      expect(await advanceUntilSettled(observed)).toBeGreaterThanOrEqual(0);
+      expect(errorCode(await observed)).toBe("session_recovery_pending");
+      expect(warned("Daemon session is stale")).toBe(true);
+      expect(warned("starting recovery")).toBe(false);
+
+      const tap = proxy.callTool("tapOn", {});
+      expect(await advanceUntilSettled(tap)).toBe(0);
+      expect(errorCode(await tap)).toBe("session_recovery_pending");
+      expect(tapCalls).toBe(1);
+
+      await deviceReturns();
+      await expect(proxy.callTool("observe", {})).resolves.toEqual(OBSERVED);
+      expect(handovers).toEqual([]);
+    });
+
+    test("a call during recovery is forwarded within the bound and the connection works after the device returns", async () => {
+      const proxy = stdioProxy();
+      await acquire(proxy, "getAndroid");
+      devicePending = true;
+      // The daemon stops acknowledging: recovery starts, and with this lease its next attempt is
+      // about twenty minutes away.
+      hangSessions.add("android-session");
+      await baseTimer.advanceTimeAsync(8_000);
+      expect(warned("starting recovery")).toBe(true);
+
+      const tap = proxy.callTool("tapOn", {});
+      const elapsedMs = await advanceUntilSettled(tap);
+      const boundMs = livenessRecoveryCallWaitMs(LONG_LEASE_MS, 4_000);
+      expect(boundMs).toBe(24_000);
+      expect(elapsedMs).toBeGreaterThanOrEqual(boundMs - 1_000);
+      expect(elapsedMs).toBeLessThanOrEqual(boundMs + 1_000);
+      expect(errorCode(await tap)).toBe("session_recovery_pending");
+      expect(tapCalls).toBe(1);
+
+      await deviceReturns();
+      const observe = proxy.callTool("observe", {});
+      expect(await advanceUntilSettled(observe)).toBeLessThanOrEqual(boundMs + 1_000);
+      await expect(observe).resolves.toEqual(OBSERVED);
+    });
+
+    test("the bound never exceeds the liveness budget recovery itself fits in", () => {
+      expect(livenessRecoveryCallWaitMs(LEASE_MS, 4_000)).toBe(LEASE_MS + SUSPECT_GRACE_MS);
+      expect(livenessRecoveryCallWaitMs(LONG_LEASE_MS, 4_000)).toBe(
+        LIVENESS_RECOVERY_ATTEMPTS * 2 * 4_000,
+      );
     });
   });
 });

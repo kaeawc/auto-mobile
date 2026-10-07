@@ -107,6 +107,7 @@ import {
   runWithoutDaemonLifecycle,
   livenessHandoverMessage,
   livenessHandoverPayload,
+  livenessRecoveryCallWaitMs,
   ownershipConflictLeashMs,
   type LivenessHandover,
   type RecoveryAttemptOutcome,
@@ -179,6 +180,18 @@ export class DaemonToolOutcomeUnknownError extends ActionableError {
       { cause },
     );
     this.name = "DaemonToolOutcomeUnknownError";
+  }
+}
+
+/**
+ * An observation-only connection (a heartbeat or liveness recovery) found a lifecycle-capable
+ * connection attempt in flight and did not join it. Nothing was sent to the daemon, so this is not
+ * evidence that the daemon stopped acknowledging heartbeats (#10508).
+ */
+export class LifecycleConnectionInFlightError extends DaemonUnavailableError {
+  constructor() {
+    super("Lifecycle-capable daemon connection is in flight; retry observation-only recovery");
+    this.name = "LifecycleConnectionInFlightError";
   }
 }
 
@@ -1269,9 +1282,7 @@ export class DaemonMcpProxy {
 
   private assertConnectionPlanCompatible(allowsLifecycle: boolean): void {
     if (this.connecting && !allowsLifecycle && this.connectingAllowsLifecycle) {
-      throw new DaemonUnavailableError(
-        "Lifecycle-capable daemon connection is in flight; retry observation-only recovery",
-      );
+      throw new LifecycleConnectionInFlightError();
     }
   }
 
@@ -1300,16 +1311,37 @@ export class DaemonMcpProxy {
     }
   }
 
+  /**
+   * Wait for liveness recovery of the sessions this proxy holds, bounded (#10508). Recovery spreads
+   * its attempts over the lease, so an unbounded wait wedged every later call on the connection
+   * for as long as recovery ran, including the call that would let the daemon resume the session.
+   * Past the bound the caller goes ahead: its connection stays observation-only while the fence
+   * holds, and a handover recorded meanwhile still surfaces from the caller's own checks.
+   */
   private async waitForLivenessRecovery(signal?: AbortSignal): Promise<void> {
     if (
-      daemonLifecycleAllowed() &&
-      this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
+      !daemonLifecycleAllowed() ||
+      !this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
     ) {
+      return;
+    }
+    const timeoutMs = livenessRecoveryCallWaitMs(
+      this.heartbeatLeashMs,
+      this.heartbeatRequestTimeoutMs(),
+    );
+    try {
       await raceWithDeadline(this.livenessRecovery.settled(), {
         timer: this.timer,
+        timeoutMs,
         signal,
         label: "Daemon liveness recovery",
       });
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DaemonMcpProxy] Liveness recovery still running after ${timeoutMs}ms; going ahead without it`,
+        error,
+      );
     }
   }
 
@@ -4495,6 +4527,14 @@ export class DaemonMcpProxy {
     } catch (error) {
       abandoned = true;
       if (this.closing) {
+        return;
+      }
+      if (error instanceof LifecycleConnectionInFlightError) {
+        // The heartbeat was never sent: a tool call is establishing the shared connection. That
+        // says nothing about the daemon, and the next tick retries on that connection (#10508).
+        logger.debug(
+          `[DaemonMcpProxy] Heartbeat for session ${sessionUuid} deferred: ${errorMessage(error)}`,
+        );
         return;
       }
       if (!this.isMissingHeartbeatAcknowledgement(error)) {

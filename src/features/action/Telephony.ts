@@ -232,6 +232,7 @@ export class Telephony {
       // Same body constraints as the Android console path, so both platforms reject the same input.
       validateSmsMessage(options.message);
     } catch (error) {
+      logger.warn(`[Telephony] iOS SMS rejected: ${errorMessage(error)}`);
       return { ...base, success: false, supported: true, error: errorMessage(error) };
     }
     const request = {

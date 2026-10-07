@@ -7,7 +7,11 @@
 
 // Main client
 export { IOSCtrlProxyClient } from "./IOSCtrlProxyClient";
-export type { IOSCtrlProxy, IosMockRuleSyncOutcome } from "./IOSCtrlProxyClient";
+export type {
+  IOSCtrlProxy,
+  IosMockRuleSyncOutcome,
+  IosMockRuleSyncResult,
+} from "./IOSCtrlProxyClient";
 
 // Delegate modules (for advanced usage)
 export { CtrlProxyGestures } from "./CtrlProxyGestures";

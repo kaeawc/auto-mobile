@@ -6,6 +6,7 @@ public struct RequestSetNetworkErrorSimulation: Decodable, Sendable {
     public var errorType: String?
     public var limit: Int?
     public var expiresAtEpochMs: Int64?
+    public var remainingMs: Int64?
 }
 
 extension RequestSetNetworkErrorSimulation: CommandPayload {}

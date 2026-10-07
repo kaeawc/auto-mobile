@@ -16,11 +16,22 @@ private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
         networkErrorCalls
     }
 
+    private var mockRulesOutcome: SdkMockRulesOutcome?
+
+    func stubMockRulesOutcome(_ outcome: SdkMockRulesOutcome) {
+        mockRulesOutcome = outcome
+    }
+
     func fetchHierarchy() async -> SdkViewHierarchy? { nil }
     func fetchFreshHierarchy() async -> SdkViewHierarchy? { hierarchy }
     func fetchServerInfo() async -> SdkHierarchyServerInfo? { serverInfo }
     func isAvailable() async -> Bool { serverInfo != nil }
     func setMockRules(_: [NetworkMockRuleDTO]) async -> Bool { serverInfo != nil }
+
+    func pushMockRules(_: [NetworkMockRuleDTO]) async -> SdkMockRulesOutcome {
+        mockRulesOutcome ?? SdkMockRulesOutcome(ok: serverInfo != nil)
+    }
+
     func setNetworkFaultRules(_: [NetworkFaultRuleDTO]) async -> Bool { serverInfo != nil }
 
     func setNetworkErrorSimulation(_: NetworkErrorSimulationDTO) async -> Bool {
@@ -231,6 +242,73 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertEqual(networkResponse?.ok, true)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 1)
+    }
+
+    // MARK: - set_network_mock_rules report (#10101)
+
+    private func mockRulesResponseJSON(
+        _ sdkClient: FakeSdkHierarchyClient,
+        foregroundBundleId: String = "com.example.sdk"
+    )
+        async throws -> [String: Any]
+    {
+        let handler = handler(foregroundBundleId: foregroundBundleId, sdkClient: sdkClient)
+        let response = try await handler.handle(
+            request(#"{"type":"set_network_mock_rules","requestId":"mock-1","rules":[]}"#)
+        ) as? SetNetworkMockRulesResponse
+        let encoded = try JSONEncoder().encode(XCTUnwrap(response))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    }
+
+    func testMockRulesResultNamesTheRulesTheSdkRejected() async throws {
+        let sdkClient = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.sdk")
+        )
+        await sdkClient.stubMockRulesOutcome(
+            SdkMockRulesOutcome(ok: true, rejectedMockIds: ["m1"], rejectedReasons: ["m1": "invalid regex: x"])
+        )
+
+        let json = try await mockRulesResponseJSON(sdkClient)
+
+        XCTAssertEqual(json["type"] as? String, "set_network_mock_rules_result")
+        XCTAssertEqual(json["requestId"] as? String, "mock-1")
+        XCTAssertEqual(json["ok"] as? Bool, true)
+        XCTAssertEqual(json["rejectedMockIds"] as? [String], ["m1"])
+        XCTAssertEqual(json["rejectedReasons"] as? [String: String], ["m1": "invalid regex: x"])
+    }
+
+    func testMockRulesResultOmitsTheReportWhenTheSdkDidNotSendOne() async throws {
+        let sdkClient = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.sdk")
+        )
+
+        let json = try await mockRulesResponseJSON(sdkClient)
+
+        XCTAssertEqual(json["ok"] as? Bool, true)
+        XCTAssertNil(json["rejectedMockIds"], "no report must not read as 'nothing rejected'")
+        XCTAssertNil(json["rejectedReasons"])
+    }
+
+    func testMockRulesResultKeepsAnEmptyRejectedListDistinctFromNoReport() async throws {
+        let sdkClient = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.sdk")
+        )
+        await sdkClient.stubMockRulesOutcome(
+            SdkMockRulesOutcome(ok: true, rejectedMockIds: [], rejectedReasons: [:])
+        )
+
+        let json = try await mockRulesResponseJSON(sdkClient)
+
+        XCTAssertEqual((json["rejectedMockIds"] as? [Any])?.count, 0)
+    }
+
+    func testMockRulesResultFailsWithoutAForegroundSdk() async throws {
+        let sdkClient = FakeSdkHierarchyClient(serverInfo: nil)
+
+        let json = try await mockRulesResponseJSON(sdkClient, foregroundBundleId: "com.apple.springboard")
+
+        XCTAssertEqual(json["ok"] as? Bool, false)
+        XCTAssertNil(json["rejectedMockIds"])
     }
 
     func testOldSdkDoesNotAdvertiseMagicTap() async throws {

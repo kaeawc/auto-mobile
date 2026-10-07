@@ -1,3 +1,4 @@
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
@@ -293,6 +294,7 @@ async function prepareDevice(
   const perf = createPerformanceTracker(true);
   perf.serial(budgets.operationName);
   const deps = getDeviceToolsDependencies();
+  const autolockEnabled = captureAutolockPolicy(deps.env);
   const deviceUtils = deps.deviceManagerFactory();
   const deviceMatcher = deps.deviceMatcherFactory();
   const bootDeadlineMs = deps.timer.now() + budgets.bootTimeoutMs;
@@ -351,6 +353,7 @@ async function prepareDevice(
       ),
     );
     return await getBootAndPrepareDevice()(args, budgets, deps, deviceUtils, {
+      autolockEnabled,
       deviceMatcher: deviceMatcher,
       bootDeadlineMs: bootDeadlineMs,
       requestedIdentity: requestedIdentity,
@@ -566,7 +569,9 @@ type PrepareDevice = (
 export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
   const { getBootAndPrepareDevice } = hooks;
   const prepare: PrepareDevice = (args, budgets, progress, signal) =>
-    prepareDevice(getBootAndPrepareDevice, args, budgets, progress, signal);
+    runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
+      prepareDevice(getBootAndPrepareDevice, args, budgets, progress, signal),
+    );
   return {
     prepareDevice: prepare,
     stripInternalAcquisitionParams,

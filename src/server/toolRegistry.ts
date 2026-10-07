@@ -48,7 +48,8 @@ import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
 import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
-import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import type { Environment } from "../daemon/poolConfig";
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -632,6 +633,7 @@ interface PlanLifecycleManager {
 }
 
 interface ToolRegistryPipelineOverrides {
+  env?: Environment;
   executionTargetResolver?: ExecutionTargetResolver;
   displayInventory?: DisplayInventoryProvider;
   auditRunner?: AuditRunner;
@@ -686,6 +688,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   private async resolveNormalExecutionTarget(
     input: ExecutionTargetInput,
   ): Promise<ExecutionTargetContext> {
+    const autolockEnabled = captureAutolockPolicy();
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
@@ -764,6 +767,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         providedDeviceId,
         mcpSessionId,
         execution,
+        autolockEnabled,
       );
       if (implicitSessionUuid) {
         sessionUuid = implicitSessionUuid;
@@ -791,14 +795,15 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         signal,
         getConnectedPlatforms,
       );
-      await this.enforceSessionUuidForAutolock(
+      await this.enforceSessionUuidForAutolock({
         platform,
         sessionUuid,
         providedDeviceId,
         deviceSessionManager,
         signal,
         getConnectedPlatforms,
-      );
+        autolockEnabled,
+      });
     }
 
     logger.info(
@@ -951,8 +956,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     // Enforce autolock: a locked device may only be driven by the session that locked it.
-    if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
+    if (device && autolockEnabled && DaemonState.getInstance().isInitialized()) {
+      DaemonState.getInstance()
+        .getDevicePool()
+        .assertAutolockAccess(device.deviceId, sessionUuid, autolockEnabled);
     }
 
     // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
@@ -1060,12 +1067,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
     mcpSessionId: string | undefined,
-    execution?: import("../daemon/sessionManager").SessionExecutionMetadata,
+    execution: import("../daemon/sessionManager").SessionExecutionMetadata | undefined,
+    autolockEnabled: boolean,
   ): string | undefined {
     if (sessionUuid) {
       return undefined;
     }
-    if (!isDevicePoolAutolockEnabled() || !DaemonState.getInstance().isInitialized()) {
+    if (!autolockEnabled || !DaemonState.getInstance().isInitialized()) {
       return undefined;
     }
 
@@ -1090,15 +1098,24 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
   }
 
-  private async enforceSessionUuidForAutolock(
-    platform: SomePlatform,
-    sessionUuid: string | undefined,
-    providedDeviceId: string | undefined,
-    deviceSessionManager: DeviceSessionManager,
-    signal: AbortSignal | undefined,
-    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
-  ): Promise<void> {
-    if (!isDevicePoolAutolockEnabled()) {
+  private async enforceSessionUuidForAutolock({
+    platform,
+    sessionUuid,
+    providedDeviceId,
+    deviceSessionManager,
+    signal,
+    getConnectedPlatforms,
+    autolockEnabled,
+  }: {
+    platform: SomePlatform;
+    sessionUuid: string | undefined;
+    providedDeviceId: string | undefined;
+    deviceSessionManager: DeviceSessionManager;
+    signal: AbortSignal | undefined;
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
+    autolockEnabled: boolean;
+  }): Promise<void> {
+    if (!autolockEnabled) {
       return;
     }
     if (sessionUuid || providedDeviceId) {
@@ -1865,6 +1882,7 @@ export class ToolRegistryClass {
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
   private readonly logger: Logger;
+  private env?: Environment;
   private executionTargetResolver: ExecutionTargetResolver;
   private auditRunner: AuditRunner;
   private navigationToolCallRecorder: NavigationToolCallRecorder;
@@ -2127,7 +2145,7 @@ export class ToolRegistryClass {
       name,
       description,
       schema,
-      handler: wrappedHandler,
+      handler: this.withAutolockPolicy(wrappedHandler),
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
@@ -2236,6 +2254,11 @@ export class ToolRegistryClass {
         false,
       ),
     );
+  }
+
+  private withAutolockPolicy(handler: ToolHandler): ToolHandler {
+    return (args, progress, signal) =>
+      runWithAutolockPolicy(this.env, () => handler(args, progress, signal));
   }
 
   private createInternalToolInvocationContext(
@@ -2635,12 +2658,14 @@ export class ToolRegistryClass {
   // on private field names. Production uses the defaults wired in the constructor.
   setPipelineOverridesForTesting(overrides: ToolRegistryPipelineOverrides): () => void {
     const previous = {
+      env: this.env,
       executionTargetResolver: this.executionTargetResolver,
       auditRunner: this.auditRunner,
       afterToolCall: this.afterToolCall,
       planLifecycleManager: this.planLifecycleManager,
     };
 
+    this.env = overrides.env ?? this.env;
     if (overrides.executionTargetResolver) {
       this.executionTargetResolver = overrides.executionTargetResolver;
     } else if (overrides.displayInventory) {
@@ -2660,6 +2685,7 @@ export class ToolRegistryClass {
     }
 
     return () => {
+      this.env = previous.env;
       this.executionTargetResolver = previous.executionTargetResolver;
       this.auditRunner = previous.auditRunner;
       this.afterToolCall = previous.afterToolCall;

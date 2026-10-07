@@ -19,6 +19,8 @@ import {
   type AndroidTelemetryRecorder,
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
+import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
+
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
 interface CapturedCall {
@@ -102,9 +104,11 @@ describe("DefaultIosSdkEventIngestor", () => {
       navigationScreenshotsEnabled?: () => boolean;
       deviceId?: string;
       timer?: FakeTimer;
+      frameMetricsStore?: SdkFrameMetricsStore;
     } = {},
   ): DefaultIosSdkEventIngestor =>
     new DefaultIosSdkEventIngestor({
+      frameMetricsStore: overrides.frameMetricsStore,
       deviceId: overrides.deviceId ?? DEVICE_ID,
       timer: overrides.timer ?? new FakeTimer(),
       getNavigationGraphManager: () => navSink,
@@ -118,6 +122,57 @@ describe("DefaultIosSdkEventIngestor", () => {
     type,
     timestamp,
     payload,
+  });
+
+  test("frame events use batch app identity and host receipt time without recording telemetry", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(2000);
+    const store = new SdkFrameMetricsStore();
+    const target = buildIngestor({ timer, frameMetricsStore: store });
+    await target.recordSdkEvent(
+      event("frame_metrics_event", {
+        fps: 55,
+        frameTimeMs: 18,
+        jankFrames: 2,
+        bundleId: "untrusted.payload.app",
+      }),
+      "com.example.app",
+    );
+    expect(store.getFresh(DEVICE_ID, "com.example.app", timer.now(), 2500)).toEqual({
+      fps: 55,
+      frameTimeMs: 18,
+      jankFrames: 2,
+      receivedAt: 2000,
+    });
+    expect(store.getFresh("other-device", "com.example.app", timer.now(), 2500)).toBeNull();
+    expect(store.getFresh(DEVICE_ID, "untrusted.payload.app", timer.now(), 2500)).toBeNull();
+    expect(recorder.logs).toEqual([]);
+  });
+
+  test("malformed frame events and missing app identity do not overwrite a valid sample", async () => {
+    const timer = new FakeTimer();
+    const store = new SdkFrameMetricsStore();
+    const target = buildIngestor({ timer, frameMetricsStore: store });
+    const valid = { fps: 55, frameTimeMs: 18, jankFrames: 2 };
+    await target.recordSdkEvent(event("frame_metrics_event", valid), "com.example.app");
+    for (const bad of [
+      {},
+      { ...valid, fps: "55" },
+      { ...valid, fps: NaN },
+      { ...valid, fps: -1 },
+      { ...valid, frameTimeMs: Infinity },
+      { ...valid, frameTimeMs: 0 },
+      { ...valid, jankFrames: -1 },
+      { ...valid, jankFrames: 1.5 },
+    ]) {
+      await target.recordSdkEvent(event("frame_metrics_event", bad), "com.example.app");
+    }
+    await target.recordSdkEvent(event("frame_metrics_event", valid), null);
+    expect(store.getFresh(DEVICE_ID, "com.example.app", timer.now(), 2500)).toEqual({
+      ...valid,
+      receivedAt: timer.now(),
+    });
+    expect(recorder.logs).toEqual([]);
   });
 
   beforeEach(() => {

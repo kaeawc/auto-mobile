@@ -11,6 +11,34 @@ import org.junit.Test
 /** Pure contract tests: no service, input connection, Android runtime, or real clock required. */
 class ImeCommitContractTest {
   @Test
+  fun `device selects the positive host budget independently of unit count`() {
+    assertEquals(14_500L, CtrlProxyIme.commitTimeoutMs(14_500L, 149))
+    assertEquals(1L, CtrlProxyIme.commitTimeoutMs(1L, 149))
+  }
+
+  @Test
+  fun `legacy budget scales with editing units and preserves the minimum`() {
+    assertEquals(4_000L, CtrlProxyIme.commitTimeoutMs(null, 0))
+    assertEquals(4_030L, CtrlProxyIme.commitTimeoutMs(null, 1))
+    assertEquals(8_470L, CtrlProxyIme.commitTimeoutMs(null, 149))
+  }
+
+  @Test
+  fun `both supplied and legacy budgets are capped without overflow`() {
+    assertEquals(25_000L, CtrlProxyIme.commitTimeoutMs(25_001L, 1))
+    assertEquals(25_000L, CtrlProxyIme.commitTimeoutMs(Long.MAX_VALUE, 1))
+    assertEquals(25_000L, CtrlProxyIme.commitTimeoutMs(null, Int.MAX_VALUE))
+  }
+
+  @Test
+  fun `nonpositive budgets fall back to the legacy default`() {
+    for (timeoutMs in listOf(0L, -1L, Long.MIN_VALUE)) {
+      assertEquals(8_470L, CtrlProxyIme.commitTimeoutMs(timeoutMs, 149))
+    }
+    assertEquals(4_000L, CtrlProxyIme.commitTimeoutMs(null, -1))
+  }
+
+  @Test
   fun `device constants match the shared contract`() {
     val device = contract.device
     assertEquals(device.pollIntervalMs, ImeCommitDriver.POLL_INTERVAL_MS)
@@ -30,14 +58,15 @@ class ImeCommitContractTest {
   }
 
   @Test
-  fun `device self-bound fits within the host timeout for all shared cases`() {
+  fun `legacy device self-bound fits within the host timeout for all shared cases`() {
     val host = contract.host
     for (text in (contract.segmentCases.map { it.text } + contract.timeoutCases.map { it.text })) {
       val segments = ImeCommitDriver.segmentCount(text)
       // Reads consume the active budget. Only scheduled settle waits extend it; this bound
       // assumes blocking reads eventually return. Activation/binding are separate budgets.
+      // UTF-16 length conservatively bounds the number of Unicode editing units.
       val selfBound =
-        CtrlProxyIme.COMMIT_TIMEOUT_MS +
+        CtrlProxyIme.commitTimeoutMs(null, text.length) +
           ImeCommitDriver.MAX_POLL_ATTEMPTS * ImeCommitDriver.POLL_INTERVAL_MS * (segments - 1)
       val hostTimeout =
         minOf(

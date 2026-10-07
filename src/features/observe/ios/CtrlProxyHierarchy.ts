@@ -236,9 +236,9 @@ export class CtrlProxyHierarchy {
       );
       // A client-invalidated tree follows a state-changing action, and a
       // SpringBoard tree may have gained a system-owned dialog without emitting
-      // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
-      // in both cases and can return the same pre-dialog tree. Force a real
-      // capture so normal observe sees the same current window as raw observe.
+      // a hierarchy update. On iOS, `request_hierarchy_if_stale` itself always
+      // captures fresh, with no cache or timestamp comparison. Unlike Android,
+      // this client does not send `sinceTimestamp`.
       const forceCapture = this.needsForcedCapture(
         cacheMissing,
         cacheInvalidated,
@@ -704,6 +704,8 @@ export class CtrlProxyHierarchy {
     requestOptions: { forceCapture?: boolean } | undefined,
   ): string {
     // Keep the literal discriminator at the serialization sink for the wire-parity scanner.
+    // iOS `request_hierarchy_if_stale` always performs a fresh capture, just like
+    // `request_hierarchy`; it does not compare timestamps or send `sinceTimestamp` (unlike Android).
     return JSON.stringify({
       type:
         requestOptions?.forceCapture || disableAllFiltering

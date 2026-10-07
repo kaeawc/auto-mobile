@@ -13,7 +13,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Slideshow
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -28,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import dev.jasonpearson.automobile.design.system.components.AutoMobileNavigationBar
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.discover.DiscoverVideoScreen
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
@@ -97,7 +97,7 @@ fun HomeScreenCore(
   Scaffold(
     contentWindowInsets = WindowInsets.systemBars,
     bottomBar = {
-      NavigationBar(windowInsets = WindowInsets.navigationBars) {
+      AutoMobileNavigationBar(windowInsets = WindowInsets.navigationBars) {
         navItems.forEachIndexed { index, item ->
           NavigationBarItem(
             selected = bottomNavSelected == index,

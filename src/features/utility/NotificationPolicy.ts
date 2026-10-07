@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -235,7 +236,7 @@ export class NotificationPolicy {
       const result = await adb.executeCommand(
         "shell dumpsys notification",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
       );
       const parsed = parsePolicyAccess(result.stdout);

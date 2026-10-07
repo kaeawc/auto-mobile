@@ -83,6 +83,9 @@ extension CommandHandler {
         if !serverInfo.capabilities.contains("network-fault-rules") {
             capabilities.removeAll { $0 == .networkFaultRules }
         }
+        if !serverInfo.capabilities.contains("magic-tap") {
+            capabilities.removeAll { $0 == .magicTap }
+        }
         return SdkCapabilitiesResponse(
             requestId: request.requestId,
             available: true,

@@ -148,19 +148,10 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "setActiveDevice path reads the same pooled device afterward, so it reconciles first.",
     },
 
-    "src/daemon/webrtcStreamSocketServer.ts": {
+    "src/daemon/streamDeviceResolver.ts": {
       calls: 2,
       reason:
-        "Picks a stream candidate by platform from an injected manager, then hands it to an " +
-        "admission gate that reads pooled identity; reconciles first. A second call retries a " +
-        "transiently empty iOS listing with bounded re-discovery before giving up (issue #7593); " +
-        "both calls reconcile candidates before use.",
-    },
-    "src/daemon/videoStreamSocketServer.ts": {
-      calls: 1,
-      reason:
-        "Picks a stream candidate across both platforms from the AVD-name-aware manager, then " +
-        "reconciles before the admission gate reads pooled identity.",
+        "Shared video/WebRTC discovery reconciles before selection, including bounded iOS retries.",
     },
     "src/daemon/testRecordingSocketServer.ts": {
       calls: 1,
@@ -286,8 +277,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/deviceToolsListing.ts",
       "src/server/deviceToolsProvisioning.ts",
       "src/server/utilityTools.ts",
-      "src/daemon/webrtcStreamSocketServer.ts",
-      "src/daemon/videoStreamSocketServer.ts",
+      "src/daemon/streamDeviceResolver.ts",
       "src/daemon/testRecordingSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];

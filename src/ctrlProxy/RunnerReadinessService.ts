@@ -1,6 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, DeviceLockState } from "../models";
-import { ActionableError } from "../models";
+import { ActionableError, toActionableError } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyManager, CtrlProxyInspectionError } from "./CtrlProxyManager";
@@ -271,6 +271,7 @@ export interface RunnerReadinessRequest {
 }
 
 interface ReadinessAttemptContext extends RunnerReadinessRequest {
+  deadlineFailure?: RunnerReadinessError;
   /**
    * Absolute deadline for the steady-state connect/health phases, opened when
    * `waitForResponsiveClient` begins (null until then) so a long cold
@@ -768,6 +769,9 @@ export class RunnerReadinessService {
 
   private throwIfCallerCancelled(context: ReadinessAttemptContext, fallback?: unknown): void {
     if (context.signal?.aborted) {
+      if (context.deadlineFailure) {
+        throw context.deadlineFailure;
+      }
       throw context.signal.reason ?? fallback ?? new Error("System UI ANR recovery cancelled");
     }
   }
@@ -1395,6 +1399,34 @@ export class RunnerReadinessService {
       });
     }
     let phaseTimedOut = false;
+    let operationFailure: unknown;
+    let callerTimedOut = false;
+    const recordCallerAbort = () => {
+      callerTimedOut = this.dependencies.timer.now() >= context.totalDeadlineMs;
+    };
+    context.signal?.addEventListener("abort", recordCallerAbort, { once: true });
+    if (context.signal?.aborted) {
+      recordCallerAbort();
+    }
+    const deadlineError = () => {
+      const stage =
+        phase === "runner-connect"
+          ? "CtrlProxy WebSocket connect"
+          : phase === "runner-health"
+            ? "CtrlProxy readiness wait"
+            : context.device.platform === "ios"
+              ? "iOS CtrlProxy setup"
+              : "CtrlProxy package/setup";
+      return new ActionableError(
+        `${stage} timed out: readiness phase exceeded the remaining deadline. Retry device acquisition.`,
+      );
+    };
+    const callerAbortError = (reason: unknown) =>
+      callerTimedOut
+        ? operationFailure === undefined
+          ? deadlineError()
+          : toActionableError(operationFailure, `Runner readiness ${phase} failed`)
+        : reason;
     const phaseStartedMs = this.dependencies.timer.now();
     let elapsedRecorded = false;
     const recordElapsed = (): void => {
@@ -1418,28 +1450,40 @@ export class RunnerReadinessService {
           signal: context.signal,
           graceMs: ABORT_SETTLEMENT_GRACE_MS,
           label: `Runner readiness ${phase}`,
+          preferOperationFailureOnTimeout: true,
+          explicitAbortError: callerAbortError,
+          defaultAbortError: () => callerAbortError(context.signal?.reason),
           timeoutError: () => {
             phaseTimedOut = true;
-            return new Error("readiness phase exceeded the remaining deadline");
+            return deadlineError();
           },
           onRaceSettled: recordElapsed,
         },
-        (signal) =>
-          trackAmbient(`readiness:${phase}`, () =>
-            runWithAbortSignal(signal, () => operation(signal)),
-          ),
+        async (signal) => {
+          try {
+            return await trackAmbient(`readiness:${phase}`, () =>
+              runWithAbortSignal(signal, () => operation(signal)),
+            );
+          } catch (error) {
+            operationFailure = error;
+            throw error;
+          }
+        },
       );
     } catch (error) {
       // Capture the phase duration at the deadline, excluding any grace period
       // spent waiting for an aborted platform command to settle.
       recordElapsed();
-      this.throwIfCallerCancelled(context, error);
-      // Only the phase-timeout path above is budget-driven; an error thrown by
-      // the operation itself is a platform fault whatever the clock says.
+      if (!callerTimedOut) {
+        this.throwIfCallerCancelled(context, error);
+      }
+      // An operation fault remains a fault; only the owned deadline or a
+      // request abort captured at that deadline is a timeout.
       return this.fail(context, phase, attempts, error, {
-        deadlineExhausted: phaseTimedOut,
+        deadlineExhausted: phaseTimedOut || callerTimedOut,
       });
     } finally {
+      context.signal?.removeEventListener("abort", recordCallerAbort);
       recordElapsed();
     }
   }
@@ -1535,7 +1579,7 @@ export class RunnerReadinessService {
     const phaseElapsed = Object.entries(context.phaseElapsedMs)
       .map(([trackedPhase, elapsedMs]) => `${phaseElapsedLabel(trackedPhase)}=${elapsedMs}`)
       .join(" ");
-    throw new RunnerReadinessError(
+    const failure = new RunnerReadinessError(
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
         `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}: ${normalizeDiagnostic(detail)}`,
       device.platform === "android" &&
@@ -1546,6 +1590,10 @@ export class RunnerReadinessService {
       attempts,
       detail,
     );
+    if (options?.deadlineExhausted) {
+      context.deadlineFailure = failure;
+    }
+    throw failure;
   }
 }
 

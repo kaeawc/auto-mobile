@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   AdbClientFactory,
@@ -228,7 +229,11 @@ export class TouchLatencyTracker {
 
       try {
         const { stdout } = await perf.track("adbGfxinfoCheck", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+          this.adb.executeCommand(
+            `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+            undefined,
+            DUMPSYS_MAX_BUFFER,
+          ),
         );
 
         const currentStats = this.idle.parseMetrics(stdout);
@@ -279,14 +284,22 @@ export class TouchLatencyTracker {
   }> {
     // Reset gfxinfo to get a clean counter baseline.
     await perf.track("adbGfxinfoReset", () =>
-      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`),
+      this.adb.executeCommand(
+        `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
+        undefined,
+        DUMPSYS_MAX_BUFFER,
+      ),
     );
 
     // First no-input snapshot. Any one-off settling/layout frame that occurs
     // right after reset is absorbed here rather than compared to zero.
     await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
     const { stdout: firstStdout } = await perf.track("adbGfxinfoBaselineFirst", () =>
-      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+      this.adb.executeCommand(
+        `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+        undefined,
+        DUMPSYS_MAX_BUFFER,
+      ),
     );
     const firstStats = this.idle.parseMetrics(firstStdout);
 
@@ -295,7 +308,11 @@ export class TouchLatencyTracker {
     // already counted in `firstStats` does not grow further.
     await this.timer.sleep(PRE_TAP_SETTLE_WINDOW_MS);
     const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaselineSecond", () =>
-      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+      this.adb.executeCommand(
+        `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+        undefined,
+        DUMPSYS_MAX_BUFFER,
+      ),
     );
     const baselineStats = this.idle.parseMetrics(baselineStdout);
 
@@ -341,7 +358,11 @@ export class TouchLatencyTracker {
       // the tap, so any frame rendered during re-observe is part of the baseline
       // and the first post-tap poll doesn't read it as the tap's response.
       const { stdout: refreshedStdout } = await perf.track("adbGfxinfoBaselinePostRevalidate", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+        this.adb.executeCommand(
+          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+          undefined,
+          DUMPSYS_MAX_BUFFER,
+        ),
       );
       responseBaseline = this.idle.parseMetrics(refreshedStdout);
     }

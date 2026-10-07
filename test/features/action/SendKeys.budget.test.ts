@@ -272,7 +272,7 @@ test("without request context, the existing caller-controlled behaviour is prese
   expect(await h.action.execute(commands)).toMatchObject({ success: true, completedCommands: 100 });
 });
 
-test("budget cancellation with lost acknowledgement self-heals only after the device restores the captured IME", async () => {
+test("budget cancellation with lost acknowledgement retains quarantine until explicit IME recovery", async () => {
   const h = harness();
   let entered: () => void = () => {};
   const started = new Promise<void>((resolve) => {
@@ -280,7 +280,6 @@ test("budget cancellation with lost acknowledgement self-heals only after the de
   });
   const commit = h.client.commitViaIme;
   let priorIme: string | null = null;
-  let restoreList = () => {};
   h.client.commitViaIme = async (_text, prior, signal) => {
     priorIme = prior;
     entered();
@@ -290,8 +289,6 @@ test("budget cancellation with lost acknowledgement self-heals only after the de
     await new Promise<void>((resolve) =>
       signal.addEventListener("abort", () => resolve(), { once: true }),
     );
-    // Simulate the existing device-side restoration after the host loses cancel-ack.
-    await h.adbFactory.create(h.device).execute(["shell", "ime", "set", String(prior)]);
     return { success: false, partialApplication: true, sessionUnsafe: true };
   };
   try {
@@ -302,30 +299,28 @@ test("budget cancellation with lost acknowledgement self-heals only after the de
     expect(result).toMatchObject({ success: false, completedCommands: 0, failedIndex: 0 });
     expect(result.error).toContain("99 command(s) not sent");
     expect(result.error).toContain("indeterminate");
+    const capturedIme = "com.example.keyboard/.Ime";
+    expect(priorIme).toBeNull();
+    expect(result.error).toContain(`keyboard setIme ${capturedIme}`);
+    expect(h.adb.getExecutedCommands()).not.toContain(`shell ime set ${capturedIme}`);
+    expect(h.adb.getExecutedCommands()).not.toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
+    await expect(withAndroidImeLock(h.device.deviceId, async () => true)).rejects.toThrow(
+      "IME state is unknown",
+    );
     // The mutex released even though quarantine was retained.
     expect(
       await withAndroidImeLock(h.device.deviceId, async () => true, undefined, {
         allowQuarantined: true,
       }),
     ).toBe(true);
-    // The raw pre-call enabled read was false. Full device restoration must match it.
-    const list = spyOn(AndroidImeCatalog.prototype, "list").mockResolvedValueOnce({
-      activeImeId: priorIme,
-      installed: [
-        {
-          id: String(priorIme),
-          enabled: true,
-          active: true,
-          capabilities: imeCapabilities(String(priorIme)),
-        },
-      ],
-    });
-    restoreList = () => list.mockRestore();
     h.client.commitViaIme = commit;
+    expect((await h.action.execute([type])).error).toContain("IME state is unknown");
+    // Model verified explicit setIme recovery before clearing the quarantine.
+    await h.adbFactory.create(h.device).execute(["shell", "ime", "set", capturedIme]);
+    clearAndroidImeQuarantine(h.device.deviceId);
     expect((await h.action.execute([type])).success).toBe(true);
     expect(await withAndroidImeLock(h.device.deviceId, async () => true)).toBe(true);
   } finally {
-    restoreList();
     clearAndroidImeQuarantine(h.device.deviceId);
   }
 });

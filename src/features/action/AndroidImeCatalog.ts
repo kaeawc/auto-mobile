@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
@@ -233,7 +234,9 @@ export class AndroidImeCatalog {
     const packageName = imeId.split("/")[0];
     const identity: KeyboardIdentity = { component: imeId, package: packageName };
     try {
-      const result = await this.adb.execute(["shell", "dumpsys", "package", packageName]);
+      const result = await this.adb.execute(["shell", "dumpsys", "package", packageName], {
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+      });
       if (!result.stderr.trim()) {
         const versionName = parsePackageVersionName(result.stdout, packageName);
         if (versionName) {
@@ -251,7 +254,10 @@ export class AndroidImeCatalog {
   }
 
   private async advertisedSubtypes(imeId: string, signal?: AbortSignal) {
-    const result = await this.adb.execute(["shell", "dumpsys", "input_method"], { signal });
+    const result = await this.adb.execute(["shell", "dumpsys", "input_method"], {
+      signal,
+      maxBuffer: DUMPSYS_MAX_BUFFER,
+    });
     if (result.stderr.trim()) {
       throw new Error(`Failed to inspect IME subtypes: ${result.stderr.trim()}`);
     }

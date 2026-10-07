@@ -244,6 +244,24 @@ wiring_requires_yq() {
   done
 }
 
+@test "merge TypeScript coverage uploads diagnostics after failures with bounded retention" {
+  local workflow=".github/workflows/merge.yml"
+  run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload TypeScript Coverage Diagnostics") | [.if, .with.name, .with.path, .with."if-no-files-found", .with."retention-days"] | @tsv' "$workflow"
+  [ "$status" -eq 0 ]
+  [[ "$output" == $'always()\tts-coverage-diagnostics\t'* ]]
+  [[ "$output" == *"ci-logs/ts-coverage.log"* ]]
+  [[ "$output" == *"coverage/shards/*.ndjson"* ]]
+  [[ "$output" == *"coverage/shards/*.log"* ]]
+  [[ "$output" == *$'\tignore\t7' ]]
+}
+
+@test "merge TypeScript coverage badge upload remains unchanged" {
+  local workflow=".github/workflows/merge.yml"
+  run yq -r '.jobs."ts-code-coverage".steps[] | select(.name == "Upload Coverage Badge") | [.uses, .with.name, .with.path, .with."retention-days"] | @tsv' "$workflow"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'actions/upload-artifact@v6\tts-coverage-badge\tcoverage/ts-coverage-badge.json\t90' ]
+}
+
 @test "merge workflow preserves the same four lane boundaries" {
   local workflow=".github/workflows/merge.yml"
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]

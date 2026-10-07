@@ -62,7 +62,7 @@ function fileAt(name: string) {
 
 const q = (path: string) => shellQuote(path);
 
-describe("stageSharedStorage pushes through a hidden temp file", () => {
+describe("sharedStorageService pushes through a hidden temp file", () => {
   test("pushes beside the destination, then renames into place (one extra adb call per file)", async () => {
     const { executor, stage } = setup();
 
@@ -172,7 +172,7 @@ describe("stageSharedStorage pushes through a hidden temp file", () => {
   });
 });
 
-describe("stageSharedStorage with rollback", () => {
+describe("sharedStorageService with rollback", () => {
   test("a transfer cut off on an overwritten file leaves it untouched and restores earlier ones", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));

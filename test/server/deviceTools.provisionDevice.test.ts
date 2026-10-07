@@ -43,7 +43,11 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
-import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessError,
+  RunnerReadinessService,
+} from "../../src/ctrlProxy/RunnerReadinessService";
+import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
@@ -55,6 +59,19 @@ import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/pr
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 
 isolateToolRegistry();
+
+let policyReads = 0;
+const autolockEnv = new Proxy<Record<string, string | undefined>>(
+  {},
+  {
+    get(target, key, receiver) {
+      if (key === "AUTOMOBILE_DEVICE_POOL_AUTOLOCK") {
+        policyReads += 1;
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  },
+);
 
 async function provisionResponseText(args: Record<string, unknown>): Promise<string> {
   const tool = ToolRegistry.getTool("provisionDevice");
@@ -629,7 +646,9 @@ describe("provisionDevice handler", () => {
   let restorePipelineOverrides: (() => void) | undefined;
 
   const setup = () => {
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      env: autolockEnv,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     resourceObserver = new FakeDeviceResourceObserver();
@@ -642,6 +661,7 @@ describe("provisionDevice handler", () => {
     operationStore = new FakeProvisionDeviceOperationStore();
     teardownOperationStore = new FakeDeviceTeardownOperationStore();
     setDeviceToolsDependencies({
+      env: autolockEnv,
       deviceResourceObserverFactory: () => resourceObserver,
       deviceManagerFactory: () => deviceManager,
       avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
@@ -816,6 +836,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -894,6 +915,83 @@ describe("provisionDevice handler", () => {
     expect(pendingDiscoveryManager.wasMethodCalled("waitForDeviceReady")).toBe(false);
     expect(pendingDiscoveryManager.wasMethodCalled("startDevice")).toBe(false);
   });
+
+  for (const initiallyEnabled of [true, false]) {
+    test(`captures provisionDevice autolock ${initiallyEnabled} before discovery`, async () => {
+      autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = initiallyEnabled ? "1" : "0";
+      const timer = new FakeTimer();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      sessions.stopCleanupTimer();
+      const firstDevice: BootedDevice = {
+        name: "phone-api-36-a",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const secondDevice: BootedDevice = {
+        ...firstDevice,
+        name: "phone-api-36-b",
+        deviceId: "emulator-5556",
+      };
+      deviceManager.setBootedDevices("android", [firstDevice, secondDevice]);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessions, "daemon", {
+          env: autolockEnv,
+          timer,
+          deviceManager,
+        }),
+      );
+      await pool.initializeWithDevices([firstDevice, secondDevice]);
+      DaemonState.getInstance().initialize(sessions, pool);
+      setDeviceToolsDependencies({ timer, ensureCtrlProxyReady: async () => {} });
+      exactProvisioner.provision = async (request) => ({
+        ...provisionedTestDevice("android", false),
+        device: {
+          ...provisionedTestDevice("android", false).device,
+          name: request.name,
+        },
+      });
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const discover = deviceManager.getBootedDevices.bind(deviceManager);
+      let paused = false;
+      deviceManager.getBootedDevices = async (platform) => {
+        if (!paused) {
+          paused = true;
+          entered.resolve();
+          await release.promise;
+        }
+        return discover(platform);
+      };
+      const firstArgs = {
+        ...provisionTestArgs("android", "policy-first"),
+        __mcpSessionId: "first",
+      };
+      policyReads = 0;
+      const pending = provisionResponseText(firstArgs);
+      await entered.promise;
+      autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = initiallyEnabled ? "0" : "1";
+      release.resolve();
+      expect(JSON.parse(await pending).sessionId).toEqual(expect.any(String));
+      expect(Boolean(pool.getDevice(firstDevice.deviceId)?.autolockSessionId)).toBe(
+        initiallyEnabled,
+      );
+      expect(policyReads).toBe(1);
+      const secondArgs = {
+        ...provisionTestArgs("android", "policy-second"),
+        __mcpSessionId: "second",
+        device: {
+          ...firstArgs.device,
+          name: secondDevice.name,
+        },
+      };
+      expect(JSON.parse(await provisionResponseText(secondArgs)).sessionId).toEqual(
+        expect.any(String),
+      );
+      expect(Boolean(pool.getDevice(secondDevice.deviceId)?.autolockSessionId)).toBe(
+        !initiallyEnabled,
+      );
+    });
+  }
 
   test("adopts a single Android device from fresh discovery", async () => {
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
@@ -3099,6 +3197,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3343,6 +3442,7 @@ describe("provisionDevice handler", () => {
       const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const pool = new DevicePool(
         createDevicePoolDependencies(sessionManager, "daemon-session", {
+          env: autolockEnv,
           timer: timer,
           deviceManager: deviceManager,
         }),
@@ -3462,6 +3562,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3525,6 +3626,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3633,12 +3735,13 @@ describe("provisionDevice handler", () => {
   });
 
   test("reconnecting during recovery preserves the live session and completed operation", async () => {
-    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3731,9 +3834,9 @@ describe("provisionDevice handler", () => {
     } finally {
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
-        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       } else {
-        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
       }
     }
   });
@@ -3743,6 +3846,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3808,6 +3912,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3875,6 +3980,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -3965,6 +4071,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -4020,6 +4127,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -4137,6 +4245,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -4806,6 +4915,7 @@ describe("provisionDevice handler", () => {
       sessionManager.stopCleanupTimer();
       const pool = new DevicePool(
         createDevicePoolDependencies(sessionManager, "daemon-session", {
+          env: autolockEnv,
           timer: timer,
           deviceManager: deviceManager,
         }),
@@ -4867,6 +4977,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -5035,6 +5146,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -5388,6 +5500,70 @@ describe("provisionDevice handler", () => {
     expect(operationStore.failCodes).toEqual(["timeout"]);
   });
 
+  test.each(["device_lost", "device_offline"] as const)(
+    "classifies a real runner readiness %s failure as retryable",
+    async (code) => {
+      const timer = new FakeTimer();
+      const failure =
+        code === "device_lost"
+          ? new DeviceLostError("emulator-5554", "device disappeared", "readiness-incident")
+          : new AdbDeviceOfflineError("emulator-5554", "device offline");
+      deviceManager.setBootedDevices("android", [
+        { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      ]);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      const service = new RunnerReadinessService({
+        timer,
+        getAndroidManager: () => ({
+          isInstalled: async () => {
+            throw failure;
+          },
+          isEnabled: async () => true,
+          isVersionCompatible: async () => true,
+          enable: async () => {},
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ready" }),
+          ensureCompatibleVersion: async () => ({ status: "compatible" }),
+        }),
+        getAndroidClient: () => ({
+          isConnected: () => true,
+          waitForConnection: async () => true,
+          verifyServiceReady: async () => true,
+          connectWithoutSetup: async () => true,
+        }),
+        getIosManager: () => {
+          throw new Error("unexpected iOS manager");
+        },
+        getIosClient: () => {
+          throw new Error("unexpected iOS client");
+        },
+        checkIosOverride: async () => ({ present: false, usable: true }),
+        awaitIosStartupMaintenance: async () => {},
+      });
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: (request) => service.ensureReady(request),
+      });
+
+      const response = JSON.parse(
+        await provisionResponseText(provisionTestArgs("android", `real-readiness-${code}`)),
+      );
+      expect(response).toMatchObject({
+        error: {
+          code,
+          retryable: true,
+          providerCode: failure.code,
+          readinessPhase: "runner-setup",
+          attempt: 1,
+          deviceId: "emulator-5554",
+          ...(code === "device_lost" ? { incidentId: "readiness-incident" } : {}),
+        },
+      });
+      expect(operationStore.failCodes).toEqual([code]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
   test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
@@ -5640,13 +5816,14 @@ describe("provisionDevice handler", () => {
   // rewrote device resource settings on another MCP client's live device, only
   // failing afterwards at the bind.
   test("does not touch a device autolocked to another MCP client", async () => {
-    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -5697,15 +5874,15 @@ describe("provisionDevice handler", () => {
     } finally {
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
-        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       } else {
-        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
       }
     }
   });
 
   test("keeps provision leases until cancelled autolock release persistence settles", async () => {
-    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     const metadataStarted = Promise.withResolvers<void>();
     const metadataFinished = Promise.withResolvers<void>();
     const releaseStarted = Promise.withResolvers<void>();
@@ -5720,6 +5897,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
         deviceSessionRepository: {
@@ -5772,7 +5950,7 @@ describe("provisionDevice handler", () => {
       },
     });
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
 
     try {
       const request = ToolRegistry.getTool("provisionDevice")!.handler({
@@ -5800,15 +5978,15 @@ describe("provisionDevice handler", () => {
       releaseFinished.resolve();
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
-        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       } else {
-        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
       }
     }
   });
 
   test("keeps provision leases while cancelled autolock session creation settles", async () => {
-    const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+    const originalAutolock = autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     const activeSessionWriteStarted = Promise.withResolvers<void>();
     const activeSessionWriteFinished = Promise.withResolvers<void>();
     const releaseStarted = Promise.withResolvers<void>();
@@ -5827,6 +6005,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),
@@ -5873,7 +6052,7 @@ describe("provisionDevice handler", () => {
       },
     });
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
 
     try {
       const request = ToolRegistry.getTool("provisionDevice")!.handler({
@@ -5905,9 +6084,9 @@ describe("provisionDevice handler", () => {
       releaseFinished.resolve();
       sessionManager.stopCleanupTimer();
       if (originalAutolock === undefined) {
-        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+        delete autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       } else {
-        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
+        autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
       }
     }
   });
@@ -5924,6 +6103,7 @@ describe("provisionDevice handler", () => {
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
       }),

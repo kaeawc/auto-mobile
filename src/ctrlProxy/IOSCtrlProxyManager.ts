@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "../utils/ios-cmdline-tools/simctlArgs";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { DoctorProbeOptions } from "../doctor/types";
 import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "../doctor/deadline";
@@ -3989,11 +3990,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         return result.data.stdout.includes(this.device.deviceId);
       }
 
-      const { stdout } = await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "list",
-        "devices",
-      ]);
+      const { stdout } = await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs(["list", "devices"]),
+      );
       return stdout.includes(this.device.deviceId);
     } catch (error) {
       // `xcrun simctl list devices` failing (Xcode tooling missing/misconfigured)

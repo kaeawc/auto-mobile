@@ -4040,6 +4040,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (requestId) {
         this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
       return {
@@ -4463,6 +4465,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       return {
         success: false,
         totalTimeMs: this.timer.now() - startTime,
@@ -4624,6 +4628,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };

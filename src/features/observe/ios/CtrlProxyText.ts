@@ -6,6 +6,7 @@
  * instead of the Android fallback of sending empty text via `request_set_text`.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
@@ -64,6 +65,8 @@ export class CtrlProxyText extends SharedTextDelegate {
       return result;
     } catch (error) {
       completeDispatch?.(false, error);
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CtrlProxyText] Text transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }

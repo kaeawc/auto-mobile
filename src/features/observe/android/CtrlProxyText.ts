@@ -4,6 +4,7 @@
  * Thin wrapper over SharedTextDelegate.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { SetTextOptions } from "../DeviceService";
 import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
@@ -203,6 +204,8 @@ export class CtrlProxyText extends SharedTextDelegate {
         timeoutError: (timeout) => unconfirmed(`IME action timed out after ${timeout}ms`, timeout),
       });
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CtrlProxyText] IME action transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }
@@ -261,6 +264,8 @@ export class CtrlProxyText extends SharedTextDelegate {
         timeoutError: (timeout) => unconfirmed(`Insert text timed out after ${timeout}ms`, timeout),
       });
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CtrlProxyText] Insert text transport failed", error);
       return unconfirmed(errorMessage(error), this.context.timer.now() - startMs);
     }

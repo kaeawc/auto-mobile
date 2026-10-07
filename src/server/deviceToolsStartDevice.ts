@@ -25,6 +25,7 @@ import {
   RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
+import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
@@ -762,6 +763,21 @@ function validateCameraPosterPlatform(args: StartDeviceArgs): void {
       "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
     );
   }
+  if (args.cameraPosterQr !== undefined && args.platform !== "android") {
+    throw new ActionableError(
+      "cameraPosterQr is unsupported on iOS. Use a stopped Android emulator.",
+    );
+  }
+}
+
+/** Replace `cameraPosterQr` with the rendered poster's `cameraPosterPath`. */
+async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promise<T> {
+  const { cameraPosterQr, ...rest } = args;
+  if (cameraPosterQr === undefined) {
+    return args;
+  }
+  const writer = getDeviceToolsDependencies().cameraPosterQrWriter ?? new FileQrPosterWriter();
+  return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
 }
 
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
@@ -778,9 +794,10 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       __mcpSessionId: internalSessionId,
     };
     validateCameraPosterPlatform(args);
+    const resolvedArgs = await resolveCameraPosterQr(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
     const target = {
-      ...args,
+      ...resolvedArgs,
       ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
     };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;

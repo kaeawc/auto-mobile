@@ -230,6 +230,47 @@ describe("startDevice handler", () => {
     expect(received).toBe("/poster.png");
   });
 
+  it("renders cameraPosterQr to a poster and passes its path to the cold Android launch", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const payloads: string[] = [];
+    setDeviceToolsDependencies({
+      cameraPosterQrWriter: {
+        writePoster: async (text) => {
+          payloads.push(text);
+          return "/posters/qr.png";
+        },
+      },
+    });
+    let received: string | undefined;
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received = options?.cameraPosterPath;
+      return originalStart(device, timeoutMs);
+    };
+    await callStartDevice({ platform: "android", cameraPosterQr: { text: "hello" } });
+    expect(payloads).toEqual(["hello"]);
+    expect(received).toBe("/posters/qr.png");
+  });
+
+  it("rejects cameraPosterQr together with cameraPosterPath", async () => {
+    await expect(
+      callStartDevice({
+        platform: "android",
+        cameraPosterPath: "/poster.png",
+        cameraPosterQr: { text: "hello" },
+      }),
+    ).rejects.toThrow("mutually exclusive");
+  });
+
+  it("rejects cameraPosterQr on iOS with an actionable unsupported error", async () => {
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterQr: { text: "hello" } }),
+    ).rejects.toThrow("cameraPosterQr is unsupported on iOS");
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
   it("rejects camera posters on iOS with an actionable unsupported error", async () => {
     await expect(
       callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),

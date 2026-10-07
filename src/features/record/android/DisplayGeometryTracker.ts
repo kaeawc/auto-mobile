@@ -44,6 +44,8 @@ function isRotation(value: number | undefined): value is number {
  */
 export class DisplayGeometryTracker {
   private refreshChain: Promise<void> = Promise.resolve();
+  /** Bumped per accepted push; a refresh from an older push is superseded and discarded. */
+  private generation = 0;
 
   constructor(
     readonly timeline: ScreenGeometryTimeline,
@@ -56,13 +58,14 @@ export class DisplayGeometryTracker {
       return;
     }
     const at = this.timer.now();
+    const generation = ++this.generation;
     this.timeline.noteChangeReported(at);
     // The push already carries the new rotation: apply it before any adb round trip.
     if (isRotation(event.rotation)) {
       this.timeline.apply({ rotation: event.rotation }, at);
     }
     const rotationKnown = isRotation(event.rotation);
-    this.refreshChain = this.refreshChain.then(() => this.refresh(at, rotationKnown));
+    this.refreshChain = this.refreshChain.then(() => this.refresh(at, rotationKnown, generation));
   }
 
   /**
@@ -80,27 +83,32 @@ export class DisplayGeometryTracker {
   /**
    * Cross-check the tracked rotation against the device once, at stop. Returns a
    * recording-level warning if they disagree (a rotation that was never pushed),
-   * otherwise nothing. A failed read cannot prove a mismatch and adds nothing.
+   * otherwise nothing. A read that fails or reports no rotation rejects, so the
+   * caller can report the geometry as unconfirmed instead of silently trusting it.
    */
   async verifyAtStop(): Promise<string | undefined> {
-    try {
-      const actual = await this.probe.readRotation();
-      const tracked = this.timeline.currentRotation;
-      if (actual !== null && actual !== tracked) {
-        return `display rotation at stop (${actual}) differs from the rotation tracked during recording (${tracked}); a rotation was not reported, so tapAt and swipeOn steps after it may be recorded at the wrong coordinates or direction`;
-      }
-    } catch (error) {
-      // The stop-time cross-check is an extra safety net; the pushed transitions remain the source.
-      logger.debug(
-        `[DisplayGeometryTracker] stop-time rotation check failed: ${errorMessage(error)}`,
-      );
+    const actual = await this.probe.readRotation();
+    if (actual === null) {
+      throw new Error("WindowManager did not report a display rotation at stop");
+    }
+    const tracked = this.timeline.currentRotation;
+    if (actual !== tracked) {
+      return `display rotation at stop (${actual}) differs from the rotation tracked during recording (${tracked}); a rotation was not reported, so tapAt and swipeOn steps after it may be recorded at the wrong coordinates or direction`;
     }
     return undefined;
   }
 
-  private async refresh(at: number, rotationKnown: boolean): Promise<void> {
+  private async refresh(at: number, rotationKnown: boolean, generation: number): Promise<void> {
+    if (generation !== this.generation) {
+      // A newer push is queued behind this one and re-reads everything; applying this
+      // older size now would briefly shadow the newer rotation with a stale geometry.
+      return;
+    }
     const rotation = rotationKnown ? undefined : await this.readRotationOrNull();
     const display = await this.readSizeOrNull();
+    if (generation !== this.generation) {
+      return;
+    }
     this.timeline.apply({ rotation, display }, at);
   }
 

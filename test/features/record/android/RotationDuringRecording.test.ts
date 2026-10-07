@@ -271,7 +271,8 @@ describe("DualTrackRecorder geometry timeline (#10174)", () => {
     const { steps, geometryWarnings } = await p.recorder.stop();
 
     expect(steps[0].label).toBe(`Warning: ${ROTATION_UNKNOWN_CAVEAT}`);
-    expect(geometryWarnings).toEqual([ROTATION_UNKNOWN_CAVEAT]);
+    // The stop-time read fails too, so the geometry also cannot be confirmed.
+    expect(geometryWarnings).toEqual([ROTATION_UNKNOWN_CAVEAT, GEOMETRY_UNCONFIRMED_WARNING]);
   });
 
   test("an unreadable display size after a display change is reported", async () => {
@@ -512,6 +513,27 @@ describe("stop-time geometry finalisation is bounded and best-effort (#10181)", 
     expect(result.geometryWarnings).toEqual([GEOMETRY_UNCONFIRMED_WARNING]);
   });
 
+  test("a stop-time rotation read that rejects reports the geometry as unconfirmed", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    p.probe.rotation = new Error("adb offline");
+
+    const result = await p.recorder.stop();
+
+    expect(result.steps).toHaveLength(1);
+    expect(result.geometryWarnings).toEqual([GEOMETRY_UNCONFIRMED_WARNING]);
+  });
+
+  test("a stop-time rotation read that reports nothing reports the geometry as unconfirmed", async () => {
+    const p = await setupTapPipeline();
+    tap(p);
+    p.probe.rotation = null;
+
+    const result = await p.recorder.stop();
+
+    expect(result.geometryWarnings).toEqual([GEOMETRY_UNCONFIRMED_WARNING]);
+  });
+
   test("the budget sits well under the manager's 10 s stop deadline", () => {
     expect(GEOMETRY_FINALIZE_BUDGET_MS).toBeLessThanOrEqual(5_000);
     expect(GEOMETRY_READ_TIMEOUT_MS).toBeLessThan(GEOMETRY_FINALIZE_BUDGET_MS);
@@ -572,5 +594,40 @@ describe("stop-time geometry finalisation is bounded and best-effort (#10181)", 
     expect(steps[1].label).toContain("display rotation at stop (2) differs");
     expect(steps[2].label).toContain("display rotation at stop (2) differs");
     expect(geometryWarnings).toEqual([expect.stringContaining("display rotation at stop (2)")]);
+  });
+});
+
+describe("a superseded geometry refresh is discarded (#10181)", () => {
+  test("an older size read finishing after a newer push does not become the effective geometry", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(1000);
+    const sizeReads: Array<(size: DisplaySize) => void> = [];
+    const probe: DisplayGeometryProbe = {
+      readRotation: async () => 0,
+      readPhysicalSize: () => new Promise<DisplaySize>((resolve) => sizeReads.push(resolve)),
+    };
+    const timeline = new ScreenGeometryTimeline(
+      AXES,
+      { rotation: 0, display: PHYSICAL },
+      timer.now(),
+    );
+    const tracker = new DisplayGeometryTracker(timeline, probe, timer);
+
+    tracker.handleTransition(rotationChange(1));
+    await Promise.resolve();
+    timer.advanceTime(10);
+    tracker.handleTransition(rotationChange(0));
+    // The first push's read completes late with a size that differs from the baseline.
+    sizeReads[0]({ width: 1840, height: 2208 });
+    for (let i = 0; i < 10; i++) {
+      await Promise.resolve();
+    }
+
+    // The newer push's read is still pending: nothing from the older read may be in force.
+    const inForce = () => timeline.warningsFor(timer.now(), timer.now()).join(";");
+    expect(inForce()).not.toContain("display size changed");
+    sizeReads[1](PHYSICAL);
+    await tracker.settle();
+    expect(inForce()).not.toContain("display size changed");
   });
 });

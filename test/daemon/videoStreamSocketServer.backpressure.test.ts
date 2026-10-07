@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { H264CaptureSource } from "../../src/features/webrtc/H264CaptureSource";
@@ -56,6 +57,7 @@ function createHarness(): {
   let emit = (_chunk: Buffer): void => {};
   const server = new TestVideoServer(
     {
+      captureRegistry: createDeviceCaptureRegistry(),
       createCaptureSource: async ({ onData }) => {
         emit = onData;
         return source;

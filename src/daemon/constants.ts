@@ -335,6 +335,9 @@ export const DAEMON_TOOL_SELECTION_PROFILE_PARAM = "__autoMobileToolSelectionPro
 export const INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM =
   "__autoMobileToolResultsNoStructuredContent";
 
+/** Loopback-only compact-metadata preference applied to the connection profile. */
+export const INTERNAL_ACTIONS_COMPACT_METADATA_PARAM = "__autoMobileActionsCompactMetadata";
+
 /**
  * Socket RPC field identifying a session UUID injected from a connection-bound
  * route rather than explicitly selected by the caller.
@@ -377,6 +380,7 @@ export const INTERNAL_TOOL_PARAM_NAMES = [
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
   INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
 ] as const;

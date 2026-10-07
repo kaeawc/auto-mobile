@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import {
   buildAppleLanguages,
@@ -105,19 +105,45 @@ describe("parseAppleTimeFormatRaw (property-based)", () => {
 
 describe("iosSpawnCommand (property-based)", () => {
   test("composes `xcrun simctl spawn <udid> <command>` verbatim", () => {
-    fc.assert(
-      fc.property(
-        fc.string({ maxLength: 40 }),
-        fc.string({ maxLength: 40 }),
-        (deviceId, command) => {
-          const line = iosSpawnCommand(deviceId, command);
-          return (
-            line === `xcrun simctl spawn ${deviceId} ${command}` &&
-            line.startsWith("xcrun simctl spawn ")
-          );
-        },
-      ),
-      RUN_OPTIONS,
-    );
+    const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    try {
+      fc.assert(
+        fc.property(
+          fc.string({ maxLength: 40 }),
+          fc.string({ maxLength: 40 }),
+          (deviceId, command) => {
+            const line = iosSpawnCommand(deviceId, command);
+            return (
+              line === `xcrun simctl spawn ${deviceId} ${command}` &&
+              line.startsWith("xcrun simctl spawn ")
+            );
+          },
+        ),
+        RUN_OPTIONS,
+      );
+    } finally {
+      if (previous === undefined) {
+        delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+      } else {
+        process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+      }
+    }
   });
+});
+
+test("iosSpawnCommand quotes the custom device set shell argument", () => {
+  const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+  try {
+    process.env.CORESIMULATOR_DEVICE_SET_PATH = "/tmp/custom device set";
+    expect(iosSpawnCommand("SIM-1", "defaults read domain key")).toBe(
+      "xcrun simctl --set '/tmp/custom device set' spawn SIM-1 defaults read domain key",
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+    } else {
+      process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+    }
+  }
 });

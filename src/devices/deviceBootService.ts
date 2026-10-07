@@ -323,6 +323,7 @@ function findEligibleExactBootedDevice(
 
 /** Inputs which affect device discovery, creation, and readiness, but not MCP sessions or automation setup. */
 export interface DeviceBootRequest {
+  cameraPosterPath?: string;
   operationName?: string;
   platform: "android" | "ios";
   minOsVersion?: string;
@@ -452,6 +453,11 @@ export class DeviceBootService {
   }
 
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
+    if (request.cameraPosterPath !== undefined && request.platform !== "android") {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
+      );
+    }
     const timeoutMs = request.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const context: BootDeadlineContext = {
       request,
@@ -1050,6 +1056,13 @@ export class DeviceBootService {
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
+    if (context.request.cameraPosterPath !== undefined) {
+      throw new ActionableError(
+        !isAndroidEmulatorSerial(device.deviceId)
+          ? "cameraPosterPath is unsupported on physical Android devices. Use a stopped Android emulator."
+          : "cameraPosterPath is unsupported on a running Android emulator. Stop it before requesting a poster.",
+      );
+    }
     if (device.platform === "ios") {
       await this.bindLifecycleIdentity(
         context,
@@ -1555,6 +1568,9 @@ export class DeviceBootService {
       return await this.dependencies.deviceManager.startDevice(
         image,
         this.remaining(context, "starting the device"),
+        context.request.cameraPosterPath === undefined
+          ? undefined
+          : { cameraPosterPath: context.request.cameraPosterPath },
       );
     } catch (error) {
       if (isEmulatorLaunchCancelledError(error) && error.process) {

@@ -1,4 +1,8 @@
 import {
+  DefaultDeviceResourceObserver,
+  type DeviceResourceObserver,
+} from "../utils/deviceResourceObserver";
+import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
 } from "../daemon/devicePoolRefresh";
@@ -101,7 +105,8 @@ import {
   defaultDisplayInventoryProvider,
   type DisplayInventoryProvider,
 } from "../devices/DisplayInventoryProvider";
-import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import type { Environment } from "../daemon/poolConfig";
+import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import {
   deleteInternalToolParams,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
@@ -1250,7 +1255,9 @@ export function detailedDiscoveryOptions(
 }
 
 export interface DeviceToolsDependencies {
+  env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
+  deviceResourceObserverFactory: () => DeviceResourceObserver;
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
@@ -3465,6 +3472,8 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
+      deviceResourceObserverFactory: () =>
+        new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
@@ -3541,6 +3550,9 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    env: deps.env ?? currentDeps.env,
+    deviceResourceObserverFactory:
+      deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
       deps.deviceResourceControllerFactory ?? currentDeps.deviceResourceControllerFactory,
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
@@ -4286,6 +4298,7 @@ export function refreshResourcesAfterCommittedBoot(
 }
 
 interface StartDeviceRunnerReadinessInput {
+  autolockEnabled?: boolean;
   boot: DeviceBootResult;
   args: StartDeviceArgs;
   operationName: string;
@@ -4310,7 +4323,7 @@ export async function prepareStartDeviceRunnerReadiness(
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   const devicePool = getStartDevicePool(input.daemonState);
   const recoveryAutolockClient =
-    isDevicePoolAutolockEnabled() && devicePool
+    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(

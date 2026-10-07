@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import type { DeviceDisplays, DisplayPanel, PanelRole, Posture } from "../../models/DisplayPanel";
 import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
@@ -249,7 +250,15 @@ export async function readAndroidDeviceDisplaysChecked(
     "shell cmd device_state print-states",
   ] as const;
   const results = await Promise.allSettled(
-    commands.map((command) => adb.executeCommand(command, 2000, undefined, true, signal)),
+    commands.map((command) =>
+      adb.executeCommand(
+        command,
+        2000,
+        command.startsWith("shell dumpsys ") ? DUMPSYS_MAX_BUFFER : undefined,
+        true,
+        signal,
+      ),
+    ),
   );
   signal?.throwIfAborted();
   for (const [index, result] of results.entries()) {

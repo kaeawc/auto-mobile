@@ -91,6 +91,7 @@ describe("CLI heartbeat ownership results", () => {
             params: {
               sessionId: "fake-session",
               livenessPolicy: "cli",
+              livenessOwnerKind: "cli-keeper",
               idleTimeoutMs: expect.any(Number),
               livenessOwnerToken: "A",
               ...(claim ? { claimLivenessOwnership: true } : {}),

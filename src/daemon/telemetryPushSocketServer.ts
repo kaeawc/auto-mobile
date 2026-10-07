@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   createDefaultStreamSocketAuthenticator,
@@ -508,35 +509,28 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (typeof id !== "string" && typeof id !== "number") {
       return null;
     }
+    if (event.category === "overlay" && typeof data.sequence === "number") {
+      return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
+    }
     return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
   }
 }
 
 // Singleton instance
-let socketServer: TelemetryPushSocketServer | null = null;
+const socketServer = new SocketServerSingleton<TelemetryPushSocketServer>();
 
 export function getTelemetryPushServer(): TelemetryPushSocketServer | null {
-  return socketServer;
+  return socketServer.instance;
 }
 
 export function getTelemetryPushSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG);
 }
 
 export async function startTelemetryPushSocketServer(): Promise<TelemetryPushSocketServer> {
-  if (!socketServer) {
-    socketServer = new TelemetryPushSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
-  return socketServer;
+  return await socketServer.start(() => new TelemetryPushSocketServer());
 }
 
 export async function stopTelemetryPushSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

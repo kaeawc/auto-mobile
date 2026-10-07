@@ -79,11 +79,10 @@ export interface EmulatorLossIncidentStore {
   list(limit?: number): Promise<EmulatorLossIncident[]>;
 }
 
-export function deviceLossCancellationReason(deviceId: string, incidentId?: string): string {
-  return incidentId
-    ? `device-disconnected:${deviceId};incident=${incidentId}`
-    : `device-disconnected:${deviceId}`;
-}
+export {
+  deviceLossCancellationReason,
+  isDeviceLossCancellationReason,
+} from "../utils/deviceLossCancellationReason";
 
 function copyIncident(incident: EmulatorLossIncident): EmulatorLossIncident {
   return {

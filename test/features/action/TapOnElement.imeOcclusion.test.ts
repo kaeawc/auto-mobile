@@ -52,11 +52,29 @@ test.each(["Demos", "Slides", "Settings", "Password"])(
       fixture: capturedImeHierarchy(),
       screenSize: { width: 1080, height: 2400 },
       realSelector: true,
-      index: label === "Settings" ? 1 : undefined,
     });
     expect(result.success).toBe(false);
     expect(result.error).toBe(
       `Failed to perform tap on element: Target "${label}" is covered by the soft keyboard; dismiss the keyboard first.`,
+    );
+    expect(points).toEqual([]);
+  },
+);
+
+test.each(["Delete", "Space"])(
+  "captured keyboard: `%s` matches only a Gboard key, so tapOn names the keyboard and dispatches no tap",
+  async (selectorText) => {
+    const { result, points } = await executeAt("Settings", {
+      fixture: capturedImeHierarchy(),
+      screenSize: { width: 1080, height: 2400 },
+      realSelector: true,
+      selectorText,
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      `Failed to perform tap on element: Element not found with provided text '${selectorText}'. ` +
+        "The only match is a soft-keyboard key, which observe does not list; " +
+        "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
     );
     expect(points).toEqual([]);
   },
@@ -170,6 +188,7 @@ async function executeAt(
     realSelector = false,
     selectionStrategy,
     index,
+    selectorText,
   }: {
     withIme?: boolean;
     platform?: "android" | "ios";
@@ -188,6 +207,8 @@ async function executeAt(
     realSelector?: boolean;
     selectionStrategy?: "unique";
     index?: number;
+    /** The text tapOn is given, when it differs from the `label` that locates the fixture node. */
+    selectorText?: string;
   } = {},
 ) {
   const hierarchy = fixture ?? imeOcclusionHierarchy(withIme);
@@ -290,7 +311,7 @@ async function executeAt(
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute(
     {
-      ...(elementId ? { elementId } : { text: label }),
+      ...(elementId ? { elementId } : { text: selectorText ?? label }),
       action,
       display,
       selectionStrategy,
@@ -332,7 +353,9 @@ describe("internal typed focus failures", () => {
         display,
       });
       expect(result[tapFocusFailure]).toBe("not-found");
-      expect(result.error).toContain("Element not found with provided elementId 's2-stale'");
+      expect(result.error).toContain(
+        "Element id 's2-stale' is stale; re-observe and use the id from the new observation.",
+      );
       expect(points).toEqual([]);
     });
 
@@ -660,4 +683,69 @@ test("iOS elementId selection behind the docked keyboard dispatches no tap", asy
   expect(result.success).toBe(false);
   expect(result.error).toContain("covered by the soft keyboard");
   expect(points).toEqual([]);
+});
+
+// No existing captured fixture contains a dialog over a list: build this tree inline.
+function dialogOverRow(
+  cover = { left: 40, top: 100, right: 360, bottom: 200 },
+  type = 1,
+): ViewHierarchyResult {
+  const row = {
+    text: "Row 5",
+    "resource-id": "app:id/row5",
+    clickable: true,
+    bounds: { left: 0, top: 120, right: 400, bottom: 180 },
+    occlusionState: "partial",
+    occludedBy: "Dialog",
+    occludedByViewId: "app:id/dialog",
+  };
+  const dialog = { text: "Dialog", "resource-id": "app:id/dialog", clickable: true, bounds: cover };
+  return {
+    hierarchy: { node: [row, dialog] },
+    screenWidth: 400,
+    screenHeight: 240,
+    windows: [
+      { type: 1, windowLayer: 0, hierarchy: row },
+      { type, windowLayer: 1, hierarchy: dialog },
+    ],
+  };
+}
+
+describe("Android application window tap occlusion", () => {
+  test("partly covered Row 5 taps an exposed point", async () => {
+    const { result, points } = await executeAt("Row 5", {
+      fixture: dialogOverRow(),
+      realSelector: true,
+    });
+    expect(result.success).toBe(true);
+    expect(points).toHaveLength(1);
+    expect(points[0].x < 40 || points[0].x >= 360).toBe(true);
+    expect(points[0].y).toBe(150);
+  });
+  test("fully covered row fails with a typed refusal naming the cover", async () => {
+    const { result, points, actionError } = await executeAt("Row 5", {
+      fixture: dialogOverRow({ left: 0, top: 100, right: 400, bottom: 200 }),
+      realSelector: true,
+    });
+    expect(points).toEqual([]);
+    expect(result.success).toBe(false);
+    expect(actionError?.constructor.name).toBe("TapTargetUnavailableError");
+    expect(result.error).toContain("Dialog");
+  });
+  test("no covering window preserves the centre", async () => {
+    const { result, points } = await executeAt("Row 5", {
+      fixture: dialogOverRow({ left: 0, top: 0, right: 400, bottom: 100 }),
+      realSelector: true,
+    });
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 200, y: 150 }]);
+  });
+  test("system covering window preserves the centre", async () => {
+    const { result, points } = await executeAt("Row 5", {
+      fixture: dialogOverRow(undefined, 3),
+      realSelector: true,
+    });
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 200, y: 150 }]);
+  });
 });

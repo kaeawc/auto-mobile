@@ -262,6 +262,34 @@ final class CommandHierarchyCaptureTests: XCTestCase {
         try fixture.assertRawCaptures(count: 1)
     }
 
+    func testRequestHierarchyIfStaleCapturesFreshOnEveryRequest() async throws {
+        let fixture = CaptureFixture()
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(
+            WebSocketRequest.self, from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"first"}"#.utf8)
+        )
+        let second = try decoder.decode(
+            WebSocketRequest.self, from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"second"}"#.utf8)
+        )
+
+        _ = await fixture.handler.handle(first)
+        _ = await fixture.handler.handle(second)
+
+        try fixture.assertRawCaptures(count: 2)
+    }
+
+    func testRequestHierarchyIfStaleIgnoresLegacySinceTimestamp() throws {
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"legacy","sinceTimestamp":123}"#.utf8)
+        )
+
+        guard case let .requestHierarchyIfStale(payload) = request else {
+            return XCTFail("Expected request_hierarchy_if_stale")
+        }
+        XCTAssertEqual(payload.requestId, "legacy")
+    }
+
     func testUnfilteredHierarchyRequestDoesNotRecord() async throws {
         let fixture = CaptureFixture()
         let request = try JSONDecoder().decode(

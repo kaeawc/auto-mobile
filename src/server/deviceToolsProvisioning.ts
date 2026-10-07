@@ -1,3 +1,5 @@
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
+import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ProgressCallback } from "./toolRegistry";
@@ -117,6 +119,7 @@ type ProvisioningHooks = {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     options?: {
+      autolockEnabled?: boolean;
       readinessReservationOwners?: ReadonlySet<symbol>;
       verifiedAndroidAvdIdentity?: DeviceInfo;
       achievedReadiness?: DeviceReadinessLevel;
@@ -2218,6 +2221,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         ? new Set([readinessReservation.owner])
         : undefined,
       verifiedAndroidAvdIdentity: undefined,
+      autolockEnabled: captureAutolockPolicy(getDeviceToolsDependencies().env),
       achievedReadiness: resolveProvisionDeviceAchievedReadiness(args.readiness),
       collectCancellationSettlement: (settlement: Promise<void>) => {
         settlementState.bindingSettlements.push(settlement);
@@ -2491,10 +2495,16 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         ? serverConfig.getRunnerReadinessTimeoutMs()
         : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     );
-    return deps.deviceResourceControllerFactory().setResources({
+    const resourceDeadlineMs = deadlineMs - completionBudgetMs;
+    const configured = await deps.deviceResourceControllerFactory().setResources({
       device,
       resources: args.resources,
-      deadlineMs: deadlineMs - completionBudgetMs,
+      deadlineMs: resourceDeadlineMs,
+      signal,
+    });
+    return observeConfiguredDeviceResources(deps, configured, {
+      device,
+      deadlineMs: resourceDeadlineMs,
       signal,
     });
   }
@@ -2706,5 +2716,8 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     };
   }
 
-  return provisionDeviceHandler;
+  return (input: ProvisionDeviceArgs, progress?: ProgressCallback, signal?: AbortSignal) =>
+    runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
+      provisionDeviceHandler(input, progress, signal),
+    );
 }

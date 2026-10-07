@@ -13,7 +13,7 @@ import {
 } from "../../../src/server/interactionTools";
 
 import { selectedElementSchema } from "../../../src/server/toolOutputSchemas";
-import { elementSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
+import { resolverSelectionStrategySchema } from "../../../src/server/elementSelectorSchemas";
 import { applyJsonSchemaOverride } from "../../../src/server/toolSchemaHelpers";
 
 import type { TapOnElementOptions, TapAnyElementOptions } from "../../../src/models";
@@ -455,11 +455,11 @@ test("tap JSON schemas retain pinchOn's bounded recursive container definitions"
   }
 });
 
-test("tap result metadata accepts unique while highlight's enum remains unchanged", () => {
+test("tap result metadata and the canonical strategy enum accept unique", () => {
   expect(selectedElementSchema.parse({ selectionStrategy: "unique" }).selectionStrategy).toBe(
     "unique",
   );
-  expect(elementSelectionStrategySchema.options).toEqual(["first", "random"]);
+  expect(resolverSelectionStrategySchema.options).toEqual(["first", "random", "unique"]);
 });
 
 test("handlers forward the complete nested scope and unique strategy", async () => {

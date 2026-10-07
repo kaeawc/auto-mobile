@@ -6,7 +6,7 @@ import {
 } from "../observe/android/StableNodeIdentity";
 
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import type { SearchableEntry } from "./SearchableNode";
+import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
@@ -49,6 +49,11 @@ export interface ResolutionIntent {
   preferTap?: boolean;
   /** Prefer bounded checkable matches and their checkable descendants. */
   preferToggle?: boolean;
+  /**
+   * Leave the soft keyboard's keys out of the search and out of `index` numbering,
+   * as `observe` folds them into one `<ime>` row (issue #10225).
+   */
+  excludeImeKeys?: boolean;
   /** An action lookup cannot use an unbounded ID match as its target. */
   requireBounds?: boolean;
   viewport?: { width: number; height: number };
@@ -69,6 +74,18 @@ export type MatchKind =
   | "regex"
   | "class-exact"
   | "all";
+export interface ContainerFailure {
+  level: number;
+  reason: "not-found" | "ambiguous";
+  selector: ResolverSelector;
+}
+
+export interface ResolvedScope {
+  selector: ResolverSelector;
+  node: SearchableEntry;
+  matchCount: number;
+}
+
 export interface ElementResolution {
   chosen: SearchableEntry | null;
   snapshotNodes?: readonly SearchableEntry[];
@@ -82,7 +99,11 @@ export interface ElementResolution {
   }[];
   matchMode: MatchMode;
   scope?: SearchableEntry;
+  scopeChain?: ResolvedScope[];
+  containerFailure?: ContainerFailure;
   error?: string;
+  /** Typed failure classification, set where selection fails. */
+  failureReason?: ContainerFailure["reason"];
 }
 
 export function isMissingContainerError(error: string | undefined): boolean {
@@ -307,23 +328,34 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
   ): ElementResolution {
-    return this.resolveInNodes(snapshot, selector, intent, snapshot.nodes);
+    // Keyboard keys are not part of what `observe` presents, so an action's selector
+    // cannot see them (issue #10225). Indices stay snapshot indices, so only the
+    // searched list shrinks.
+    const searched = intent.excludeImeKeys
+      ? snapshot.nodes.filter((node) => !isImeKeyEntry(node))
+      : snapshot.nodes;
+    return this.resolveInNodes(snapshot, selector, intent, searched);
   }
 
   private containerFailure(
     selector: ResolverSelector,
     result: ElementResolution,
   ): ElementResolution {
-    if (result.error?.startsWith("Container level ")) {
+    if (result.containerFailure) {
       return result;
     }
     let level = 1;
     for (let parent = selector.container; parent; parent = parent.container) {
       level += 1;
     }
-    const ambiguous = /ambiguous/i.test(result.error ?? "");
+    const ambiguous = result.failureReason === "ambiguous";
     return {
       ...result,
+      containerFailure: {
+        level,
+        reason: ambiguous ? "ambiguous" : "not-found",
+        selector,
+      },
       error: `Container level ${level} ${ambiguous ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}${ambiguous ? `; ${this.candidateDetails(result.candidates)}` : ""}`,
     };
   }
@@ -356,6 +388,7 @@ export class ElementResolver {
         return true;
       });
     let scope: SearchableEntry | undefined = boundary;
+    const scopeMetadata: Pick<ElementResolution, "scopeChain"> = {};
     let siblingCandidateNodes: SearchableEntry[] | undefined;
     if (selector.container) {
       const container = this.resolveInNodes(
@@ -373,6 +406,14 @@ export class ElementResolver {
       // rooted at the node that actually supplied the text, so siblings in
       // that row do not become descendants of the requested container.
       scope = containerSource(selector.container, container) ?? container.chosen;
+      scopeMetadata.scopeChain = [
+        ...(container.scopeChain ?? []),
+        {
+          selector: this.containerSelector(selector),
+          node: scope,
+          matchCount: container.candidates.length,
+        },
+      ];
       nodes = nodes.filter((node) => isWithin(node, scope!, snapshot.nodes));
     }
     if (selector.sibling) {
@@ -410,6 +451,7 @@ export class ElementResolver {
       candidates: matched.matches.map(({ node }) => node),
       ...matched,
       scope,
+      ...scopeMetadata,
     };
     if (matched.error) {
       return result;
@@ -544,13 +586,13 @@ export class ElementResolver {
   }
 
   private prepareMatches(
-    matched: Pick<ElementResolution, "matches" | "matchMode" | "error">,
+    matched: Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason">,
     selector: ResolverSelector,
     snapshot: ResolverSnapshot,
     scope: SearchableEntry | undefined,
     intent: ResolutionIntent,
     preserveTextScope: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
       const toggles = this.toggleMatches(matched.matches, snapshot, intent);
       if (toggles.length > 0) {
@@ -623,6 +665,7 @@ export class ElementResolver {
       result.chosen = candidates[0];
       return;
     }
+    result.failureReason = candidates.length === 0 ? "not-found" : "ambiguous";
     result.error =
       candidates.length === 0
         ? `Target not found${result.scope ? " within container" : ""}`
@@ -910,7 +953,9 @@ export class ElementResolver {
     intent: ResolutionIntent,
     snapshot: ResolverSnapshot,
     scope?: SearchableEntry,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> & { usedHintFallback?: boolean } {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> & {
+    usedHintFallback?: boolean;
+  } {
     if (selector.elementId !== undefined) {
       return this.matchId(
         nodes,
@@ -1000,7 +1045,7 @@ export class ElementResolver {
     textQuery: string,
     snapshot: ResolverSnapshot,
     options: { scope?: SearchableEntry; hintFallback?: boolean },
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     const { scope, hintFallback } = options;
     const fields = (node: SearchableEntry) =>
       this.matchableTextFields(node, selector, hintFallback);
@@ -1078,7 +1123,7 @@ export class ElementResolver {
     matchMode: MatchMode,
     intent: ResolutionIntent,
     caseSensitive?: boolean,
-  ): Pick<ElementResolution, "matches" | "matchMode" | "error"> {
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (matchMode === "regex") {
       return {
         matches: [],
@@ -1117,6 +1162,7 @@ export class ElementResolver {
       return {
         matches: [],
         matchMode,
+        failureReason: "ambiguous",
         error: `Skeleton element id "${query}" is ambiguous: ${direct.length} id-less nodes share this view-id. Use text with index instead.`,
       };
     }
@@ -1162,6 +1208,7 @@ export class ElementResolver {
       matchMode,
       ...(packages.size > 1
         ? {
+            failureReason: "ambiguous" as const,
             error: `Ambiguous element ID ${query}: ${candidates.map((node) => node.nativeId).join(", ")}. Use a full resource ID.`,
           }
         : {}),

@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -263,7 +264,11 @@ export class PerformanceAudit {
     perf: PerformanceTracker,
   ): Promise<{ stdout: string; counters: GfxCounterSample }> {
     const { stdout } = await perf.track("adbGfxinfo", () =>
-      this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+      this.adb.executeCommand(
+        `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+        undefined,
+        DUMPSYS_MAX_BUFFER,
+      ),
     );
     const metrics = this.idle.parseMetrics(stdout);
     return {
@@ -411,6 +416,8 @@ export class PerformanceAudit {
       const { stdout } = await perf.track("adbCheckAnr", () =>
         this.adb.executeCommand(
           `shell dumpsys activity processes | grep -A 20 ${shellQuote(packageName)}`,
+          undefined,
+          DUMPSYS_MAX_BUFFER,
         ),
       );
 
@@ -543,7 +550,11 @@ export class PerformanceAudit {
   ): Promise<number | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfoFrameRate", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+        this.adb.executeCommand(
+          `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+          undefined,
+          DUMPSYS_MAX_BUFFER,
+        ),
       );
 
       // Parse "Total frames rendered: N"
@@ -642,7 +653,11 @@ export class PerformanceAudit {
       while (elapsedMs < maxWaitMs) {
         // Reset gfxinfo to start fresh measurement
         await perf.track("adbGfxinfoTtiReset", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)} reset`),
+          this.adb.executeCommand(
+            `shell dumpsys gfxinfo ${shellQuote(packageName)} reset`,
+            undefined,
+            DUMPSYS_MAX_BUFFER,
+          ),
         );
 
         // Wait for check interval
@@ -651,7 +666,11 @@ export class PerformanceAudit {
 
         // Get metrics after interval
         const { stdout: afterStdout } = await perf.track("adbGfxinfoTtiAfter", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`),
+          this.adb.executeCommand(
+            `shell dumpsys gfxinfo ${shellQuote(packageName)}`,
+            undefined,
+            DUMPSYS_MAX_BUFFER,
+          ),
         );
 
         const metrics = this.idle.parseMetrics(afterStdout);

@@ -119,6 +119,11 @@ type KeyboardDetection = {
  */
 export interface KeyboardOpenClient {
   supportsNodeActionSelectors(perf?: undefined, signal?: AbortSignal): Promise<boolean>;
+  requestClickFocusedInput(
+    timeoutMs?: number,
+    perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
@@ -470,7 +475,7 @@ export class Keyboard {
   /**
    * Ask CtrlProxy to `click` the focused editable node, which makes the framework
    * show the IME for that field without a touch position. `unavailable` means no
-   * click was sent and the tap fallback is allowed (no stable selector, the selector
+   * click was sent and the tap fallback is allowed (the selector
    * does not resolve to exactly this field, the runner is too old, or it refused the
    * action); `sent` means the runner accepted it; `unconfirmed` means it was
    * dispatched but never acknowledged, so a second activation would be unsafe.
@@ -482,7 +487,10 @@ export class Keyboard {
   ): Promise<NodeClickOutcome> {
     const selector = stableNodeSelectorForElement(element);
     if (!selector) {
-      return { kind: "unavailable" };
+      // action_result contains no clicked-node identity (only success/action/timing/error),
+      // so we cannot compare the runner's current focused input with this host snapshot.
+      // The runner resolves input focus at dispatch time; success still requires a fresh IME check.
+      return this.dispatchNodeClick(this.getOpenClient(), undefined, signal);
     }
     let client: KeyboardOpenClient;
     try {
@@ -506,19 +514,25 @@ export class Keyboard {
 
   private async dispatchNodeClick(
     client: KeyboardOpenClient,
-    selector: AccessibilityNodeSelector,
+    selector: AccessibilityNodeSelector | undefined,
     signal?: AbortSignal,
   ): Promise<NodeClickOutcome> {
     throwIfAborted(signal);
     let result: A11yActionResult;
     try {
-      result = await client.requestNodeAction("click", selector, undefined, undefined, signal);
+      result = selector
+        ? await client.requestNodeAction("click", selector, undefined, undefined, signal)
+        : await client.requestClickFocusedInput(undefined, undefined, signal);
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Keyboard open: node click errored: ${errorMessage(error)}`, error);
       return { kind: "unavailable" };
     }
-    const unacknowledged = result.dispatched === true && result.acknowledged !== true;
+    // Older runners reject this additive request during decoding, before any click.
+    const unsupportedFocusedClick =
+      !selector && result.error === "Unknown command type: request_click_focused_input";
+    const unacknowledged =
+      !unsupportedFocusedClick && result.dispatched === true && result.acknowledged !== true;
     // The runner reports an aborted-after-send click as dispatched but unacknowledged.
     if (signal?.aborted && unacknowledged) {
       throw new KeyboardOpenIndeterminateError("node click", result.error);

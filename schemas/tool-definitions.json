@@ -195,6 +195,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -2059,8 +2060,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -2186,8 +2185,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -3057,29 +3054,36 @@
           "type": "string"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
           "anyOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/__schema0"
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "description": "Container resource ID",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["elementId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "description": "Container text",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["text"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["text"],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -3090,7 +3094,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3104,7 +3108,61 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -3858,6 +3916,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -3954,6 +4013,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -4258,6 +4318,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -5102,6 +5163,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -5348,6 +5410,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -6620,6 +6683,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -8316,7 +8380,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -8513,10 +8577,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -8829,7 +8895,7 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
+              "description": "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -8846,7 +8912,10 @@
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 }
               ]
             },
@@ -8970,6 +9039,7 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -9714,6 +9784,7 @@
                   "type": "object",
                   "properties": {
                     "elementId": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "label": {
@@ -9809,6 +9880,7 @@
                   "type": "object",
                   "properties": {
                     "elementId": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "label": {
@@ -11499,6 +11571,7 @@
             "type": "object",
             "properties": {
               "elementId": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "label": {
@@ -11595,6 +11668,7 @@
             "type": "object",
             "properties": {
               "elementId": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "label": {
@@ -12001,6 +12075,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12247,6 +12322,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12493,6 +12569,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12766,6 +12843,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -13014,6 +13092,7 @@
                 "type": "string"
               },
               "view-id": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "content-desc": {
@@ -14088,10 +14167,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -16696,6 +16777,41 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "pages": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "state": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "lastKnown": {
+                "description": "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+                "type": "boolean",
+                "const": true
               }
             },
             "required": ["lastAction", "success", "timestamp"],
@@ -17032,7 +17148,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {
@@ -17575,6 +17691,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -17671,6 +17788,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -17975,6 +18093,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -18819,6 +18938,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -19065,6 +19185,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -20296,6 +20417,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -20929,8 +21051,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -22014,6 +22134,12 @@
           "description": "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
           "type": "boolean"
         },
+        "display": {
+          "description": "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -22403,6 +22529,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -22499,6 +22626,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -22803,6 +22931,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -23647,6 +23776,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -23893,6 +24023,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -25118,6 +25249,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -25643,6 +25775,70 @@
                   }
                 },
                 "required": ["observedGeneration", "currentGeneration", "retry"],
+                "additionalProperties": false
+              },
+              "imeFailure": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "unsupportedCapability",
+                      "activationBinding",
+                      "commit",
+                      "verification",
+                      "transport",
+                      "restoration"
+                    ]
+                  },
+                  "cause": {
+                    "type": "string"
+                  },
+                  "expectedText": {
+                    "type": "string"
+                  },
+                  "observedText": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "focusedFieldClass": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "textMayHaveBeenApplied": {
+                    "type": "boolean"
+                  },
+                  "committedUnits": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "verifiedGraphemes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "stage",
+                  "cause",
+                  "expectedText",
+                  "observedText",
+                  "focusedFieldClass",
+                  "textMayHaveBeenApplied"
+                ],
                 "additionalProperties": false
               },
               "backend": {
@@ -27425,8 +27621,6 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
-            "stageSharedStorage",
-            "stageSharedStorageFixtures",
             "startTestRecording",
             "swipeOn",
             "systemTray",
@@ -27518,8 +27712,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -27723,12 +27915,16 @@
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration ms (default 1000)",
-          "type": "number"
+          "description": "Shake duration ms (1-1798000, default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1798000
         },
         "intensity": {
-          "description": "Shake intensity (Android; default 100)",
-          "type": "number"
+          "description": "Shake intensity on Android (1-1000, default 100); ignored on iOS",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000
         },
         "platform": {
           "type": "string",
@@ -27925,150 +28121,6 @@
         }
       },
       "required": ["sessionUuid", "directory", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "stageSharedStorage",
-    "description": "Deprecated alias of putAppFile with target.domain \"user_files\"; retained until device verification. Stage host-file, UTF-8, or base64 fixtures into one bounded Android Downloads namespace for system pickers.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "description": "Android platform",
-          "default": "android",
-          "type": "string",
-          "const": "android"
-        },
-        "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
-        },
-        "reset": {
-          "description": "Remove only this declared namespace before writing",
-          "default": false,
-          "type": "boolean"
-        },
-        "indexMedia": {
-          "description": "Request Android media indexing for media files",
-          "default": true,
-          "type": "boolean"
-        },
-        "files": {
-          "description": "Files to stage into the namespace",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourcePath": {
-                "description": "Host file path",
-                "type": "string",
-                "minLength": 1
-              },
-              "contentText": {
-                "description": "UTF-8 content",
-                "type": "string"
-              },
-              "contentBase64": {
-                "description": "Base64 content",
-                "type": "string"
-              },
-              "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
-              }
-            },
-            "required": ["destinationPath"],
-            "additionalProperties": false
-          }
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["namespace", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "stageSharedStorageFixtures",
-    "description": "Deprecated alias of putAppFile with target.domain \"user_files\"; retained until device verification. Stage files in an isolated Android Download namespace for system picker workflows.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "description": "Android platform",
-          "default": "android",
-          "type": "string",
-          "const": "android"
-        },
-        "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
-        },
-        "reset": {
-          "description": "Remove only this declared namespace before writing",
-          "default": false,
-          "type": "boolean"
-        },
-        "indexMedia": {
-          "description": "Request Android media indexing for media files",
-          "default": true,
-          "type": "boolean"
-        },
-        "files": {
-          "description": "Files to stage into the namespace",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourcePath": {
-                "description": "Host file path",
-                "type": "string",
-                "minLength": 1
-              },
-              "contentText": {
-                "description": "UTF-8 content",
-                "type": "string"
-              },
-              "contentBase64": {
-                "description": "Base64 content",
-                "type": "string"
-              },
-              "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
-              }
-            },
-            "required": ["destinationPath"],
-            "additionalProperties": false
-          }
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["namespace", "files"],
       "additionalProperties": false
     }
   },
@@ -29217,6 +29269,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -29731,6 +29784,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -29827,6 +29881,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -30131,6 +30186,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -30975,6 +31031,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -31221,6 +31278,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -32749,6 +32807,7 @@
                     "type": "string"
                   },
                   "view-id": {
+                    "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                     "type": "string"
                   },
                   "content-desc": {
@@ -32952,6 +33011,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -33407,6 +33467,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -33503,6 +33564,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -33807,6 +33869,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -34651,6 +34714,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -34897,6 +34961,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -36137,6 +36202,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {

@@ -102,6 +102,8 @@ export interface TapOnArgs {
 }
 
 export type TapAtArgs = TapAtOptions & {
+  __tapAtPlanContext?: import("../models/TapAtGeometry").TapAtPlanContext;
+  __tapAtRecordingContext?: import("../models/TapAtGeometry").TapAtPlanContext;
   platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";
@@ -154,10 +156,7 @@ export interface PinchOnArgs {
   duration?: number;
   rotationDegrees?: number;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   autoTarget?: boolean;
   platform?: Platform;
 }
@@ -198,6 +197,7 @@ export interface RotateArgs {
    * if originally locked, restores the session's original user_rotation, and clears ownership.
    */
   lockOrientation?: boolean;
+  display?: number;
   platform?: Platform;
 }
 

@@ -1188,6 +1188,12 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
   ): Promise<A11yActionResult>;
 
+  requestClickFocusedInput(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult>;
+
   requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
@@ -3642,6 +3648,40 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
+    return this.dispatchActionRequest(
+      action,
+      (requestId) =>
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
+        ),
+      timeoutMs,
+      perf,
+      signal,
+    );
+  }
+
+  async requestClickFocusedInput(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    return this.dispatchActionRequest(
+      "click",
+      (requestId) =>
+        serializeCtrlProxyRequest(ctrlProxyRequests.requestClickFocusedInput({ requestId })),
+      timeoutMs,
+      perf,
+      signal,
+    );
+  }
+
+  private async dispatchActionRequest(
+    action: string,
+    serializeRequest: (requestId: string) => string,
+    timeoutMs: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
@@ -3670,8 +3710,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const requestId = this.requestManager.generateId("action");
       pendingRequestId = requestId;
       logger.debug(
-        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
-          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
       );
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
@@ -3705,14 +3744,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
-        );
+        const message = serializeRequest(requestId);
         this.ws.send(message);
         dispatched = true;
         logger.debug(
-          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
-            `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
         );
       });
 
@@ -4613,6 +4649,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     delayMs: number = 500,
     timeoutMs: number = 3000,
   ): Promise<boolean> {
+    const signal = combineWithAmbientAbort();
+    signal?.throwIfAborted();
     // Remember the most recent runner error text across attempts (issue #3062) so the terminal
     // warn — the one visible at the default log level — attributes the deterministic handler
     // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
@@ -4638,7 +4676,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const hierarchyResult = await this.requestHierarchySync(
           new NoOpPerformanceTracker(),
           false,
-          undefined,
+          signal,
           timeoutMs,
           diagnostics,
         );
@@ -4667,6 +4705,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       {
         maxAttempts,
         delays: delayMs,
+        signal,
         shouldRetry: () => {
           if (identicalRunnerErrorStreak >= VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT) {
             shortCircuited = true;
@@ -4680,6 +4719,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
       },
     );
+
+    signal?.throwIfAborted();
 
     if (!result.success) {
       const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";
@@ -4706,12 +4747,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
-  /** Tell the Kotlin service that recording has started (enables interaction event emission). */
+  /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
-  /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
+  /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }
@@ -5226,10 +5267,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.rejectedCommands.add(rejectedCommand);
       }
       const deviceError = message.error || "Runner reported an unstructured protocol error";
-      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      // Preserve capability refusals used by fallback callers, including focused-input clicks.
       const errorText =
         rejectedCommand &&
         [
+          "request_click_focused_input",
           "show_overlay",
           "update_overlay",
           "dismiss_overlay",

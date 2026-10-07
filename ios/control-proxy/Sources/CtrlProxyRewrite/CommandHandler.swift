@@ -141,6 +141,9 @@ final class CommandHandler: CommandHandling {
             case let .requestHierarchy(payload):
                 return try await handleRequestHierarchy(payload, startTime: startTime)
 
+            // On iOS, `request_hierarchy_if_stale` always captures fresh, just like
+            // `request_hierarchy`. `sinceTimestamp` is accepted but does not enable
+            // cache reuse: there is no UI-change signal, and polls can miss a change.
             case let .requestHierarchyIfStale(payload):
                 return try await handleRequestHierarchyIfStale(payload, startTime: startTime)
 
@@ -239,6 +242,9 @@ final class CommandHandler: CommandHandling {
 
             case let .addHighlight(payload):
                 return await handleAddHighlight(payload, startTime: startTime)
+
+            case let .magicTap(payload):
+                return await handleMagicTap(payload, startTime: startTime)
 
             case let .getVoiceOverState(payload):
                 return await handleGetVoiceOverState(payload, startTime: startTime)

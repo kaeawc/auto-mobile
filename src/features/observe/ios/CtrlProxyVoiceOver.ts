@@ -9,7 +9,12 @@
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../shared/SharedGestureDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ElementBounds } from "../../../models/ElementBounds";
-import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
+import type {
+  DelegateContext,
+  CtrlProxyVoiceOverResult,
+  CtrlProxyActionResult,
+  CtrlProxyMagicTapResult,
+} from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort, getAbortSignal } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -45,6 +50,33 @@ export class CtrlProxyVoiceOver {
 
   constructor(context: DelegateContext) {
     this.context = context;
+  }
+
+  /** Invoke the foreground app's SDK responder chain, even with VoiceOver off. */
+  async requestMagicTap(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    const failure = (error: string, unsupported = false): CtrlProxyMagicTapResult => ({
+      success: false,
+      unsupported,
+      requiresVoiceOver: false,
+      totalTimeMs: 0,
+      error,
+    });
+    return sendCommand<CtrlProxyMagicTapResult>(this.context, {
+      idPrefix: "magicTap",
+      responseType: "magic_tap_result",
+      messageType: "request_magic_tap",
+      timeoutMs,
+      perf,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => failure("Not connected to CtrlProxy"),
+      unsupportedCommandError: (_type, error) => failure(error, true),
+      timeoutError: () => failure("Timeout waiting for magic_tap_result"),
+    });
   }
 
   /**

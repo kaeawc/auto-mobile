@@ -7,6 +7,8 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
+import capturedHome from "../../fixtures/android-launcher/launcher-home-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
 
 const device: BootedDevice = {
@@ -66,7 +68,9 @@ describe("RecentApps inner result", () => {
     timer.enableAutoAdvance();
     observe = new FakeObserveScreen();
     observe.enableAutoVaryHierarchy();
-    observe.setObserveResult(() => capturedObservation(timer));
+    observe.setObserveResult(() =>
+      globalActionSpy?.mock.calls.length ? recentsObservation() : capturedObservation(timer),
+    );
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
     window.configureActiveWindow({
@@ -98,6 +102,60 @@ describe("RecentApps inner result", () => {
     globalActionSpy?.mockRestore();
   });
 
+  const recentsObservation = (): ObserveResult => ({
+    ...capturedRecents,
+    timestamp: timer.now(),
+    screenSize,
+    systemInsets,
+  });
+
+  test("already-open overview never dispatches another recent action", async () => {
+    observe.setObserveResult(() => recentsObservation());
+    const result = await recentApps.execute();
+    expect(result.success).toBe(true);
+    expect(globalActionSpy).not.toHaveBeenCalled();
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input keyevent"))).toEqual([]);
+  });
+
+  test("two consecutive calls open overview with only one navigation dispatch", async () => {
+    expect((await recentApps.execute()).success).toBe(true);
+    expect((await recentApps.execute()).success).toBe(true);
+    expect(globalActionSpy).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input keyevent"))).toEqual([
+      "shell input keyevent 187",
+    ]);
+  });
+
+  test("unverified overview cannot suppress navigation or claim success", async () => {
+    observe.setObserveResult(() => ({
+      ...recentsObservation(),
+      freshness: { isFresh: false, verified: false },
+    }));
+    const result = await recentApps.execute();
+    expect(result.success).toBe(false);
+    expect(globalActionSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("hardware delivery without overview reports an honest failure", async () => {
+    observe.setObserveResult(() => capturedObservation(timer));
+    const result = await recentApps.execute();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("overview");
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
+  });
+
+  test("launcher Home still dispatches recents and verifies the resulting overview", async () => {
+    observe.setObserveResult(() =>
+      adb.getExecutedCommands().includes("shell input keyevent 187")
+        ? recentsObservation()
+        : { ...capturedHome, timestamp: timer.now(), screenSize, systemInsets },
+    );
+    const result = await recentApps.execute();
+    expect(result.success).toBe(true);
+    expect(globalActionSpy).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
+  });
+
   // This regression must fail on the original callback's constant success result.
   test("preserves hardware inner failure and observation", async () => {
     recentApps["executeHardwareNavigation"] = async () => ({
@@ -117,7 +175,9 @@ describe("RecentApps inner result", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("hardware");
     expect(result.observation).toBeDefined();
-    expect(adb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input keyevent"))).toEqual([
+      "shell input keyevent 187",
+    ]);
   });
 
   // #9979: app elements whose ids contain navigation-ish words must never be tapped or swiped,
@@ -133,26 +193,30 @@ describe("RecentApps inner result", () => {
     ["@android:id/content", "com.android.systemui:id/home_handle"],
   ])("app container %s with control %s is not acted on", async (containerId, controlId) => {
     observe.setObserveResult(() =>
-      observation(appHierarchyWithControl(containerId, controlId), timer),
+      globalActionSpy?.mock.calls.length
+        ? recentsObservation()
+        : observation(appHierarchyWithControl(containerId, controlId), timer),
     );
     const result = await recentApps.execute();
     expect(result.success).toBe(true);
     expect(result.method).toBe("hardware");
-    const commands = adb.getExecutedCommands();
+    const commands = adb.getExecutedCommands().filter((cmd) => cmd.includes("input "));
     expect(commands).toEqual(["shell input keyevent 187"]);
     expect(commands.some((command) => /input (tap|swipe)/.test(command))).toBe(false);
   });
 
-  test("an unavailable view hierarchy does not block the hardware press", async () => {
+  test("an unavailable view hierarchy allows the press but cannot verify overview", async () => {
     observe.setObserveResult(() => ({
       timestamp: timer.now(),
       screenSize,
       systemInsets,
     }));
     const result = await recentApps.execute();
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.method).toBe("hardware");
-    expect(adb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input keyevent"))).toEqual([
+      "shell input keyevent 187",
+    ]);
   });
 
   test("delivered global action succeeds without the key event", async () => {
@@ -165,7 +229,7 @@ describe("RecentApps inner result", () => {
     const result = await recentApps.execute();
     expect(result.success).toBe(true);
     expect(result.method).toBe("hardware");
-    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input "))).toEqual([]);
   });
 
   test("undelivered hardware global action falls back to ADB successfully", async () => {
@@ -226,7 +290,7 @@ describe("RecentApps inner result", () => {
     await expect(recentApps.execute(undefined, controller.signal)).rejects.toThrow(
       "Operation cancelled",
     );
-    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input "))).toEqual([]);
   });
 
   test("abort during the key event command rejects", async () => {

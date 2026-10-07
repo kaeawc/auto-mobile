@@ -97,7 +97,6 @@
 3	src/features/action/TapOnElement.ts	eslint(max-lines-per-function)
 3	src/features/observe/ObserveScreen.ts	eslint(complexity)
 3	src/server/toolRegistry.ts	eslint(complexity)
-3	src/utils/retry/RetryExecutor.ts	auto-mobile(catch-convention)
 4	src/features/observe/shared/SharedGestureDelegate.ts	eslint(max-params)
 5	src/features/action/swipeon/TalkBackSwipeExecutor.ts	eslint(max-params)
 5	src/utils/plan/PlanExecutor.ts	eslint(complexity)

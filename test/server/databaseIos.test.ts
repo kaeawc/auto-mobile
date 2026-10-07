@@ -204,6 +204,33 @@ describe("iOS database inspection server integration", function () {
   });
 
   test.each([
+    ["SELECT * FROM notes", "safe to retry"],
+    ["INSERT INTO notes (body) VALUES ('x')", "Do not retry automatically"],
+    ["SELECT 1; DELETE FROM notes", "Do not retry automatically"],
+  ] as const)(
+    "sqlQuery words an unanswered %s by what the host sent",
+    async (query, expectedFragment) => {
+      IOSCtrlProxyClient.getInstance = mock(() => ({
+        executeSQLForIos: mock(async () => {
+          // The runner's SdkDatabaseError.indeterminateMessage, passed through verbatim.
+          throw new Error(
+            "database request was sent but no answer arrived in time; the outcome is indeterminate (a write may still have been applied). Do not retry automatically; query the data to confirm first",
+          );
+        }),
+      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+
+      registerDatabaseTools();
+      const tool = ToolRegistry.getTool("sqlQuery");
+      const error = await tool!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        databasePath: "/app/Documents/app.db",
+        query,
+      }).catch((caught: unknown) => caught as Error);
+      expect(error.message).toContain(expectedFragment);
+    },
+  );
+
+  test.each([
     [
       `${SDK_UNAVAILABLE_PREFIX}: app_not_active`,
       "The target app is not in the foreground; bring it to the foreground and retry.",

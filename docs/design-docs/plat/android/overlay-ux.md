@@ -36,6 +36,7 @@ blanket focusability proposal).
 | `id`     | Required nonempty overlay identifier string.                      |
 | `window` | Required window configuration below.                              |
 | `state`  | Optional flat object of string, finite number, or boolean values. |
+| `motion` | Optional `none` or `standard` (default). See Motion below.        |
 | `root`   | Required single node.                                             |
 
 All numeric values are finite. State keys (including action/binding/condition
@@ -259,6 +260,19 @@ loops: if they are still missing, or the retry fails or is cancelled, the first
 successful result is returned with `missingAssets` and a `warning` on the tool output.
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
+
+## Motion
+
+Overlay state changes animate by default (#10442). A node with `visibleWhen`
+fades and expands in and fades and shrinks out; a pager page change driven by
+`setPage` animates the scroll instead of jumping. Spec-level `motion: "none"`
+opts out and keeps every change instant. Motion is also off when the system
+animator duration scale is 0 (`adb shell settings put global
+animator_duration_scale 0`), so `observe` screenshots are settled with no
+extra waits; other scales are honored by Compose's animation clock. The scale is
+read when the spec changes. Only nodes with `visibleWhen` get an animation
+wrapper. Size-change animation, `transition` variants and `pressScale` are
+follow-ups.
 
 ## Actions and state
 

@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +29,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
@@ -45,6 +51,11 @@ internal fun OverlayRuntimeContent(
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val resolver = LocalContext.current.contentResolver
+  val motion =
+    remember(snapshot.spec) {
+      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
+    }
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -54,6 +65,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
           queue.trySend(interaction)
@@ -76,7 +88,25 @@ fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -
 
 @Composable
 private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
-  if (!node.visible) return
+  // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
+  if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    AnimatedVisibility(
+      visible = node.visible,
+      enter = fadeIn() + expandIn(),
+      exit = fadeOut() + shrinkOut(),
+    ) {
+      RenderOverlayNodeContent(node, interact)
+    }
+  } else if (node.visible) {
+    RenderOverlayNodeContent(node, interact)
+  }
+}
+
+@Composable
+private fun RenderOverlayNodeContent(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+) {
   val modifier = overlayNodeModifier(node, interact)
   when (node.role) {
     "box" ->
@@ -195,7 +225,12 @@ private fun RenderOverlayPager(
 ) {
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  LaunchedEffect(node.page) { if (pager.currentPage != node.page) pager.scrollToPage(node.page) }
+  val animate = LocalOverlayMotion.current
+  LaunchedEffect(node.page) {
+    if (pager.currentPage != node.page) {
+      if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
+    }
+  }
   LaunchedEffect(pager) {
     snapshotFlow { pager.isScrollInProgress to pager.settledPage }
       .distinctUntilChanged()

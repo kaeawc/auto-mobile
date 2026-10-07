@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "motion",
+    "window": { "placement": { "type": "fullscreen" } },
+    "motion": "bouncy",
+    "root": { "type": "text", "text": "x" }
+  },
+  "expectedPath": "motion"
+}

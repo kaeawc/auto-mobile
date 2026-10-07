@@ -686,7 +686,8 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "mcpRecording",
   "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-    (spec) => spec.field !== "toolResultsNoStructuredContent",
+    (spec) =>
+      spec.field !== "toolResultsNoStructuredContent" && spec.field !== "actionsCompactMetadata",
   ).map((spec) => spec.field),
 ];
 
@@ -705,6 +706,7 @@ export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
   ...REUSE_CRITICAL_STRING_OPTION_KEYS,
   ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
   "accessibilityUseBaseline",
+  "actionsCompactMetadata",
   "eventAllMarkers",
 ];
 
@@ -767,14 +769,15 @@ function requestedOptionDeficits<T>(
  * #3846): a client that does not ask for a flag has no opinion on it, so a flag
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
- * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
+ * Compact metadata compares explicit on/off; an unrecorded running value defaults on.
+ * Other booleans are compared strictly (`=== true`), so `undefined` and `false` both
  * read as "no opinion"; strings and marker arrays count only when the client
  * supplies one that differs from the daemon's. Connection presentation options
  * are intentionally absent from this comparison.
  * Returns a human-readable list (empty when the daemon already satisfies every
  * requested flag) for logging and error messages.
  */
-function startupOptionDeficits(
+export function startupOptionDeficits(
   requested: DaemonOptions | undefined,
   running: DaemonOptions | undefined,
 ): string[] {
@@ -785,6 +788,13 @@ function startupOptionDeficits(
       running,
       (options, key) => (options?.[key] === true ? true : undefined),
       (options, key) => options?.[key] === true,
+    ),
+    ...requestedOptionDeficits(
+      ["actionsCompactMetadata"],
+      requested,
+      running,
+      (options) => options?.actionsCompactMetadata,
+      (options) => options?.actionsCompactMetadata ?? true,
     ),
     ...requestedOptionDeficits(
       REUSE_CRITICAL_STRING_OPTION_KEYS,
@@ -829,9 +839,10 @@ function startupOptionDeficits(
  * silently strip a flag the daemon was already launched with (issue #3846) —
  * it only ever adds flags the client explicitly asks for. Boolean CLI options
  * are one-directional: `false` means the caller has no opinion, so every
- * active boolean on the running daemon is force-preserved.
+ * active boolean on the running daemon is force-preserved. Compact metadata
+ * instead preserves the running value only when the client has no preference.
  */
-function mergeDaemonOptions(
+export function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
@@ -844,6 +855,8 @@ function mergeDaemonOptions(
       mergedRecord[key] = true;
     }
   }
+  merged.actionsCompactMetadata =
+    requestedOptions.actionsCompactMetadata ?? runningOptions.actionsCompactMetadata;
   if (requested?.accessibilityAudit === true) {
     merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }

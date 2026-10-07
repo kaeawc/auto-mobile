@@ -800,9 +800,11 @@ export class Daemon {
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
     }
-    if (options.actionsCompactMetadata) {
-      serverConfig.setActionsCompactMetadataEnabled(true);
+    if (options.actionsCompactMetadata !== undefined) {
+      serverConfig.setActionsCompactMetadataEnabled(options.actionsCompactMetadata);
     }
+    // Status/PID records must describe effective behavior, including persisted opt-outs.
+    this.options.actionsCompactMetadata = serverConfig.isActionsCompactMetadataEnabled();
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
     }

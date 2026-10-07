@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { serverConfig } from "../../src/utils/ServerConfig";
 
 /**
- * EC1: each output-reduction flag defaults off and its setter flips the getter.
+ * EC1: compact metadata defaults on; other flags default off and its setter flips the getter.
  * Restores defaults after each test so the shared singleton doesn't leak state.
  */
 describe("ServerConfig output-reduction flags", () => {
@@ -11,7 +11,7 @@ describe("ServerConfig output-reduction flags", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     serverConfig.setActionsDiffObserveEnabled(false);
     serverConfig.setActionsNoObserveEnabled(false);
-    serverConfig.setActionsCompactMetadataEnabled(false);
+    serverConfig.setActionsCompactMetadataEnabled(true);
     serverConfig.setToolOutputsDir(undefined);
   });
 
@@ -33,10 +33,10 @@ describe("ServerConfig output-reduction flags", () => {
     expect(serverConfig.isActionsDiffObserveEnabled()).toBe(true);
   });
 
-  test("compact metadata defaults off and toggles", () => {
-    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
-    serverConfig.setActionsCompactMetadataEnabled(true);
+  test("compact metadata defaults on and opts out", () => {
     expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
   });
 
   test("actions-no-observe defaults off and toggles", () => {

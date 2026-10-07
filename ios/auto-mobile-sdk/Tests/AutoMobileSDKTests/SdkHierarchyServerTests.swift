@@ -252,6 +252,21 @@ final class SdkHierarchyServerTests: XCTestCase {
         }
     }
 
+    func testTriggerRouteThroughListenerReturnsOkAndGatesOnForeground() throws {
+        defer { AutoMobileBiometrics.shared.reset() }
+        let payload = "{\"module\":\"biometrics\",\"trigger\":\"clear\"}"
+        let head = "POST /trigger HTTP/1.1\r\nHost: localhost\r\nContent-Length: \(payload.utf8.count)\r\n\r\n"
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: true)) { port in
+            let response = try roundTrip(port: port, head: head, body: payload)
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK"), response)
+            XCTAssertTrue(response.contains("\"status\":\"ok\""), response)
+        }
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: false)) { port in
+            let response = try roundTrip(port: port, head: head, body: payload)
+            assertErrorResponse(response, status: "409 Conflict", error: "app_not_active")
+        }
+    }
+
     private func assertHealthResponse(_ response: String) throws {
         XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK"), response)
         let body = try XCTUnwrap(response.components(separatedBy: "\r\n\r\n").last)

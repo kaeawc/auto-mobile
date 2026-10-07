@@ -115,6 +115,9 @@
     /// `src/features/action/BiometricAuth.ts`, with the same `result`/`ttlMs`/`errorCode` fields.
     struct SdkBiometricsTriggerModule: SdkTriggerModule {
         static let defaultTtlMs: Int64 = 5000
+        /// Longest override a host may request (10 minutes); larger values are rejected so a stray
+        /// trigger cannot leave a stale override armed indefinitely.
+        static let maxTtlMs: Int64 = 600_000
 
         private let override: @Sendable (BiometricResult, Int64) -> Void
         private let clear: @Sendable () -> Void
@@ -153,7 +156,8 @@
             switch payload["ttlMs"] {
             case nil:
                 ttlMs = Self.defaultTtlMs
-            case let value as NSNumber where Self.isInteger(value) && value.int64Value > 0:
+            case let value as NSNumber
+                where Self.isInteger(value) && value.doubleValue > 0 && value.doubleValue <= Double(Self.maxTtlMs):
                 ttlMs = value.int64Value
             default:
                 return .invalidPayload("invalid_ttl_ms")
@@ -171,7 +175,9 @@
                 switch payload["errorCode"] {
                 case nil:
                     code = -1
-                case let value as NSNumber where Self.isInteger(value):
+                case let value as NSNumber
+                    where Self.isInteger(value) && value.doubleValue >= Double(Int32.min)
+                    && value.doubleValue <= Double(Int32.max):
                     code = value.intValue
                 default:
                     return .invalidPayload("invalid_error_code")

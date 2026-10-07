@@ -54,7 +54,7 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
         let module = RecordingModule()
         let handler = SdkTriggerRouteHandler(registry: SdkTriggerRegistry(modules: ["calls": module]))
 
-        let response = handler.handle(body: try body([
+        let response = try handler.handle(body: body([
             "module": "calls", "trigger": "ring", "payload": ["number": "5551234567"],
         ]))
 
@@ -67,14 +67,14 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
         let module = RecordingModule()
         let handler = SdkTriggerRouteHandler(registry: SdkTriggerRegistry(modules: ["calls": module]))
 
-        XCTAssertEqual(handler.handle(body: try body(["module": "calls", "trigger": "ring"])).statusCode, 200)
+        XCTAssertEqual(try handler.handle(body: body(["module": "calls", "trigger": "ring"])).statusCode, 200)
         XCTAssertEqual(module.received.withLock { $0 }, ["ring:"])
     }
 
     func testUnregisteredModuleIsAStructuredNotFound() throws {
         let handler = SdkTriggerRouteHandler(registry: SdkTriggerRegistry(modules: ["calls": RecordingModule()]))
 
-        let response = handler.handle(body: try body(["module": "messages", "trigger": "sms"]))
+        let response = try handler.handle(body: body(["module": "messages", "trigger": "sms"]))
 
         XCTAssertEqual(response.statusCode, 404)
         XCTAssertEqual(try json(response) as NSDictionary, [
@@ -86,7 +86,7 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
         let module = RecordingModule()
         let handler = SdkTriggerRouteHandler(registry: SdkTriggerRegistry(modules: ["calls": module]))
 
-        let response = handler.handle(body: try body(["module": "calls", "trigger": "hangup"]))
+        let response = try handler.handle(body: body(["module": "calls", "trigger": "hangup"]))
 
         XCTAssertEqual(response.statusCode, 400)
         XCTAssertEqual(try json(response) as NSDictionary, [
@@ -99,7 +99,7 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
             "calls": RecordingModule(outcome: .invalidPayload("missing_number")),
         ]))
 
-        let response = handler.handle(body: try body(["module": "calls", "trigger": "ring"]))
+        let response = try handler.handle(body: body(["module": "calls", "trigger": "ring"]))
 
         XCTAssertEqual(response.statusCode, 400)
         XCTAssertEqual(try json(response)["reason"] as? String, "missing_number")
@@ -109,15 +109,15 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
     func testMalformedBodiesAreBadRequestsAndReachNoModule() throws {
         let module = RecordingModule()
         let handler = SdkTriggerRouteHandler(registry: SdkTriggerRegistry(modules: ["calls": module]))
-        let bodies: [Data] = [
+        let bodies: [Data] = try [
             Data(),
             Data("not json".utf8),
             Data("[]".utf8),
-            try body(["trigger": "ring"]),
-            try body(["module": "calls"]),
-            try body(["module": "", "trigger": "ring"]),
-            try body(["module": "calls", "trigger": 7]),
-            try body(["module": "calls", "trigger": "ring", "payload": "5551234567"]),
+            body(["trigger": "ring"]),
+            body(["module": "calls"]),
+            body(["module": "", "trigger": "ring"]),
+            body(["module": "calls", "trigger": 7]),
+            body(["module": "calls", "trigger": "ring", "payload": "5551234567"]),
         ]
         for request in bodies {
             let response = handler.handle(body: request)
@@ -178,12 +178,24 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
             (["result": "SUCCESS", "ttlMs": 1.5], "invalid_ttl_ms"),
             (["result": "SUCCESS", "ttlMs": true], "invalid_ttl_ms"),
             (["result": "SUCCESS", "ttlMs": "100"], "invalid_ttl_ms"),
+            (["result": "SUCCESS", "ttlMs": 1e20], "invalid_ttl_ms"),
+            (["result": "SUCCESS", "ttlMs": 600_001], "invalid_ttl_ms"),
             (["result": "ERROR", "errorCode": "7"], "invalid_error_code"),
+            (["result": "ERROR", "errorCode": 1e20], "invalid_error_code"),
+            (["result": "ERROR", "errorCode": 2_147_483_648], "invalid_error_code"),
         ]
         for (payload, reason) in cases {
             XCTAssertEqual(module.handle(trigger: "override", payload: payload), .invalidPayload(reason), reason)
         }
         XCTAssertEqual(sink.overrides.withLock { $0 }, [])
+    }
+
+    func testBiometricsOverrideAcceptsTtlAtTheCap() {
+        let sink = BiometricsSink()
+        XCTAssertEqual(
+            sink.module().handle(trigger: "override", payload: ["result": "SUCCESS", "ttlMs": 600_000]), .handled
+        )
+        XCTAssertEqual(sink.overrides.withLock { $0 }, ["success/600000"])
     }
 
     func testBiometricsClearAndUnknownTrigger() {
@@ -201,7 +213,7 @@ final class SdkTriggerRouteHandlerTests: XCTestCase {
             "biometrics": SdkBiometricsTriggerModule(),
         ]))
 
-        let response = handler.handle(body: try body([
+        let response = try handler.handle(body: body([
             "module": "biometrics", "trigger": "override", "payload": ["result": "CANCEL", "ttlMs": 60000],
         ]))
 

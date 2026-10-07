@@ -149,10 +149,15 @@ export class FakeTimer implements Timer {
    * event.
    *
    * Use this when callbacks begin asynchronous work that must settle before the
-   * next caught-up interval tick. The synchronous advanceTime() remains useful
+   * next caught-up interval tick. Pure promise-based harnesses can inject a
+   * microtask drain as afterEvent to avoid host scheduling without changing the
+   * event ordering. The synchronous advanceTime() remains useful
    * for deterministic single-turn tests.
    */
-  async advanceTimeAsync(ms: number): Promise<void> {
+  async advanceTimeAsync(
+    ms: number,
+    afterEvent: () => Promise<void> = () => new Promise<void>((resolve) => setImmediate(resolve)),
+  ): Promise<void> {
     const target = this.currentTime + ms;
 
     for (;;) {
@@ -162,7 +167,7 @@ export class FakeTimer implements Timer {
       }
       this.currentTime = next.dueAt;
       next.fire();
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await afterEvent();
     }
 
     this.currentTime = target;

@@ -27,6 +27,7 @@ import {
 } from "../ctrlProxy/RunnerReadinessService";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -742,31 +743,38 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
     };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
-    return await prepareDevice(
-      target,
-      {
-        bootTimeoutMs: totalTimeoutMs,
-        automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
-        automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
-        operationName: "startDevice",
-        stableTarget:
-          args.platform === "android" && target.name && !args.deviceId
-            ? { platform: "android", stableId: target.name }
-            : args.platform === "ios" && args.deviceId
-              ? { platform: "ios", stableId: args.deviceId }
-              : undefined,
-        ...(args.platform === "android" && args.avdName && args.deviceId
-          ? {
-              androidAvdName: args.avdName,
-              requestedAndroidIdentifierPair: {
-                avdName: args.avdName,
-                deviceId: args.deviceId,
-              },
-            }
-          : {}),
-      },
-      progress,
+    return await runWithAcquisitionDeadline(
+      rawArgs,
+      getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
+      "startDevice",
+      (deadlineMs, requestSignal) =>
+        prepareDevice(
+          target,
+          {
+            bootTimeoutMs: totalTimeoutMs,
+            automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+            automationDeadlineMs: deadlineMs,
+            operationName: "startDevice",
+            stableTarget:
+              args.platform === "android" && target.name && !args.deviceId
+                ? { platform: "android", stableId: target.name }
+                : args.platform === "ios" && args.deviceId
+                  ? { platform: "ios", stableId: args.deviceId }
+                  : undefined,
+            ...(args.platform === "android" && args.avdName && args.deviceId
+              ? {
+                  androidAvdName: args.avdName,
+                  requestedAndroidIdentifierPair: {
+                    avdName: args.avdName,
+                    deviceId: args.deviceId,
+                  },
+                }
+              : {}),
+          },
+          progress,
+          requestSignal,
+        ),
     );
   };
 

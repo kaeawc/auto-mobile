@@ -43,7 +43,11 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
-import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessError,
+  RunnerReadinessService,
+} from "../../src/ctrlProxy/RunnerReadinessService";
+import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
@@ -5495,6 +5499,70 @@ describe("provisionDevice handler", () => {
     });
     expect(operationStore.failCodes).toEqual(["timeout"]);
   });
+
+  test.each(["device_lost", "device_offline"] as const)(
+    "classifies a real runner readiness %s failure as retryable",
+    async (code) => {
+      const timer = new FakeTimer();
+      const failure =
+        code === "device_lost"
+          ? new DeviceLostError("emulator-5554", "device disappeared", "readiness-incident")
+          : new AdbDeviceOfflineError("emulator-5554", "device offline");
+      deviceManager.setBootedDevices("android", [
+        { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+      ]);
+      exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+      const service = new RunnerReadinessService({
+        timer,
+        getAndroidManager: () => ({
+          isInstalled: async () => {
+            throw failure;
+          },
+          isEnabled: async () => true,
+          isVersionCompatible: async () => true,
+          enable: async () => {},
+          resetSetupState: () => {},
+          setup: async () => ({ success: true, message: "ready" }),
+          ensureCompatibleVersion: async () => ({ status: "compatible" }),
+        }),
+        getAndroidClient: () => ({
+          isConnected: () => true,
+          waitForConnection: async () => true,
+          verifyServiceReady: async () => true,
+          connectWithoutSetup: async () => true,
+        }),
+        getIosManager: () => {
+          throw new Error("unexpected iOS manager");
+        },
+        getIosClient: () => {
+          throw new Error("unexpected iOS client");
+        },
+        checkIosOverride: async () => ({ present: false, usable: true }),
+        awaitIosStartupMaintenance: async () => {},
+      });
+      setDeviceToolsDependencies({
+        timer,
+        ensureCtrlProxyReady: (request) => service.ensureReady(request),
+      });
+
+      const response = JSON.parse(
+        await provisionResponseText(provisionTestArgs("android", `real-readiness-${code}`)),
+      );
+      expect(response).toMatchObject({
+        error: {
+          code,
+          retryable: true,
+          providerCode: failure.code,
+          readinessPhase: "runner-setup",
+          attempt: 1,
+          deviceId: "emulator-5554",
+          ...(code === "device_lost" ? { incidentId: "readiness-incident" } : {}),
+        },
+      });
+      expect(operationStore.failCodes).toEqual([code]);
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
 
   test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
     deviceManager.setBootedDevices("android", [

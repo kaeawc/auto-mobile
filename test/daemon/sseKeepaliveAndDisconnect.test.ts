@@ -170,6 +170,7 @@ function planDisconnectMonitorHarness() {
     manager,
     device,
     devices,
+    timer,
     actions,
     recordingsReader,
     async tick() {
@@ -352,6 +353,28 @@ describe("disconnect monitor during plan execution", () => {
       expect(h.actions).not.toContain(`remove:${h.device.id}`);
       expect(h.actions).not.toContain("stop-recording");
     } finally {
+      serverConfig.setPlanExecutionActive(previous);
+    }
+  });
+
+  test("non-plan sessions retain all three discovery misses of restart grace", async () => {
+    const h = planDisconnectMonitorHarness();
+    const previous = serverConfig.isPlanExecutionActive();
+    const stopMonitoring = spyOn(getPerformanceMonitor(), "stopMonitoring").mockImplementation(
+      () => {},
+    );
+    try {
+      serverConfig.setPlanExecutionActive(false);
+      for (let misses = 1; misses < DEVICE_DISCONNECT_MISS_THRESHOLD; misses++) {
+        await h.tick();
+        expect(h.daemon.deviceDisconnectMisses.get(h.device.id)).toBe(misses);
+        expect(h.actions).not.toContain("cancel:plan-session");
+      }
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      stopMonitoring.mockRestore();
       serverConfig.setPlanExecutionActive(previous);
     }
   });

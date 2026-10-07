@@ -1,5 +1,4 @@
 import { parsePort, parsePositiveNumber, type ParseLogger } from "../../cli/numericValidators";
-import { parseOutputReductionFlagOverrides } from "../../utils/outputReductionFlags";
 import { logger } from "../../utils/logger";
 import { shouldSkipCtrlProxyDownload } from "../../utils/ctrlProxyDownloadControl";
 import {
@@ -244,9 +243,5 @@ export function parseDaemonArgs(
       i++;
     }
   }
-  options.actionsCompactMetadata = parseOutputReductionFlagOverrides(
-    args,
-    env,
-  ).actionsCompactMetadata;
   return options;
 }

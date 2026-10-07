@@ -324,7 +324,7 @@ export interface FinalizeToolResponseContext {
   args?: Record<string, unknown>;
   sessionUuid?: string;
   baselineStore?: ObservationBaselineStore;
-  /** Connection preference takes precedence over the persistent feature flag. */
+  /** Connection preference takes precedence over the effective daemon default. */
   actionsCompactMetadata?: boolean;
   /**
    * Internal tool-to-tool invocation guard (issue #3053). PlanExecutor calls the

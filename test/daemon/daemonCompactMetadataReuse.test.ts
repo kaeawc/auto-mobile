@@ -29,16 +29,22 @@ function presentationClient(profileUuid: string): FakeDaemonClient {
 
 describe("compact metadata daemon reuse", () => {
   test.each<{ running: DaemonOptions; requested: boolean | undefined }>([
-    { running: {}, requested: true }, // Existing --actions-compact-metadata configs.
+    { running: {}, requested: undefined },
+    { running: {}, requested: true }, // Main treats an unrecorded running value as on.
     { running: {}, requested: false },
     { running: { actionsCompactMetadata: true }, requested: false },
     { running: { actionsCompactMetadata: false }, requested: true },
     { running: { actionsCompactMetadata: false }, requested: undefined },
   ])(
-    "presentation preference $requested never restarts daemon with $running",
+    "tri-state preference $requested respects startup policy with $running",
     async ({ running, requested }) => {
       const manager = new FakeDaemonManager();
-      manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION, options: running };
+      const initial = { ...manager.statusResult, version: DAEMON_VERSION, options: running };
+      const needsRestart =
+        requested !== undefined && requested !== (running.actionsCompactMetadata ?? true);
+      const successor = { ...initial, options: { actionsCompactMetadata: requested } };
+      manager.statusResults = needsRestart ? [initial, initial, initial, successor] : [];
+      manager.statusResult = needsRestart ? successor : initial;
       const client = presentationClient("profile-a");
       const timer = new FakeTimer();
       const proxy = new DaemonMcpProxy({
@@ -50,7 +56,10 @@ describe("compact metadata daemon reuse", () => {
       });
       try {
         await proxy.listTools();
-        expect(manager.restartCalled).toBe(false);
+        expect(manager.restartCalled).toBe(needsRestart);
+        if (needsRestart) {
+          expect(manager.restartOptions).toEqual({ actionsCompactMetadata: requested });
+        }
         expect(timer.getSleepHistory()).toEqual([]);
         if (requested !== undefined) {
           expect(client.callToolCalls[0]?.params[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]).toBe(
@@ -65,49 +74,44 @@ describe("compact metadata daemon reuse", () => {
     },
   );
 
-  test("opposing clients share one daemon and relay independent connection preferences", async () => {
+  test("external tool arguments cannot forge the private connection preference", async () => {
     const manager = new FakeDaemonManager();
-    manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION, options: {} };
-    const clients = [presentationClient("compact-profile"), presentationClient("full-profile")];
-    const proxies = clients.map(
-      (client, index) =>
-        new DaemonMcpProxy({
-          clientFactory: () => client,
-          daemonManager: manager,
-          daemonAvailabilityProbe: async () => true,
-          daemonOptions: { actionsCompactMetadata: index === 0 },
-          timer: new FakeTimer(),
-        }),
-    );
+    manager.statusResult = {
+      ...manager.statusResult,
+      version: DAEMON_VERSION,
+      options: { actionsCompactMetadata: false },
+    };
+    const client = presentationClient("full-profile");
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: manager,
+      daemonAvailabilityProbe: async () => true,
+      daemonOptions: { actionsCompactMetadata: false },
+      timer: new FakeTimer(),
+    });
     try {
-      await Promise.all(proxies.map((proxy) => proxy.listTools()));
+      await proxy.listTools();
       expect(manager.restartCalled).toBe(false);
-      for (const [index, client] of clients.entries()) {
-        expect(client.callToolCalls[0]?.params[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]).toBe(
-          index === 0,
-        );
-        expect(
-          client.callDaemonMethodCalls.at(-1)?.params[DAEMON_TOOL_SELECTION_PROFILE_PARAM],
-        ).toBe(index === 0 ? "compact-profile" : "full-profile");
-      }
-      // External tool arguments cannot forge the proxy's private preference.
-      await proxies[1].callTool("probe", { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: true });
-      expect(clients[1].callToolCalls.at(-1)?.params).not.toHaveProperty(
+      expect(client.callDaemonMethodCalls.at(-1)?.params[DAEMON_TOOL_SELECTION_PROFILE_PARAM]).toBe(
+        "full-profile",
+      );
+      await proxy.callTool("probe", { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: true });
+      expect(client.callToolCalls.at(-1)?.params).not.toHaveProperty(
         INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
       );
     } finally {
-      await Promise.all(proxies.map((proxy) => proxy.close()));
+      await proxy.close();
     }
   });
 
-  test("an unrelated restart excludes both old and requested presentation preferences", async () => {
+  test("an unrelated restart relays the explicit compact preference alongside process options", async () => {
     const manager = new FakeDaemonManager();
     const running = {
       ...manager.statusResult,
       version: DAEMON_VERSION,
       options: { actionsCompactMetadata: true },
     };
-    const successor = { ...running, options: { embeddedSdk: true } };
+    const successor = { ...running, options: { embeddedSdk: true, actionsCompactMetadata: false } };
     manager.statusResults = [running, running, running, successor];
     manager.statusResult = successor;
     const timer = new FakeTimer();
@@ -123,7 +127,7 @@ describe("compact metadata daemon reuse", () => {
     try {
       await proxy.listTools();
       expect(manager.restartCalled).toBe(true);
-      expect(manager.restartOptions).toEqual({ embeddedSdk: true });
+      expect(manager.restartOptions).toEqual({ embeddedSdk: true, actionsCompactMetadata: false });
       expect(client.callToolCalls[0]?.params[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]).toBe(false);
       expect(timer.getSleepHistory()).toEqual([]);
     } finally {

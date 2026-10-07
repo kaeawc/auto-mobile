@@ -54,7 +54,7 @@ export interface ToolSelectionProfileRegistry {
   setToolResultsNoStructuredContent(profileUuid: string, enabled: boolean): void;
   /** Read a live profile preference, or undefined when the profile expressed none. */
   getToolResultsNoStructuredContent(profileUuid: string): boolean | undefined;
-  /** Live compact-metadata override; absence uses the persistent feature flag. */
+  /** Live compact-metadata override; absence uses the effective daemon default. */
   setActionsCompactMetadata(profileUuid: string, enabled: boolean): void;
   getActionsCompactMetadata(profileUuid: string): boolean | undefined;
 }

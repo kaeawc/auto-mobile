@@ -57,23 +57,6 @@ These tools accept `raw` to return the raw hierarchy and `project` to choose
 Skeleton output contains actionable entries; the collapsed keyboard marker `<ime>` is not a
 selector. Use `sendKeys` or `keyboard` for keyboard input.
 
-Action responses compact repeated device metadata by default within a session:
-`insets`, `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`,
-`deviceLock`, `accessibilityState`, and `freshness`. The first response, a new
-session, and every device switch send available blocks in full; changed blocks
-are sent again. `screenSize`, `display`, and device/observation join keys remain
-present. An identical top-level `element` is omitted in favour of
-`selectedElement.matchedElement` when the output schema allows it. Set
-`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0` or feature-flag
-`actions-compact-metadata` to `false` to restore full metadata. Precedence is
-`--actions-compact-metadata`, then `--no-actions-compact-metadata`, then exact
-env `1`/`0`, then the saved feature flag (default on). CLI/env overrides apply
-only to that process/connection, never write the shared DB, and do not restart
-a shared daemon. Only feature-flag changes persist; removing an override uses
-the saved flag again on the next launch. `observe` itself always
-sends full metadata. See [the interaction loop](design-docs/mcp/interaction-loop.md#default-compact-action-metadata)
-for diff, artifact, and freshness behavior.
-
 ## Observe & navigate
 
 The default skeleton projection optionally includes `windowTruncations`:

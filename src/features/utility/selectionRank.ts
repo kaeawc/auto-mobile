@@ -24,3 +24,23 @@ export function compareSelectionRank(
     a.order - b.order
   );
 }
+
+/**
+ * One positional slot per selectable target in a selector's matches. Prefer the
+ * owner when it also matched; otherwise retain the matching source so diagnostic
+ * and scoped consumers can still recover it. Null targets do not occupy slots.
+ */
+export function selectableCandidates<T>(
+  matches: readonly T[],
+  targetFor: (candidate: T) => T | null,
+): T[] {
+  const matching = new Set(matches);
+  const candidates = new Map<T, T>();
+  for (const match of matches) {
+    const target = targetFor(match);
+    if (target !== null && !candidates.has(target)) {
+      candidates.set(target, matching.has(target) ? target : match);
+    }
+  }
+  return [...candidates.values()];
+}

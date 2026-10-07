@@ -8,6 +8,9 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { DeviceInfo, ExecResult } from "../../../src/models";
 import { EmulatorLaunchCancelledError } from "../../../src/models/EmulatorLaunchCancelledError";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
+import { resolve } from "node:path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -46,15 +49,23 @@ function createClient(
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
   };
+  const posterFileSystem = new FakeFileSystem();
+  for (const file of ["poster image.PNG", "poster.jpg", "poster.jpeg"]) {
+    posterFileSystem.setExists(resolve(file), true);
+  }
   const client = new AndroidEmulatorClient(
     async () => execResult(),
     spawnFn as never,
     timer,
     adbFactory,
-    undefined,
+    { readConfig: async () => ({ ramSizeMb: 2048 }) },
     undefined,
     undefined,
     hostPortAvailabilityChecker,
+    undefined,
+    undefined,
+    undefined,
+    posterFileSystem,
   );
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
@@ -75,6 +86,82 @@ afterEach(() => {
 });
 
 describe("AndroidEmulatorClient launch contract", () => {
+  test("adds only back-camera wall poster arguments and resolves spaces as one argument", async () => {
+    const launch = async (cameraPosterPath?: string) => {
+      const child = createChild();
+      let args: string[] = [];
+      const client = createClient((_command, actual) => {
+        args = actual;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      });
+      await client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath });
+      child.emit("exit", 0, null);
+      AndroidEmulatorClient.resetLaunchReservationsForTesting();
+      return args;
+    };
+    const baseline = await launch();
+    const poster = await launch("poster image.PNG");
+    expect(poster).toEqual([
+      ...baseline.slice(0, -2),
+      "-camera-back",
+      "virtualscene",
+      "-virtualscene-poster",
+      `wall=${resolve("poster image.PNG")}`,
+      ...baseline.slice(-2),
+    ]);
+    for (const path of ["poster.jpg", "poster.jpeg"]) {
+      expect(await launch(path)).toContain(`wall=${resolve(path)}`);
+    }
+    expect(baseline).not.toContain("-camera-back");
+    expect(baseline).not.toContain("-virtualscene-poster");
+  });
+
+  test("rejects a missing poster or unsupported extension without spawning", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    for (const path of ["missing.png", "poster.gif", ""]) {
+      await expect(
+        client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath: path }),
+      ).rejects.toBeInstanceOf(ActionableError);
+    }
+    expect(spawns).toBe(0);
+  });
+
+  test("rejects conflicting camera arguments without spawning", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    await expect(
+      client.launchEmulator({
+        avdName: "Pixel 9",
+        cameraPosterPath: "poster image.PNG",
+        extraArgs: ["-camera-back", "none"],
+      }),
+    ).rejects.toThrow("cannot be combined");
+    expect(spawns).toBe(0);
+  });
+
+  test("does not adopt a running AVD when a poster was requested", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    spyOn(client, "getBootedDevicesChecked").mockResolvedValue([
+      { name: "Pixel 9", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    await expect(
+      client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath: "poster image.PNG" }),
+    ).rejects.toThrow("unsupported on a running or starting AVD");
+    expect(spawns).toBe(0);
+  });
+
   test("uses a JSON argv array so values containing spaces remain one argument", () => {
     expect(parseExtraEmulatorArguments('["-gpu", "swiftshader indirect"]')).toEqual([
       "-gpu",

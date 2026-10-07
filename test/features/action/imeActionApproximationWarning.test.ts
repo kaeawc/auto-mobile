@@ -22,6 +22,11 @@ describe("withImeActionApproximationWarning", () => {
     expect(result.warning).toBe(`earlier ${IME_ACTION_APPROXIMATED_WARNING}`);
   });
 
+  test("does not claim focus moved when the approximated action failed", () => {
+    const failed = { success: false, approximated: true, error: "Action failed" };
+    expect(withImeActionApproximationWarning(failed)).toBe(failed);
+  });
+
   test("returns the result unchanged when not approximated", () => {
     const result = { success: true };
     expect(withImeActionApproximationWarning(result)).toBe(result);

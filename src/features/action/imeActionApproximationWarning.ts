@@ -4,12 +4,13 @@ export const IME_ACTION_APPROXIMATED_WARNING =
 
 /**
  * Surface a device `approximated: true` IME action result as a host-side `warning`,
- * keeping any warning the result already carries.
+ * keeping any warning the result already carries. Failed results are left untouched.
  */
 export function withImeActionApproximationWarning<
-  T extends { approximated?: boolean; warning?: string },
+  T extends { success?: boolean; approximated?: boolean; warning?: string },
 >(result: T): T {
-  if (!result.approximated) {
+  // A failed fallback (adjacent node not found/focused) did not move focus, so the warning would lie.
+  if (!result.approximated || result.success === false) {
     return result;
   }
   return {

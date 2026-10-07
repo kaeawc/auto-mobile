@@ -223,7 +223,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
             serverInfo: SdkHierarchyServerInfo(
                 status: "ok",
                 bundleId: "com.example.sdk",
-                capabilities: ["network-fault-rules"]
+                capabilities: ["network-fault-rules", "magic-tap"]
             )
         )
         let handler = handler(foregroundBundleId: "com.example.sdk", sdkClient: sdkClient)
@@ -238,6 +238,7 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
         XCTAssertEqual(capabilityResponse?.available, true)
         XCTAssertEqual(capabilityResponse?.bundleId, "com.example.sdk")
         XCTAssertTrue(capabilityResponse?.capabilities.contains("network_error_simulation") == true)
+        XCTAssertTrue(capabilityResponse?.capabilities.contains("magic_tap") == true)
         XCTAssertEqual(networkResponse?.ok, true)
         let callCount = await sdkClient.networkErrorCallCount()
         XCTAssertEqual(callCount, 1)
@@ -308,6 +309,16 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
 
         XCTAssertEqual(json["ok"] as? Bool, false)
         XCTAssertNil(json["rejectedMockIds"])
+    }
+
+    func testOldSdkDoesNotAdvertiseMagicTap() async throws {
+        let sdk = FakeSdkHierarchyClient(serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
+        let response = try await handler(foregroundBundleId: "com.example.app", sdkClient: sdk).handle(
+            request(#"{"type":"get_sdk_capabilities"}"#)
+        ) as? SdkCapabilitiesResponse
+        XCTAssertEqual(response?.available, true)
+        XCTAssertFalse(response?.capabilities.contains("magic_tap") == true)
+        XCTAssertTrue(response?.capabilities.contains("highlight") == true)
     }
 
     func testForegroundTransitionInvalidatesPreviouslyReachableSdk() async throws {

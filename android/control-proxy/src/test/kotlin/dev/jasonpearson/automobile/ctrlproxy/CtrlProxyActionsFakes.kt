@@ -93,6 +93,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) {}
 
+  override fun requestClickFocusedInput(requestId: String?) {}
+
   override fun requestAction(
     requestId: String?,
     action: String,
@@ -400,6 +402,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
     record("requestCommitText", requestId, text, priorImeId)
 
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
+    timeoutMs: Long?,
+  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs)
+
   override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
     record("requestCancelImeCommit", requestId, targetRequestId)
 
@@ -418,6 +428,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     record("requestImeAction", requestId, action, frameContext)
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
+
+  override fun requestClickFocusedInput(requestId: String?) =
+    record("requestClickFocusedInput", requestId)
 
   override fun requestAction(
     requestId: String?,

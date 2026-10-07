@@ -38,6 +38,8 @@ import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager"
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
 
+import { getPerfWindowBuffer } from "../../../../src/features/performance/PerfWindowBuffer";
+
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
     expect(getRequiredIosRunnerFeatureFlags({ AUTOMOBILE_VERSION: "0.0.66" })).toEqual([]);
@@ -55,6 +57,34 @@ describe("IOSCtrlProxyClient", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
+
+  test("runner performance updates stay out of the app perfSnapshot buffer", () => {
+    const buffer = getPerfWindowBuffer();
+    buffer.clear(testDevice.deviceId);
+    const record = spyOn(buffer, "record");
+    const server = new DeviceDataStreamSocketServer(undefined, fakeTimer);
+    const push = spyOn(server, "pushPerformanceUpdate").mockImplementation(() => {});
+    installDeviceDataStreamSocketServerForTesting(server);
+    try {
+      ctrlProxyClient["handlePerformanceUpdate"]({
+        timestamp: fakeTimer.now(),
+        fps: 12,
+        frameTimeMs: 83,
+        jankFrames: 9,
+        cpuUsagePercent: 70,
+        memoryUsageMb: 200,
+      });
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(record).not.toHaveBeenCalled();
+      expect(buffer.snapshot(testDevice.deviceId, fakeTimer.now(), 1000).fps).toBeNull();
+      expect(buffer.snapshot(testDevice.deviceId, fakeTimer.now(), 1000).jank).toBeNull();
+    } finally {
+      installDeviceDataStreamSocketServerForTesting(null);
+      push.mockRestore();
+      record.mockRestore();
+      buffer.clear(testDevice.deviceId);
+    }
+  });
 
   beforeEach(function () {
     // Create fake timer with auto-advance for fast tests

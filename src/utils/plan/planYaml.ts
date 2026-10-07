@@ -50,3 +50,10 @@ function createPlanYamlSchema(): yaml.Schema {
 export const PLAN_YAML_LOAD_OPTIONS: yaml.LoadOptions = {
   schema: createPlanYamlSchema(),
 };
+
+/** Decode the optional transport encoding used by executePlan planContent. */
+export function decodePlanYamlContent(content: string): string {
+  return content.startsWith("base64:")
+    ? Buffer.from(content.substring(7), "base64").toString("utf-8")
+    : content;
+}

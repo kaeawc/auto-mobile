@@ -10,8 +10,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -19,13 +17,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 private data class PerformanceItem(
@@ -51,7 +51,7 @@ fun StartupDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.startup", composableName = "StartupDemoScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Startup Demo") },
           navigationIcon = {
             IconButton(
@@ -82,7 +82,7 @@ fun StartupDemoScreen(onNavigateBack: () -> Unit) {
           text = "When measuring startup, wait for the Ready signal below.",
           style = MaterialTheme.typography.bodyMedium,
         )
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "startup_ready_card" },
           colors =
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -112,7 +112,7 @@ fun PerformanceListScreen(
   ) {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Performance List") },
           navigationIcon = {
             IconButton(
@@ -136,7 +136,7 @@ fun PerformanceListScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
       ) {
         items(performanceItems, key = { it.id }) { item ->
-          Card(
+          AutoMobileContentCard(
             modifier =
               Modifier.fillMaxWidth().semantics { testTag = "performance_item_${item.id}" },
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -154,7 +154,7 @@ fun PerformanceListScreen(
                 Text(text = item.subtitle, style = MaterialTheme.typography.bodySmall)
                 Text(text = item.price, style = MaterialTheme.typography.bodySmall)
               }
-              Button(
+              AutoMobileContentButton(
                 onClick = { onNavigateToDetail(item.id) },
                 modifier = Modifier.semantics { testTag = "performance_item_${item.id}_action" },
               ) {
@@ -180,7 +180,7 @@ fun PerformanceDetailScreen(
   ) {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Performance Detail") },
           navigationIcon = {
             IconButton(
@@ -211,7 +211,7 @@ fun PerformanceDetailScreen(
           text = "Use this screen as the transition target from the list.",
           style = MaterialTheme.typography.bodyMedium,
         )
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "performance_detail_card" },
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {
@@ -221,7 +221,7 @@ fun PerformanceDetailScreen(
             Text(text = "Status: In Stock", style = MaterialTheme.typography.bodySmall)
           }
         }
-        Button(
+        AutoMobileContentButton(
           onClick = onNavigateBack,
           modifier = Modifier.semantics { testTag = "performance_detail_back_to_list" },
         ) {

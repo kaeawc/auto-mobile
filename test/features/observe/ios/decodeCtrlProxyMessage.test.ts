@@ -816,8 +816,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 49 rawValues", () => {
-    expect(rawValues.length).toBe(49);
+  test("Swift ResponseType declares exactly 50 rawValues", () => {
+    expect(rawValues.length).toBe(50);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {

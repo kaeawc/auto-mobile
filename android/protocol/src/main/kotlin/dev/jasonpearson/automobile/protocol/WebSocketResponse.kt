@@ -474,6 +474,7 @@ data class KeyboardProfileCatalogResult(
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("ime_action_result")
 data class ImeActionResult(
@@ -484,6 +485,7 @@ data class ImeActionResult(
   val totalTimeMs: Long,
   val error: String? = null,
   val perfTiming: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
 ) : WebSocketResponse()
 
 @Serializable

@@ -1,3 +1,4 @@
+import type { CtrlProxyMagicTapResult } from "./types";
 import type { IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
@@ -245,7 +246,8 @@ type IosSdkCapability =
   | "network_fault_rules"
   | "network_error_simulation"
   | "database"
-  | "highlight";
+  | "highlight"
+  | "magic_tap";
 
 interface IosSdkCapabilities {
   bundleId: string;
@@ -643,6 +645,12 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult>;
+
+  requestMagicTap(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult>;
 
   requestActivateAccessibilityLink(
     text: string,
@@ -2263,7 +2271,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
               capability === "network_fault_rules" ||
               capability === "network_error_simulation" ||
               capability === "database" ||
-              capability === "highlight",
+              capability === "highlight" ||
+              capability === "magic_tap",
           ),
         ),
       };
@@ -2360,6 +2369,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       network_error_simulation: "set_network_error_simulation",
       database: "execute_sql",
       highlight: "add_highlight",
+      magic_tap: "request_magic_tap",
     };
     return this.isCommandSupported(commandByCapability[capability]);
   }
@@ -4167,6 +4177,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, options);
+  }
+
+  /** Invoke Magic Tap directly through the foreground app's in-app SDK. */
+  async requestMagicTap(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    return this.voiceOver.requestMagicTap(timeoutMs, perf, signal);
   }
 
   /**

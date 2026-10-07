@@ -48,7 +48,7 @@ class ServerConfig {
   private _toolResultsNoStructuredContent: boolean = false;
   private _actionsDiffObserve: boolean = false;
   private _actionsNoObserve: boolean = false;
-  private _actionsCompactMetadata: boolean = false;
+  private _actionsCompactMetadata: boolean = true;
   private _toolOutputsDir: string | undefined;
   private _runnerReadinessTimeoutMs = DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
 

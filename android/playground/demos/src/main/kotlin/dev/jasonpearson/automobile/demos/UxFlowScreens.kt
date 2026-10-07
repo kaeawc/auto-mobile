@@ -7,20 +7,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,7 +32,7 @@ fun UxFlowStartScreen(
   TrackRecomposition(id = "screen.demo.ux.start", composableName = "UxFlowStartScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "UX Flow: Start") },
           navigationIcon = {
             IconButton(
@@ -63,7 +63,7 @@ fun UxFlowStartScreen(
           text = "Use the buttons below to navigate through the demo screens.",
           style = MaterialTheme.typography.bodyMedium,
         )
-        Button(
+        AutoMobileContentButton(
           onClick = onNavigateNext,
           modifier = Modifier.semantics { testTag = "ux_flow_start_next" },
         ) {
@@ -83,7 +83,7 @@ fun UxFlowDetailsScreen(
   TrackRecomposition(id = "screen.demo.ux.details", composableName = "UxFlowDetailsScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "UX Flow: Details") },
           navigationIcon = {
             IconButton(
@@ -116,13 +116,13 @@ fun UxFlowDetailsScreen(
           Text(text = "- Stable labels for automation")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-          OutlinedButton(
+          AutoMobileContentOutlinedButton(
             onClick = onNavigateBack,
             modifier = Modifier.semantics { testTag = "ux_flow_details_back_to_start" },
           ) {
             Text("Back to Start")
           }
-          Button(
+          AutoMobileContentButton(
             onClick = onNavigateNext,
             modifier = Modifier.semantics { testTag = "ux_flow_details_next" },
           ) {
@@ -143,7 +143,7 @@ fun UxFlowSummaryScreen(
   TrackRecomposition(id = "screen.demo.ux.summary", composableName = "UxFlowSummaryScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "UX Flow: Summary") },
           navigationIcon = {
             IconButton(
@@ -174,7 +174,7 @@ fun UxFlowSummaryScreen(
           text = "This screen closes the navigation loop for graph exploration.",
           style = MaterialTheme.typography.bodyMedium,
         )
-        Button(
+        AutoMobileContentButton(
           onClick = onRestartFlow,
           modifier = Modifier.semantics { testTag = "ux_flow_summary_restart" },
         ) {

@@ -115,17 +115,17 @@ for tests that also set `AUTOMOBILE_ALLOW_IN_MEMORY_DB=1`.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                        | Use and accepted values                                                                                                                                                                                                                                                                                         | Default            |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `AUTOMOBILE_ENABLED_TOOLS`                      | Enable comma-separated exact, case-sensitive tool names; unknown names and conflicts fail startup. CLI flags win; persisted choices override startup defaults.                                                                                                                                                  | unset; no override |
-| `AUTOMOBILE_DISABLED_TOOLS`                     | Disable comma-separated exact, case-sensitive tool names; same validation and precedence as enabled tools.                                                                                                                                                                                                      | unset; no override |
-| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions eagerly; exact `true` enables.                                                                                                                                                                                                                                               | off                |
-| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include flattened `elements` in observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Use differential action observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                             | off                |
-| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip post-action observation; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                     | off                |
-| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit deeply equal previously inline-sent action metadata per session/device and identical duplicate matched elements; exact `1` or `--actions-compact-metadata` enables. First/changed/new-session/device-switch blocks are sent in full. Applies after action diffs; no-observe leaves only duplicate removal. | off                |
-| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated, trimmed event markers that promote matching events to all-event capture; `--event-all-markers` wins.                                                                                                                                                                                           | empty list         |
+| Variable                                        | Use and accepted values                                                                                                                                                                                                                                                                                                                                                                        | Default            |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `AUTOMOBILE_ENABLED_TOOLS`                      | Enable comma-separated exact, case-sensitive tool names; unknown names and conflicts fail startup. CLI flags win; persisted choices override startup defaults.                                                                                                                                                                                                                                 | unset; no override |
+| `AUTOMOBILE_DISABLED_TOOLS`                     | Disable comma-separated exact, case-sensitive tool names; same validation and precedence as enabled tools.                                                                                                                                                                                                                                                                                     | unset; no override |
+| `AUTOMOBILE_ALWAYS_LOAD_TOOLS`                  | Register optional tool definitions eagerly; exact `true` enables.                                                                                                                                                                                                                                                                                                                              | off                |
+| `AUTOMOBILE_OBSERVE_RESULT_INCLUDE_ELEMENTS`    | Include flattened `elements` in observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT` | Omit structured tool content; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_ACTIONS_DIFF_OBSERVE`               | Use differential action observations; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                            | off                |
+| `AUTOMOBILE_ACTIONS_NO_OBSERVE`                 | Skip post-action observation; exact `1` enables, or corresponding CLI flag.                                                                                                                                                                                                                                                                                                                    | off                |
+| `AUTOMOBILE_ACTIONS_COMPACT_METADATA`           | Omit unchanged metadata per session/device and duplicate matches. Exact `0` opts out, `1` opts in. CLI negative wins over positive, then env, persisted state, default on. Unset/other values relay no preference or restart request. `actions-compact-metadata=false` persists an opt-out. First/changed/new-session/device-switch blocks remain full; diff/no-observe behavior is unchanged. | on                 |
+| `AUTOMOBILE_EVENT_ALL_MARKERS`                  | Comma-separated, trimmed event markers that promote matching events to all-event capture; `--event-all-markers` wins.                                                                                                                                                                                                                                                                          | empty list         |
 
 </div>
 
@@ -184,8 +184,9 @@ A rejected claim returns
 session and changes nothing: the owner, policy, and every deadline stay as the
 owner left them. A claim from a token that already claimed and was displaced
 returns `{ success: false, code: "liveness_owner_superseded", error: "..." }`
-and records nothing; it never succeeds silently and can never take the session
-back. To take a session from a displaced owner, claim with a fresh token after
+and records nothing; it cannot take an owned session back. An explicit release
+opens the session to a new claim, including one from a previously used token.
+To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
 A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
@@ -207,14 +208,61 @@ no activity, heartbeat, expiry or policy. The heartbeat CLI exits non-zero with
 guidance to re-claim or stop, instead of printing `heartbeat recorded`. There is
 no co-ownership.
 
-The proxy treats supersession as informational, logs it once at debug level,
-and continues without fencing, reconnecting or releasing the session. Only the
+The proxy reports lost ownership once at warn level and continues without
+fencing, reconnecting or re-claiming the session. This acknowledgement proves
+transport reachability only; its keeper no longer protects the deadline. Only the
 current owner's ticks protect liveness: a proxy stall past the heartbeat timeout
 can therefore reap the session even while a displaced external keeper ticks.
 Legacy tokenless heartbeats after a token has claimed ownership remain
 successful no-ops. Missing or releasing sessions still return
 `daemon_session_not_found`. A keeper cannot currently claim through the
 heartbeat CLI without adopting its CLI policy.
+
+### Explicit liveness handoff
+
+A one-shot CLI exits after declaring the CLI idle policy, retaining its token.
+An independent MCP proxy can immediately adopt that session with
+`--initial-session-uuid S`: CLI idle sessions do not block a different token's
+claim. That claim switches the session back to heartbeat policy.
+
+A harness that owns liveness through a proxy or a CLI keeper can deliberately
+hand the session to another client:
+
+```bash
+auto-mobile --daemon release-liveness-ownership S --liveness-owner-token T
+```
+
+The equivalent daemon method is `daemon/releaseLivenessOwnership` with
+`{ sessionId: S, livenessOwnerToken: T }`. On an owned session, only its current
+token can release. A foreign or stale token returns `liveness_owner_not_owner`
+and changes nothing. A missing session returns `daemon_session_not_found`.
+Releasing an already-unowned session is a successful no-op for any valid token.
+The result is `{ sessionId: S, alreadyUnowned: false }` on the first release and
+`{ sessionId: S, alreadyUnowned: true }` on a no-op.
+
+**Unowned** means the existing owner-token column is empty. Release changes only
+that token: it retains the session UUID, device reservation, liveness policy,
+activity clocks and existing deadline, including heartbeat suspect grace. It
+adds no schema state or former-owner proof. On restart the row follows the usual
+unowned rehydration path. A tokenless keeper tick does not adopt ownership.
+While the daemon keeps running, former-owner ticks cannot adopt the released
+session: they return `liveness_owner_unowned` with guidance to make an explicit
+claim. After a daemon restart, a released session can be re-adopted by its former
+owner's token-bearing keeper tick, because the daemon's claim history is empty.
+Legacy recovery of rows without ownership continues to follow the existing rules.
+
+Stop the old keeper after release. The next proxy's explicit claim succeeds and
+moves the session to heartbeat policy; any second proxy with another token is
+refused while the first proxy's lease or grace window is live. An unclaimed CLI
+idle session is reaped on its usual idle deadline. Tool activity and daemon-stall
+forgiveness continue to use the existing policy rules.
+
+Ownership and lease state are separate. A session is token-owned or unowned;
+startup admission is `awaiting-owner` until the owner returns. For heartbeat
+policy, `session-info` reports all three lease states: `live` (lease remains),
+`suspect` (lease expired but grace remains), and `lapsed` (lease and grace ended,
+remaining time is zero). CLI idle policy uses its activity-based idle deadline
+and has no lease field in `session-info`. Release adds no session-info fields.
 
 ### Supported liveness stack
 
@@ -241,8 +289,8 @@ prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and
 while the session is being released, `releasing: true`. A missing session fails
 with `daemon_session_not_found`. The harness reads this to decide whether a session
 survived; it must not heartbeat the session itself to find out. It also prints
-`liveness`: `{ state: "live" | "suspect", remainingMs }`, the time left on the
-lease (live) or on the 10 s grace window (suspect).
+`liveness`: `{ state: "live" | "suspect" | "lapsed", remainingMs }`, the time
+left on the lease or grace window, or zero once lapsed.
 
 ### Stalled liveness: `daemon_stalled` and `proxy_stalled`
 

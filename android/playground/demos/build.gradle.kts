@@ -37,6 +37,8 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.bundles.compose.ui)
 
+  implementation(projects.playground.design.system)
+
   // AutoMobile SDK utilities
   implementation(projects.autoMobileSdk)
 

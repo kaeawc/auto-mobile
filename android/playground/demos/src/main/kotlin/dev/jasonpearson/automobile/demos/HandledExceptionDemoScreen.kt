@@ -9,9 +9,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -19,7 +17,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -30,6 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 
@@ -46,7 +46,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
 
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Handled Exceptions Demo") },
           navigationIcon = {
             IconButton(
@@ -78,7 +78,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
           style = MaterialTheme.typography.bodyLarge,
         )
 
-        Card(
+        AutoMobileContentCard(
           modifier =
             Modifier.fillMaxWidth().semantics { testTag = "handled_exception_status_card" },
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -112,7 +112,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         )
 
         // NullPointerException
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               val nullString: String? = null
@@ -135,7 +135,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // IllegalArgumentException
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               require(false) { "This is an intentional IllegalArgumentException" }
@@ -159,7 +159,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // IllegalStateException
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               check(false) { "This is an intentional IllegalStateException" }
@@ -181,7 +181,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // IndexOutOfBoundsException
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               val list = listOf(1, 2, 3)
@@ -206,7 +206,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // NumberFormatException
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               @Suppress("UNUSED_VARIABLE") val number = "not_a_number".toInt()
@@ -228,7 +228,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // Custom exception without message
-        Button(
+        AutoMobileContentButton(
           onClick = {
             try {
               throw RuntimeException("Custom runtime exception for testing")
@@ -245,7 +245,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
         }
 
         // Reset counter
-        Button(
+        AutoMobileContentButton(
           onClick = {
             exceptionCount = 0
             lastExceptionType = null

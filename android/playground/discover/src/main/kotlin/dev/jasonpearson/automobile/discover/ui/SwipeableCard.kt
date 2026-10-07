@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +34,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -53,7 +53,7 @@ fun SwipeableCard(card: SwipeCard, onSwipeAway: () -> Unit) {
   val scale = remember { Animatable(1f) }
   val coroutineScope = rememberCoroutineScope()
 
-  Card(
+  AutoMobileContentCard(
     modifier =
       Modifier.fillMaxWidth()
         .height(200.dp)

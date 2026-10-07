@@ -31,6 +31,7 @@
     /// - `GET /health` -> status, bundle ID, capabilities, and optional simulator UDID
     /// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
+    /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
@@ -46,6 +47,7 @@
             case networkMock = "/network/mock"
             case networkErrorSimulation = "/network/error-simulation"
             case networkFaultRules = "/network/fault-rules"
+            case magicTap = "/accessibility/magic-tap"
             case highlight = "/highlight"
             case dbExecute = "/db/execute"
             case dbList = "/db/list"
@@ -100,6 +102,10 @@
         private var bindPlanner = SdkBindPlanner()
         private let listenerFactory: (UInt16) throws -> any SdkHierarchyListener
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
+        /// Database and preference routes run here, not on `queue`: a statement waiting on the app's lock
+        /// must not stop `/health` and the hierarchy routes from answering (#10166). Serial, so work
+        /// on one database keeps its order.
+        private let storageQueue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.storage")
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
         private let preferenceRouteHandler = SdkPreferenceRouteHandler()
@@ -347,16 +353,32 @@
                 handleNetworkErrorSimulation(connection, initialData: requestData)
             case .networkFaultRules:
                 handleNetworkFaultRules(connection, initialData: requestData)
+            case .magicTap:
+                DispatchQueue.main.async {
+                    guard self.requireApplicationActive(connection) else { return }
+                    #if canImport(UIKit)
+                        let handled = SdkMagicTap.performInApplication()
+                        let body = try? JSONEncoder().encode(["handled": handled])
+                        self.sendResponse(connection, statusCode: 200, body: body)
+                    #else
+                        self.sendResponse(connection, statusCode: 501, body: nil)
+                    #endif
+                }
             case .highlight:
                 handleHighlight(connection, initialData: requestData)
             case .dbExecute:
+                let receivedAt = SdkDatabaseBudget.now()
                 handleBodyRoute(connection, initialData: requestData) {
-                    self.databaseRouteHandler.handleExecuteSql(body: $0)
+                    self.databaseRouteHandler.handleExecuteSql(body: $0, receivedAt: receivedAt)
                 }
             case .dbList:
-                sendRouteResponse(connection, databaseRouteHandler.handleListDatabases())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                }
             case .dbCapabilities:
-                sendRouteResponse(connection, databaseRouteHandler.handleCapabilities())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
+                }
             case .dbTables:
                 handleBodyRoute(connection, initialData: requestData) {
                     self.databaseRouteHandler.handleListTables(body: $0)
@@ -400,11 +422,19 @@
             return nil
         }
 
+        static var capabilities: Set<String> {
+            #if canImport(UIKit)
+                ["network-fault-rules", "magic-tap"]
+            #else
+                ["network-fault-rules"]
+            #endif
+        }
+
         func healthResponse() -> SdkRouteResponse {
             let payload = HealthPayload(
                 status: "ok",
                 bundleId: tracker?.bundleId,
-                capabilities: ["network-fault-rules"],
+                capabilities: Self.capabilities,
                 simulatorUdid: identity.udid
             )
             guard let data = try? JSONEncoder().encode(payload) else {
@@ -574,7 +604,9 @@
             route: @escaping @Sendable (Data) -> SdkRouteResponse
         ) {
             withRequestBody(connection, initialData: initialData) { server, body in
-                server.sendRouteResponse(connection, route(body ?? Data()))
+                server.storageQueue.async {
+                    server.sendRouteResponse(connection, route(body ?? Data()))
+                }
             }
         }
 

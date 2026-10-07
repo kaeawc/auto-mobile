@@ -5,6 +5,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -17,6 +18,34 @@ class WebSocketRequestTest {
     ignoreUnknownKeys = true
     classDiscriminator = "type"
   }
+
+  @Test
+  fun `commit timeout round trips and absent or null fields preserve legacy defaults`() {
+    val literal =
+      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}"""
+    val request = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals(14_500L, request.timeoutMs)
+    assertEquals(literal, json.encodeToString<WebSocketRequest>(request))
+    assertEquals(
+      request,
+      json.decodeFromString<WebSocketRequest>(json.encodeToString<WebSocketRequest>(request)),
+    )
+    val legacy = """{"type":"request_commit_text","requestId":"commit-1","text":"long text"}"""
+    val absent = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(legacy))
+    assertEquals(null, absent.timeoutMs)
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(absent))
+    val explicitNull = legacy.dropLast(1) + """, "timeoutMs":null}"""
+    assertEquals(absent, json.decodeFromString<WebSocketRequest>(explicitNull))
+    // Request decoding must retain tolerance for future additive host fields.
+    val future = literal.dropLast(1) + """, "futureBudget":true}"""
+    assertEquals(request, json.decodeFromString<WebSocketRequest>(future))
+    // Older APKs use the same unknown-key tolerance with a schema lacking timeoutMs.
+    val older = json.decodeFromString<LegacyCommitText>(literal)
+    assertEquals("long text", older.text)
+    assertEquals("commit-1", older.requestId)
+  }
+
+  @Serializable private data class LegacyCommitText(val requestId: String? = null, val text: String)
 
   @Test
   fun `decimal millisecond literals are rejected rather than truncated or rounded`() {
@@ -37,6 +66,7 @@ class WebSocketRequestTest {
           "duration",
         ),
         Triple("set_hierarchy_interval", "", "intervalMs"),
+        Triple("request_commit_text", "\"text\":\"x\"", "timeoutMs"),
         // Millisecond timestamps also use Long, but are not gesture durations.
         Triple("request_hierarchy_if_stale", "", "sinceTimestamp"),
         Triple("set_network_error_simulation", "\"enabled\":false", "expiresAtEpochMs"),

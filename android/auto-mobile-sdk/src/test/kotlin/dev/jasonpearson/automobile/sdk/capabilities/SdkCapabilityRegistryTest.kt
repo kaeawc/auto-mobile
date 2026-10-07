@@ -5,9 +5,18 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 class SdkCapabilityRegistryTest {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun warmRegistry() {
+      SdkCapabilityRegistry().snapshot()
+    }
+  }
+
   @Test
   fun `main defaults do not contribute a debug keystore descriptor`() {
     val registry = SdkCapabilityRegistry()

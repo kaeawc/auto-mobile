@@ -150,6 +150,15 @@ export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
 export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
 type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
 
+/**
+ * Android delivery for a `clear` command. auto and ime clear through the CtrlProxy IME
+ * (`ime_clear_field_v1`), falling back to key-event deletes; the accessibility ACTION_SET_TEXT
+ * clear breaks a rich-text editor's live formatting until it resets (#10408), so only an explicit
+ * a11y clear uses it (#10479).
+ */
+export const SEND_KEYS_CLEAR_MODES = ["auto", "ime", "a11y"] as const;
+export type SendKeysClearMode = (typeof SEND_KEYS_CLEAR_MODES)[number];
+
 function isPrintableAscii(text: string): boolean {
   for (const char of text) {
     const codePoint = char.codePointAt(0)!;
@@ -298,6 +307,7 @@ export interface SendKeysKeyCommand {
 
 export interface SendKeysClearCommand {
   action: "clear";
+  mode?: SendKeysClearMode;
 }
 
 export type SendKeysCommand = SendKeysTypeCommand | SendKeysKeyCommand | SendKeysClearCommand;
@@ -365,6 +375,7 @@ export interface SendKeysCommandExecutor {
   clear(
     signal?: AbortSignal,
     display?: string,
+    mode?: SendKeysClearMode,
   ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
 }
 
@@ -889,19 +900,48 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
-  async clear(signal?: AbortSignal, display?: string): Promise<TextActionResult> {
+  async clear(
+    signal?: AbortSignal,
+    display?: string,
+    mode: SendKeysClearMode = "auto",
+  ): Promise<TextActionResult> {
     signal?.throwIfAborted();
     this.resetCaretState();
     if (this.device.platform !== "android") {
       return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
     }
-    if (this.imeSpan) {
-      return this.executeAndroidImeCommit("", "insert", undefined, {
-        signal,
-        display,
-        delivery: "clearField",
-      });
+    if (mode === "a11y") {
+      return this.clearAndroidWithAccessibility(signal, display);
     }
+    return this.clearAndroidWithIme(signal, display);
+  }
+
+  /**
+   * auto/ime clear (#10479): the IME clearField when CtrlProxy advertises `ime_clear_field_v1`,
+   * activated and restored like IME typing (inside the call's IME span when there is one);
+   * otherwise key-event deletes, which need no keyboard switch. Never the accessibility clear.
+   */
+  private async clearAndroidWithIme(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    const supportsClearField = await this.textClient.supportsImeClearField();
+    this.checkAbort(signal);
+    if (!supportsClearField) {
+      return this.clearImeFieldWithKeyEvents(signal, display);
+    }
+    return this.executeAndroidImeCommit("", "insert", undefined, {
+      signal,
+      display,
+      delivery: "clearField",
+    });
+  }
+
+  /** Explicit `mode: "a11y"` clear: ACTION_SET_TEXT, then key-event deletes if it fails. */
+  private async clearAndroidWithAccessibility(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
     const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
       signal,
       display,
@@ -3773,9 +3813,10 @@ export class SendKeys {
           routing.onCommandResult?.(result);
         },
       });
+    // An auto/ime clear activates the IME the way IME typing does (#10479).
     const needsImeSpan = commands.some(
       (command) =>
-        command.action === "type" &&
+        (command.action === "type" || command.action === "clear") &&
         ["auto", "ime", "imeKeyEvents"].includes(command.mode ?? "auto"),
     );
     try {
@@ -3946,7 +3987,7 @@ export class SendKeys {
         }
         return this.executor.key(command, signal, onDispatch, display);
       case "clear":
-        return this.executor.clear(signal, display).then((result) => ({
+        return this.executor.clear(signal, display, command.mode).then((result) => ({
           index: -1,
           action: "clear",
           success: result.success,

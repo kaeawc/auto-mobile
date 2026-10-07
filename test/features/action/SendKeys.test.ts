@@ -717,7 +717,7 @@ describe("SendKeys", () => {
       success: false,
       error: "No focused editable node found",
     });
-    const clearResult = await executor.clear();
+    const clearResult = await executor.clear(undefined, undefined, "a11y");
     expect(clearResult).toEqual({
       success: false,
       error: "Android event delivery requires a focused editable field",
@@ -850,7 +850,7 @@ describe("SendKeys", () => {
     const { executor, textClient, adb } = imeVerificationHarness(observer);
     const clear = mock(async () => ({ success: false, error: "No focused editable node found" }));
     textClient.client.clear = clear;
-    expect(await executor.clear()).toEqual({
+    expect(await executor.clear(undefined, undefined, "a11y")).toEqual({
       success: false,
       error: "Android event delivery requires a focused editable field",
     });
@@ -1858,7 +1858,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         );
         const result =
           operation === "clear"
-            ? await executor.clear()
+            ? await executor.clear(undefined, undefined, "a11y")
             : await executor.type({
                 action: "type",
                 text: "a",
@@ -1973,8 +1973,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient, timer: new FakeTimer() },
     );
     const controller = new AbortController();
-    const first = executor.clear(controller.signal);
-    const second = Promise.allSettled([executor.clear(new AbortController().signal)]);
+    const first = executor.clear(controller.signal, undefined, "a11y");
+    const second = Promise.allSettled([
+      executor.clear(new AbortController().signal, undefined, "a11y"),
+    ]);
     await started;
     controller.abort();
     await expect(first).rejects.toMatchObject({ name: "AbortError" });
@@ -2009,7 +2011,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient },
     );
 
-    expect(await executor.clear()).toMatchObject({ success: true });
+    expect(await executor.clear(undefined, undefined, "a11y")).toMatchObject({ success: true });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
@@ -4860,7 +4862,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     test("polls until the old text is gone before the a11y insert is dispatched", async () => {
       // Reads: pre-clear, then the settled polls.
       const h = harness(["old z", "old z", "old z", ""]);
-      expect(await h.executor.clear(undefined, "2")).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, "2", "a11y")).toEqual({ success: true });
       expect(await h.executor.type({ action: "type", text: "Na1 k", mode: "a11y" })).toMatchObject({
         success: true,
       });
@@ -4873,7 +4875,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("an already-empty field needs only the pre-clear read and no sleep", async () => {
       const h = harness([""]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(1);
       expect(h.timer.getSleepHistory()).toEqual([]);
       expect(h.seq.options[0]).not.toHaveProperty("display");
@@ -4888,7 +4890,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         timestampProvider: { now: async () => 0 },
       });
       const result = await sendKeys.execute([
-        { action: "clear" },
+        { action: "clear", mode: "a11y" },
         { action: "type", text: "5551234", mode: "a11y" },
       ]);
       expect(result.success).toBe(true);
@@ -4902,21 +4904,21 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("a masked field that re-inserts its skeleton still counts as cleared", async () => {
       const h = harness(["(555) 123", "(   )    "]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(2);
       expect(h.timer.getSleepHistory()).toEqual([]);
     });
 
     test("a clear applied on the second read succeeds after one settle", async () => {
       const h = harness(["old z", "old z", "(   )"]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(3);
       expect(h.timer.getSleepHistory()).toEqual([150]);
     });
 
     test("an unreadable first read keeps polling and still notices the unchanged text", async () => {
       const h = harness(["old z", undefined, "old z", "old z"]);
-      const result = await h.executor.clear();
+      const result = await h.executor.clear(undefined, undefined, "a11y");
       expect(result.success).toBe(true);
       expect(result.warning).toContain("still shows its pre-clear text");
       expect(h.seq.reads()).toBe(4);
@@ -4924,7 +4926,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("an unreadable first read recovers when a later read shows the clear applied", async () => {
       const h = harness(["old z", undefined, ""]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(3);
     });
 
@@ -4932,7 +4934,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const h = harness(["old z", undefined]);
-        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
         expect(h.seq.reads()).toBe(4);
         expect(
           loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] The clear could not be verified"),
@@ -4946,7 +4948,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const h = harness([undefined]);
-        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
         expect(h.seq.reads()).toBe(1);
         expect(
           loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] Focused text is unreadable"),
@@ -4960,7 +4962,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const h = harness([]);
       const hinted = focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
       h.seq.observer.execute = async () => hinted;
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
     });
   });
 

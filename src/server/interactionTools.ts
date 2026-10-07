@@ -86,6 +86,7 @@ import {
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
+  SEND_KEYS_CLEAR_MODES,
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
   SEND_KEYS_OPERATIONS,
@@ -1192,7 +1193,17 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           ),
       })
       .strict(),
-    z.object({ action: z.literal("clear") }).strict(),
+    z
+      .object({
+        action: z.literal("clear"),
+        mode: z
+          .enum(SEND_KEYS_CLEAR_MODES)
+          .optional()
+          .describe(
+            "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
+          ),
+      })
+      .strict(),
   ]),
 );
 

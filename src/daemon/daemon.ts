@@ -77,6 +77,7 @@ import {
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
+import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
@@ -1714,6 +1715,14 @@ export class Daemon {
    * ready early. {@link writePidFile} overwrites it with the complete record.
    */
   private async writeEarlyOwnerRecord(): Promise<void> {
+    // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
+    // so the lock-less bind guard can still see the live sibling and restore its
+    // record on refusal instead of unlinking/orphaning it (issue #6232).
+    this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
+    // A DEAD committed owner is carried on this record: if this start dies before
+    // binding, the next start still has proof the leftover socket is reclaimable
+    // (issue #10107).
+    const supersededOwner = this.incumbentOwnerGuard.supersededOwnerForEarlyRecord();
     const pidData: PidFileData = {
       pid: process.pid,
       daemonSessionId: this.daemonSessionId,
@@ -1722,18 +1731,13 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       options: this.options,
+      ...(supersededOwner === undefined ? {} : { supersededOwner }),
     };
-    // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
-    // so the lock-less bind guard can still see the live sibling and restore its
-    // record on refusal instead of unlinking/orphaning it (issue #6232).
-    this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
     await this.persistPidFileData(pidData);
     this.incumbentOwnerGuard.recordContenderEarlyOwner(pidData);
     logger.info(`Early daemon owner record written to ${PID_FILE_PATH} (dbPath ${pidData.dbPath})`);
@@ -1754,9 +1758,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),

@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { stableStringify } from "../utils/stableStringify";
 
 /**
@@ -19,8 +20,11 @@ export interface DaemonGenerationIdentity {
 }
 
 export function daemonGenerationIdentityFromStatus(
-  status: Partial<DaemonGenerationIdentity>,
+  status: Partial<DaemonGenerationIdentity> & { processGenerationTokenUtc?: unknown },
 ): DaemonGenerationIdentity | undefined {
+  // The token may sit in either record field (see `processGenerationFields.ts`);
+  // the identity carries it as one string, which is also what the daemon derives.
+  const processGenerationToken = recordedProcessGenerationToken(status);
   if (
     typeof status.pid !== "number" ||
     typeof status.startedAt !== "number" ||
@@ -28,16 +32,16 @@ export function daemonGenerationIdentityFromStatus(
     typeof status.buildId !== "string" ||
     typeof status.entryScript !== "string" ||
     (status.processGenerationToken !== undefined &&
-      typeof status.processGenerationToken !== "string")
+      typeof status.processGenerationToken !== "string") ||
+    (status.processGenerationTokenUtc !== undefined &&
+      typeof status.processGenerationTokenUtc !== "string")
   ) {
     return undefined;
   }
   return {
     pid: status.pid,
     startedAt: status.startedAt,
-    ...(status.processGenerationToken === undefined
-      ? {}
-      : { processGenerationToken: status.processGenerationToken }),
+    ...(processGenerationToken === undefined ? {} : { processGenerationToken }),
     version: status.version,
     buildId: status.buildId,
     entryScript: status.entryScript,

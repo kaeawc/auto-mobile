@@ -23,6 +23,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
+  INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_RELEASED_SESSION_PARAM,
@@ -1494,14 +1495,17 @@ export class DaemonMcpProxy {
    * any of these options back to process-global startup state.
    */
   private async applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
-    const enabledTools = this.config.daemonOptions?.enabledTools ?? [];
-    const disabledTools = this.config.daemonOptions?.disabledTools ?? [];
-    const toolResultsNoStructuredContent =
-      this.config.daemonOptions?.toolResultsNoStructuredContent;
+    const {
+      enabledTools = [],
+      disabledTools = [],
+      toolResultsNoStructuredContent,
+      actionsCompactMetadata,
+    } = this.config.daemonOptions ?? {};
     const updates = this.connectionPresentationUpdates(
       enabledTools,
       disabledTools,
       toolResultsNoStructuredContent,
+      actionsCompactMetadata,
     );
 
     for (const update of updates) {
@@ -1511,6 +1515,9 @@ export class DaemonMcpProxy {
           ? {
               [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: toolResultsNoStructuredContent,
             }
+          : {}),
+        ...(actionsCompactMetadata !== undefined
+          ? { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: actionsCompactMetadata }
           : {}),
       };
       const forwardedArgs = this.withToolSelectionProfile(requestedArgs);
@@ -1535,11 +1542,13 @@ export class DaemonMcpProxy {
     enabledTools: string[],
     disabledTools: string[],
     toolResultsNoStructuredContent: boolean | undefined,
+    actionsCompactMetadata: boolean | undefined,
   ): Array<{ toolNames: string[]; enabled: boolean }> {
     if (
       enabledTools.length === 0 &&
       disabledTools.length === 0 &&
-      toolResultsNoStructuredContent === undefined
+      toolResultsNoStructuredContent === undefined &&
+      actionsCompactMetadata === undefined
     ) {
       return [];
     }
@@ -1553,7 +1562,7 @@ export class DaemonMcpProxy {
     }
     if (updates.length === 0) {
       // setToolEnabled is always-on; reaffirming it is a no-op that mints the
-      // connection profile needed to carry a structured-content-only policy.
+      // connection profile needed to carry a presentation-only policy.
       updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
     }
 
@@ -3141,6 +3150,7 @@ export class DaemonMcpProxy {
     delete callerArgs[DAEMON_RELEASED_SESSION_PARAM];
     delete callerArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete callerArgs[INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM];
+    delete callerArgs[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM];
     // The acceptance controls are configuration of the dedicated harness proxy,
     // never client-provided tool arguments. Remove both before routing so a
     // caller cannot forge or override that configuration.

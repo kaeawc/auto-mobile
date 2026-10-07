@@ -251,7 +251,10 @@ object TestPlanValidator {
     errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
 
-    return ValidationResult(valid = false, errors = errors)
+    // Only ERROR-severity findings invalidate a plan; warnings (deprecated fields) do not, so
+    // valid=false can never come with an empty error list.
+    val valid = errors.none { it.severity == ValidationSeverity.ERROR }
+    return ValidationResult(valid = valid, errors = errors)
   }
 
   /** networknt draft-07 ignores formatMinimum/Maximum; match the TS semantic check. */
@@ -1112,7 +1115,7 @@ object TestPlanValidator {
 
     // Determine severity based on whether this is a deprecated field
     val severity =
-      if (isDeprecatedFieldError(field, rawMessage, messageType)) {
+      if (isDeprecatedFieldError(rawMessage, messageType)) {
         ValidationSeverity.WARNING
       } else {
         ValidationSeverity.ERROR
@@ -1163,24 +1166,17 @@ object TestPlanValidator {
     )
   }
 
-  /** Determine if an error is related to a deprecated field */
-  private fun isDeprecatedFieldError(field: String, message: String, messageType: String): Boolean {
-    // Check if the field itself is deprecated
-    val fieldName = field.substringAfterLast('.').substringAfterLast(']')
-    if (fieldName in ValidTools.DEPRECATED_FIELDS) {
-      return true
+  /**
+   * Only the "deprecated field is present but not allowed" notice is a warning: an
+   * additionalProperties error naming a deprecated property. Type, format, enum and required errors
+   * stay errors whatever the field is called.
+   */
+  private fun isDeprecatedFieldError(message: String, messageType: String): Boolean {
+    if (!messageType.contains("additionalProperties") && !message.contains("additional")) {
+      return false
     }
-
-    // Check if the message mentions a deprecated field
-    if (messageType.contains("additionalProperties") || message.contains("additional")) {
-      val propertyMatch = Regex("property '([^']+)'").find(message)
-      val property = propertyMatch?.groupValues?.getOrNull(1)
-      if (property in ValidTools.DEPRECATED_FIELDS) {
-        return true
-      }
-    }
-
-    return false
+    val property = Regex("property '([^']+)'").find(message)?.groupValues?.getOrNull(1)
+    return property in ValidTools.DEPRECATED_FIELDS
   }
 
   /**

@@ -41,18 +41,25 @@ describe("PlanNormalizer", () => {
     }
   });
 
-  test("keeps the raw and normalized JSON dumps at debug", () => {
+  test("keeps the raw and normalized JSON dumps at debug, with typed text redacted", () => {
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       const step = { tool: "inputText", text: "hunter2" };
       const normalized = PlanNormalizer.normalizeStep(step, 0);
 
+      expect(normalized.params.text).toBe("hunter2");
       expect(debug.mock.calls).toEqual([
-        ["Processing step 0:", JSON.stringify(step, null, 2)],
-        ["Normalized step 0:", JSON.stringify(normalized, null, 2)],
+        [
+          "Processing step 0:",
+          JSON.stringify({ tool: "inputText", text: "<text, 7 characters>" }, null, 2),
+        ],
+        [
+          "Normalized step 0:",
+          JSON.stringify({ tool: "inputText", params: { text: "<text, 7 characters>" } }, null, 2),
+        ],
       ]);
-      expect(debug.mock.calls.every(([, dump]) => String(dump).includes("hunter2"))).toBe(true);
+      expect(debug.mock.calls.some(([, dump]) => String(dump).includes("hunter2"))).toBe(false);
     } finally {
       info.mockRestore();
       debug.mockRestore();

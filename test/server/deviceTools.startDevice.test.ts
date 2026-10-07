@@ -215,6 +215,63 @@ describe("startDevice handler", () => {
     return response.structuredContent;
   }
 
+  it("passes cameraPosterPath through the boot service on a cold Android launch", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    let received: string | undefined;
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    // The production interface carries boot-only options; the old fake needs no new behavior.
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received = options?.cameraPosterPath;
+      return originalStart(device, timeoutMs);
+    };
+    await callStartDevice({ platform: "android", cameraPosterPath: "/poster.png" });
+    expect(received).toBe("/poster.png");
+  });
+
+  it("rejects camera posters on iOS with an actionable unsupported error", async () => {
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
+    ).rejects.toThrow("unsupported on iOS");
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
+  it("rejects camera posters on physical Android with an actionable unsupported error", async () => {
+    const physical = { ...androidDevice, deviceId: "physical-serial" };
+    fakeDeviceUtils.setBootedDevices("android", [physical]);
+    fakeMatcher.setBootedResult(physical);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: physical.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: physical.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toThrow("unsupported on physical Android");
+  });
+
+  it("rejects camera posters on an already-running Android emulator", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toThrow("unsupported on a running Android emulator");
+  });
+
   for (const platform of ["android", "ios"] as const) {
     for (const running of [true, false]) {
       it(`reports readiness evidence for ${platform} ${running ? "adoption" : "launch"}`, async () => {

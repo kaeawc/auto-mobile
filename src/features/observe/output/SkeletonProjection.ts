@@ -3,9 +3,12 @@ import {
   foldSearchableLabels,
   inheritsOwnerLabel,
 } from "../../utility/SearchableLabels";
-import { toSearchable } from "../../utility/SearchableNode";
+import { ElementResolver } from "../../utility/ElementResolver";
+import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { SearchableEntry } from "../../utility/SearchableNode";
+import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import { compareSelectionRank } from "../../utility/selectionRank";
+import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
@@ -19,6 +22,7 @@ import {
   ElementProvenance,
   getElementProvenance,
   getHierarchyNodeSource,
+  getSearchableEntries,
   getCapturedKeyboard,
   getUncollectedWrappers,
   isStrictAncestor,
@@ -572,14 +576,16 @@ function isSelectableForReplay(
 export function assignDuplicateIndexes(
   entries: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  nodes?: readonly SearchableEntry[],
 ): void {
   const byElementId = new Map<string, SkeletonAccumulator[]>();
   const byLabel = new Map<string, SkeletonAccumulator[]>();
-  for (const entry of entries) {
-    // Mirror tap selection's visible-bounds and affordance gate before indexing.
-    if (!isSelectableForReplay(entry, viewport)) {
-      continue;
-    }
+  // Emitted rows already represent their promoted children. Use the same
+  // selectable-set normalization as the resolver before grouping and ranking.
+  const candidates = selectableCandidates(entries, (entry) =>
+    isSelectableForReplay(entry, viewport) ? entry : null,
+  );
+  for (const entry of candidates) {
     if (entry.label !== undefined) {
       const label = normalizeQuotes(entry.label).trim().toLowerCase();
       const group = byLabel.get(label) ?? [];
@@ -596,25 +602,114 @@ export function assignDuplicateIndexes(
       byElementId.set(entry.elementId, [entry]);
     }
   }
-  for (const group of byElementId.values()) {
-    if (group.length < 2) {
+  const selectionViewport = serverConfig.isRawElementSearchEnabled() ? undefined : viewport;
+  // A single exact source cannot produce multiple selectable targets. Count
+  // potential exact matches once; uncertain/fallback selectors still resolve
+  // over the complete capture so hidden promoted matches keep their slots.
+  const exactCounts = exactSelectorMatchCounts(nodes ?? []);
+  for (const [elementId, group] of byElementId) {
+    if (canSkipSelectorGroup(group, exactCounts.byId.get(elementId), nodes !== undefined)) {
       continue;
     }
-    group.sort(bySelectorRank);
-    group.forEach((entry, position) => {
-      entry.index = position;
-    });
+    indexSelectorGroup(group, { elementId }, selectionViewport, nodes);
   }
-  for (const group of byLabel.values()) {
-    if (group.length < 2) {
+  for (const [text, group] of byLabel) {
+    if (
+      canSkipSelectorGroup(
+        group,
+        exactCounts.byText.get(text.replace(/\s+/g, " ")),
+        nodes !== undefined,
+        true,
+      )
+    ) {
       continue;
     }
-    group.sort(bySelectorRank);
-    group.forEach((entry, position) => {
-      if (entry.elementId === undefined) {
-        entry.index = position;
+    indexSelectorGroup(group, { text }, selectionViewport, nodes, true);
+  }
+}
+
+function canSkipSelectorGroup(
+  group: readonly SkeletonAccumulator[],
+  exactCount: number | undefined,
+  hasCapture: boolean,
+  labelOnly = false,
+): boolean {
+  if (labelOnly && group.every((entry) => entry.elementId !== undefined)) {
+    return true;
+  }
+  return group.length < 2 && (!hasCapture || exactCount === 1);
+}
+
+/** Conservative raw-match counts, before promotion, visibility and copy dedup. */
+function exactSelectorMatchCounts(nodes: readonly SearchableEntry[]) {
+  const byId = new Map<string, number>();
+  const byText = new Map<string, number>();
+  for (const node of nodes) {
+    if (isImeKeyEntry(node)) {
+      continue;
+    }
+    for (const id of new Set([node.nativeId, node.nodeKey])) {
+      if (id !== undefined) {
+        byId.set(id, (byId.get(id) ?? 0) + 1);
       }
+    }
+    const texts = new Set(
+      node.textFields.map((field) =>
+        normalizeQuotes(field).trim().replace(/\s+/g, " ").toLowerCase(),
+      ),
+    );
+    for (const text of texts) {
+      byText.set(text, (byText.get(text) ?? 0) + 1);
+    }
+  }
+  return { byId, byText };
+}
+
+/** Real captures use the resolver's complete selectable set, including promoted owners. */
+function indexSelectorGroup(
+  group: SkeletonAccumulator[],
+  selector: ResolverSelector,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  nodes: readonly SearchableEntry[] | undefined,
+  labelOnly = false,
+): void {
+  const candidates = nodes
+    ? new ElementResolver().resolve({ id: "skeleton", nodes }, selector, {
+        action: "tap",
+        viewport,
+        excludeImeKeys: true,
+      }).candidates
+    : undefined;
+  if ((candidates?.length ?? group.length) < 2) {
+    return;
+  }
+  group.sort(bySelectorRank);
+  const indexable = labelOnly ? group.filter((entry) => entry.elementId === undefined) : group;
+  for (const entry of indexable) {
+    if (!candidates) {
+      entry.index = group.indexOf(entry);
+      continue;
+    }
+    // Merged identical siblings cannot advertise a specific captured occurrence.
+    const sameRow = candidates.filter((candidate) => {
+      const b = candidate.bounds;
+      return (
+        b &&
+        entry.elementId === candidate.elementId &&
+        normalizeQuotes(entry.label ?? "")
+          .trim()
+          .toLowerCase() ===
+          normalizeQuotes(candidate.displayedLabel ?? "")
+            .trim()
+            .toLowerCase() &&
+        entry.bounds.every((edge, index) => edge === [b.left, b.top, b.right, b.bottom][index])
+      );
     });
+    if (sameRow.length === 1 || (sameRow.length > 1 && group.length > 1)) {
+      // Serialized merged/window copies can describe the same emitted row.
+      // Its first ranked occurrence is the topmost copy, just as resolution uses.
+      entry.index = candidates.indexOf(sameRow[0]);
+    }
   }
 }
 
@@ -1333,11 +1428,9 @@ export function projectSkeleton(
     actionable.push(imeRow);
   }
 
-  // Disambiguate duplicate ids (issue #6221 item 2) against the FINAL emitted
-  // actionable set, not the pre-filter accumulators — a duplicate suppressed by
-  // the keep rule (e.g. folded/hoisted text) must not consume an index slot a
-  // client will never see.
-  assignDuplicateIndexes(actionable, viewport);
+  // Number emitted rows against the same complete captured candidate set used
+  // by positional resolution. Promoted sources and their owners share a slot.
+  assignDuplicateIndexes(actionable, viewport, getSearchableEntries(elements));
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.

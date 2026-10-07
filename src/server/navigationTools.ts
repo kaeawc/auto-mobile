@@ -243,7 +243,7 @@ export function registerNavigationTools({
     "Navigate to screen using navigation graph",
     navigateToSchema,
     navigateToHandler,
-    { defaultEnabled: false, supportsProgress: true, debugOnly: true, embeddedSdkOnly: true },
+    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -251,7 +251,7 @@ export function registerNavigationTools({
     "Get navigation graph for debugging",
     getNavigationGraphSchema,
     getNavigationGraphHandler,
-    { defaultEnabled: false, debugOnly: true, embeddedSdkOnly: true },
+    { defaultEnabled: false, embeddedSdkOnly: true },
   );
 
   // Explore handler
@@ -332,6 +332,6 @@ export function registerNavigationTools({
     "Automatically explore app to build navigation graph",
     exploreSchema,
     exploreHandler,
-    { defaultEnabled: false, supportsProgress: true, debugOnly: true, embeddedSdkOnly: true },
+    { defaultEnabled: false, supportsProgress: true, embeddedSdkOnly: true },
   );
 }

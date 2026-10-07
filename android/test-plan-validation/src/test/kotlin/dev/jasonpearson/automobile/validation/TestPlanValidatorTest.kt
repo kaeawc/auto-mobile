@@ -2336,6 +2336,39 @@ class TestPlanValidatorTest {
     )
   }
 
+  @Test
+  fun `type error on a deprecated-named field stays an error`() {
+    val yaml =
+      """
+      name: login
+      description:
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid)
+    val error = result.errors.single { it.field == "description" }
+    assertEquals(ValidationSeverity.ERROR, error.severity)
+  }
+
+  @Test
+  fun `invalid result always carries an error-severity entry`() {
+    val yaml =
+      """
+      name: login
+      parameters: [user, pass]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+
+    val result = TestPlanValidator.validateYaml(yaml)
+    assertFalse(result.valid)
+    assertTrue(result.errors.any { it.severity == ValidationSeverity.ERROR })
+  }
+
   // ========== Tool Name Validation Tests ==========
 
   @Test

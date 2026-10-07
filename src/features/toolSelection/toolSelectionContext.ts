@@ -27,6 +27,8 @@ export type ToolSelectionContext = {
   };
   /** Connection-scoped selection profile, independent of device routing. */
   toolSelectionProfileUuid?: string;
+  /** Effective connection presentation preference, resolved at MCP ingress. */
+  actionsCompactMetadata?: boolean;
   /** Derived device-label selection profiles for the current routing base. */
   labelSessionUuids?: readonly string[];
   /** Resolved base profile for the current routing session. */

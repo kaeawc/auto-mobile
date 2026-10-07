@@ -66,6 +66,7 @@ import {
   DeviceCriteriaMatcher,
   DeviceAllocationCriteria,
   DeviceAllocationRequest,
+  type DevicePoolBootedDevice,
 } from "./DeviceCriteriaMatcher";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import {
@@ -2010,7 +2011,7 @@ export class DevicePool {
     pooledDevice: PooledDevice,
     bootedDevice: BootedDevice,
   ): Promise<boolean> {
-    const capturedEntryStillPooled = this.devices.get(pooledDevice.id) === pooledDevice;
+    const capturedEntryStillPooled = this.isPooledEntryCurrent(pooledDevice);
     this.runtimeIdentity.beginPendingReplacement(bootedDevice);
     try {
       await this.evictMissingPooledDevice(
@@ -2253,7 +2254,7 @@ export class DevicePool {
   /** Permit a later fresh booted observation to lift a timed-out kill's fence. */
   noteLatePlatformShutdownSettled(expectedDevice: PooledDevice): void {
     if (
-      this.devices.get(expectedDevice.id) !== expectedDevice ||
+      !this.isPooledEntryCurrent(expectedDevice) ||
       this.intentionalShutdowns.get(expectedDevice.id) !== expectedDevice.incarnation
     ) {
       return;
@@ -3197,50 +3198,14 @@ export class DevicePool {
         if (remainingTimeoutMs <= 0) {
           break;
         }
-        const startResult = await this.runCoordinatedDeviceStart(
+        const ready = await this.startAndPublishAdditionalDevice(
           device,
+          label,
           deadlineMs,
-          "start",
-          async (childProcess, signal, retainLeaseUntil) => {
-            const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
-            if (readinessTimeoutMs <= 0) {
-              logger.warn(
-                `[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`,
-              );
-              await this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil);
-              return false;
-            }
-            const ready = this.criteriaMatcher.withDeviceImageMetadata(
-              await waitForDeviceReadyOrCancel(
-                this.deviceManager,
-                device,
-                childProcess,
-                readinessTimeoutMs,
-                signal,
-                this.timer,
-                () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
-              ),
-              device,
-            );
-            return { ready, childProcess };
-          },
+          device.platform,
         );
-        if (startResult) {
-          // The lifecycle lease is released before taking assignmentMutex: never
-          // acquire the pool assignment lock while holding a start lease.
-          await this.assignmentMutex.runExclusive(async () => {
-            await this.addDevice(
-              startResult.ready,
-              device,
-              false,
-              this.runtimeIdentity.identityEvidenceForBootedDevice(startResult.ready),
-            );
-            await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
-          });
+        if (ready) {
           started++;
-        } else if (startResult === undefined && device.platform === "android") {
-          // Rediscover the winner after releasing the lifecycle lease.
-          await this.refreshDevices();
         }
       }
 
@@ -3249,6 +3214,69 @@ export class DevicePool {
       logger.warn(`[DevicePool] Failed to start additional devices: ${error}`);
       return 0;
     }
+  }
+
+  /**
+   * The shared body of both start-additional variants: start `device` under the
+   * coordinated lifecycle lease, cancel it when the deadline elapses before
+   * readiness, wait for readiness, then publish it to the pool. Returns the
+   * ready device, or null when it was cancelled before readiness or the start
+   * was skipped because another start or recovery owns the image (an Android
+   * skip rediscovers the winner after the lease is released). Errors propagate
+   * to the caller, which owns the failure logging.
+   */
+  private async startAndPublishAdditionalDevice(
+    device: DeviceInfo,
+    label: string,
+    deadlineMs: number,
+    platform: Platform,
+  ): Promise<DevicePoolBootedDevice | null> {
+    const startResult = await this.runCoordinatedDeviceStart(
+      device,
+      deadlineMs,
+      "start",
+      async (childProcess, signal, retainLeaseUntil) => {
+        const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
+        if (readinessTimeoutMs <= 0) {
+          logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
+          await this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil);
+          return null;
+        }
+        const ready = this.criteriaMatcher.withDeviceImageMetadata(
+          await waitForDeviceReadyOrCancel(
+            this.deviceManager,
+            device,
+            childProcess,
+            readinessTimeoutMs,
+            signal,
+            this.timer,
+            () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
+          ),
+          device,
+        );
+        return { ready, childProcess };
+      },
+    );
+    if (!startResult) {
+      if (startResult === undefined && platform === "android") {
+        // Rediscover the winner after releasing the lifecycle lease.
+        await this.refreshDevices();
+      }
+      return null;
+    }
+    // Start readiness and the lifecycle lease settle before assignmentMutex: never
+    // acquire the pool assignment lock while holding a start lease. The pool
+    // publish and process association share one assignment turn.
+    await this.assignmentMutex.runExclusive(async () => {
+      await this.addDevice(
+        startResult.ready,
+        device,
+        false,
+        this.runtimeIdentity.identityEvidenceForBootedDevice(startResult.ready),
+      );
+      await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
+    });
+    return startResult.ready;
   }
 
   private remainingStartDeadline(deadlineMs: number): number {
@@ -3435,53 +3463,13 @@ export class DevicePool {
       if (remainingTimeoutMs <= 0) {
         return null;
       }
-      const startResult = await this.runCoordinatedDeviceStart(
+      const ready = await this.startAndPublishAdditionalDevice(
         device,
+        label,
         deadlineMs,
-        "start",
-        async (childProcess, signal, retainLeaseUntil) => {
-          const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
-          if (readinessTimeoutMs <= 0) {
-            logger.warn(
-              `[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`,
-            );
-            await this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil);
-            return null;
-          }
-          const ready = this.criteriaMatcher.withDeviceImageMetadata(
-            await waitForDeviceReadyOrCancel(
-              this.deviceManager,
-              device,
-              childProcess,
-              readinessTimeoutMs,
-              signal,
-              this.timer,
-              () => this.cancelCoordinatedDeviceStart(device, childProcess, retainLeaseUntil),
-            ),
-            device,
-          );
-          return { ready, childProcess };
-        },
+        criteria.platform,
       );
-      if (!startResult) {
-        if (startResult === undefined && criteria.platform === "android") {
-          // Rediscover the winner after releasing the lifecycle lease.
-          await this.refreshDevices();
-        }
-        return null;
-      }
-      // Start readiness and the lifecycle lease settle before assignmentMutex;
-      // the pool publish and process association share one assignment turn.
-      await this.assignmentMutex.runExclusive(async () => {
-        await this.addDevice(
-          startResult.ready,
-          device,
-          false,
-          this.runtimeIdentity.identityEvidenceForBootedDevice(startResult.ready),
-        );
-        await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
-      });
-      return this.devices.get(startResult.ready.deviceId) ?? null;
+      return ready ? (this.devices.get(ready.deviceId) ?? null) : null;
     } catch (error) {
       logger.warn(
         `[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`,
@@ -3711,7 +3699,7 @@ export class DevicePool {
       );
       return false;
     }
-    if (this.devices.get(device.id) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       await this.finishEmulatorLossIncident(incidentId, "not-attempted");
       return false;
     }
@@ -4496,7 +4484,7 @@ export class DevicePool {
         if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
           if (matchingAvd.deviceId === disconnectedDevice.id) {
             if (
-              this.devices.get(disconnectedDevice.id) !== disconnectedDevice ||
+              !this.isPooledEntryCurrent(disconnectedDevice) ||
               !this.detachSessionForAndroidRecovery(
                 disconnectedDevice,
                 preservedSessionId,
@@ -5302,6 +5290,14 @@ export class DevicePool {
     return result;
   }
 
+  /**
+   * The one pooled-entry identity check: the captured object is still the entry
+   * stored under its own id (not removed, not replaced by a rebind or recovery).
+   * The captured-entry predicates below layer their own field checks on top of
+   * it; isPreservedSessionCurrent deliberately does not use it because its
+   * callers may already have detached the entry. Checks keyed by a separately
+   * captured id compare `this.devices.get(id)` directly.
+   */
   private isPooledEntryCurrent(device: PooledDevice): boolean {
     return this.devices.get(device.id) === device;
   }
@@ -5324,7 +5320,7 @@ export class DevicePool {
     let livenessUnknown = false;
     let snapshotStale = [...capturedEntries].some(
       (entry) =>
-        this.devices.get(entry.id) !== entry ||
+        !this.isPooledEntryCurrent(entry) ||
         entry.status !== "idle" ||
         entry.sessionId !== null ||
         this.isReservedForAssignment(entry),
@@ -5354,7 +5350,7 @@ export class DevicePool {
         } else {
           // Reconciliation may have removed or replaced this captured entry.
           // A replacement needs its own pass before it can be handed out.
-          snapshotStale ||= this.devices.get(device.id) !== device;
+          snapshotStale ||= !this.isPooledEntryCurrent(device);
         }
       } else {
         const status = this.idleDeviceReaper.getIdleDeviceLivenessStatus(device, iosLiveness);
@@ -5483,7 +5479,7 @@ export class DevicePool {
       throw new ActionableError(unavailableMessage);
     }
 
-    if (this.devices.get(device.id) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       throw new ActionableError(unavailableMessage);
     }
     this.assertTargetDeviceLiveness({ device, unavailableMessage, snapshot });
@@ -5683,7 +5679,7 @@ export class DevicePool {
     try {
       const session = await createSession();
       if (session.assignedDevice !== device.id) {
-        if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+        if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {
           this.restoreSessionAssignment(device, snapshot);
         }
         return session;
@@ -5710,7 +5706,7 @@ export class DevicePool {
       this.pooledSessionIdentities.set(device, session);
       return session;
     } catch (error) {
-      if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
+      if (this.isPooledEntryCurrent(device) && device.sessionId === attemptedSessionId) {
         this.restoreSessionAssignment(device, snapshot);
       }
       throw error;
@@ -5875,11 +5871,11 @@ export class DevicePool {
     options: DeviceRetirementOptions = {},
   ): Promise<boolean> {
     return await this.assignmentMutex.runExclusive(async () => {
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+      if (!this.isPooledEntryCurrent(expectedDevice)) {
         return false;
       }
       await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+      if (!this.isPooledEntryCurrent(expectedDevice)) {
         return false;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
@@ -5933,13 +5929,13 @@ export class DevicePool {
     options: Pick<DiscoveryReconcileOptions, "excludeExecutionId"> = {},
   ): Promise<PooledDevice | undefined> {
     return await this.assignmentMutex.runExclusive(async () => {
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+      if (!this.isPooledEntryCurrent(expectedDevice)) {
         return undefined;
       }
       // A kill's same-serial successor must not inherit the old device's work.
       // System UI recovery uses its separate session-preserving handoff.
       await this.runtimeIdentity.cancelRetiredDeviceExecutions(expectedDevice, options);
-      if (this.devices.get(expectedDevice.id) !== expectedDevice) {
+      if (!this.isPooledEntryCurrent(expectedDevice)) {
         return undefined;
       }
       this.releaseCapturedDeviceForShutdown(expectedDevice);
@@ -6002,7 +5998,7 @@ export class DevicePool {
           excludeExecutionId,
         );
         await this.trackStartedDeviceProcess(replacement, childProcess);
-        if (this.devices.get(replacementDevice.id) !== replacementDevice) {
+        if (!this.isPooledEntryCurrent(replacementDevice)) {
           throw new ActionableError(
             `Replacement device '${replacementDevice.id}' exited before its recovery session was rebound.`,
           );
@@ -6018,7 +6014,7 @@ export class DevicePool {
         // replacement back and release the preserved session so caller cleanup
         // cannot leave an idle device mapped to the stopped serial.
         const originalWasDetached =
-          this.devices.get(expectedDevice.id) !== expectedDevice ||
+          !this.isPooledEntryCurrent(expectedDevice) ||
           (preservedSession !== undefined && expectedDevice.sessionId === null);
         if (originalWasDetached) {
           await this.rollbackSystemUiAnrRecoveryReplacement(replacementDevice, preservedSession);
@@ -6051,7 +6047,7 @@ export class DevicePool {
     }
     await this.assignmentMutex.runExclusive(() => {
       if (
-        this.devices.get(replacementDevice.id) !== replacementDevice ||
+        !this.isPooledEntryCurrent(replacementDevice) ||
         replacementDevice.sessionId !== preservedSession.sessionId ||
         replacementDevice.status !== "busy" ||
         this.sessionManager.getSession(preservedSession.sessionId) !== preservedSession ||
@@ -6132,7 +6128,7 @@ export class DevicePool {
 
     if (existingReplacement && existingReplacement !== expectedDevice) {
       this.assertPooledSystemUiAnrReplacement(existingReplacement, sourceImage);
-      if (this.devices.get(expectedDevice.id) === expectedDevice) {
+      if (this.isPooledEntryCurrent(expectedDevice)) {
         await this.cancelOldDeviceWorkForSystemUiAnr(expectedDevice.id, excludeExecutionId);
         this.releaseCapturedDeviceForShutdown(expectedDevice);
         await this.removeDevice(expectedDevice.id, false, expectedDevice);
@@ -6246,7 +6242,7 @@ export class DevicePool {
       replacementDevice.platform,
     );
     if (
-      this.devices.get(replacementDevice.id) !== replacementDevice ||
+      !this.isPooledEntryCurrent(replacementDevice) ||
       reboundSession !== session ||
       reboundSession.assignedDevice !== replacementDevice.id
     ) {
@@ -6828,7 +6824,7 @@ export class DevicePool {
     }
     // iOS uses the per-source liveness snapshot; Android reconciles the supplied evidence.
     if (await this.ensurePooledDevicePresentForUse(device, true, true, false, presence)) {
-      if (this.devices.get(device.id) !== device) {
+      if (!this.isPooledEntryCurrent(device)) {
         return undefined;
       }
       this.assertIdleDeviceAssignable(options);

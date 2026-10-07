@@ -80,6 +80,9 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
+const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
@@ -3276,7 +3279,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     return (
       this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      this.finder.hasContainerElement(viewHierarchy, container)
+      defaultContainerSelector.hasContainer(viewHierarchy, container)
     );
   }
 

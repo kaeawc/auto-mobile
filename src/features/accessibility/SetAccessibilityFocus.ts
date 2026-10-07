@@ -25,6 +25,7 @@ import { SearchableHierarchy } from "../utility/SearchableNode";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import type { FocusActionOutcome } from "../observe/android/CtrlProxyFocus";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { BaseVisualChange } from "../action/BaseVisualChange";
@@ -34,8 +35,8 @@ import { BaseVisualChange } from "../action/BaseVisualChange";
  * with a fake instead of a real device/WebSocket.
  */
 export interface AccessibilityFocusService {
-  setAccessibilityFocus(resourceId: string): Promise<void>;
-  clearAccessibilityFocus(resourceId: string): Promise<void>;
+  setAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome | void>;
+  clearAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome | void>;
   requestCurrentFocus(): Promise<CurrentFocusResult>;
 }
 
@@ -116,12 +117,13 @@ export class SetAccessibilityFocus {
     const resourceId = await this.resolveResourceId(options);
     const service = this.serviceFactory(this.device);
 
+    let alreadySatisfied = false;
     try {
-      if (action === "clear") {
-        await service.clearAccessibilityFocus(resourceId);
-      } else {
-        await service.setAccessibilityFocus(resourceId);
-      }
+      const outcome =
+        action === "clear"
+          ? await service.clearAccessibilityFocus(resourceId)
+          : await service.setAccessibilityFocus(resourceId);
+      alreadySatisfied = outcome?.alreadySatisfied === true;
     } catch (error) {
       const message = errorMessage(error);
       logger.warn(`[accessibilityFocus] Failed to ${action} focus: ${errorMessage(error)}`, error);
@@ -133,7 +135,13 @@ export class SetAccessibilityFocus {
     const warning = confirmed
       ? undefined
       : `Focus ${action} was acknowledged by the accessibility service but the resulting focus state could not be read back to confirm it (${readError}).`;
-    return { success: true, focusedElement, confirmed, warning };
+    return {
+      success: true,
+      focusedElement,
+      confirmed,
+      warning,
+      ...(alreadySatisfied ? { alreadySatisfied } : {}),
+    };
   }
 
   /**

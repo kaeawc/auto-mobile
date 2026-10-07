@@ -10,6 +10,9 @@
         case unknownTrigger
         /// The trigger exists but its payload is unusable; the reason is returned to the host.
         case invalidPayload(String)
+        /// The payload was valid but the module could not act on it (for example CallKit rejected
+        /// the call, or there is no call for that number); the reason is returned to the host.
+        case failed(String)
     }
 
     /// An SDK module the host can reach through `POST /trigger` (#1580).
@@ -23,7 +26,22 @@
 
     /// Modules registered for host triggers, keyed by module name.
     final class SdkTriggerRegistry: Sendable {
-        static let shared = SdkTriggerRegistry(modules: ["biometrics": SdkBiometricsTriggerModule()])
+        static let shared = SdkTriggerRegistry(modules: defaultModules())
+
+        /// Modules every SDK build registers. CallKit exists only on iOS, so other platforms
+        /// answer `module_not_registered` for `callkit`.
+        static func defaultModules() -> [String: any SdkTriggerModule] {
+            var modules: [String: any SdkTriggerModule] = [
+                "biometrics": SdkBiometricsTriggerModule(),
+                SdkMessagesTriggerModule.moduleName: SdkMessagesTriggerModule(),
+            ]
+            #if canImport(CallKit) && os(iOS)
+                modules[SdkCallKitTriggerModule.moduleName] = SdkCallKitTriggerModule(
+                    reporter: CallKitSdkCallReporter()
+                )
+            #endif
+            return modules
+        }
 
         private let modules: OSAllocatedUnfairLock<[String: any SdkTriggerModule]>
 
@@ -52,7 +70,8 @@
     ///
     /// Errors are structured so the host can tell a missing module from a wrong trigger name:
     /// `400 bad_request`, `404 module_not_registered` (with `registeredModules`),
-    /// `400 unknown_trigger` (with `supportedTriggers`) and `400 invalid_payload` (with `reason`).
+    /// `400 unknown_trigger` (with `supportedTriggers`), `400 invalid_payload` (with `reason`) and
+    /// `409 trigger_failed` (with `reason`).
     struct SdkTriggerRouteHandler: Sendable {
         private let registry: SdkTriggerRegistry
 
@@ -96,6 +115,13 @@
             case let .invalidPayload(reason):
                 return Self.response(400, [
                     "error": "invalid_payload",
+                    "module": moduleName,
+                    "trigger": trigger,
+                    "reason": reason,
+                ])
+            case let .failed(reason):
+                return Self.response(409, [
+                    "error": "trigger_failed",
                     "module": moduleName,
                     "trigger": trigger,
                     "reason": reason,

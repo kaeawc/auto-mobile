@@ -76,6 +76,9 @@ import {
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+
+// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
+const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -86,8 +89,6 @@ import {
 import { throwIfAborted } from "../../utils/toolUtils";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
@@ -396,7 +397,6 @@ export class TapAnyElement extends BaseVisualChange {
   private readonly lastRenderedObservation: RenderedObservationReader;
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
-  private finder: ElementFinder;
   private accessibilityService: TapAnyAccessibilityService;
   private hierarchyAccessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
@@ -439,7 +439,6 @@ export class TapAnyElement extends BaseVisualChange {
         platform: device.platform,
         iosMultiPanel: this.iosMultiPanel,
       });
-    this.finder = new DefaultElementFinder();
     this.accessibilityService =
       options.accessibilityService ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.hierarchyAccessibilityService = AndroidCtrlProxyClient.getInstance(
@@ -959,7 +958,7 @@ export class TapAnyElement extends BaseVisualChange {
     }
     return (
       this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      this.finder.hasContainerElement(viewHierarchy, container)
+      defaultContainerSelector.hasContainer(viewHierarchy, container)
     );
   }
 

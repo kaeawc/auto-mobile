@@ -253,6 +253,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "set_preference",
       requestId,
+      ...this.context.wireDeadlineParams?.("set_preference", timeoutMs),
       appId: packageName,
       fileName,
       key,
@@ -316,6 +317,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "remove_preference",
       requestId,
+      ...this.context.wireDeadlineParams?.("remove_preference", timeoutMs),
       appId: packageName,
       fileName,
       key,
@@ -371,6 +373,7 @@ export class CtrlProxyStorage {
     const message = JSON.stringify({
       type: "clear_preferences",
       requestId,
+      ...this.context.wireDeadlineParams?.("clear_preferences", timeoutMs),
       appId: packageName,
       fileName,
       ...(sessionId ? { sessionId } : {}),

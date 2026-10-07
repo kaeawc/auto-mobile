@@ -105,7 +105,8 @@ run_with_retry() {
 }
 
 # Re-run update+install of xmlstarlet against FALLBACK_MIRROR with a throwaway
-# sources list (invoked as a subprocess under sudo + timeout; see main).
+# sources list (invoked as a subprocess under sudo + timeout; see main). sudo
+# resets the environment, so main passes the mirror and codename via `env`.
 install_xmlstarlet_from_fallback_mirror() {
   local codename="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}"
   if [[ -z "$codename" && -r /etc/os-release ]]; then
@@ -138,7 +139,10 @@ main() {
     if ! try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet; then
       log "Default mirror failed; falling back to ${FALLBACK_MIRROR}"
       run_with_retry "apt-get install xmlstarlet from fallback mirror" \
-        sudo bash "$SELF" --install-xmlstarlet-from-fallback-mirror
+        sudo env \
+        "FAST_VALIDATION_DEPS_FALLBACK_MIRROR=${FALLBACK_MIRROR}" \
+        "FAST_VALIDATION_DEPS_UBUNTU_CODENAME=${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}" \
+        bash "$SELF" --install-xmlstarlet-from-fallback-mirror
     fi
   fi
 

@@ -42,10 +42,11 @@ STUB
 exit 0
 STUB
   chmod +x "${MOCK_BIN}/bats"
-  # `sudo` just drops the sudo and execs the rest.
+  # `sudo` drops the sudo and execs the rest, but like real sudo it resets the
+  # fallback overrides: they only survive when passed explicitly (via `env`).
   cat > "${MOCK_BIN}/sudo" <<'STUB'
 #!/usr/bin/env bash
-exec "$@"
+exec env -u FAST_VALIDATION_DEPS_FALLBACK_MIRROR -u FAST_VALIDATION_DEPS_UBUNTU_CODENAME "$@"
 STUB
   chmod +x "${MOCK_BIN}/sudo"
   # Deterministic timeout/sleep stubs: no wall-clock delay or process signaling.

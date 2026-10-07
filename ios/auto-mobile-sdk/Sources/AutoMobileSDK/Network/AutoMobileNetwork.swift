@@ -491,7 +491,13 @@ public final class AutoMobileNetwork: Sendable {
 ///
 /// This is an implementation detail -- consumers should register it via
 /// ``AutoMobileNetwork/protocolClass()`` rather than referencing this type directly.
-public class AutoMobileURLProtocol: URLProtocol {
+///
+/// `@unchecked Sendable` (issue #5839): `URLProtocol` is `Sendable`, and the compiler cannot verify
+/// a subclass of a class other than `NSObject`. Every mutable stored property, instance and static,
+/// lives inside an `OSAllocatedUnfairLock` (`state`, `faultSchedulerStorage`,
+/// `innerSessionHostStorage`); everything else is an immutable `let`. The class is `final` so no
+/// subclass can add unguarded state.
+public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable {
     static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     #if DEBUG
         /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
@@ -542,7 +548,7 @@ public class AutoMobileURLProtocol: URLProtocol {
         }
     }
 
-    override public class func canInit(with request: URLRequest) -> Bool {
+    override public static func canInit(with request: URLRequest) -> Bool {
         guard let scheme = request.url?.scheme?.lowercased(),
               supportedSchemes.contains(scheme),
               URLProtocol.property(forKey: handledKey, in: request) == nil,
@@ -556,7 +562,7 @@ public class AutoMobileURLProtocol: URLProtocol {
     /// Task-aware check the URL loading system consults before the request-only one. Declines
     /// task kinds a request-level `URLProtocol` cannot relay faithfully (issue #10139); the app's
     /// own stack then handles them, uncaptured.
-    override public class func canInit(with task: URLSessionTask) -> Bool {
+    override public static func canInit(with task: URLSessionTask) -> Bool {
         guard !InnerSessionPolicy.shouldDecline(task: task),
               let request = task.currentRequest ?? task.originalRequest
         else {
@@ -565,7 +571,7 @@ public class AutoMobileURLProtocol: URLProtocol {
         return canInit(with: request)
     }
 
-    override public class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    override public static func canonicalRequest(for request: URLRequest) -> URLRequest {
         return request
     }
 
@@ -968,7 +974,7 @@ extension AutoMobileURLProtocol {
     /// system and completes the inner challenge with whatever the app decides.
     func forwardChallenge(
         _ challenge: URLAuthenticationChallenge,
-        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         let sender = InnerChallengeSender(completionHandler)
         let stopped = state.withLock { state -> Bool in

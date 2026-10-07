@@ -66,10 +66,14 @@ internal fun OverlayRuntimeContent(
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  Box(Modifier.semantics { testTagsAsResourceId = true }) {
-    RenderOverlayNode(root, interact)
-    modalOverlaySheets(root).forEach { node ->
-      key(node.identity) { RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact) }
+  OverlayTheme(root) {
+    Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      RenderOverlayNode(root, interact)
+      modalOverlaySheets(root).forEach { node ->
+        key(node.identity) {
+          RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact)
+        }
+      }
     }
   }
 }
@@ -299,7 +303,7 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(node.style.background ?: Color.White)
+        .background(node.style.background ?: MaterialTheme.colorScheme.surface)
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
             onDragStart = { drag = 0.0 },

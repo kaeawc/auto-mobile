@@ -1664,7 +1664,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     // The field shows only its hint, which is not delivered text (#10252): a hint such as
     // "Search settings" must not satisfy the suffix/subsequence match for "set". Only text
     // that could itself have produced the hint is indistinguishable, so it stays unverified.
-    const couldBeTyped = operation === "replace" ? text === sent : text.endsWith(sent);
+    // Rich-text editors may consume markers or change case, so compare the same marker-free,
+    // case-insensitive views the IME suffix matcher uses.
+    const hint = text.replace(KEY_EVENT_FORMAT_MARKERS, "").toLowerCase();
+    const projected = sent.replace(KEY_EVENT_FORMAT_MARKERS, "").toLowerCase();
+    const couldBeTyped =
+      projected.length === 0 ||
+      (operation === "replace" ? hint === projected : hint.endsWith(projected));
     return couldBeTyped ? undefined : "";
   }
 
@@ -2313,6 +2319,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     mode: "eventAll" | "eventOnly",
     signal?: AbortSignal,
     display?: string,
+    before = "",
   ): Promise<TextActionResult> {
     if (text.toLowerCase() === text.toUpperCase()) {
       return typed;
@@ -2323,7 +2330,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
         }
         const field = this.readFocusedText(await this.readFreshObservation(signal, display));
-        if (field === undefined || keyEventLetterCase(field, text) !== "changed") {
+        if (field === undefined || keyEventLetterCase(field, text, before) !== "changed") {
           return typed;
         }
         if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
@@ -2646,6 +2653,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
     }
 
+    // Pre-existing text must not satisfy the case read-back for the newly inserted region.
+    const beforeText = preExistingFieldText(focusResult.hierarchy, operation);
     let mutated = operation === "replace";
     if (this.androidCaretUnsafe) {
       return {
@@ -2660,7 +2669,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       mutated = true;
     }
-    return this.verifyKeyEventLetterCase(text, { success: true }, "eventOnly", signal, display);
+    return this.verifyKeyEventLetterCase(
+      text,
+      { success: true },
+      "eventOnly",
+      signal,
+      display,
+      beforeText,
+    );
   }
 
   private async clearEventOnlyForReplace(
@@ -3664,20 +3680,37 @@ const KEY_EVENT_FORMAT_MARKERS = /[*_~`]/g;
  * Whether the field holds the typed text, holds it only in a different letter case, or neither.
  * Rich-text editors may consume formatting markers, so a marker-free view is compared too.
  */
-function keyEventLetterCase(field: string, text: string): "exact" | "changed" | "other" {
+function keyEventLetterCase(
+  field: string,
+  text: string,
+  before = "",
+): "exact" | "changed" | "other" {
+  const occurrences = (haystack: string, needle: string): number =>
+    haystack.split(needle).length - 1;
+  const strip = (value: string): string => value.replace(KEY_EVENT_FORMAT_MARKERS, "");
   const views = [
-    { field, text },
-    {
-      field: field.replace(KEY_EVENT_FORMAT_MARKERS, ""),
-      text: text.replace(KEY_EVENT_FORMAT_MARKERS, ""),
-    },
+    { field, text, before },
+    { field: strip(field), text: strip(text), before: strip(before) },
   ].filter((view) => view.text.length > 0);
-  if (views.some((view) => view.field.includes(view.text))) {
+  // A match that was already in the field before typing says nothing about the new region.
+  const grew = (fold: (value: string) => string): boolean =>
+    views.some(
+      (view) =>
+        occurrences(fold(view.field), fold(view.text)) >
+        occurrences(fold(view.before), fold(view.text)),
+    );
+  if (grew((value) => value)) {
     return "exact";
   }
-  return views.some((view) => view.field.toLowerCase().includes(view.text.toLowerCase()))
-    ? "changed"
-    : "other";
+  return grew((value) => value.toLowerCase()) ? "changed" : "other";
+}
+
+/** The text already in the focused field that a case read-back must not count; none on replace. */
+function preExistingFieldText(
+  hierarchy: Parameters<typeof getFocusedTextField>[0],
+  operation: SendKeysOperation,
+): string {
+  return operation === "replace" ? "" : (getFocusedTextField(hierarchy)?.value ?? "");
 }
 
 function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {

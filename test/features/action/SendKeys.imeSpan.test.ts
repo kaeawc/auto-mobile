@@ -922,3 +922,26 @@ test("IME replacement applies and restores the requested keyboard profile around
   expect(profilesAtCommit).toEqual([["direct"], ["direct"]]);
   expect(profiles).toEqual(["direct", "prior-profile"]);
 });
+
+test("IME commit of a marked-up string stays verified when the field shows the hint it displays", async () => {
+  const read: SendKeysObserver = {
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: {
+              focused: "true",
+              class: "android.widget.EditText",
+              text: "Bold",
+              "hint-text": "Bold",
+            },
+          },
+        },
+      },
+    }),
+  };
+  const h = harness(read);
+  const result = await h.action.execute([type("*bold*")]);
+  expect(result.success).toBe(true);
+});

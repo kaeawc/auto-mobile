@@ -5300,6 +5300,26 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       },
     );
 
+    test("eventOnly ignores a pre-existing exact match and warns on the new region's case", async () => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const h = harness(["hi. ", "hi. Hi"]);
+        const result = await h.executor.type({ action: "type", text: "hi", mode: "eventOnly" });
+        expect(result.success).toBe(true);
+        expect(result.warning).toContain("letter case");
+        expect(result.warning).toContain('holds "hi. Hi"');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("eventOnly with an exact new occurrence after existing text has no warning", async () => {
+      const h = harness(["hi. ", "hi. hi"]);
+      const result = await h.executor.type({ action: "type", text: "hi", mode: "eventOnly" });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
+    });
+
     test.each([
       ["eventOnly", "hi there", "hi there"],
       ["eventAll", "ev *bold* x", "ev bold x"],

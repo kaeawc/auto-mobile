@@ -1,5 +1,5 @@
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,10 +35,24 @@ function childArgv(spawnArgs: string[]): string[] {
 
 describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", () => {
   const tempDirs: string[] = [];
+  let previousEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    previousEnv = {
+      AUTOMOBILE_DATA_DIR: process.env.AUTOMOBILE_DATA_DIR,
+      [EVENT_ALL_MARKERS_ENV]: process.env[EVENT_ALL_MARKERS_ENV],
+    };
+  });
 
   afterEach(() => {
-    delete process.env.AUTOMOBILE_DATA_DIR;
-    delete process.env[EVENT_ALL_MARKERS_ENV];
+    // Preserve preload isolation and explicit overrides for the next suite.
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }

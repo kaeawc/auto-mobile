@@ -173,3 +173,13 @@ test("a suspect-session refusal keeps its wire code so a proxy can tell it is re
   const other = Object.assign(new Error("boom"), { code: "something_else" });
   expect(shapeToolCallError(other, context).content[0].text).toBe("Error: boom");
 });
+
+test("a suspect-session refusal tells an agent to retry now, not to heartbeat or wait it out", () => {
+  const { message } = new SessionSuspectError("session-a", 8_000);
+  expect(message).toBe(
+    "Session session-a missed a liveness heartbeat and is being restored; its device stays " +
+      "reserved for 8s. Retry this call now, without waiting. If the retry says the session was " +
+      "released, acquire a device again with getAndroid or getApple.",
+  );
+  expect(message).not.toMatch(/heartbeats from the owner|after the window/i);
+});

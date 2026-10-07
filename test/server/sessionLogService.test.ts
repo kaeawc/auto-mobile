@@ -246,9 +246,10 @@ describe("SessionLogService (#7006)", () => {
       expect(result.unifiedLog).toBeUndefined();
     });
 
-    test("reports iOS-only sources as unavailable without blocking the file source", async () => {
+    test("reports unsupported sources as unavailable without blocking the file source", async () => {
       const adb = new FakeAdbExecutor();
       adb.setDefaultResponse(execResult(base64Read("ok")));
+      adb.setCommandResponse("shell pidof 'com.example.app'", execResult("\n"));
       const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
 
       const result = await service.collect({
@@ -271,9 +272,89 @@ describe("SessionLogService (#7006)", () => {
         status: "unavailable",
         reason: "App Group containers are not available on android.",
       });
-      expect(result.unifiedLog).toEqual({
+      expect(result.androidLogcat).toEqual({
         status: "unavailable",
-        reason: "The unified log is not available on android.",
+        reason: expect.stringContaining("No running process"),
+      });
+      expect(result.unifiedLog).toBeUndefined();
+    });
+
+    test("reads app-scoped logcat with time, level, line, and byte bounds", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
+      adb.setDefaultResponse(execResult("one\ntwo\nthree\n"));
+      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+
+      const result = await service.collect({
+        sessionUuid: "s",
+        device: androidDevice,
+        request: {
+          appId: "com.example.app",
+          maxBytes: 8,
+          unifiedLog: { lastSeconds: 30, level: "info" },
+        },
+      });
+
+      expect(result.androidLogcat).toEqual({
+        status: "ok",
+        lastSeconds: 30,
+        level: "info",
+        pid: 4321,
+        lineLimit: 1000,
+        byteCount: 14,
+        truncated: true,
+        text: "one\ntwo\n",
+      });
+      expect(adb.getExecutedCommands()).toHaveLength(2);
+      expect(adb.getExecutedCommands()[1]).toBe(
+        `shell logcat -d -v brief --pid 4321 -T "$(( $(date +%s) - 30 )).000" -m 1000 '*:I'`,
+      );
+    });
+
+    test("clamps oversized Android window bounds and marks a full line window truncated", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
+      adb.setDefaultResponse(execResult(`${"line\n".repeat(1000)}`));
+      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+
+      const result = await service.collect({
+        sessionUuid: "s",
+        device: androidDevice,
+        request: {
+          appId: "com.example.app",
+          maxBytes: 99_999_999,
+          unifiedLog: { lastSeconds: 99_999, level: "debug" },
+        },
+      });
+
+      expect(result.androidLogcat).toMatchObject({
+        status: "ok",
+        lastSeconds: 3600,
+        lineLimit: 1000,
+        truncated: true,
+      });
+      expect(adb.getExecutedCommands()[1]).toContain('-T "$(( $(date +%s) - 3600 )).000"');
+      expect(adb.getCommandCalls()[1]?.maxBuffer).toBe(16 * 1024 * 1024);
+    });
+
+    test("returns unavailable when adb/logcat fails instead of an empty success", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell pidof 'com.example.app'", execResult("4321\n"));
+      adb.setCommandError("logcat -d", new Error("logcat: permission denied"));
+      const service = createSessionLogService({ adbFactory: new FakeAdbClientFactory(adb) });
+
+      const result = await service.collect({
+        sessionUuid: "s",
+        device: androidDevice,
+        request: {
+          appId: "com.example.app",
+          maxBytes: 100,
+          unifiedLog: { lastSeconds: 10, level: "default" },
+        },
+      });
+      expect(result.androidLogcat).toMatchObject({
+        status: "unavailable",
+        reason: expect.stringContaining("permission denied"),
       });
     });
 

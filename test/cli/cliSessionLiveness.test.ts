@@ -21,6 +21,7 @@ import {
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -141,7 +142,7 @@ class SessionContinuityDaemonClient implements DaemonClientLike {
     this.daemonRequests.push(request);
     const response = await handleDaemonRequest(request, daemonStateFor(this.sessionManager));
     if (!response.success) {
-      throw new Error(response.error);
+      throw Object.assign(new Error(response.error), { code: response.code });
     }
     if (method === DAEMON_HEARTBEAT_METHOD && (this.options.dropHeartbeatResponses ?? 0) > 0) {
       this.options.dropHeartbeatResponses!--;
@@ -237,6 +238,45 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       ),
     ).toHaveLength(1);
     expect(sessionManager.getSession("minted")?.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("CLI exit then an independent proxy claims without release under main's rules", async () => {
+    const client = new SessionContinuityDaemonClient(sessionManager, "handoff-cli");
+    const cli = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["cli-token"]),
+    });
+    await cli.callTool("getAndroid", {});
+    expect(await cli.adoptCliSessionLiveness()).toBe("handoff-cli");
+    await cli.close();
+    expect(client.daemonRequests.map((request) => request.method)).toEqual([
+      DAEMON_HEARTBEAT_METHOD,
+      DAEMON_HEARTBEAT_METHOD,
+    ]);
+    expect(sessionManager.getSession("handoff-cli")).toMatchObject({
+      livenessOwnerToken: "cli-token",
+      livenessPolicy: "cli-idle",
+    });
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: "handoff-cli",
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["proxy-token"]),
+    });
+    try {
+      await proxy.ensureConnected();
+      expect(sessionManager.getSession("handoff-cli")).toMatchObject({
+        livenessOwnerToken: "proxy-token",
+        livenessPolicy: "heartbeat",
+      });
+    } finally {
+      await proxy.close();
+    }
   });
 
   test("the declared session outlives the think-time that reaps a heartbeat session", async () => {
@@ -544,6 +584,53 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(cliHeartbeats).toHaveLength(1);
     expect(cliHeartbeats.every((call) => call.params.idleTimeoutMs === 120_000)).toBe(true);
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("a proxy reports deliberate ownership release without reclaiming or fencing", async () => {
+    const sessionUuid = "released-proxy";
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android");
+    const client = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: sessionUuid,
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs: 1_000,
+      idGenerator: new FakeIdGenerator(["proxy-token"]),
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await proxy.ensureConnected();
+      expect(
+        await handleDaemonRequest(
+          {
+            id: "release",
+            type: "daemon_request",
+            method: "daemon/releaseLivenessOwnership",
+            params: { sessionId: sessionUuid, livenessOwnerToken: "proxy-token" },
+          },
+          daemonStateFor(sessionManager),
+        ),
+      ).toMatchObject({ success: true });
+      const before = { ...sessionManager.getSession(sessionUuid)! };
+      await timer.advanceTimeAsync(3_000);
+      expect(sessionManager.getSession(sessionUuid)).toEqual(before);
+      expect(
+        client.daemonRequests
+          .filter((call) => call.method === DAEMON_HEARTBEAT_METHOD)
+          .map((call) => call.params.claimLivenessOwnership),
+      ).toEqual([true, undefined, undefined, undefined]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("no longer protects its deadline"),
+        ),
+      ).toHaveLength(1);
+      expect(proxy.isConnected()).toBe(true);
+    } finally {
+      await proxy.close();
+      warn.mockRestore();
+    }
   });
 
   test("the declaration carries this invocation's idle-timeout override", async () => {

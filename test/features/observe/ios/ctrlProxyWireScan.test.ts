@@ -27,6 +27,15 @@ function typesOf(source: string): string[] {
 }
 
 describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
+  test("Magic Tap delegate emits the additive runner command", () => {
+    const file = resolve(
+      import.meta.dir,
+      "../../../../src/features/observe/ios/CtrlProxyVoiceOver.ts",
+    );
+    const result = scanFile(file, readFileSync(file, "utf8"));
+    expect(result.emitted.map((emit) => emit.type)).toContain("request_magic_tap");
+    expect(result.unresolved).toEqual([]);
+  });
   test("finds both hierarchy request types in the production source with no unresolved sites", () => {
     const file = resolve(
       import.meta.dir,

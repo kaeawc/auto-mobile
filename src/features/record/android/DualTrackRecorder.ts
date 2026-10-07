@@ -664,7 +664,7 @@ export class DualTrackRecorder {
     );
     this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
 
-    return new GetEventReader({
+    const reader = new GetEventReader({
       adb,
       touchNode: node,
       // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
@@ -672,6 +672,18 @@ export class DualTrackRecorder {
       density,
       timer: this.timer,
     });
+    const rotated = rotation % 2 !== 0;
+    const geometry = {
+      platform: "android" as const,
+      deviceWidth: rotated ? display.height : display.width,
+      deviceHeight: rotated ? display.width : display.height,
+      orientation: rotation,
+    };
+    return {
+      start: (onGesture, onError) =>
+        reader.start((event) => onGesture({ ...event, geometry }), onError),
+      stop: () => reader.stop(),
+    };
   }
 }
 
@@ -885,7 +897,13 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
       Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
     );
   }
-  return { tool: "tapAt", params };
+  return {
+    tool: "tapAt",
+    params,
+    ...(gesture.geometry
+      ? { geometry: { ...gesture.geometry, x: gesture.screenX, y: gesture.screenY } }
+      : {}),
+  };
 }
 
 function warnUnknownGesture(gesture: GestureEvent): void {

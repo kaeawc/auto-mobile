@@ -33,6 +33,7 @@ public enum ResponseType: String, Sendable {
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"
     case highlightResponse = "highlight_response"
+    case magicTapResult = "magic_tap_result"
     case voiceOverStateResult = "voiceover_state_result"
     case voiceOverSetResult = "voiceover_set_result"
     case connected

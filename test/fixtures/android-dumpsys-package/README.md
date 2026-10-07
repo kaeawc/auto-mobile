@@ -20,3 +20,10 @@ These files are whole, raw, unedited command output, copied verbatim from the ca
 | `dumpsys-package-uninstalled-user0-keepdata.txt` | `dev.jasonpearson.automobile.playground` | `installed=false`, data kept; absent from `pm list packages`, present in `pm list packages -u` | `pm uninstall -k --user 0 <pkg>`                                                  |
 | `dumpsys-package-system-installed.txt`           | `com.android.egg`                        | Installed system app; baseline for the next row                                                | No state-changing command recorded                                                |
 | `dumpsys-package-system-uninstalled-user0.txt`   | `com.android.egg`                        | System app; `installed=false` for user 0, `ceDataInode=-1 deDataInode=-1`                      | `pm uninstall --user 0 com.android.egg`                                           |
+
+## `dumpsys-package-messaging-permissions-section.txt`
+
+- **Package:** `com.google.android.apps.messaging`, which declares restricted permissions (`READ_SMS`, `READ_CALL_LOG`, `RECEIVE_SMS`, `READ_EXTERNAL_STORAGE`, ...).
+- **Device:** emulator `emulator-5600` (manual-test batch mt40, 2026-10-06). Its API level and build were not recorded with the capture; `emulator-5602` produced a byte-identical section.
+- **Capture:** the `declared permissions:` through `runtime permissions:` lines of `adb -s emulator-5600 shell dumpsys package com.google.android.apps.messaging`, copied verbatim. It has no `Package [...]` header or `User 0:` line (the full dump is about 215 KB, mostly the activity resolver table), so the test prepends one header line before parsing and reads only the requested section.
+- **Why it exists:** it pins that restricted permissions appear in `requested permissions:` as bare names (no `: restricted=true` suffix); the restriction shows only in the runtime `flags=[ ... RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]` list (issue #10189).

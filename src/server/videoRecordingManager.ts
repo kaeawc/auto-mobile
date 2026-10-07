@@ -177,6 +177,8 @@ interface VideoRecordingManagerDependencies {
   highlightClient: VisualHighlightClient;
   timer: Timer;
   now: () => Date;
+  /** The same live-owner snapshot used by daemon startup's device-session sweep. */
+  liveDaemonSessionIds: ReadonlySet<string>;
   /**
    * Time-based retention + in-progress size-cap policy (issue #4762). Injected so
    * tests can drive the sweep/monitor with FakeTimer; defaults come from
@@ -435,7 +437,10 @@ async function initializeVideoRecordingState(
 async function performVideoRecordingStateInitialization(
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  const active = await deps.recordingRepository.listRecordings({ status: "recording" });
+  const active = await deps.recordingRepository.listRecordings({
+    status: "recording",
+    excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+  });
   if (moduleDependencies === deps) {
     ensureRetentionSweep(deps);
   }
@@ -446,7 +451,7 @@ async function performVideoRecordingStateInitialization(
   const endedAt = deps.now().toISOString();
 
   for (const record of active) {
-    const sizeBytes = await getFileSize(record.filePath);
+    const sizeBytes = await deps.statFileSize(record.filePath);
     const durationMs = calculateDurationMs(record.startedAt, endedAt);
     await deps.recordingRepository.updateRecording(record.recordingId, {
       status: "interrupted",
@@ -469,6 +474,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       highlightClient: new VisualHighlightClient(),
       timer: defaultTimer,
       now: () => new Date(),
+      liveDaemonSessionIds: new Set(),
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
@@ -492,6 +498,7 @@ export async function setVideoRecordingManagerDependencies(
     highlightClient: deps.highlightClient ?? current.highlightClient,
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
+    liveDaemonSessionIds: deps.liveDaemonSessionIds ?? current.liveDaemonSessionIds,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
     statFileSize: deps.statFileSize ?? current.statFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
@@ -509,6 +516,7 @@ async function initialVideoRecordingDependencies(
     highlightClient: deps.highlightClient ?? new VisualHighlightClient(),
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),
+    liveDaemonSessionIds: deps.liveDaemonSessionIds ?? new Set(),
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
     statFileSize: deps.statFileSize ?? getFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
@@ -669,7 +677,10 @@ async function resolveActiveRecordingId(
   }
 
   const { recordingRepository } = deps;
-  const active = await recordingRepository.listRecordings({ status: "recording" });
+  const localRecordingIds = new Set(deps.videoRecorderService.listActiveRecordingIds());
+  const active = (await recordingRepository.listRecordings({ status: "recording" })).filter(
+    (record) => localRecordingIds.has(record.recordingId),
+  );
 
   if (active.length === 0) {
     throw new ActionableError("No active video recording found. Provide recordingId.");
@@ -1701,9 +1712,12 @@ export async function lookupLatestVideoRecording(
   if (recordings.length === LATEST_LOOKUP_FIRST_PAGE) {
     // Every one of the newest rows lacks a file: widen to all rows rather than miss an
     // older playable one. The common case reads only a page.
-    const firstPageSize = recordings.length;
+    const firstPageIds = new Set(recordings.map((recording) => recording.recordingId));
     recordings = await deps.recordingRepository.listRecordings(query);
-    const older = await firstPlayable(recordings.slice(firstPageSize), deps);
+    const older = await firstPlayable(
+      recordings.filter((recording) => !firstPageIds.has(recording.recordingId)),
+      deps,
+    );
     if (older) {
       return { recording: toMetadata(older) };
     }

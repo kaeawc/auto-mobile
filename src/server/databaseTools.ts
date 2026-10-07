@@ -163,6 +163,19 @@ export function isMutationQuery(query: string): boolean {
 }
 
 /**
+ * Whether the query is one statement that cannot change data, so a request for it that got no answer
+ * is safe to retry. Stricter than `!isMutationQuery`: any `;` before more text (a second statement, or
+ * one hidden in a literal) counts as not read-only.
+ */
+export function isReadOnlySqlQuery(query: string): boolean {
+  if (isMutationQuery(query)) {
+    return false;
+  }
+  const withoutTrailingSemicolons = query.replace(/[\s;]+$/, "");
+  return !withoutTrailingSemicolons.includes(";");
+}
+
+/**
  * Check if text starts with a keyword followed by a word boundary.
  * Prevents matching CTE names like "select_cte" as statement keywords.
  */
@@ -284,7 +297,12 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
         args.query,
       );
     } catch (error) {
-      throw new ActionableError(iosSqlErrorMessage(error, args.databasePath), { cause: error });
+      throw new ActionableError(
+        iosSqlErrorMessage(error, args.databasePath, {
+          readOnlyQuery: isReadOnlySqlQuery(args.query),
+        }),
+        { cause: error },
+      );
     }
   }
 

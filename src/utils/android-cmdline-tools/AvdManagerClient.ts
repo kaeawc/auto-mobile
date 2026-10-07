@@ -133,12 +133,22 @@ interface CommandResult {
   stderrTruncated: boolean;
 }
 
+export interface AvdInventory {
+  valid: AvdInfo[];
+  unloadable: Array<{ name: string; path: string; error: string }>;
+}
+
 export class AvdManagerClient {
   private static readonly homebrewWarningLoggers = new WeakSet<object>();
 
   constructor(private readonly dependencies: AvdManagerClientDependencies = defaults()) {}
 
   async listDeviceImages(options: AvdManagerExecutionOptions = {}): Promise<AvdInfo[]> {
+    return (await this.listAvdInventory(options)).valid;
+  }
+
+  /** Include unloadable AVD diagnostics separately from startable images. */
+  async listAvdInventory(options: AvdManagerExecutionOptions = {}): Promise<AvdInventory> {
     const { path, env } = await this.resolve();
     const result = await this.execute(
       path,
@@ -454,16 +464,35 @@ export class AvdManagerClient {
     }
   }
 
-  private parseAvdList(output: string): AvdInfo[] {
-    const avds: AvdInfo[] = [];
-    let current: Partial<AvdInfo> = {};
+  private parseAvdList(output: string): AvdInventory {
+    const inventory: AvdInventory = { valid: [], unloadable: [] };
+    let current: AvdInfo | undefined;
+    let unloadableSection = false;
+    const finishEntry = () => {
+      if (!current?.name) {
+        return;
+      }
+      if (unloadableSection) {
+        inventory.unloadable.push({
+          name: current.name,
+          path: current.path ?? "",
+          error: current.error ?? "",
+        });
+      } else {
+        inventory.valid.push(current);
+      }
+      current = undefined;
+    };
     for (const line of output.split("\n")) {
       const trimmed = line.trim();
-      if (trimmed.startsWith("Name:")) {
-        if (current.name) {
-          avds.push(current as AvdInfo);
-        }
+      if (trimmed === "The following Android Virtual Devices could not be loaded:") {
+        finishEntry();
+        unloadableSection = true;
+      } else if (trimmed.startsWith("Name:")) {
+        finishEntry();
         current = { name: trimmed.slice("Name:".length).trim() };
+      } else if (!current) {
+        continue;
       } else if (trimmed.startsWith("Path:")) {
         current.path = trimmed.slice("Path:".length).trim();
       } else if (trimmed.startsWith("Target:")) {
@@ -474,10 +503,8 @@ export class AvdManagerClient {
         current.error = trimmed.slice("Error:".length).trim();
       }
     }
-    if (current.name) {
-      avds.push(current as AvdInfo);
-    }
-    return avds;
+    finishEntry();
+    return inventory;
   }
 
   private parseDeviceList(output: string): DeviceProfile[] {

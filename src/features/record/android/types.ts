@@ -39,6 +39,7 @@ type GestureEventType = "tap" | "doubleTap" | "longPress" | "swipe" | "pinch" | 
 
 export interface GestureEvent {
   type: GestureEventType;
+  geometry?: Omit<import("../../../models/TapAtGeometry").TapAtGeometry, "x" | "y">;
   /** Host time of the UP/key event that completed the gesture */
   arrivedAt: number;
 

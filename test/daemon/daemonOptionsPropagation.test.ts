@@ -3,7 +3,12 @@ import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { daemonCommandOptions } from "../../src/daemon/cli/runDaemonCommand";
 import { parseArgs } from "../../src/cli/parseArgs";
-import { REUSE_CRITICAL_OPTION_KEYS } from "../../src/daemon/daemonMcpProxy";
+import {
+  REUSE_CRITICAL_OPTION_KEYS,
+  STARTUP_OPTION_DEFICIT_KEYS,
+  startupOptionDeficits,
+  mergeDaemonOptions,
+} from "../../src/daemon/daemonMcpProxy";
 import {
   CONNECTION_PRESENTATION_ENV_KEYS,
   CONNECTION_PRESENTATION_OPTION_KEYS,
@@ -11,7 +16,12 @@ import {
   daemonProcessOptions,
   daemonReuseOptions,
 } from "../../src/daemon/daemonOptionScopes";
-import { OUTPUT_REDUCTION_FLAG_SPECS } from "../../src/utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  parseOutputReductionFlags,
+  outputReductionFlagsToArgs,
+  resolveActionsCompactMetadata,
+} from "../../src/utils/outputReductionFlags";
 import type { DaemonOptions } from "../../src/daemon/types";
 
 /**
@@ -30,14 +40,7 @@ import type { DaemonOptions } from "../../src/daemon/types";
 /** Reach the pure private arg-builder without spawning anything. */
 function serialize(options: DaemonOptions): string[] {
   const manager = new DaemonManager();
-  const built = (
-    manager as unknown as {
-      withDaemonOptions: (
-        l: { command: string; args: string[] },
-        o: DaemonOptions,
-      ) => { args: string[] };
-    }
-  ).withDaemonOptions({ command: "auto-mobile", args: [] }, options);
+  const built = manager["withDaemonOptions"]({ command: "auto-mobile", args: [] }, options);
   return built.args;
 }
 
@@ -253,6 +256,12 @@ describe("daemon startup-option propagation", () => {
     expect(args).toContain("--no-retrieve-interactive-windows");
   });
 
+  test("compact metadata false survives the manager arg builder", () => {
+    const args = serialize({ actionsCompactMetadata: false });
+    expect(args).toContain("--no-actions-compact-metadata");
+    expect(parseDaemonArgs(args, {}).actionsCompactMetadata).toBe(false);
+  });
+
   test("no flags -> no propagation args beyond the base launch", () => {
     // A bare options object must not emit any of the propagating flags.
     const args = serialize({});
@@ -412,7 +421,7 @@ describe("reuse-critical drift guard", () => {
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS.filter(
       ({ field }) => field !== "toolResultsNoStructuredContent",
     )) {
-      expect(REUSE_CRITICAL_OPTION_KEYS).toContain(spec.field);
+      expect(STARTUP_OPTION_DEFICIT_KEYS).toContain(spec.field);
     }
     expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("toolResultsNoStructuredContent");
   });
@@ -459,5 +468,77 @@ describe("reuse-critical drift guard", () => {
         AUTOMOBILE_DEBUG: "1",
       }),
     ).toEqual({ AUTOMOBILE_DEBUG: "1" });
+  });
+});
+
+// Persistence affects process-local behavior only; proxies never infer a relay preference from it.
+const compactPreferenceCases = [false, true].flatMap((negative) =>
+  [false, true].flatMap((positive) =>
+    ["0", "1", undefined, "false"].flatMap((envValue) =>
+      [true, false, undefined].map((persisted) => ({ negative, positive, envValue, persisted })),
+    ),
+  ),
+);
+
+describe("compact metadata tri-state startup", () => {
+  test.each(compactPreferenceCases)(
+    "negative=$negative positive=$positive env=$envValue persisted=$persisted (local only)",
+    ({ negative, positive, envValue, persisted }) => {
+      const args = [
+        ...(positive ? ["--actions-compact-metadata"] : []),
+        ...(negative ? ["--no-actions-compact-metadata"] : []),
+      ];
+      const env = { AUTOMOBILE_ACTIONS_COMPACT_METADATA: envValue } satisfies NodeJS.ProcessEnv;
+      const explicit = negative
+        ? false
+        : positive
+          ? true
+          : envValue === "0"
+            ? false
+            : envValue === "1"
+              ? true
+              : undefined;
+      const flags = parseOutputReductionFlags(args, env);
+      const startOptions = { ...flags } satisfies DaemonOptions;
+      expect(resolveActionsCompactMetadata(flags.actionsCompactMetadata, persisted)).toBe(
+        explicit ?? persisted ?? true,
+      );
+      expect(startOptions.actionsCompactMetadata).toBe(explicit);
+      if (explicit === undefined) {
+        expect(startOptions).not.toHaveProperty("actionsCompactMetadata");
+      }
+      const expectedArgs =
+        explicit === undefined
+          ? []
+          : [explicit ? "--actions-compact-metadata" : "--no-actions-compact-metadata"];
+      expect(outputReductionFlagsToArgs(startOptions)).toEqual(expectedArgs);
+      const managerArgs = serialize(startOptions);
+      expect(managerArgs.filter((arg) => arg.includes("actions-compact-metadata"))).toEqual(
+        expectedArgs,
+      );
+      expect(parseDaemonArgs(managerArgs, {}).actionsCompactMetadata).toBe(explicit);
+      expect(parseDaemonArgs(args, env).actionsCompactMetadata).toBe(explicit);
+      for (const runningValue of [true, false, undefined]) {
+        const running = { actionsCompactMetadata: runningValue } satisfies DaemonOptions;
+        expect(startupOptionDeficits(startOptions, running).length > 0).toBe(
+          explicit !== undefined && explicit !== (runningValue ?? true),
+        );
+        const merged = mergeDaemonOptions(running, startOptions);
+        expect(merged.actionsCompactMetadata).toBe(explicit ?? runningValue);
+      }
+      expect(startupOptionDeficits(startOptions, undefined).length > 0).toBe(explicit === false);
+    },
+  );
+
+  test("neighbouring boolean options still treat false and undefined as no opinion", () => {
+    for (const key of REUSE_CRITICAL_OPTION_KEYS) {
+      expect(startupOptionDeficits({ [key]: false }, { [key]: true })).toEqual([]);
+      expect(startupOptionDeficits({}, { [key]: true })).toEqual([]);
+      expect(startupOptionDeficits({ [key]: true }, { [key]: false })).toHaveLength(1);
+      expect(mergeDaemonOptions({ [key]: true }, { [key]: false })[key]).toBe(true);
+    }
+    expect(startupOptionDeficits({ toolResultsNoStructuredContent: true }, {})).toEqual([]);
+    expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("actionsCompactMetadata");
+    expect(STARTUP_OPTION_DEFICIT_KEYS).toContain("actionsCompactMetadata");
   });
 });

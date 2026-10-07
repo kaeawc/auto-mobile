@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -367,6 +368,8 @@ export class DeepLinkManager implements DeepLinkManager {
       // Use dumpsys package to get detailed package information including intent filters
       const packageInfoResult = await this.adbUtils.executeCommand(
         `shell dumpsys package ${shellQuote(appId)}`,
+        undefined,
+        DUMPSYS_MAX_BUFFER,
       );
 
       const hasStderr = packageInfoResult.stderr.trim().length > 0;

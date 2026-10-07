@@ -14,6 +14,13 @@ type PlanMigrationReport = {
   outdated: boolean;
 };
 
+export type PlanMigrationOptions = { platform?: unknown; devices?: unknown };
+type StepMigrationContext = {
+  planPlatform: unknown;
+  planDevices: unknown;
+  fallbackPlatform: unknown;
+};
+
 export const parseVersion = (version: string | undefined): number[] | null => {
   if (!version || version === "unknown" || version === "latest") {
     return null;
@@ -60,21 +67,23 @@ const isPlatform = (value: unknown): value is "android" | "ios" =>
 
 const resolveStepPlatform = (
   params: Record<string, any>,
-  planPlatform: unknown,
-  planDevices: unknown,
+  context: StepMigrationContext,
 ): "android" | "ios" | undefined => {
   if (isPlatform(params.platform)) {
     return params.platform;
   }
-  if (typeof params.device === "string" && Array.isArray(planDevices)) {
-    const device = planDevices.find(
+  if (typeof params.device === "string" && Array.isArray(context.planDevices)) {
+    const device = context.planDevices.find(
       (entry: unknown) => isRecord(entry) && entry.label === params.device,
     );
     if (isRecord(device) && isPlatform(device.platform)) {
       return device.platform;
     }
   }
-  return isPlatform(planPlatform) ? planPlatform : undefined;
+  if (isPlatform(context.planPlatform)) {
+    return context.planPlatform;
+  }
+  return isPlatform(context.fallbackPlatform) ? context.fallbackPlatform : undefined;
 };
 
 const recordWarning = (warnings: MigrationWarning[], message: string, stepIndex?: number): void => {
@@ -201,8 +210,7 @@ const migrateInputTextParams = (
   mergedParams: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  context: StepMigrationContext,
 ): void => {
   if (mergedParams.value !== undefined) {
     if (mergedParams.text === undefined) {
@@ -215,8 +223,7 @@ const migrateInputTextParams = (
   const typeCommand: Record<string, unknown> = {
     action: "type",
     text: mergedParams.text,
-    operation:
-      resolveStepPlatform(mergedParams, planPlatform, planDevices) === "ios" ? "insert" : "replace",
+    operation: resolveStepPlatform(mergedParams, context) === "ios" ? "insert" : "replace",
   };
   delete mergedParams.text;
   if (mergedParams.mode !== undefined) {
@@ -247,8 +254,7 @@ const migrateToolName = (
   mergedParams: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  context: StepMigrationContext,
 ): { normalizedTool: string; changed: boolean } => {
   let changed = false;
   let normalizedTool = toolName;
@@ -280,7 +286,7 @@ const migrateToolName = (
     changed = true;
   }
   if (toolName === "inputText") {
-    migrateInputTextParams(mergedParams, stepIndex, warnings, planPlatform, planDevices);
+    migrateInputTextParams(mergedParams, stepIndex, warnings, context);
     normalizedTool = "sendKeys";
     changed = true;
   }
@@ -565,8 +571,7 @@ const migrateStepFields = (
   step: Record<string, any>,
   stepIndex: number,
   warnings: MigrationWarning[],
-  planPlatform: unknown,
-  planDevices: unknown,
+  context: StepMigrationContext,
 ): boolean => {
   let changed = migrateStepMetadata(step, stepIndex, warnings);
 
@@ -583,7 +588,9 @@ const migrateStepFields = (
     // would strip the flag before the executor sees it, making a best-effort step mandatory (#2853).
     // `expectations` is likewise a plan-step field: as a tool param a strict schema rejects the
     // step (#9925). PlanNormalizer keeps it off `params` and the executor warns it is unevaluated.
-    if (["tool", "command", "label", "params", "optional", "expectations"].includes(key)) {
+    if (
+      ["tool", "command", "label", "params", "optional", "expectations", "geometry"].includes(key)
+    ) {
       continue;
     }
     inlineParams[key] = value;
@@ -592,14 +599,7 @@ const migrateStepFields = (
   }
   const mergedParams = { ...inlineParams, ...paramsFromStep };
 
-  const migratedTool = migrateToolName(
-    toolName,
-    mergedParams,
-    stepIndex,
-    warnings,
-    planPlatform,
-    planDevices,
-  );
+  const migratedTool = migrateToolName(toolName, mergedParams, stepIndex, warnings, context);
   const normalizedTool = migratedTool.normalizedTool;
   changed = migratedTool.changed || changed;
 
@@ -621,18 +621,23 @@ const migrateStepFields = (
 export const migratePlanStep = (
   step: unknown,
   stepIndex: number,
-  context: { platform?: unknown; devices?: unknown } = {},
+  context: PlanMigrationOptions = {},
 ): unknown => {
   if (!isRecord(step)) {
     return step;
   }
   const copy = structuredClone(step);
-  migrateStepFields(copy, stepIndex, [], context.platform, context.devices);
+  migrateStepFields(copy, stepIndex, [], {
+    planPlatform: context.platform,
+    planDevices: context.devices,
+    fallbackPlatform: undefined,
+  });
   return copy;
 };
 
 export const migratePlan = (
   rawPlan: unknown,
+  options: PlanMigrationOptions = {},
 ): { plan: Record<string, any>; report: PlanMigrationReport } => {
   if (!isRecord(rawPlan)) {
     throw new Error("Plan is not a valid object");
@@ -664,7 +669,11 @@ export const migratePlan = (
       if (!isRecord(step)) {
         return step;
       }
-      const stepChanged = migrateStepFields(step, index, warnings, plan.platform, plan.devices);
+      const stepChanged = migrateStepFields(step, index, warnings, {
+        planPlatform: plan.platform,
+        planDevices: plan.devices,
+        fallbackPlatform: options.platform,
+      });
       stepsChanged = stepsChanged || stepChanged;
       return step;
     });

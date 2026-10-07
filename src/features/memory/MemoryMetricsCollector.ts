@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type {
   AdbExecutor,
   DeviceTimestampResult,
@@ -96,7 +97,11 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   ): Promise<MemorySnapshot> {
     try {
       const { stdout } = await perf.track("adbMeminfo", () =>
-        this.adb.executeCommand(`shell dumpsys meminfo ${shellQuote(packageName)}`),
+        this.adb.executeCommand(
+          `shell dumpsys meminfo ${shellQuote(packageName)}`,
+          undefined,
+          DUMPSYS_MAX_BUFFER,
+        ),
       );
 
       const metrics = this.parseMeminfo(stdout);
@@ -486,6 +491,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
         this.adb.executeCommand(
           `shell dumpsys meminfo --unreachable ${shellQuote(packageName)}`,
           10000,
+          DUMPSYS_MAX_BUFFER,
         ),
       );
 

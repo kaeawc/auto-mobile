@@ -13,9 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -41,6 +39,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.settings.ui.EmailEditBottomSheet
@@ -130,7 +130,7 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
         HorizontalDivider()
 
         // Statistics Section
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
           shape = RoundedCornerShape(12.dp),
@@ -191,7 +191,7 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
         }
 
         // Logout Section
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
           shape = RoundedCornerShape(12.dp),
@@ -210,7 +210,7 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
               modifier = Modifier.padding(bottom = 12.dp),
             )
 
-            Button(
+            AutoMobileContentButton(
               onClick = onLogout,
               modifier = Modifier.fillMaxWidth(),
               colors =

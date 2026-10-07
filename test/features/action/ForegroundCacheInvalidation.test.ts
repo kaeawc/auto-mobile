@@ -118,13 +118,16 @@ describe("shared foreground cache invalidation", () => {
             : new HomeScreen(device, adb, timer);
       const invalidator = wire(action);
       const execute = action.observeScreen.execute.bind(action.observeScreen);
+      let postActionCaptures = 0;
       action.observeScreen.execute = async (options) => {
-        if (name === "homeScreen" && options?.skipCache) {
-          // Home's cache revalidation happens before dispatch, without caching this read.
+        if ((name === "homeScreen" || name === "recentApps") && options?.skipCache) {
+          // Home and Recents revalidate the current screen before dispatch, without caching it.
           expect(invalidator.calls).toEqual([]);
           expect(options.freshness).toBe("fresh");
+          expect(options.requireFreshExtraction).toBe(true);
         } else {
           expect(invalidator.calls).toEqual([device]);
+          postActionCaptures++;
         }
         return execute(options);
       };
@@ -133,6 +136,7 @@ describe("shared foreground cache invalidation", () => {
       } else {
         await action.execute();
       }
+      expect(postActionCaptures).toBeGreaterThan(0);
       expect(invalidator.calls).toEqual([device]);
     },
   );

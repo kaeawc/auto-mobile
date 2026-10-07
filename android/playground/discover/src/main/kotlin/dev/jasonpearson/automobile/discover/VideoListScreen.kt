@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +32,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileClickableCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.mediaplayer.VideoData
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
@@ -55,7 +56,7 @@ fun VideoListScreen(onNavigateToVideoPlayer: (String) -> Unit) {
 
 @Composable
 fun VideoCard(video: VideoData, onClick: () -> Unit) {
-  Card(
+  AutoMobileClickableCard(
     onClick = onClick,
     modifier = Modifier.fillMaxWidth(),
     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -78,7 +79,7 @@ fun VideoCard(video: VideoData, onClick: () -> Unit) {
           modifier = Modifier.fillMaxSize().padding(8.dp),
           contentAlignment = Alignment.BottomEnd,
         ) {
-          Card(
+          AutoMobileContentCard(
             colors =
               CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)

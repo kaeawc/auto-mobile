@@ -193,6 +193,8 @@ import {
   resetSystemTrayDependencies,
   getSystemTrayDependencies,
   waitForNotificationMatch,
+  clearMatchingSystemTrayNotifications,
+  clearIosSystemTrayNotifications,
   listSystemTrayNotifications,
   NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
@@ -211,8 +213,6 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-  SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
-  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -3167,14 +3167,15 @@ export function registerInteractionTools() {
         const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
         // Use statusbar commands directly: an unreadable hierarchy must not
         // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
-        restoreFailedClearAll = () =>
-          initiallyOpen ? clearDetector.expandTray() : clearDetector.collapseTray();
+        restoreFailedClearAll = () => {
+          // Cleanup must still run after request cancellation.
+          const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
+          return initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray();
+        };
       }
 
-      let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
-      let notificationsListedBeforeClear = false;
       if (device.platform === "android" && notification.appId) {
         const attributionLabel = await resolveClearAllAttributionLabel(
           device,
@@ -3196,7 +3197,6 @@ export function registerInteractionTools() {
           "before",
           signal,
         );
-        notificationsListedBeforeClear = listed.notifications.length > 0;
         // All correlated rows' content text lets the existing row matcher
         // isolate them, whether ownership comes from a header or dumpsys.
         clearMatchTexts = [
@@ -3206,48 +3206,23 @@ export function registerInteractionTools() {
           ]),
         ];
       }
-      const { timer } = getSystemTrayDependencies();
-
-      for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-        const { observation, match } = await waitForNotificationMatch(
-          device,
-          notification,
-          clearMatchTexts,
-          // The list pass collapses the shade; reopening may take longer than
-          // the short drain wait used after a swipe (#10249).
-          device.platform === "android" &&
-            i === 0 &&
-            (notificationsListedBeforeClear || !notification.appId)
-            ? awaitTimeoutMs
-            : 500,
-          progress,
-          signal,
-        );
-
-        if (!match && clearDetector && !clearDetector.isTrayOpen(observation.viewHierarchy)) {
-          throw new ActionableError(
-            observation.viewHierarchy
-              ? "Could not clear notifications: shade not readable (shade not detected open)."
-              : "Could not clear notifications: shade not readable (view hierarchy missing).",
-          );
-        }
-        if (!match) {
-          break;
-        }
-
-        const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
-        if (!swipeTarget) {
-          break;
-        }
-
-        await swipeElement(device, swipeTarget, signal);
-        swipeCount++;
-        throwIfAborted(signal);
-        await awaitWhileRequestIsLive(
-          timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
-          signal,
-        );
-      }
+      const drained =
+        device.platform === "android"
+          ? await clearMatchingSystemTrayNotifications(
+              device,
+              notification,
+              clearMatchTexts,
+              awaitTimeoutMs,
+              {
+                maxSwipes: expectedKeys?.length,
+                progress,
+                signal,
+              },
+            )
+          : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
+              progress,
+              signal,
+            });
 
       const remainingKeys =
         expectedKeys === undefined || !notification.appId
@@ -3256,9 +3231,18 @@ export function registerInteractionTools() {
 
       const result = formatClearAllResult(
         notification.appId,
-        swipeCount,
+        drained.dismissedCount,
         expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
       );
+      if (drained.stalled) {
+        result.success = false;
+        result.message =
+          expectedKeys === undefined
+            ? `Cleared ${drained.dismissedCount} matching notification(s).`
+            : result.message;
+        result.message +=
+          " A matching notification remains; dismissal was not confirmed or the swipe limit was reached.";
+      }
       if (!result.success && restoreFailedClearAll) {
         await restoreFailedClearAll();
         restoreFailedClearAll = undefined;
@@ -3286,16 +3270,6 @@ export function registerInteractionTools() {
       return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throwIfAborted(signal);
-      if (restoreFailedClearAll) {
-        try {
-          await restoreFailedClearAll();
-        } catch (restoreError) {
-          logger.warn(
-            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
-            restoreError,
-          );
-        }
-      }
       if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
         throw new ActionableError(
           "Could not clear notifications: shade not readable (shade not detected open during list).",
@@ -3306,6 +3280,17 @@ export function registerInteractionTools() {
         throw error;
       }
       throw toActionableError(error, `systemTray failed`);
+    } finally {
+      if (restoreFailedClearAll) {
+        try {
+          await restoreFailedClearAll();
+        } catch (restoreError) {
+          logger.warn(
+            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+            restoreError,
+          );
+        }
+      }
     }
   };
 

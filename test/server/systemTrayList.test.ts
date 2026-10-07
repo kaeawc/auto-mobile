@@ -31,6 +31,17 @@ const device: BootedDevice = {
   source: "local",
 };
 const headerlessTwoNotificationGroups = {
+  collapsed: (
+    JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
+        ),
+        "utf8",
+      ),
+    ) as ObserveResult
+  ).viewHierarchy,
   expanded: (
     JSON.parse(
       readFileSync(
@@ -1353,7 +1364,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     }
   });
 
-  test("counts every notification when one grouped-row swipe clears them all", async () => {
+  test("refuses to swipe a collapsed group without an expand control", async () => {
     const notifications = [
       ["First shell notification", "First body"],
       ["Second shell notification", "Second body"],
@@ -1373,21 +1384,14 @@ describe("systemTray clearAll dumpsys ownership", () => {
     installClearAllDependencies(timer, adb);
 
     try {
-      const payload = JSON.parse((await clearAll()).content[0].text);
-      expect(payload).toMatchObject({
-        dismissedCount: 3,
-        expectedCount: 3,
-        remainingCount: 0,
-        success: true,
-      });
-      expect(payload.message).toBe(`Cleared 3 notification(s) for ${SHELL}`);
+      await expect(clearAll()).rejects.toThrow("no expand button found");
     } finally {
       installedAppsSpy.mockRestore();
     }
 
     expect(
       adb.getExecutedCommands().filter((command) => command.includes("input swipe")),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   // Shade state follows statusbar commands, not observation counts.
@@ -1433,7 +1437,7 @@ describe("systemTray clearAll dumpsys ownership", () => {
     adb.setCommandResponse("dumpsys notification", unchangedDump);
     setSystemTrayDependencies({ observeScreenFactory: () => observer });
     installClearAllDependencies(timer, adb);
-    return { adb, commands };
+    return { adb, commands, timer };
   };
 
   for (const initiallyOpen of [false, true]) {
@@ -1453,11 +1457,28 @@ describe("systemTray clearAll dumpsys ownership", () => {
             : "shell cmd statusbar collapse",
         );
         expect(response.isError).toBe(true);
+        expect(
+          commands().filter((command) => command.startsWith("shell input swipe")),
+        ).toHaveLength(1);
       } finally {
         installedAppsSpy.mockRestore();
       }
     });
   }
+
+  test("a text-filtered clearAll reports no confirmed dismissals when its row snaps back", async () => {
+    const { commands } = setupClearAllShade(false);
+    const response = await handler()(device, {
+      action: "clearAll",
+      notification: { title: "Shell notification" },
+    });
+    const payload = JSON.parse(response.content[0].text);
+    expect(payload).toMatchObject({ success: false, dismissedCount: 0 });
+    expect(payload.message).toContain("matching notification remains");
+    expect(payload.message).not.toContain("No notifications found");
+    expect(commands().filter((command) => command.startsWith("shell input swipe"))).toHaveLength(1);
+    expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+  });
 
   for (const unreadable of ["missing", "closed"] as const) {
     test(`clearAll names unreadable shade (${unreadable}) instead of remaining-count failure`, async () => {
@@ -1549,6 +1570,324 @@ describe("systemTray clearAll dumpsys ownership", () => {
           .filter((command) => command.includes("shell cmd statusbar"))
           .at(-1),
       ).toBe("shell cmd statusbar expand-notifications");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  const setupDelayedClear = (
+    readyAfterMs: number,
+    staleAfterSwipeMs = 0,
+    staleHierarchy = false,
+  ) => {
+    const { adb, timer } = setupClearAllShade(false);
+    const observer = new FakeObserveScreen();
+    let reopenedAt: number | undefined;
+    let lastSwipeAt = 0;
+    let previousSwipes = 0;
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    observer.setObserveResult(() => {
+      const lastShadeCommand = adb
+        .getExecutedCommands()
+        .filter((command) => command.includes("shell cmd statusbar"))
+        .at(-1);
+      if (!lastShadeCommand || lastShadeCommand.endsWith("collapse")) {
+        return { ...page(), viewHierarchy: undefined };
+      }
+      const expands = adb
+        .getExecutedCommands()
+        .filter((command) => command.endsWith("expand-notifications")).length;
+      if (expands >= 2 && reopenedAt === undefined) {
+        reopenedAt = timer.now();
+      }
+      if (reopenedAt !== undefined && timer.now() - reopenedAt < readyAfterMs) {
+        return staleHierarchy
+          ? {
+              ...page(row("Alpha", shellLabel), row("Beta", shellLabel)),
+              freshness: { isFresh: false, verified: false },
+            }
+          : { ...page(), viewHierarchy: undefined };
+      }
+      const count = swipes().length;
+      if (count !== previousSwipes) {
+        previousSwipes = count;
+        lastSwipeAt = timer.now();
+      }
+      const removed =
+        count > 0 && timer.now() - lastSwipeAt < staleAfterSwipeMs ? count - 1 : count;
+      return page(...["Alpha", "Beta"].slice(removed).map((title) => row(title, shellLabel)));
+    });
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Alpha", "Body of Alpha"), record(2, "Beta", "Body of Beta"))),
+      execResult(dumpsys()),
+    ]);
+    setSystemTrayDependencies({ observeScreenFactory: () => observer });
+    return { adb, timer, swipes, observer };
+  };
+
+  for (const [readyAfterMs, staleHierarchy] of [
+    [0, false],
+    [1000, false],
+    [1000, true],
+  ] as const) {
+    test(`app-filtered clearAll retries the reopened shade until readable at ${readyAfterMs}ms (stale hierarchy: ${staleHierarchy})`, async () => {
+      const { timer, swipes } = setupDelayedClear(readyAfterMs, 0, staleHierarchy);
+      const installedAppsSpy = mockInstalledApps([SHELL]);
+      try {
+        expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+          success: true,
+          dismissedCount: 2,
+        });
+        expect(swipes()).toHaveLength(2);
+        expect(timer.getSleepHistory()).toEqual(readyAfterMs === 0 ? [] : [250, 250, 250, 250]);
+        expect(timer.now()).toBe(readyAfterMs);
+      } finally {
+        installedAppsSpy.mockRestore();
+      }
+    });
+  }
+
+  test("clearAll polls stale post-swipe frames instead of swiping the same row again", async () => {
+    const { timer, swipes } = setupDelayedClear(0, 1000);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+        success: true,
+        dismissedCount: 2,
+      });
+      expect(swipes()).toHaveLength(2);
+      expect(timer.getSleepHistory()).toEqual(Array(8).fill(250));
+      expect(timer.now()).toBe(2000);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("the initial app inventory allows offscreen matches to move into view", async () => {
+    const { adb, observer, swipes } = setupDelayedClear(0);
+    observer.setObserveResult(() => {
+      const commands = adb.getExecutedCommands();
+      if (
+        !commands
+          .filter((command) => command.includes("shell cmd statusbar"))
+          .at(-1)
+          ?.endsWith("expand-notifications")
+      ) {
+        return { ...page(), viewHierarchy: undefined };
+      }
+      return page(
+        ...["Alpha", "Beta", "Gamma"]
+          .slice(swipes().length, swipes().length + 2)
+          .map((title) => row(title, shellLabel)),
+      );
+    });
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(
+        dumpsys(
+          record(1, "Alpha", "Body of Alpha"),
+          record(2, "Beta", "Body of Beta"),
+          record(3, "Gamma", "Body of Gamma"),
+        ),
+      ),
+      execResult(dumpsys()),
+    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      expect(JSON.parse((await clearAll()).content[0].text)).toMatchObject({
+        success: true,
+        dismissedCount: 3,
+      });
+      expect(swipes()).toHaveLength(3);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("new matching arrivals cannot raise the initial dismissal budget", async () => {
+    const { adb, observer, swipes } = setupDelayedClear(0);
+    observer.setObserveResult(() => {
+      const commands = adb.getExecutedCommands();
+      if (
+        !commands
+          .filter((command) => command.includes("shell cmd statusbar"))
+          .at(-1)
+          ?.endsWith("expand-notifications")
+      ) {
+        return { ...page(), viewHierarchy: undefined };
+      }
+      const count = swipes().length;
+      const titles =
+        count === 0 ? ["Alpha", "Beta"] : count === 1 ? ["Beta", "Gamma"] : ["Gamma", "Delta"];
+      return page(...titles.map((title) => row(title, shellLabel)));
+    });
+    adb.setCommandResponseSequence("dumpsys notification", [
+      execResult(dumpsys(record(1, "Alpha", "Body of Alpha"), record(2, "Beta", "Body of Beta"))),
+      execResult(dumpsys(record(3, "Gamma", "Body of Gamma"), record(4, "Delta", "Body of Delta"))),
+    ]);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      const response = await clearAll();
+      expect(JSON.parse(response.content[0].text)).toMatchObject({
+        success: false,
+        dismissedCount: 2,
+        remainingCount: 2,
+      });
+      expect(swipes()).toHaveLength(2);
+      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("clearAll caps readiness polls at the caller deadline and closes the shade", async () => {
+    const { adb, timer, swipes } = setupDelayedClear(1000);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(
+        handler()(device, {
+          action: "clearAll",
+          notification: { appId: SHELL },
+          awaitTimeout: 625,
+        }),
+      ).rejects.toThrow("shade not readable");
+      expect(swipes()).toHaveLength(0);
+      expect(timer.now()).toBe(625);
+      expect(timer.getSleepHistory()).toEqual([250, 250, 125]);
+      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("a hung shade read hits the deadline and still restores the shade", async () => {
+    const { adb, timer, observer, swipes } = setupDelayedClear(0);
+    const execute = observer.execute.bind(observer);
+    const executeSpy = spyOn(observer, "execute").mockImplementation((options) => {
+      const expands = adb
+        .getExecutedCommands()
+        .filter((command) => command.endsWith("expand-notifications")).length;
+      return expands >= 2 ? new Promise<ObserveResult>(() => {}) : execute(options);
+    });
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(
+        handler()(device, {
+          action: "clearAll",
+          notification: { appId: SHELL },
+          awaitTimeout: 625,
+        }),
+      ).rejects.toThrow("shade not readable");
+      expect(swipes()).toHaveLength(0);
+      expect(timer.now()).toBe(625);
+      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("an unreadable post-dismissal shade fails with its cause and is closed", async () => {
+    const { adb, timer, observer, swipes } = setupDelayedClear(0);
+    const execute = observer.execute.bind(observer);
+    const executeSpy = spyOn(observer, "execute").mockImplementation((options) =>
+      swipes().length > 0
+        ? Promise.resolve({ ...page(), viewHierarchy: undefined })
+        : execute(options),
+    );
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(
+        handler()(device, {
+          action: "clearAll",
+          notification: { appId: SHELL },
+          awaitTimeout: 625,
+        }),
+      ).rejects.toThrow("shade not readable after dismissal");
+      expect(swipes()).toHaveLength(1);
+      expect(timer.now()).toBe(625);
+      expect(adb.getExecutedCommands().at(-1)).toBe("shell cmd statusbar collapse");
+    } finally {
+      installedAppsSpy.mockRestore();
+      executeSpy.mockRestore();
+    }
+  });
+
+  test("clearAll expands a real collapsed group before dismissing a child", async () => {
+    const { adb, timer } = setup(
+      [{ ...page(), viewHierarchy: headerlessTwoNotificationGroups.collapsed }],
+      false,
+    );
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult(() => {
+      const commands = adb.getExecutedCommands();
+      if (commands.some((command) => command.startsWith("shell input swipe"))) {
+        return page();
+      }
+      return {
+        ...page(),
+        viewHierarchy: commands.some((command) => command.startsWith("shell input tap"))
+          ? headerlessTwoNotificationGroups.expanded
+          : headerlessTwoNotificationGroups.collapsed,
+      };
+    });
+    const initialDump = execResult(
+      dumpsys(record(1, "Delta", "delta body"), record(2, "Gamma", "gamma body")),
+    );
+    adb.setCommandResponseSequence("dumpsys notification", [
+      initialDump,
+      initialDump,
+      initialDump,
+      execResult(dumpsys()),
+    ]);
+    setSystemTrayDependencies({ observeScreenFactory: () => observer });
+    installClearAllDependencies(timer, adb);
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      expect(JSON.parse((await clearAll()).content[0].text).success).toBe(true);
+      const actions = adb
+        .getExecutedCommands()
+        .filter((command) => /shell input (tap|swipe)/.test(command));
+      expect(actions).toHaveLength(2);
+      expect(actions[0]).toStartWith("shell input tap");
+      expect(actions[1]).toStartWith("shell input swipe");
+      expect(timer.getSleepHistory()).toEqual([500]);
+    } finally {
+      installedAppsSpy.mockRestore();
+    }
+  });
+
+  test("cancellation while reading the reopened shade still closes it", async () => {
+    const { adb, commands } = setupClearAllShade(false);
+    const controller = new AbortController();
+    const observer = new FakeObserveScreen();
+    observer.setObserveResult(() => {
+      const lastShadeCommand = commands()
+        .filter((command) => command.includes("shell cmd statusbar"))
+        .at(-1);
+      if (!lastShadeCommand || lastShadeCommand.endsWith("collapse")) {
+        return { ...page(), viewHierarchy: undefined };
+      }
+      if (commands().filter((command) => command.endsWith("expand-notifications")).length >= 2) {
+        controller.abort(new Error("cancel clear"));
+      }
+      return page(row("Shell notification", shellLabel));
+    });
+    setSystemTrayDependencies({ observeScreenFactory: () => observer });
+    const installedAppsSpy = mockInstalledApps([SHELL]);
+    try {
+      await expect(
+        handler()(
+          device,
+          { action: "clearAll", notification: { appId: SHELL } },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toThrow("Operation cancelled");
+      expect(commands().at(-1)).toBe("shell cmd statusbar collapse");
+      expect(
+        adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")),
+      ).toHaveLength(0);
     } finally {
       installedAppsSpy.mockRestore();
     }

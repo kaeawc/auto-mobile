@@ -1,5 +1,7 @@
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
+import { extname, resolve } from "node:path";
+import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
@@ -237,6 +239,7 @@ interface EmulatorEarlyExitContext {
 }
 
 interface EmulatorProcessOptions {
+  cameraPosterPath?: string;
   requestedExtraArgs?: readonly string[];
   onSpawn?: (process: ChildProcess) => void;
   isCancelled?: () => boolean;
@@ -342,6 +345,8 @@ function configuredAvdArchitecture(
  * Provides emulator lifecycle and control capabilities
  */
 export interface AndroidEmulatorLaunchRequest {
+  /** Host still image used as the virtual-scene back-camera wall poster at boot. */
+  cameraPosterPath?: string;
   /** The configured Android Virtual Device to launch. */
   avdName: string;
   /**
@@ -874,6 +879,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
     consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
+    private readonly posterFileSystem?: Pick<FileSystem, "existsSync">,
   ) {
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn =
@@ -2607,6 +2613,27 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return (await this.launchEmulator({ avdName })).process;
   }
 
+  private resolveCameraPosterPath(posterPath?: string): string | undefined {
+    const cameraPosterPath = posterPath === undefined ? undefined : resolve(posterPath);
+    if (cameraPosterPath !== undefined) {
+      if (![".png", ".jpg", ".jpeg"].includes(extname(cameraPosterPath).toLowerCase())) {
+        throw new ActionableError("cameraPosterPath must point to a PNG, JPG, or JPEG image.");
+      }
+      if (!(this.posterFileSystem ?? { existsSync }).existsSync(cameraPosterPath)) {
+        throw new ActionableError(`Camera poster image does not exist: ${cameraPosterPath}`);
+      }
+    }
+    return cameraPosterPath;
+  }
+
+  private assertCameraPosterColdBoot(posterPath?: string): void {
+    if (posterPath !== undefined) {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on a running or starting AVD. Stop it first.",
+      );
+    }
+  }
+
   async launchEmulator(
     request: AndroidEmulatorLaunchRequest,
   ): Promise<AndroidEmulatorLaunchHandle> {
@@ -2614,6 +2641,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       throw new EmulatorLaunchCancelledError(request.avdName, null);
     }
 
+    const cameraPosterPath = this.resolveCameraPosterPath(request.cameraPosterPath);
     let process: ChildProcess | null = null;
     let disposed = false;
     const dispose = () => {
@@ -2641,6 +2669,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           trackAmbient(`emulator launch ${request.avdName}`, () =>
             this.startEmulatorProcess(request.avdName, {
               requestedExtraArgs: request.extraArgs,
+              cameraPosterPath,
               onSpawn: (spawnedProcess) => {
                 process = spawnedProcess;
                 if (disposed && !spawnedProcess.killed) {
@@ -2655,6 +2684,10 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           ),
         { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
       );
+      if (!process) {
+        // A sibling can win the AVD lock after the pre-spawn check. Never adopt its camera state.
+        this.assertCameraPosterColdBoot(cameraPosterPath);
+      }
       if (disposed) {
         // `dispose` already sent the SIGTERM to this child.
         throw new EmulatorLaunchCancelledError(request.avdName, process);
@@ -2791,6 +2824,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // adjacent and synchronous, so two concurrent launches of the same AVD in
     // this process can never both reach the spawn (#6407).
     if (AndroidEmulatorClient.inFlightAvdLaunches.has(avdName)) {
+      this.assertCameraPosterColdBoot(options.cameraPosterPath);
       logger.info(
         `AVD '${avdName}' already has a launch in flight in this process - waiting for it to be ready`,
       );
@@ -2822,6 +2856,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       signal,
     } = options;
     if (await this.adoptsExistingAvdLaunch(avdName, perf, signal)) {
+      this.assertCameraPosterColdBoot(options.cameraPosterPath);
       // Some other actor already owns this AVD, so we hold no process handle for
       // it. Return null rather than a fabricated `{} as ChildProcess`
       // (issue #3938); the caller waits for readiness regardless.
@@ -2857,6 +2892,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     } else if (extraArgsRaw) {
       args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
+    this.appendCameraPosterArguments(args, options.cameraPosterPath);
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const preLaunchEmulatorDeviceSnapshot = await this.capturePreLaunchEmulatorDeviceIds(
       capturePreLaunchDeviceIds,
@@ -2875,6 +2911,25 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
 
     return this.spawnClaimedEmulator({ avdName, perf, args, reservedEmulator, onSpawn });
+  }
+
+  private appendCameraPosterArguments(args: string[], posterPath?: string): void {
+    if (posterPath !== undefined) {
+      if (
+        args.some(
+          (arg) =>
+            arg === "-camera-back" ||
+            arg === "-virtualscene-poster" ||
+            arg.startsWith("-camera-back=") ||
+            arg.startsWith("-virtualscene-poster="),
+        )
+      ) {
+        throw new ActionableError(
+          "cameraPosterPath cannot be combined with camera-back or virtualscene-poster extra arguments. Remove the conflicting arguments.",
+        );
+      }
+      args.push("-camera-back", "virtualscene", "-virtualscene-poster", `wall=${posterPath}`);
+    }
   }
 
   private spawnReservedEmulator(context: {

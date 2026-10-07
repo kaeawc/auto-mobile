@@ -1484,6 +1484,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       args,
       sessionUuid,
       baselineStore,
+      actionsCompactMetadata: getToolSelectionContext()?.actionsCompactMetadata,
       internal: internalCall,
       artifactWriter,
       artifactMode,

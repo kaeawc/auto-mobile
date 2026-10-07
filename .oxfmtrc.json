@@ -10,6 +10,7 @@
     "test/fixtures/release/CHANGELOG-0.0.82.md",
     "android/junit-runner/src/test/resources/captured/*.json",
     "test/fixtures/android-notification-policy/*.txt",
+    "test/fixtures/daemon-ps-lstart/*.txt",
     "test/fixtures/android-window-policy/*.txt",
     "test/fixtures/android-locale/*.txt",
     "test/fixtures/android-am-start/*.txt",

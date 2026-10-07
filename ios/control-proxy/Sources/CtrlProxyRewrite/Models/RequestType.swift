@@ -50,6 +50,8 @@ public enum RequestType: String, CaseIterable, Sendable {
     case getCurrentFocus = "get_current_focus"
     case getTraversalOrder = "get_traversal_order"
     case addHighlight = "add_highlight"
+    case magicTap = "request_magic_tap"
+    case sdkTrigger = "request_sdk_trigger"
     case getVoiceOverState = "get_voiceover_state"
     case setVoiceOverState = "set_voiceover_state"
 
@@ -114,6 +116,8 @@ extension RequestType {
         case .getCurrentFocus: return .currentFocusResult
         case .getTraversalOrder: return .traversalOrderResult
         case .addHighlight: return .highlightResponse
+        case .magicTap: return .magicTapResult
+        case .sdkTrigger: return .sdkTriggerResult
         case .getVoiceOverState: return .voiceOverStateResult
         case .setVoiceOverState: return .voiceOverSetResult
         case .listPreferenceFiles: return .preferenceFiles

@@ -10,6 +10,7 @@ const NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
 const INTERNAL: Record<string, string> = {
   AUTOMOBILE_TEST_MODE: "ADB test fake activation, not a device configuration option.",
   AUTOMOBILE_ALLOW_IN_MEMORY_DB: "Test-only opt-in to a nonpersistent database.",
+  AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET: "Test-only opt-in to a real CtrlProxy WebSocket.",
   AUTOMOBILE_ACCEPTANCE_LIVE: "Live acceptance harness activation.",
   AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER: "Acceptance harness discovery ordering.",
   AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY:

@@ -6,7 +6,7 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { resolveTapAtCoordinates } from "../../../src/features/action/TapAtCoordinate";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
 } from "../../../src/features/utility/ElementGeometry";
 import type {
@@ -76,8 +76,8 @@ test("helper: secondary panel uses its own captured size, not the default displa
     observationScreenSize: defaultDisplay,
   });
   expect(resolved).toEqual(cover);
-  expect(isElementCenterOffScreen(target.bounds, resolved)).toBe(true);
-  expect(isElementCenterOffScreen(target.bounds, defaultDisplay)).toBe(false);
+  expect(!hasVisibleScreenPart(target.bounds, resolved)).toBe(true);
+  expect(!hasVisibleScreenPart(target.bounds, defaultDisplay)).toBe(false);
 });
 
 test("helper: observation of another display is not borrowed when the capture size is missing", () => {
@@ -93,8 +93,8 @@ test("helper: observation of another display is not borrowed when the capture si
 });
 
 test("helper: unknown or zero size never refuses", () => {
-  expect(isElementCenterOffScreen(target.bounds, undefined)).toBe(false);
-  expect(isElementCenterOffScreen(target.bounds, { width: 0, height: 0 })).toBe(false);
+  expect(!hasVisibleScreenPart(target.bounds, undefined)).toBe(false);
+  expect(!hasVisibleScreenPart(target.bounds, { width: 0, height: 0 })).toBe(false);
 });
 
 // The default display's size is supplied as the observation size in the next
@@ -189,15 +189,10 @@ test("tapOn end to end taps an element whose centre is inside the panel", async 
   expect(points).toEqual([{ x: 1030, y: 150 }]);
 });
 
-test("tapOn end to end refuses an element straddling the panel edge, like tapAny", async () => {
-  // Centre x=1085 is outside the 1080-wide panel; 1070..1080 is the visible part.
-  // The resolver's centre filter rejects it before tapOn's own screen clip runs,
-  // so tapOn does not tap the visible part. With the default display's size
-  // (2076 wide, supplied as the observation size) it would have been tapped.
+test("tapOn end to end taps the visible part of an element straddling the panel edge", async () => {
   const { result, points } = await runTapOn({ left: 1070, right: 1100, top: 100, bottom: 200 });
-  expect(result.success).toBe(false);
-  expect(result.error).toContain("Element not found");
-  expect(points).toEqual([]);
+  expect(result.success).toBe(true);
+  expect(points).toEqual([{ x: 1075, y: 150 }]);
 });
 
 test("tapAt path refuses a coordinate outside the targeted panel's observation size", () => {

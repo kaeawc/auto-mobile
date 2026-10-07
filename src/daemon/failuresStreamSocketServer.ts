@@ -1,14 +1,21 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
 import type {
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse,
-  DateRangePreset,
-  TimeAggregation,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
+  getDateRangeDurationMs as getDateRangeDuration,
+  normalizeAggregation,
+  normalizeDateRange,
   normalizeStreamLimit,
   normalizeStreamSinceId,
   normalizeStreamTimestampMs,
@@ -29,58 +36,6 @@ export type FailuresStreamRepository = Pick<
 >;
 
 /**
- * Get duration in ms for a date range preset
- */
-function getDateRangeDuration(preset: DateRangePreset): number {
-  switch (preset) {
-    case "1h":
-      return 60 * 60 * 1000;
-    case "24h":
-      return 24 * 60 * 60 * 1000;
-    case "3d":
-      return 3 * 24 * 60 * 60 * 1000;
-    case "7d":
-      return 7 * 24 * 60 * 60 * 1000;
-    case "30d":
-      return 30 * 24 * 60 * 60 * 1000;
-  }
-}
-
-/**
- * Validate aggregation value
- */
-function normalizeAggregation(value: unknown): TimeAggregation {
-  if (value === undefined || value === null) {
-    return "hour";
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Invalid aggregation: ${String(value)}`);
-  }
-  const valid: TimeAggregation[] = ["minute", "hour", "day", "week"];
-  if (!valid.includes(value as TimeAggregation)) {
-    throw new Error(`Invalid aggregation: ${value}. Must be one of: ${valid.join(", ")}`);
-  }
-  return value as TimeAggregation;
-}
-
-/**
- * Validate date range preset
- */
-function normalizeDateRange(value: unknown): DateRangePreset | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Invalid dateRange: ${String(value)}`);
-  }
-  const valid: DateRangePreset[] = ["1h", "24h", "3d", "7d", "30d"];
-  if (!valid.includes(value as DateRangePreset)) {
-    throw new Error(`Invalid dateRange: ${value}. Must be one of: ${valid.join(", ")}`);
-  }
-  return value as DateRangePreset;
-}
-
-/**
  * Socket server for failures stream.
  * Handles poll_notifications, poll_groups, poll_timeline, and acknowledge commands.
  */
@@ -88,20 +43,32 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
 > {
+  private readonly authenticator: StreamSocketAuthenticator;
+
+  /** `acknowledge` ships an id list the protocol does not bound, so allow more than the default. */
+  protected readonly maxFrameBytes = FAILURES_STREAM_MAX_FRAME_BYTES;
   private readonly repository: FailuresStreamRepository;
 
   constructor(
     socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     repository: FailuresStreamRepository = failureAnalyticsRepository,
+    options: { authenticator?: StreamSocketAuthenticator } = {},
   ) {
     super(socketPath, timer, "FailuresStream");
     this.repository = repository;
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("failuresStream", { allowObserverSessions: true });
   }
 
   protected async handleRequest(
     request: FailuresStreamSocketRequest,
   ): Promise<FailuresStreamSocketResponse> {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+    });
+
     switch (request.command) {
       case "poll_notifications":
         return await this.handlePollNotifications(request);
@@ -248,25 +215,16 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: FailuresStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<FailuresStreamSocketServer>();
 
 export function getFailuresStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
 }
 
 export async function startFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new FailuresStreamSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new FailuresStreamSocketServer());
 }
 
 export async function stopFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

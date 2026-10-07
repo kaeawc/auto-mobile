@@ -7,7 +7,8 @@ type RawHierarchyCarrier = {
   [RAW_VIEW_HIERARCHY_SYMBOL]?: ViewHierarchyResult;
 };
 
-const getRawViewHierarchy = (
+/** The uncleaned capture attached to a cleaned projection, independent of the raw-search flag. */
+export const getRawViewHierarchy = (
   viewHierarchy: ViewHierarchyResult,
 ): ViewHierarchyResult | undefined => {
   return (viewHierarchy as RawHierarchyCarrier)[RAW_VIEW_HIERARCHY_SYMBOL];

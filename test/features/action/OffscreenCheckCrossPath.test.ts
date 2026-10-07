@@ -2,8 +2,9 @@ import { expect, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { screenSizeForOffscreenCheck } from "../../../src/features/utility/ElementGeometry";
 import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
 import type {
@@ -45,6 +46,21 @@ const rows: Row[] = [
     captureSize: small,
     options: { observationScreenSize: small },
     center: [150, 40],
+    resolvedSize: small,
+    offscreen: true,
+  },
+  {
+    name: "visible right-edge sliver with off-screen centre (99-109)",
+    captureSize: small,
+    options: { observationScreenSize: small },
+    center: [104, 40],
+    resolvedSize: small,
+    offscreen: false,
+  },
+  {
+    name: "starts at right edge with no visible area",
+    captureSize: small,
+    center: [105, 40],
     resolvedSize: small,
     offscreen: true,
   },
@@ -166,7 +182,6 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
   };
   const finder = new DefaultElementFinder();
   expect(finder.findElementsByText(hierarchy, target.text!)).toEqual([target]);
-  const selector = new DefaultElementSelector(finder, options);
   const device = selectionFixtureDevice(platform, 1);
   // The fake deliberately returns the target unfiltered, so tapAny's own check
   // must reject off-screen rows independently of the selector's filtering.
@@ -185,13 +200,40 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
   expect(screenSizeForOffscreenCheck(hierarchy, options)).toEqual(row.resolvedSize);
   expect(tapOnSize).toEqual(row.resolvedSize);
   const verdicts = {
-    selector: selector.selectByText(hierarchy, target.text!).element === null,
+    resolver:
+      new ResolverElementSelector(undefined, undefined, options).selectByText(
+        hierarchy,
+        target.text!,
+      ).element === null,
     tapAny: tapAny["findClickableElement"]({ action: "tap" }, hierarchy, options).element === null,
     tapOn: tapOn["isElementTapTargetOffScreen"](selection, hierarchy, tapOnSize),
   };
   expect(verdicts).toEqual({
-    selector: row.offscreen,
+    resolver: row.offscreen,
     tapAny: row.offscreen,
     tapOn: row.offscreen,
   });
+  if (!row.offscreen) {
+    const capture = identifyObservedHierarchy(platform, hierarchy, "fresh", new FakeTimer());
+    const anyPoint = tapAny["resolveTapPoint"]({ element: target, capture }, options);
+    const visibleBounds = tapOn["visibleTapBounds"](selection, hierarchy, tapOnSize);
+    expect(visibleBounds).not.toBeNull();
+    const onPoint = tapOn["resolveVisibleTapPoint"](target, hierarchy, visibleBounds!, {
+      options: { action: "tap" },
+      screenSize: tapOnSize,
+    });
+    expect(onPoint).not.toBeNull();
+    for (const point of [anyPoint, onPoint!]) {
+      expect(point.x).toBeGreaterThanOrEqual(target.bounds.left);
+      expect(point.x).toBeLessThan(target.bounds.right);
+      expect(point.y).toBeGreaterThanOrEqual(target.bounds.top);
+      expect(point.y).toBeLessThan(target.bounds.bottom);
+      if (row.resolvedSize) {
+        expect(point.x).toBeGreaterThanOrEqual(0);
+        expect(point.x).toBeLessThan(row.resolvedSize.width);
+        expect(point.y).toBeGreaterThanOrEqual(0);
+        expect(point.y).toBeLessThan(row.resolvedSize.height);
+      }
+    }
+  }
 });

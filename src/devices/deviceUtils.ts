@@ -13,7 +13,7 @@ import {
   type IosPhysicalDeviceLister,
   type PhysicalIosDeviceDiscovery,
 } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
-import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosLifecycleBackend } from "../utils/ios-cmdline-tools/IosLifecycleBackend";
 import type { DiscoverySource } from "../utils/discoverySource";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type {
@@ -177,10 +177,12 @@ export interface DeviceDestroyOptions {
   lifecycleLease?: VirtualDeviceLifecycleLease;
 }
 
-/**
- * Interface for device utility operations
- * Provides platform-agnostic device management for Android emulators and iOS simulators
- */
+/** Options applied only when starting a new virtual-device process. */
+export interface DeviceStartOptions {
+  cameraPosterPath?: string;
+}
+
+/** Platform-agnostic device management for Android emulators and iOS simulators. */
 export interface PlatformDeviceManager {
   /**
    * List all available device images for a specific platform
@@ -232,7 +234,11 @@ export interface PlatformDeviceManager {
    * @param device - The device to start
    * @returns Promise with the spawned child process for the running device
    */
-  startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null>;
+  startDevice(
+    device: DeviceInfo,
+    timeoutMs?: number,
+    options?: DeviceStartOptions,
+  ): Promise<ChildProcess | null>;
 
   /**
    * Kill/terminate a running device
@@ -948,6 +954,23 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
+  private validateCameraPosterTarget(device: DeviceInfo, options: DeviceStartOptions): void {
+    if (options.cameraPosterPath !== undefined && device.platform !== "android") {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
+      );
+    }
+    if (
+      options.cameraPosterPath !== undefined &&
+      device.deviceId &&
+      !isAndroidEmulatorSerial(device.deviceId)
+    ) {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on physical Android devices. Use a stopped Android emulator.",
+      );
+    }
+  }
+
   /**
    * Start a device
    * @param device - The device to start
@@ -956,7 +979,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    options: DeviceStartOptions = {},
   ): Promise<ChildProcess | null> {
+    this.validateCameraPosterTarget(device, options);
     assertAndroidImageRunningStateKnown(device);
     // Validate the UDID before any simctl running-state probe: a slow/hung
     // 'simctl list' would otherwise burn the boot budget, and an already-booted
@@ -979,6 +1004,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
+      if (options.cameraPosterPath !== undefined) {
+        throw new ActionableError(
+          "cameraPosterPath is unsupported on a running Android emulator. Stop it first.",
+        );
+      }
       throw new DeviceAlreadyRunningError(
         `${device.platform} device '${device.name}' is already running`,
         device.platform,
@@ -993,6 +1023,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             avdName: device.name,
             deviceId: device.deviceId,
             signal: getAbortSignal(),
+            cameraPosterPath: options.cameraPosterPath,
           })
         ).process;
       case "ios":
@@ -1021,17 +1052,12 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":
-        // Physical devices are discoverable now (issue #5620), so a kill request
-        // can reach one. `simctl shutdown` cannot act on a physical UDID — it
-        // would fail with an opaque CoreSimulator error — and there is no
-        // devicectl equivalent of shutting a device down, so say so plainly.
-        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
-          throw new ActionableError(
-            `Cannot shut down physical iOS device ${device.deviceId}: only simulators have a ` +
-              `remote shutdown path. Disconnect or power the device off manually.`,
-          );
-        }
-        return this.simctl.killSimulator(device, options);
+        // A physical UDID is refused by its backend: there is no remote
+        // shutdown path for it (issue #5620).
+        return resolveIosLifecycleBackend(device.deviceId, { simctl: this.simctl }).shutdown(
+          device,
+          options,
+        );
     }
   }
 
@@ -1127,27 +1153,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
               `a name-only target cannot be verified against 'simctl' state after boot`,
           );
         }
-        // A connected physical device has no simulator lifecycle: `simctl
-        // bootstatus` cannot answer for its UDID, and discovery already proved
-        // it reachable. Treat successful discovery as readiness rather than
-        // shelling out to a tool that would only fail (issue #5620).
-        if (isIosPhysicalUdid(device.deviceId)) {
-          return {
-            name: device.name,
-            platform: "ios",
-            deviceId: device.deviceId,
-            ...(device.iosVersion ? { iosVersion: device.iosVersion } : {}),
-            ...(device.osVersion ? { osVersion: device.osVersion } : {}),
-            ...(device.formFactor ? { formFactor: device.formFactor } : {}),
-          };
-        }
-        // A `childProcess` is only supplied on the cold-boot path, where
-        // `startSimulator` has already run `bootstatus -b`. Signal that so the
-        // wait doesn't redundantly repeat the full boot-readiness wait; the
-        // already-running path (no childProcess) still performs it.
-        return this.simctl.waitForSimulatorReady(device.deviceId, timeoutMs, {
-          assumeBooted: Boolean(childProcess),
-        });
+        // A physical device's backend treats successful discovery as readiness
+        // (issue #5620). A `childProcess` is only supplied on the cold-boot
+        // path, where `startSimulator` has already run `bootstatus -b`. Signal
+        // that so the wait doesn't redundantly repeat the full boot-readiness
+        // wait; the already-running path (no childProcess) still performs it.
+        return resolveIosLifecycleBackend(device.deviceId, { simctl: this.simctl }).waitForReady(
+          { ...device, deviceId: device.deviceId },
+          timeoutMs,
+          { assumeBooted: Boolean(childProcess) },
+        );
       default:
         throw new ActionableError("Unknown platform");
     }

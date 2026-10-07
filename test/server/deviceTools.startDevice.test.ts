@@ -50,10 +50,18 @@ import * as os from "os";
 
 isolateToolRegistry();
 
-const AUTOLOCK_ENV_KEYS = [
-  "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
-  "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
-] as const;
+let policyReads = 0;
+const autolockEnv = new Proxy<Record<string, string | undefined>>(
+  {},
+  {
+    get(target, key, receiver) {
+      if (key === "AUTOMOBILE_DEVICE_POOL_AUTOLOCK") {
+        policyReads += 1;
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  },
+);
 
 class FakeExitChildProcess extends EventEmitter {
   readonly pid = 4242;
@@ -68,9 +76,7 @@ class FakeExitChildProcess extends EventEmitter {
 }
 
 function clearAutolockEnv(): void {
-  for (const key of AUTOLOCK_ENV_KEYS) {
-    delete process.env[key];
-  }
+  autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
 }
 
 describe("startDevice handler", () => {
@@ -78,14 +84,17 @@ describe("startDevice handler", () => {
   let fakeMatcher: FakeDeviceMatcher;
   let daemonSessionManager: SessionManager | undefined;
   let bootTimer: FakeTimer;
+  let restoreAutolockEnv: (() => void) | undefined;
 
   const setup = () => {
+    restoreAutolockEnv = ToolRegistry.setPipelineOverridesForTesting({ env: autolockEnv });
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeMatcher = new FakeDeviceMatcher();
     daemonSessionManager = undefined;
     bootTimer = new FakeTimer();
 
     setDeviceToolsDependencies({
+      env: autolockEnv,
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       avdManagerFactory: () => ({
@@ -110,6 +119,8 @@ describe("startDevice handler", () => {
   };
 
   const cleanup = () => {
+    restoreAutolockEnv?.();
+    restoreAutolockEnv = undefined;
     resetDeviceToolsDependencies();
     clearAutolockEnv();
     clearDirectSessionDevices();
@@ -203,6 +214,120 @@ describe("startDevice handler", () => {
     );
     return response.structuredContent;
   }
+
+  it("passes cameraPosterPath through the boot service on a cold Android launch", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    let received: string | undefined;
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    // The production interface carries boot-only options; the old fake needs no new behavior.
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received = options?.cameraPosterPath;
+      return originalStart(device, timeoutMs);
+    };
+    await callStartDevice({ platform: "android", cameraPosterPath: "/poster.png" });
+    expect(received).toBe("/poster.png");
+  });
+
+  it("renders cameraPosterQr to a poster and passes its path to the cold Android launch", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    const payloads: string[] = [];
+    setDeviceToolsDependencies({
+      cameraPosterQrWriter: {
+        writePoster: async (text) => {
+          payloads.push(text);
+          return "/posters/qr.png";
+        },
+      },
+    });
+    let received: string | undefined;
+    const originalStart = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    const manager: import("../../src/devices/deviceUtils").PlatformDeviceManager = fakeDeviceUtils;
+    manager.startDevice = async (device, timeoutMs, options) => {
+      received = options?.cameraPosterPath;
+      return originalStart(device, timeoutMs);
+    };
+    await callStartDevice({ platform: "android", cameraPosterQr: { text: "hello" } });
+    expect(payloads).toEqual(["hello"]);
+    expect(received).toBe("/posters/qr.png");
+  });
+
+  it("cancels a stalled cameraPosterQr render when the request is aborted", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    setDeviceToolsDependencies({
+      cameraPosterQrWriter: { writePoster: () => new Promise<string>(() => {}) },
+    });
+    const controller = new AbortController();
+    const start = callStartDevice(
+      { platform: "android", cameraPosterQr: { text: "hello" } },
+      controller.signal,
+    );
+    controller.abort(new Error("caller aborted"));
+    await expect(start).rejects.toThrow();
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
+  it("rejects cameraPosterQr together with cameraPosterPath", async () => {
+    await expect(
+      callStartDevice({
+        platform: "android",
+        cameraPosterPath: "/poster.png",
+        cameraPosterQr: { text: "hello" },
+      }),
+    ).rejects.toThrow("mutually exclusive");
+  });
+
+  it("rejects cameraPosterQr on iOS with an actionable unsupported error", async () => {
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterQr: { text: "hello" } }),
+    ).rejects.toThrow("cameraPosterQr is unsupported on iOS");
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
+  it("rejects camera posters on iOS with an actionable unsupported error", async () => {
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      callStartDevice({ platform: "ios", cameraPosterPath: "/poster.png" }),
+    ).rejects.toThrow("unsupported on iOS");
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
+  it("rejects camera posters on physical Android with an actionable unsupported error", async () => {
+    const physical = { ...androidDevice, deviceId: "physical-serial" };
+    fakeDeviceUtils.setBootedDevices("android", [physical]);
+    fakeMatcher.setBootedResult(physical);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: physical.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: physical.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toThrow("unsupported on physical Android");
+  });
+
+  it("rejects camera posters on an already-running Android emulator", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        cameraPosterPath: "/poster.png",
+      }),
+    ).rejects.toThrow("unsupported on a running Android emulator");
+  });
 
   for (const platform of ["android", "ios"] as const) {
     for (const running of [true, false]) {
@@ -635,6 +760,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -679,6 +805,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -712,6 +839,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -738,6 +866,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -783,6 +912,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -821,6 +951,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
         recoveryPolicy: { onLoss: false, maxAttempts: 2 },
@@ -859,6 +990,7 @@ describe("startDevice handler", () => {
     const readyDeviceIds: string[] = [];
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
         onDeviceReady: (deviceId) => readyDeviceIds.push(deviceId),
@@ -917,6 +1049,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
         retryExecutor: new DefaultRetryExecutor(timer),
@@ -964,6 +1097,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -992,6 +1126,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer,
         deviceManager: fakeDeviceUtils,
         cancelDeviceSessionExecutions: Object.assign(
@@ -1061,6 +1196,7 @@ describe("startDevice handler", () => {
       tracker.bindDeviceExecution(sessionless.id, androidDevice.deviceId);
       const pool = new DevicePool(
         createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+          env: autolockEnv,
           timer: timer,
           deviceManager: fakeDeviceUtils,
           retryExecutor: new DefaultRetryExecutor(timer),
@@ -1174,6 +1310,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1256,6 +1393,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1310,11 +1448,12 @@ describe("startDevice handler", () => {
   // the preserved id anyway bumps an unrelated session's expiry, or logs
   // "Cannot update cache for session ...: not found" on every recovery.
   it("does not record readiness on a preserved session the autolock path did not return", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1379,6 +1518,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1431,6 +1571,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1495,6 +1636,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1568,6 +1710,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1641,6 +1784,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
         retryExecutor: new DefaultRetryExecutor(timer),
@@ -1706,6 +1850,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1779,6 +1924,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -1834,6 +1980,7 @@ describe("startDevice handler", () => {
       daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const pool = new DevicePool(
         createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+          env: autolockEnv,
           timer,
           deviceManager: fakeDeviceUtils,
         }),
@@ -1985,6 +2132,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -2036,6 +2184,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -2100,6 +2249,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -2144,6 +2294,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
         retryExecutor: new DefaultRetryExecutor(timer),
@@ -2219,6 +2370,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -2518,6 +2670,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -2581,11 +2734,12 @@ describe("startDevice handler", () => {
   });
 
   it("does not kill a shared cold boot when autolock rejects the later caller", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3086,12 +3240,78 @@ describe("startDevice handler", () => {
     expect(result.osVersion).toBe("17.2");
   });
 
+  for (const initiallyEnabled of [true, false]) {
+    it(`captures startDevice autolock ${initiallyEnabled} before discovery`, async () => {
+      autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = initiallyEnabled ? "1" : "0";
+      daemonSessionManager = new SessionManager(bootTimer, new FakeDeviceSessionPersistence());
+      const secondDevice = { ...androidDevice, deviceId: "emulator-5556", name: "Pixel_second" };
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice, secondDevice]);
+      fakeMatcher.setBootedResult(androidDevice);
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon", {
+          env: autolockEnv,
+          timer: bootTimer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      await pool.initializeWithDevices([androidDevice, secondDevice]);
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      const readinessPolicies: boolean[] = [];
+      const captureRoute = pool.captureAutolockSessionForMcpSession.bind(pool);
+      pool.captureAutolockSessionForMcpSession = (client) => {
+        readinessPolicies.push(true);
+        return captureRoute(client);
+      };
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const discover = fakeDeviceUtils.getBootedDevices.bind(fakeDeviceUtils);
+      let paused = false;
+      fakeDeviceUtils.getBootedDevices = async (platform) => {
+        if (!paused) {
+          paused = true;
+          entered.resolve();
+          await release.promise;
+        }
+        return discover(platform);
+      };
+      policyReads = 0;
+      const pending = callStartDevice({
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        __mcpSessionId: "first",
+      });
+      await entered.promise;
+      autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = initiallyEnabled ? "0" : "1";
+      release.resolve();
+      const first = await pending;
+      expect(first.runtime.session.sessionUuid).toBeDefined();
+      expect(Boolean(pool.getDevice(androidDevice.deviceId)?.autolockSessionId)).toBe(
+        initiallyEnabled,
+      );
+      expect(readinessPolicies.length).toBe(initiallyEnabled ? 1 : 0);
+      expect(policyReads).toBe(1);
+      fakeMatcher.setBootedResult(secondDevice);
+      const second = await callStartDevice({
+        platform: "android",
+        deviceId: secondDevice.deviceId,
+        __mcpSessionId: "second",
+      });
+      expect(second.runtime.session.sessionUuid).toBeDefined();
+      expect(Boolean(pool.getDevice(secondDevice.deviceId)?.autolockSessionId)).toBe(
+        !initiallyEnabled,
+      );
+      expect(readinessPolicies.length).toBe(1);
+      expect(policyReads).toBe(2);
+    });
+  }
+
   it("registers the generated autolock session for the MCP session", async () => {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3118,6 +3338,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3146,6 +3367,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3193,6 +3415,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3223,6 +3446,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -3253,6 +3477,7 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),

@@ -1,0 +1,3 @@
+  mCurrentFocus=Window{a7d4634 u0 com.google.android.settings.intelligence/com.google.android.settings.intelligence.modules.search.SearchActivity}
+  mFocusedApp=ActivityRecord{160996495 u0 com.google.android.settings.intelligence/.modules.search.SearchActivity t133}
+    mFocusedWindow=Window{a7d4634 u0 com.google.android.settings.intelligence/com.google.android.settings.intelligence.modules.search.SearchActivity}

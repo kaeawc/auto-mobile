@@ -6,10 +6,8 @@ import {
   shouldSkipObserveWaitForScreenshot,
 } from "../../src/features/observe/automaticScreenshotPolicy";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import { DefaultElementSelector } from "../../src/features/utility/DefaultElementSelector";
-import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
 } from "../../src/features/utility/ElementGeometry";
 import { TapAnyElement } from "../../src/features/action/TapAnyElement";
@@ -35,11 +33,11 @@ import {
   waitForObservation,
   type WaitForWithSettled,
 } from "../../src/server/observeTools";
+import { MAX_WAIT_FOR_TIMEOUT_MS } from "../../src/features/observe/waitForTimeout";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeElementFinder } from "../fakes/FakeElementFinder";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -375,6 +373,80 @@ describe("published observe waitFor input schema", () => {
     );
   });
 
+  test("bounds both timeout aliases in legacy and DSL waits", () => {
+    const waits = [
+      { text: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS },
+      { text: "target", timeoutMs: MAX_WAIT_FOR_TIMEOUT_MS },
+      { for: "appear", elementId: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS },
+      { for: "appear", elementId: "target", timeoutMs: MAX_WAIT_FOR_TIMEOUT_MS },
+    ];
+    for (const waitFor of waits) {
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(true);
+      expect(validatePublishedObserveInput({ platform: "android", waitFor }).valid).toBe(true);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS + 1 },
+      { text: "target", timeoutMs: 1e300 },
+      { for: "appear", elementId: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS + 1 },
+      { for: "appear", elementId: "target", timeoutMs: 1e300 },
+    ]) {
+      const parsed = observeSchema.safeParse({ platform: "android", waitFor });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.message).toContain(
+          `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+        );
+      }
+      expect(validatePublishedObserveInput({ platform: "android", waitFor }).valid).toBe(false);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: Number.POSITIVE_INFINITY },
+      { for: "appear", elementId: "target", timeoutMs: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(false);
+    }
+
+    for (const timeout of [undefined, 0, -1, 0.0001]) {
+      const waitFor = { text: "target", ...(timeout === undefined ? {} : { timeout }) };
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(true);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: 1, timeoutMs: 1 },
+      { for: "appear", elementId: "target", timeout: 1, timeoutMs: 1 },
+    ]) {
+      const parsed = observeSchema.safeParse({ platform: "android", waitFor });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.message).toContain(
+          "waitFor accepts either timeout or timeoutMs, not both",
+        );
+      }
+    }
+  });
+
+  test("commits the same maximum for both wait timeout aliases", () => {
+    const definitions = JSON.parse(
+      readFileSync(new URL("../../schemas/tool-definitions.json", import.meta.url), "utf8"),
+    ) as Array<{
+      name: string;
+      inputSchema: {
+        properties: {
+          waitFor: { properties: Record<string, { maximum?: number }> };
+        };
+      };
+    }>;
+    const observeTool = definitions.find((definition) => definition.name === "observe");
+    expect(observeTool?.inputSchema.properties.waitFor.properties.timeout.maximum).toBe(
+      MAX_WAIT_FOR_TIMEOUT_MS,
+    );
+    expect(observeTool?.inputSchema.properties.waitFor.properties.timeoutMs.maximum).toBe(
+      MAX_WAIT_FOR_TIMEOUT_MS,
+    );
+  });
+
   test("advertises stable scope restrictions", () => {
     expect(
       validatePublishedObserveInput({
@@ -671,16 +743,25 @@ describe("published observe waitFor input schema", () => {
   });
 });
 
-describe("element center visibility consistency", () => {
+describe("element visible-part consistency", () => {
   const screen = { width: 200, height: 200 };
   const cases = [
     { name: "well inside", bounds: bounds(20, 20, 40, 40), screen, offScreen: false },
     { name: "exactly on right edge", bounds: bounds(190, 20, 210, 40), screen, offScreen: false },
     { name: "exactly on bottom edge", bounds: bounds(20, 190, 40, 210), screen, offScreen: false },
-    { name: "1px past right edge", bounds: bounds(191, 20, 211, 40), screen, offScreen: true },
-    { name: "1px past bottom edge", bounds: bounds(20, 191, 40, 211), screen, offScreen: true },
-    { name: "negative horizontal center", bounds: bounds(-11, 20, 9, 40), screen, offScreen: true },
-    { name: "negative vertical center", bounds: bounds(20, -11, 40, 9), screen, offScreen: true },
+    { name: "1px past right edge", bounds: bounds(191, 20, 211, 40), screen, offScreen: false },
+    { name: "1px past bottom edge", bounds: bounds(20, 191, 40, 211), screen, offScreen: false },
+    {
+      name: "negative horizontal center",
+      bounds: bounds(-11, 20, 9, 40),
+      screen,
+      offScreen: false,
+    },
+    { name: "negative vertical center", bounds: bounds(20, -11, 40, 9), screen, offScreen: false },
+    { name: "no area at right edge", bounds: bounds(200, 20, 220, 40), screen, offScreen: true },
+    { name: "no area at bottom edge", bounds: bounds(20, 200, 40, 220), screen, offScreen: true },
+    { name: "entirely left", bounds: bounds(-20, 20, 0, 40), screen, offScreen: true },
+    { name: "entirely above", bounds: bounds(20, -20, 40, 0), screen, offScreen: true },
     { name: "missing bounds", bounds: undefined, screen, offScreen: false },
     {
       name: "zero width",
@@ -703,7 +784,7 @@ describe("element center visibility consistency", () => {
   ];
 
   test.each(cases)(
-    "shared geometry and four consumers agree: $name",
+    "shared geometry and three consumers agree: $name",
     ({ bounds: elementBounds, screen: size, offScreen }) => {
       const element: Element = {
         text: "Match",
@@ -721,19 +802,13 @@ describe("element center visibility consistency", () => {
       const resolver = new ElementResolver(() => 0);
       const projection = new SearchableHierarchy().project(hierarchy);
       const snapshot = { id: "center-consistency", nodes: projection };
-      const sharedOffScreen = isElementCenterOffScreen(
+      const sharedOffScreen = !hasVisibleScreenPart(
         element.bounds,
         screenSizeForOffscreenCheck(hierarchy),
       );
 
       // Real parsers discard boundless Elements. Supply one at the existing injected
-      // boundaries to exercise the consumers' center policy rather than parsing.
-      const fakeFinder = new FakeElementFinder();
-      fakeFinder.nextElementsByText = [element];
-      const selector = new DefaultElementSelector(
-        elementBounds ? new DefaultElementFinder() : fakeFinder,
-        () => 0,
-      );
+      // boundaries to exercise the consumers' visible-part policy rather than parsing.
       const waitResolver: ConditionResolver = elementBounds
         ? resolver
         : {
@@ -766,7 +841,6 @@ describe("element center visibility consistency", () => {
         !sharedOffScreen,
       );
       expect(sharedOffScreen).toBe(offScreen);
-      expect(selector.selectByText(hierarchy, "Match").element !== null).toBe(!sharedOffScreen);
       expect(
         findWaitForElement(waitResolver, { text: "Match", textMatch: "exact" }, hierarchy) !== null,
       ).toBe(!sharedOffScreen);

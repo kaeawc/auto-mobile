@@ -100,7 +100,7 @@ Every node has required `type`. All other common properties are optional:
 | ----------------- | -------------------------------------------------------------------------------------------------- |
 | `id`              | Nonempty node ID; required and unique among pagers for `pager`. Other node IDs need not be unique. |
 | `testTag`         | Nonempty accessibility/test selector tag.                                                          |
-| `onTap`           | Nonempty ordered array of actions, run in order.                                                   |
+| `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
 | `visibleWhen`     | `{key, equals}`; equals is a scalar. Missing key or unequal value means hidden.                    |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
@@ -108,6 +108,12 @@ Every node has required `type`. All other common properties are optional:
 
 Hidden and closed sheet content still counts toward all limits and references.
 No arbitrary extra metadata is allowed.
+
+Tap targets: a node with `onTap` responds across its whole drawn area, including
+its own `padding`, and its accessibility bounds are that drawn area. It also
+reserves a 48 dp minimum touch target, like Material components: a smaller node
+keeps the size it draws at and is centered in the reserved space, which takes up
+layout room.
 
 ## Nodes
 
@@ -158,10 +164,10 @@ permitted but the pager placeholders take precedence within a pager.
 
 ## Style
 
-All properties are optional. Sizes, padding, offsets, radii, and spacing use dp,
-including text size. Negative offsets/positions are allowed; sizes are
-nonnegative, except text size and sheet height/detent height which must be
-positive. Positive values use a minimum of 0.000001 dp.
+All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
+Text size uses sp, so it follows the system font scale. Negative offsets/positions
+are allowed; sizes are nonnegative, except text size and sheet height/detent
+height which must be positive. Positive values use a minimum of 0.000001.
 
 | Property              | Accepted value                                                                                                       |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -174,7 +180,7 @@ positive. Positive values use a minimum of 0.000001 dp.
 | `alignment`           | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`. |
 | `arrangement`         | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                              |
 | `spacing`             | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.            |
-| `textSize`            | Positive dp.                                                                                                         |
+| `textSize`            | Positive sp; scaled by the system font scale.                                                                        |
 | `fontWeight`          | Integer 100–900.                                                                                                     |
 | `textAlign`           | `start`, `center`, `end`, `justify`.                                                                                 |
 | `maxLines`            | Integer 1–2147483647.                                                                                                |
@@ -304,7 +310,7 @@ request deadline for such a call is the show stage (with `assets`, the upload-an
 budget of `show`) plus the 30 s wait plus 30 s of headroom. Whether
 the Kotlin renderer resolves `{page}`/`{pageCount}` inside a pager and emits the
 static payload is not verified without a device. See
-[tool inputs and results](../../../tools.md#overlay) for the complete helper surface.
+[tool inputs and results](../../../tools.md#prototype) for the complete helper surface.
 
 ## Anchors
 

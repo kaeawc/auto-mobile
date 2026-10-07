@@ -496,6 +496,18 @@ describe("TalkBack fresh hierarchy review regressions", () => {
   });
 });
 
+// An unreachable CtrlProxy: a semantic long-click fails, so the tap falls back to
+// coordinates without opening a real WebSocket to a host emulator (#10470).
+const unreachable = async (): Promise<never> => {
+  throw new Error("CtrlProxy is unreachable in this test");
+};
+const unreachableCtrlProxy = {
+  requestTapCoordinates: unreachable,
+  requestAction: unreachable,
+  requestNodeAction: unreachable,
+  supportsNodeActionSelectors: async () => false,
+};
+
 function cachedTapAny(current: ObserveResult, cached = page([row("Old", 1700)], "Old")) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -506,6 +518,7 @@ function cachedTapAny(current: ObserveResult, cached = page([row("Old", 1700)], 
     timer,
     accessibilityDetector: detector,
     elementSelector: new ResolverElementSelector(),
+    accessibilityService: unreachableCtrlProxy,
   });
   tap.observedInteraction = (callback) => callback({ ...cached });
   const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
@@ -1042,6 +1055,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
             hierarchyCapture: captures,
             accessibilityDetector: detector,
             elementSelector: new ResolverElementSelector(),
+            accessibilityService: unreachableCtrlProxy,
           });
     tap.observeScreen = screen;
     tap.awaitIdle = new FakeAwaitIdle();

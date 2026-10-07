@@ -17,9 +17,11 @@
 # Every re-runnable offender gets its isolated median: test files this change
 # touched go first, then every remaining file by worst first sample. This avoids
 # treating an unchanged file as safe when a source/runtime/shared-test change can
-# slow every unit test. Rechecking is wall-time bounded instead: if the recheck
-# budget expires before all queued files have complete medians, the gate fails
-# closed and identifies the offenders that need a larger budget.
+# slow every unit test. Rechecking is wall-time bounded.
+# Odd run counts can stop once every offender in a file has a complete-sample
+# majority under budget: the configured median is then guaranteed to pass.
+# If the wall-time budget expires before verification, fail closed. Widespread
+# first-sample offenders suggest a runner stall, never permission to waive tests.
 set -euo pipefail
 
 # Bash 3.2 retains a failed echo in its stdio buffer when stdout is closed;
@@ -46,6 +48,7 @@ recheck_dir="${report_path%.xml}.recheck.d"
 max_ms="${BUN_TEST_MAX_MS:-100}"
 recheck_runs="${BUN_TEST_TIMING_RECHECK_RUNS:-3}"
 recheck_budget_seconds="${BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS:-600}"
+stall_min_offenders="${BUN_TEST_TIMING_STALL_MIN_OFFENDERS:-25}"
 
 # Every one of these is used in Bash arithmetic, where a leading zero means
 # octal: `08` is an arithmetic error and `010` silently means eight. Digit-only
@@ -61,6 +64,7 @@ require_positive_int() {
 require_positive_int BUN_TEST_MAX_MS "$max_ms"
 require_positive_int BUN_TEST_TIMING_RECHECK_RUNS "$recheck_runs"
 require_positive_int BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS "$recheck_budget_seconds"
+require_positive_int BUN_TEST_TIMING_STALL_MIN_OFFENDERS "$stall_min_offenders"
 
 mkdir -p "$(dirname "$report_path")"
 
@@ -193,10 +197,13 @@ recheck_rows="$recheck_dir/recheck.tsv"
 identity_counts="$recheck_dir/identity-counts.tsv"
 rechecked_list="$recheck_dir/rechecked-files.txt"
 unverified_list="$recheck_dir/unverified-files.txt"
+early_stopped_list="$recheck_dir/early-stopped-files.txt"
 changed_test_list="$recheck_dir/changed-test-files.txt"
 recheck_summary="$recheck_dir/summary.txt"
 recheck_verdict_file="$recheck_dir/verdict.txt"
 budget_summary="$recheck_dir/unit-timing-budget-summary.md"
+failure_list="$recheck_dir/failures.txt"
+failure_counts="$recheck_dir/failure-counts.txt"
 
 : > "$changed_test_list"
 for file in ${changed_test_files[@]+"${changed_test_files[@]}"}; do
@@ -267,6 +274,45 @@ if [[ ! -s "$offender_rows" ]]; then
   exit 0
 fi
 
+# This is a heuristic over the initial measurement window, not proof of load.
+# Report the file spread and duration range without claiming causal certainty.
+stall_notice="$(awk -F"$field_sep" -v threshold="$stall_min_offenders" '
+  { files[$1] = 1; count++; if (count == 1 || $4 < low) low = $4; if ($4 > high) high = $4 }
+  END {
+    for (file in files) file_count++
+    if (count >= threshold) printf "Runner stall suspected: %d distinct over-budget tests across %d file(s) in the first-sample window (%.2fms to %.2fms).", count, file_count, low, high
+  }
+' "$offender_rows")"
+if [[ -n "$stall_notice" ]]; then
+  echo "$stall_notice" || true
+fi
+
+# Count only complete identity samples, using each process maximum for same-line
+# siblings just as the final verdict does. Every offender must have a majority.
+file_majority_under_budget() {
+  awk -F"$field_sep" -v candidate="$1" -v limit_ms="$max_ms" \
+    -v majority="$((recheck_runs / 2 + 1))" \
+    -v counts_file="$identity_counts" -v rows_file="$file_recheck_rows" '
+    FILENAME == counts_file { expected[$1 SUBSEP $2 SUBSEP $3 SUBSEP $4] = $5; next }
+    FILENAME == rows_file {
+      key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
+      runkey = key SUBSEP $6
+      identities[runkey] = key
+      rows[runkey]++
+      if (!(runkey in worst) || $4 + 0 > worst[runkey]) worst[runkey] = $4 + 0
+      next
+    }
+    $1 == candidate { offenders[$1 SUBSEP $2 SUBSEP $3 SUBSEP $7] = 1 }
+    END {
+      for (runkey in rows) {
+        key = identities[runkey]
+        if (rows[runkey] >= expected[key] && worst[runkey] <= limit_ms) under[key]++
+      }
+      for (key in offenders) if (under[key] < majority) exit 1
+    }
+  ' "$identity_counts" "$file_recheck_rows" "$offender_rows"
+}
+
 # Distinct files owning a provisional offender, worst sample first. A report
 # without a `file` attribute cannot be re-run, so there the first sample stands.
 offender_files=()
@@ -287,6 +333,7 @@ done < <(
 : > "$recheck_rows"
 : > "$rechecked_list"
 : > "$unverified_list"
+: > "$early_stopped_list"
 recheck_files=()
 changed_offender_count=0
 
@@ -343,7 +390,6 @@ elapsed_recheck_seconds() {
 
 if [[ "${#recheck_files[@]}" -gt 0 ]]; then
   recheck_index=0
-  recheck_reports=()
   for file in "${recheck_files[@]}"; do
     elapsed_seconds="$(elapsed_recheck_seconds)"
     if [[ "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
@@ -351,6 +397,8 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       continue
     fi
     file_complete=true
+    file_recheck_rows="$recheck_dir/file-recheck.tsv"
+    : > "$file_recheck_rows"
     for ((run = 0; run < recheck_runs; run += 1)); do
       elapsed_seconds="$(elapsed_recheck_seconds)"
       if [[ "$elapsed_seconds" -ge "$recheck_budget_seconds" ]]; then
@@ -383,24 +431,47 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
         echo "Recheck run ${run} of ${file} did not pass; measuring whatever it reported." >&2
       fi
       if [[ -f "$recheck_report" ]]; then
-        recheck_reports+=("$recheck_report")
+        testcase_rows "$recheck_report" > "$recheck_dir/run-recheck.tsv"
+        # Log each isolated sample as it lands: the final verdict prints only
+        # after every file is rechecked, and a job whose log is lost (#9751)
+        # would otherwise show no trace that the median check ran at all.
+        awk -F"$field_sep" -v file="$file" -v run="$((run + 1))" -v runs="$recheck_runs" '
+          NR == 1 || $4 + 0 > worst { worst = $4 + 0 }
+          END { if (NR > 0) printf "Recheck run %d/%d of %s: slowest testcase %.2fms.\n", run, runs, file, worst }
+        ' "$recheck_dir/run-recheck.tsv" >&2 || true
+        cat "$recheck_dir/run-recheck.tsv" >> "$recheck_rows"
+        cat "$recheck_dir/run-recheck.tsv" >> "$file_recheck_rows"
+        if (( recheck_runs % 2 == 1 && run + 1 < recheck_runs )); then
+          # Invoke separately to preserve processing errors under errexit.
+          set +e
+          file_majority_under_budget "$file"
+          majority_status=$?
+          set -e
+          if [[ "$majority_status" -gt 1 ]]; then
+            exit "$majority_status"
+          elif [[ "$majority_status" -eq 0 ]]; then
+            printf '%s\n' "$file" >> "$early_stopped_list"
+            break
+          fi
+        fi
       fi
     done
     if [[ "$file_complete" != "true" ]]; then
       printf '%s\n' "$file" >> "$unverified_list"
     fi
   done
-  if [[ "${#recheck_reports[@]}" -gt 0 ]]; then
-    testcase_rows "${recheck_reports[@]}" > "$recheck_rows"
-  fi
 fi
 
 # Keep awk off the potentially non-blocking CI stdout. Its status still exposes
 # genuine processing errors; the data verdict is recorded separately from output.
 awk -F"$field_sep" \
   -v limit_ms="$max_ms" \
+  -v stall_notice="$stall_notice" \
+  -v early_stopped_file="$early_stopped_list" \
   -v limit_budget="$recheck_budget_seconds" \
   -v verdict_file="$recheck_verdict_file" \
+  -v failure_list="$failure_list" \
+  -v failure_counts="$failure_counts" \
   -v summary_file="$budget_summary" \
   -v identity_counts_file="$identity_counts" \
   -v recheck_file="$recheck_rows" \
@@ -409,8 +480,9 @@ awk -F"$field_sep" \
   -v recheck_runs="$recheck_runs" '
 BEGIN {
   printf "# Unit timing budget summary\n\nBudget: %dms; configured re-runs: %d\n", limit_ms, recheck_runs > summary_file
+  if (stall_notice != "") printf "\n%s\n", stall_notice > summary_file
 }
-function record(verdict, measured_median,    values, count, sample_index, label_text) {
+function record(verdict, measured_median,    values, count, sample_index, label_text, safe_label, sample_text) {
   # HTML-escape the label so testcase text cannot become Markdown structure.
   label_text = label
   gsub(/&/, "\\&amp;", label_text)
@@ -418,11 +490,24 @@ function record(verdict, measured_median,    values, count, sample_index, label_
   gsub(/>/, "\\&gt;", label_text)
   printf "\n<pre>%s</pre>\n\n- First sample: %.2fms\n- Re-run samples: ", label_text, $4 > summary_file
   count = (key in samples) ? split(samples[key], values, ",") : 0
+  sample_text = ""
   for (sample_index = 1; sample_index <= count; sample_index += 1) {
     printf "%s%.2fms", (sample_index > 1 ? " / " : ""), values[sample_index] > summary_file
+    sample_text = sample_text (sample_index > 1 ? " / " : "") sprintf("%.2fms", values[sample_index])
   }
   if (!count) printf "none" > summary_file
-  printf "\n- Completed samples: %d of %d\n- Median: %s\n- Verdict: %s\n", runs[key] + 0, recheck_runs, measured_median, verdict > summary_file
+  printf "\n- Completed samples: %d of %d%s\n- Median: %s\n- Verdict: %s\n", runs[key] + 0, recheck_runs, (early_clear ? " (early stop: majority under budget)" : ""), measured_median, verdict > summary_file
+  if (verdict ~ /^FAIL/) {
+    safe_label = label
+    gsub(/%/, "%25", safe_label)
+    gsub(sprintf("%c", 13), "%0D", safe_label)
+    gsub(sprintf("%c", 10), "%0A", safe_label)
+    printf "FAIL: %s | %s | first sample: %.2fms | re-run samples: %s | median: %s\n", \
+      safe_label, verdict, $4, (count ? sample_text : "none"), measured_median >> failure_list
+    failures++
+  } else {
+    cleared++
+  }
 }
 function median(key,    values, count, outer, inner, swap) {
   count = split(samples[key], values, ",")
@@ -440,6 +525,7 @@ function median(key,    values, count, outer, inner, swap) {
   }
   return (values[count / 2] + values[count / 2 + 1]) / 2.0
 }
+FILENAME == early_stopped_file { early_stopped[$0] = 1; next }
 FILENAME == rechecked_file { rechecked[$0] = 1; next }
 FILENAME == unverified_file { unverified[$0] = 1; next }
 FILENAME == identity_counts_file {
@@ -474,6 +560,7 @@ FILENAME == recheck_file {
       expected_rows = (aggregated_key in identity_count) ? identity_count[aggregated_key] : 1
       if (run_rows[aggregated_runkey] >= expected_rows) {
         runs[aggregated_key] += 1
+        if (seen_run[aggregated_runkey] <= limit_ms) under[aggregated_key]++
         samples[aggregated_key] = (aggregated_key in samples) \
           ? samples[aggregated_key] "," seen_run[aggregated_runkey] \
           : seen_run[aggregated_runkey]
@@ -482,21 +569,28 @@ FILENAME == recheck_file {
     recheck_finalized = 1
   }
   key = $1 SUBSEP $2 SUBSEP $3 SUBSEP $7
+  early_clear = ($1 in early_stopped) && recheck_runs % 2 == 1 && under[key] >= int(recheck_runs / 2) + 1
   label = ($2 != "" && $3 != "") ? $2 "." $3 : $3
   if ($5 + 0 > 1) {
     label = label " #" $5
   }
+  if ((key in samples) || ($1 in unverified) || ($1 in rechecked)) rechecked_tests++
   if ($1 in unverified) {
     record("FAIL (could not verify within the recheck budget)", "not computed")
-    printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms; file %s). Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.\n", limit_budget, label, $4, $1 > "/dev/stderr"
+    printf "Could not verify within the %ds recheck budget: %s (first sample %.2fms; file %s). %s\n", limit_budget, label, $4, $1, (stall_notice != "" ? "Runner stall suspected; re-run the job on a quieter runner." : "Raise BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS to obtain an isolated median.") > "/dev/stderr"
     fail = 1
     next
   }
   if (key in samples) {
     # A recheck run can die before the reporter writes this testcase, and a
     # median over the survivors is not the evidence the gate asked for: one fast
-    # sample would clear a real breach. Fewer samples than configured means the
-    # recheck did not happen, so the first measurement stands.
+    # sample would clear a real breach. Only a deliberate majority-under early
+    # stop guarantees the configured median; other incomplete sets still fail.
+    if (early_clear) {
+      record("PASS (cleared)", sprintf("guaranteed <= %dms", limit_ms))
+      printf "Recheck cleared %s: configured median guaranteed <= %dms after %d isolated runs (early stop: majority under budget; first sample %.2fms).\n", label, limit_ms, runs[key], $4
+      next
+    }
     if (runs[key] < recheck_runs + 0) {
       record("FAIL (fewer samples than configured)", "not computed")
       printf "Test exceeded %dms: %s (%.2fms; recheck produced %d of %d isolated samples)\n", limit_ms, label, $4, runs[key], recheck_runs > "/dev/stderr"
@@ -527,13 +621,24 @@ FILENAME == recheck_file {
 END {
   printf "\nOverall verdict: %s\n", (fail ? "FAIL" : "PASS") > summary_file
   print (fail ? 1 : 0) > verdict_file
+  if (fail) {
+    printf "FAIL: %d test(s)\n", failures >> failure_list
+    printf "Rechecked tests: %d\nCleared tests: %d\nFailing tests: %d\n", rechecked_tests, cleared, failures > failure_counts
+  }
 }
-' "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
+' "$early_stopped_list" "$rechecked_list" "$unverified_list" "$identity_counts" "$recheck_rows" "$offender_rows" > "$recheck_summary"
 
 IFS= read -r recheck_verdict < "$recheck_verdict_file"
 # cat handles partial writes/EAGAIN; losing diagnostic stdout must not change
 # the budget verdict. Keep stderr diagnostics and processing failures visible.
 cat "$recheck_summary" || true
+if [[ "$recheck_verdict" -eq 1 ]]; then
+  {
+    printf '\n## Failing tests\n\n'
+    cat "$failure_list"
+    cat "$failure_counts"
+  } >> "$budget_summary" || true
+fi
 cat "$budget_summary" || true
 if [[ -n "${BUN_TEST_TIMING_REPORT_DIR:-}" && -d "$BUN_TEST_TIMING_REPORT_DIR" ]]; then
   cp "$budget_summary" "$BUN_TEST_TIMING_REPORT_DIR/unit-timing-budget-summary.md" || {
@@ -544,5 +649,17 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   cat "$budget_summary" >> "$GITHUB_STEP_SUMMARY" || {
     echo "Could not append unit timing summary to $GITHUB_STEP_SUMMARY." >&2
   }
+fi
+if [[ "$recheck_verdict" -eq 1 ]]; then
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    while IFS= read -r failure_line; do
+      if [[ "$failure_line" == FAIL:* && "$failure_line" != 'FAIL: '*test\(s\) ]]; then
+        printf '::error::%s\n' "$failure_line" >&2 || true
+      fi
+    done < "$failure_list"
+  fi
+  # stderr remains visible when CI stdout is non-blocking or has been closed.
+  printf '\nUnit timing budget failures:\n' >&2 || true
+  cat "$failure_list" "$failure_counts" >&2 || true
 fi
 exit "$recheck_verdict"

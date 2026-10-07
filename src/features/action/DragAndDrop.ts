@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
@@ -15,6 +16,10 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import {
+  assertAppGestureNotUnderOverlay,
+  scopeHierarchyForSelector,
+} from "../observe/hierarchyLayer";
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
@@ -276,10 +281,7 @@ export class DragAndDrop extends BaseVisualChange {
           throw error;
         }
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(
-          { success: false, duration: 0, distance: 0, error: errorMessage(error) },
-          error,
-        );
+        return withStaleDisplay(this.failureResult(error, errorMessage(error)), error);
       }
     }
     return undefined;
@@ -455,8 +457,20 @@ export class DragAndDrop extends BaseVisualChange {
       }
 
       throwIfAborted(signal);
-      return { success: false, duration: 0, distance: 0, error: finalErrorMessage };
+      return this.failureResult(error, finalErrorMessage);
     }
+  }
+
+  private failureResult(error: unknown, message: string): DragAndDropResult {
+    return {
+      success: false,
+      duration: 0,
+      distance: 0,
+      error: message,
+      ...(error instanceof ActionableError && error.containerFailure
+        ? { containerFailure: error.containerFailure }
+        : {}),
+    };
   }
 
   private isSourceResolutionError(message: string): boolean {
@@ -508,20 +522,15 @@ export class DragAndDrop extends BaseVisualChange {
       observationScreenSize: options.observation.screenSize,
       display: options.observation.viewHierarchy,
     };
-    const source = this.resolveTarget(
-      hierarchy,
-      { ...options.source, screenSizeOptions },
-      "source",
-    );
-    const target = this.resolveTarget(
-      hierarchy,
-      { ...options.target, screenSizeOptions },
-      "target",
-    );
-    return {
-      sourcePoint: this.geometry.getElementCenter(source),
-      targetPoint: this.geometry.getElementCenter(target),
-    };
+    // `layer` scopes both endpoints; the overlay check runs on the unscoped capture (#9305).
+    const scoped = scopeHierarchyForSelector(hierarchy, options.layer);
+    const source = this.resolveTarget(scoped, { ...options.source, screenSizeOptions }, "source");
+    const target = this.resolveTarget(scoped, { ...options.target, screenSizeOptions }, "target");
+    const sourcePoint = this.geometry.getElementCenter(source);
+    const targetPoint = this.geometry.getElementCenter(target);
+    assertAppGestureNotUnderOverlay(hierarchy, options.layer, sourcePoint, "drag from");
+    assertAppGestureNotUnderOverlay(hierarchy, options.layer, targetPoint, "drop");
+    return { sourcePoint, targetPoint };
   }
 
   private resolveTarget(
@@ -544,8 +553,7 @@ export class DragAndDrop extends BaseVisualChange {
         throw new ActionableError("Target not found within container");
       }
     } catch (error) {
-      const prefix =
-        target.container || target.selectionStrategy === "unique" ? `dragAndDrop ${label}: ` : "";
+      const prefix = isStrictlyScoped(target, "any-container") ? `dragAndDrop ${label}: ` : "";
       throw new ActionableError(`${prefix}${errorMessage(error)}`, { cause: error });
     }
     if (!element) {
@@ -571,13 +579,13 @@ export class DragAndDrop extends BaseVisualChange {
     // Preflight that scope via the shared resolver so drag errors remain distinct.
     if (
       target.container &&
-      !target.container.container &&
-      target.selectionStrategy !== "unique" &&
+      !isStrictlyScoped(target) &&
       this.selector.resolveContainer &&
       !this.selector.resolveContainer(viewHierarchy, target.container, target.selectionStrategy)
     ) {
       throw new ActionableError(
         `Container level 1 not found: ${target.container.elementId ?? target.container.text}`,
+        { containerFailure: { level: 1, reason: "not-found", selector: target.container } },
       );
     }
     if (target.elementId) {

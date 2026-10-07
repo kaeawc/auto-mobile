@@ -1,9 +1,15 @@
 import type { Element } from "../../models/Element";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import type {
+  ClickableElementsQuery,
+  FocusedInputQuery,
+  ScrollableElementsQuery,
+} from "./ElementTraitQueries";
 
 export type TextSelectionIntent = "tap" | "focus-input" | "toggle";
 
-export interface ElementFinder {
+export interface ElementFinder
+  extends FocusedInputQuery, ScrollableElementsQuery, ClickableElementsQuery {
   findElementsByText(
     viewHierarchy: ViewHierarchyResult,
     text: string,
@@ -56,20 +62,11 @@ export interface ElementFinder {
     container?: { elementId?: string; text?: string },
   ): boolean;
 
-  findElementByIndex(
-    viewHierarchy: ViewHierarchyResult,
-    index: number,
-  ): { element: Element; text?: string } | null;
-
-  findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[];
-
   findScrollableContainer(viewHierarchy: ViewHierarchyResult): Element | null;
-
-  findClickableElements(viewHierarchy: ViewHierarchyResult): Element[];
 
   /**
    * Find clickable elements, optionally restricted to a container.
-   * Used by `DefaultElementSelector.selectClickable` (the tapAny selection
+   * Used by `ResolverElementSelector` (the tapAny selection
    * path) — was implemented on `DefaultElementFinder` but missing from this
    * interface (issue #6252), so callers typed against `ElementFinder` (rather
    * than the concrete class) could not see it.
@@ -105,19 +102,4 @@ export interface ElementFinder {
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
   ): Element[];
-
-  findChildElements(viewHierarchy: ViewHierarchyResult, parentElement: Element): Element[];
-
-  findSpannables(element: Element): Element[] | null;
-
-  findFocusedTextInput(viewHierarchy: any): any;
-
-  isElementFocused(element: any): boolean;
-
-  isElementKeyboardFocused(element: any): boolean;
-
-  validateElementText(
-    foundElement: { element: Element; text?: string },
-    expectedText?: string,
-  ): boolean;
 }

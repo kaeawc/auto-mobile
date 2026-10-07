@@ -1,11 +1,17 @@
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
-import { previewHierarchyHitTest } from "../../../src/features/observe/HierarchyHitTest";
-import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import {
+  applicationWindowSafeTapPoint,
+  previewHierarchyHitTest,
+} from "../../../src/features/observe/HierarchyHitTest";
+import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
@@ -143,5 +149,77 @@ describe("hierarchy hitTest preview", () => {
     const ios = previewHierarchyHitTest({ x: 1.6, y: 2.5 }, observe(), "ios");
     expect(ios.point).toEqual({ x: 1.6, y: 2.5 });
     expect(ios.reference.unit).toBe("points");
+  });
+});
+
+// Inline model tree: there is no existing capture of overlapping application dialogs.
+test("application fallback avoids multiple covering windows and the IME", () => {
+  const row = { text: "Row", bounds: { left: 0, top: 0, right: 400, bottom: 100 } };
+  const dialog = { text: "Dialog", bounds: { left: 40, top: 0, right: 360, bottom: 100 } };
+  const popup = { text: "Popup", bounds: { left: 0, top: 0, right: 40, bottom: 100 } };
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [row, dialog, popup] },
+    windows: [
+      { type: 1, windowLayer: 0, hierarchy: row },
+      { type: 1, windowLayer: 2, hierarchy: dialog },
+      { type: 1, windowLayer: 1, hierarchy: popup },
+    ],
+  };
+  const target = new DefaultElementParser().parseNodeBounds(row)!;
+  expect(
+    applicationWindowSafeTapPoint(hierarchy, target, row.bounds, { x: 200, y: 50 }).point,
+  ).toEqual({ x: 380, y: 50 });
+  expect(
+    applicationWindowSafeTapPoint(
+      hierarchy,
+      target,
+      row.bounds,
+      { x: 200, y: 50 },
+      { left: 360, top: 0, right: 400, bottom: 100 },
+    ),
+  ).toEqual({ point: null, coveredBy: "Dialog" });
+});
+
+// Inline two-window tree mirroring the tapOn fixtures: no capture of overlapping app dialogs exists.
+describe("skeleton occlusion by application windows", () => {
+  const rowNode = (id: string, bounds: ElementBounds) => ({
+    "resource-id": id,
+    clickable: "true",
+    bounds,
+  });
+  const project = (windows: ViewHierarchyResult["windows"]) => {
+    const hierarchy: ViewHierarchyResult = { hierarchy: { node: [] }, windows };
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+    return projectSkeleton(elements, { width: 400, height: 400 }, hierarchy);
+  };
+  const list = rowNode("list_row", { left: 0, top: 0, right: 200, bottom: 100 });
+  const dialog = rowNode("dialog_btn", { left: 0, top: 0, right: 300, bottom: 200 });
+
+  test("moves a row fully under a higher application window to occluded context", () => {
+    const { skeleton, context } = project([
+      { type: 1, windowLayer: 0, hierarchy: list },
+      { type: 1, windowLayer: 1, hierarchy: dialog },
+    ]);
+    expect(skeleton.map((row) => row.elementId)).toEqual(["dialog_btn"]);
+    expect(context.find((row) => row.elementId === "list_row")).toMatchObject({
+      occluded: true,
+      affordances: [],
+    });
+  });
+
+  test("keeps a partly exposed row actionable and ignores non-application windows", () => {
+    const partial = rowNode("list_row", { left: 0, top: 0, right: 400, bottom: 100 });
+    expect(
+      project([
+        { type: 1, windowLayer: 0, hierarchy: partial },
+        { type: 1, windowLayer: 1, hierarchy: dialog },
+      ]).skeleton.map((row) => row.elementId),
+    ).toContain("list_row");
+    expect(
+      project([
+        { type: 1, windowLayer: 0, hierarchy: list },
+        { type: 3, windowLayer: 1, hierarchy: dialog },
+      ]).skeleton.map((row) => row.elementId),
+    ).toContain("list_row");
   });
 });

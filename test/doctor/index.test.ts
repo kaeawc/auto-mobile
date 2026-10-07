@@ -4,6 +4,7 @@ import { formatConsoleOutput, formatJsonOutput } from "../../src/doctor/formatte
 import type { DoctorReport, CheckResult, DoctorSummary } from "../../src/doctor/types";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models/ActionableError";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -506,6 +507,48 @@ describe("runDoctor", () => {
       expect(report.platform).toBe("linux");
       expect(report.android).toBeUndefined();
       expect(report.ios?.checks.map((c) => c.name)).toEqual(["Xcode"]);
+    });
+  });
+
+  test("skips iOS on macOS when ios is explicitly false (#10128)", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const report = await runDoctor({ ios: false }, fakeDeps());
+
+      expect(report.android?.checks.map((c) => c.name)).toEqual(["Android SDK"]);
+      expect(report.ios).toBeUndefined();
+    });
+  });
+
+  test("still runs iOS on macOS by default and skips android when android is false", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const defaults = await runDoctor({}, fakeDeps());
+      expect(defaults.android).toBeDefined();
+      expect(defaults.ios).toBeDefined();
+
+      const iosOnly = await runDoctor({ android: false }, fakeDeps());
+      expect(iosOnly.android).toBeUndefined();
+      expect(iosOnly.ios?.checks.map((c) => c.name)).toEqual(["Xcode"]);
+    });
+  });
+
+  test("rejects excluding every platform with an actionable usage error", async () => {
+    await withProcessPlatform("darwin", async () => {
+      const calls: string[] = [];
+      const deps = {
+        ...fakeDeps(),
+        runAndroidChecks: async () => {
+          calls.push("android");
+          return [];
+        },
+        runIosChecks: async () => {
+          calls.push("ios");
+          return [];
+        },
+      };
+      const failure = runDoctor({ android: false, ios: false }, deps);
+      await expect(failure).rejects.toBeInstanceOf(ActionableError);
+      await expect(failure).rejects.toThrow("exclude every platform");
+      expect(calls).toEqual([]);
     });
   });
 

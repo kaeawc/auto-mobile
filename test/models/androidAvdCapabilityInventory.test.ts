@@ -17,6 +17,7 @@ test("normalizes camera and boolean values without claiming unknown capabilities
   ).toEqual({
     schemaVersion: 1,
     capabilities: [
+      { id: "android.emulator.cameraPoster", state: "available", source: "platform" },
       { id: "android.hardware.camera", state: "available", source: "avd_config" },
       { id: "android.hardware.camera.front", state: "unavailable", source: "avd_config" },
       { id: "android.hardware.fingerprint", state: "available", source: "avd_config" },

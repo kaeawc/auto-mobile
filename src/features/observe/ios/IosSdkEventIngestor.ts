@@ -22,11 +22,15 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
-import { buildNavigationNodeScreenshotUri } from "../../../utils/navigationResourceUri";
 import type { ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
 import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
+
+import {
+  getSdkFrameMetricsStore,
+  type SdkFrameMetricsStore,
+} from "../../performance/SdkFrameMetricsStore";
 
 export const IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS = 10 * 60 * 1000;
 const MAX_NETWORK_DIAGNOSTIC_KEYS = 64;
@@ -75,6 +79,7 @@ export interface IosSdkEventIngestorDeps {
   /** The iOS device/simulator UDID that owns these events. */
   deviceId: string;
   timer?: Timer;
+  frameMetricsStore?: SdkFrameMetricsStore;
   /** Returns the navigation graph for the current session (session-bound). */
   getNavigationGraphManager: () => NavigationEventSink;
   /** Capture a screenshot for navigation-node association. */
@@ -85,16 +90,12 @@ export interface IosSdkEventIngestorDeps {
   failureRecorder?: FailureRecorderService;
   /** Whether navigation screenshots are enabled; defaults to server config. */
   navigationScreenshotsEnabled?: () => boolean;
-  /** Resolves the persisted node ID used to construct a screenshot resource URI. */
-  findNavigationNodeId?: (
-    applicationId: string,
-    destination: string,
-  ) => Promise<number | undefined>;
 }
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly deviceId: string;
   private readonly timer: Timer;
+  private readonly frameMetricsStore: SdkFrameMetricsStore;
   private readonly networkDiagnostics = new Map<
     string,
     { emittedAt: number; suppressedCount: number }
@@ -104,21 +105,17 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
-  private readonly findNavigationNodeIdOverride?: (
-    applicationId: string,
-    destination: string,
-  ) => Promise<number | undefined>;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
     this.timer = deps.timer ?? defaultTimer;
+    this.frameMetricsStore = deps.frameMetricsStore ?? getSdkFrameMetricsStore();
     this.getNavigationGraphManager = deps.getNavigationGraphManager;
     this.captureScreenshot = deps.captureScreenshot;
     this.telemetryRecorderOverride = deps.telemetryRecorder;
     this.failureRecorderOverride = deps.failureRecorder;
     this.navigationScreenshotsEnabled =
       deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
-    this.findNavigationNodeIdOverride = deps.findNavigationNodeId;
   }
 
   /**
@@ -136,6 +133,10 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
 
   async recordSdkEvent(event: SdkEvent, applicationId: string | null): Promise<void> {
     try {
+      if (event.type === "frame_metrics_event") {
+        this.ingestFrameMetrics(event.payload, applicationId);
+        return;
+      }
       const recorder = this.telemetryRecorder;
       // Save and restore context to avoid race with Android device context
       const prevContext = recorder.getContext();
@@ -161,6 +162,30 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     } catch (error) {
       logger.warn("[IosSdkEventIngestor] Failed to record SDK event", error);
     }
+  }
+
+  private ingestFrameMetrics(p: Record<string, unknown>, applicationId: string | null): void {
+    const { fps, frameTimeMs, jankFrames } = p;
+    if (
+      !applicationId ||
+      typeof fps !== "number" ||
+      !Number.isFinite(fps) ||
+      fps < 0 ||
+      typeof frameTimeMs !== "number" ||
+      !Number.isFinite(frameTimeMs) ||
+      frameTimeMs <= 0 ||
+      typeof jankFrames !== "number" ||
+      !Number.isSafeInteger(jankFrames) ||
+      jankFrames < 0
+    ) {
+      return;
+    }
+    this.frameMetricsStore.ingest(this.deviceId, applicationId, {
+      fps,
+      frameTimeMs,
+      jankFrames,
+      receivedAt: this.timer.now(),
+    });
   }
 
   private recordAcceptedSdkEvent(
@@ -276,38 +301,22 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     });
   }
 
-  private async navigationScreenshotUri(
+  private async storeNavigationScreenshot(
     applicationId: string,
     destination: string,
-  ): Promise<string | null> {
-    let screenshotUri: string | null = null;
+  ): Promise<void> {
     try {
       const path = await this.captureNavigationScreenshot(applicationId, destination);
       if (!path) {
-        return screenshotUri;
+        return;
       }
       await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
-      try {
-        const nodeId = await this.findNavigationNodeId(applicationId, destination);
-        if (nodeId !== undefined) {
-          // Scope by applicationId (in scope) so a cross-app client
-          // resolves this node's screenshot under the named app, not
-          // the daemon's current foreground app (#5851 / #5534).
-          screenshotUri = buildNavigationNodeScreenshotUri(nodeId, applicationId);
-        }
-      } catch (error) {
-        logger.warn(
-          `[IosSdkEventIngestor] Navigation screenshot lookup failed: ${errorMessage(error)}`,
-          error,
-        );
-      }
     } catch (error) {
       logger.warn(
         `[IosSdkEventIngestor] Navigation screenshot update failed: ${errorMessage(error)}`,
         error,
       );
     }
-    return screenshotUri;
   }
 
   private async recordNavigationSdkEvent(
@@ -320,8 +329,12 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     const navSource = (p.source as string) ?? null;
     const navArgs = (p.arguments as Record<string, string>) ?? null;
     const navMeta = (p.metadata as Record<string, string>) ?? null;
-    let screenshotUri: string | null = null;
     if (applicationId && destination) {
+      // The graph manager owns this event's telemetry record, as it does on Android, so it is
+      // recorded once and stamped with this device (#10195). The graph write keeps host time:
+      // the SDK timestamp is not in the clock the hierarchy detector correlates against. The
+      // telemetry record alone carries the SDK time, as every other iOS event does, so this
+      // device's timeline sorts consistently.
       // Barrier-tracked via trackExisting so graceful shutdown drains this
       // fire-and-forget write without a track() await hop perturbing the
       // nav-event↔hierarchy-update ordering (issue #2885); a mid-flight
@@ -333,14 +346,18 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         arguments: navArgs ?? {},
         metadata: navMeta ?? {},
         triggeringInteraction: null,
+        deviceId: this.deviceId,
+        telemetryTimestamp: ts,
       } as NavigationEvent);
       void getDbWriteBarrier().trackExisting(navWrite);
       await navWrite;
 
       if (this.navigationScreenshotsEnabled()) {
-        screenshotUri = await this.navigationScreenshotUri(applicationId, destination);
+        await this.storeNavigationScreenshot(applicationId, destination);
       }
+      return;
     }
+    // No graph write, so no manager record: this is the only record of the event.
     await recorder.recordNavigationEvent({
       timestamp: ts,
       applicationId,
@@ -348,7 +365,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       source: navSource,
       arguments: navArgs,
       metadata: navMeta,
-      screenshotUri,
+      screenshotUri: null,
     });
   }
 
@@ -590,23 +607,6 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     return text.length > MAX_RECEIVED_VERSION_LENGTH
       ? `${text.slice(0, MAX_RECEIVED_VERSION_LENGTH - 1)}…`
       : text;
-  }
-
-  private async findNavigationNodeId(
-    applicationId: string,
-    destination: string,
-  ): Promise<number | undefined> {
-    if (this.findNavigationNodeIdOverride) {
-      return this.findNavigationNodeIdOverride(applicationId, destination);
-    }
-    const { getDatabase } = await import("../../../db");
-    const node = await getDatabase()
-      .selectFrom("navigation_nodes")
-      .select(["id"])
-      .where("app_id", "=", applicationId)
-      .where("screen_name", "=", destination)
-      .executeTakeFirst();
-    return node?.id;
   }
 
   /** Capture and store a screenshot for an iOS navigation event. Returns the stored path or null. */

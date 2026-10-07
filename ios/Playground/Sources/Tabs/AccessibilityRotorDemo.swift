@@ -53,6 +53,7 @@ struct AccessibilityRotorDemo: View {
         list
             .accessibilityRotor("Flagged Items") { rotorEntries(for: flagged) }
             .accessibilityRotor("Landmarks") { rotorEntries(for: landmarks) }
+            .playgroundContent()
             .navigationTitle("Custom Rotors")
             .navigationBarTitleDisplayMode(.inline)
             .trackNavigation(destination: "AccessibilityRotorDemo")

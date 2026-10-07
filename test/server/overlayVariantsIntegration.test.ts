@@ -84,7 +84,7 @@ describe("showVariants on the integrated overlay mutation path", () => {
     input: Record<string, unknown>,
     progress?: (amount: number) => Promise<void>,
   ) {
-    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       progress,

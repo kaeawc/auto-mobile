@@ -93,6 +93,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) {}
 
+  override fun requestClickFocusedInput(requestId: String?) {}
+
   override fun requestAction(
     requestId: String?,
     action: String,
@@ -136,13 +138,14 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     occlusionEnabled: Boolean,
   ) {}
 
-  override fun setNetworkMockRules(rulesJson: String) {}
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) {}
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {}
 
   override fun getCurrentFocus(requestId: String?) {}
@@ -399,6 +402,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
     record("requestCommitText", requestId, text, priorImeId)
 
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: dev.jasonpearson.automobile.protocol.ImeTextDelivery,
+    timeoutMs: Long?,
+  ) = record("requestCommitText", requestId, text, priorImeId, delivery, timeoutMs)
+
   override fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
     record("requestCancelImeCommit", requestId, targetRequestId)
 
@@ -417,6 +428,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     record("requestImeAction", requestId, action, frameContext)
 
   override fun requestSelectAll(requestId: String?) = record("requestSelectAll", requestId)
+
+  override fun requestClickFocusedInput(requestId: String?) =
+    record("requestClickFocusedInput", requestId)
 
   override fun requestAction(
     requestId: String?,
@@ -480,14 +494,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
       occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = record("setNetworkMockRules", rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    record("setNetworkMockRules", rulesJson, requestId)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = record("setNetworkErrorSimulation", enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = record("getCurrentFocus", requestId)
 

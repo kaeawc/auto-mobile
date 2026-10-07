@@ -10,6 +10,8 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
     public let error: String?
     /// Opaque identity calculated from the exact hierarchy captured on device.
     public let frameContext: String?
+    /// True only when data is a previous capture, rather than a new screen extraction.
+    public let servedFromCache: Bool?
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
@@ -17,7 +19,8 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
         data: ViewHierarchy? = nil,
         perfTiming: PerfTiming? = nil,
         error: String? = nil,
-        frameContext: String? = nil
+        frameContext: String? = nil,
+        servedFromCache: Bool? = nil
     ) {
         type = "hierarchy_update"
         self.timestamp = timestamp
@@ -26,6 +29,7 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
         self.perfTiming = perfTiming
         self.error = error
         self.frameContext = frameContext
+        self.servedFromCache = servedFromCache
     }
 
     /// Returns this response with performance timing attached without changing its
@@ -37,7 +41,8 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
             data: data,
             perfTiming: perfTiming,
             error: error,
-            frameContext: frameContext
+            frameContext: frameContext,
+            servedFromCache: servedFromCache
         )
     }
 }

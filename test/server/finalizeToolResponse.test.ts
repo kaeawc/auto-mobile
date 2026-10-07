@@ -1,3 +1,8 @@
+import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
+import {
+  parseOutputReductionFlags,
+  resolveActionsCompactMetadata,
+} from "../../src/utils/outputReductionFlags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -4778,13 +4783,16 @@ describe("actions-compact-metadata", () => {
     }
   }
 
-  test("default finalized bytes stay identical; missing session/store are also unchanged", () => {
+  test("opt-out finalized bytes stay identical; missing session/store are also unchanged", () => {
     emit();
     const snapshot = structuredClone(records);
     const reads = spyOn(store, "getActionMetadata");
     const writes = spyOn(store, "setActionMetadata");
     serverConfig.setActionsCompactMetadataEnabled(false);
-    const expected = JSON.stringify(emit());
+    const full = emit();
+    expectFull(full);
+    expect(structuredPayload(full).element).toEqual(element);
+    const expected = JSON.stringify(full);
     expect(JSON.stringify(emit())).toBe(expected);
     emit(action().observation as Record<string, unknown>, { name: "observe" });
     emit({ ...action(), success: false });
@@ -4799,7 +4807,63 @@ describe("actions-compact-metadata", () => {
     expect(JSON.stringify(emit(action(), { baselineStore: undefined }))).toBe(expected);
     expect(records.size).toBe(0);
   });
-  test("first full; identical second omits each block; changed block alone reappears", () => {
+  test("default configuration sends full first/new-session/device-switch blocks and compacts repeats", () => {
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(parseOutputReductionFlags([], {}).actionsCompactMetadata),
+    );
+    expectFull(emit());
+    const repeated = observation(emit());
+    for (const key of Object.keys(metadata)) {
+      expect(repeated).not.toHaveProperty(key);
+    }
+    expectFull(emit(action(), { sessionUuid: "s2" }));
+    expectFull(emit(action("phone-b")));
+    expectFull(emit());
+  });
+  test.each(["environment", "feature-flag"])(
+    "%s opt-out restores every block and duplicate element",
+    (source) => {
+      if (source === "environment") {
+        serverConfig.setActionsCompactMetadataEnabled(
+          resolveActionsCompactMetadata(
+            parseOutputReductionFlags([], {
+              AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
+            }).actionsCompactMetadata,
+          ),
+        );
+      } else {
+        new DefaultFeatureFlagApplier().apply("actions-compact-metadata", false);
+      }
+      for (let i = 0; i < 2; i++) {
+        const response = emit();
+        expectFull(response);
+        expect(structuredPayload(response).element).toEqual(element);
+      }
+      expect(records.size).toBe(0);
+    },
+  );
+  test("connection preferences override the saved flag without changing other clients", () => {
+    serverConfig.setActionsCompactMetadataEnabled(false);
+    expectFull(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true }));
+    expect(
+      observation(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true })),
+    ).not.toHaveProperty("backStack");
+    expectFull(emit(action(), { sessionUuid: "default-client" }));
+    expectFull(emit(action(), { sessionUuid: "default-client" }));
+    serverConfig.setActionsCompactMetadataEnabled(true);
+    expectFull(emit(action(), { sessionUuid: "full-client", actionsCompactMetadata: false }));
+    expectFull(emit(action(), { sessionUuid: "full-client", actionsCompactMetadata: false }));
+    expectFull(
+      emit(action("phone-b"), { sessionUuid: "compact-client", actionsCompactMetadata: true }),
+    );
+    expectFull(emit(action(), { sessionUuid: "compact-client", actionsCompactMetadata: true }));
+    expectFull(emit(action(), { sessionUuid: "new-client", actionsCompactMetadata: true }));
+    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
+  });
+  test("default compact: first full; identical second omits each block; changed block alone reappears", () => {
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(parseOutputReductionFlags([], {}).actionsCompactMetadata),
+    );
     expectFull(emit());
     const repeated = observation(emit());
     for (const key of Object.keys(metadata)) {

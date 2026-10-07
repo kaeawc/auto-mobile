@@ -9,6 +9,8 @@ import {
 import {
   ExecutePlanStepDebugInfo,
   PlanExecutionOptions,
+  type PlanStepToolResult,
+  type PlanToolResultsTruncation,
   type PlanStepWarnings,
   type PlanSkippedStep,
   type PlanDeviceFailure,
@@ -21,6 +23,7 @@ import {
 import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
@@ -52,6 +55,12 @@ import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import {
+  healthSummaryField,
+  planHealthWriterFromEnv,
+  reportPlanHealth,
+  type PlanHealthWriter,
+} from "./planHealthSummary";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -116,6 +125,8 @@ export interface PlanExecutionDependencies {
   videoRecorder?: VideoRecorder;
   /** Whether the plan's session still holds its device at teardown — replaced by a fake in tests. */
   deviceOwnership?: PlanDeviceOwnership;
+  /** Receives the end-of-run health summary; defaults to the AUTOMOBILE_PLAN_HEALTH_DIR writer. */
+  healthWriter?: PlanHealthWriter;
 }
 
 interface VideoState {
@@ -203,6 +214,20 @@ function planSkippedStepsField(skippedSteps: PlanSkippedStep[] | undefined): {
   skippedSteps?: PlanSkippedStep[];
 } {
   return skippedSteps?.length ? { skippedSteps } : {};
+}
+
+/** The toolResults response field, omitted when no completed step produced an object payload. */
+function planToolResultsField(toolResults: PlanStepToolResult[] | undefined): {
+  toolResults?: PlanStepToolResult[];
+} {
+  return toolResults?.length ? { toolResults } : {};
+}
+
+/** The toolResultsTruncated marker, present only when the plan's shared budget ran out. */
+function planToolResultsTruncatedField(truncated: PlanToolResultsTruncation | undefined): {
+  toolResultsTruncated?: PlanToolResultsTruncation;
+} {
+  return truncated ? { toolResultsTruncated: truncated } : {};
 }
 
 /** The deviceFailures response field, omitted when no device failures were reported. */
@@ -315,6 +340,8 @@ export function convertPerDeviceSkippedStepsToRecords(
  * throws) wrap the whole sequence in {@link execute}.
  */
 export class PlanExecutionOrchestrator {
+  // Capture before planTools installs this invocation's own planRequest context.
+  private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
@@ -327,6 +354,7 @@ export class PlanExecutionOrchestrator {
   >;
   private readonly videoRecorder: VideoRecorder;
   private readonly deviceOwnership: PlanDeviceOwnership;
+  private readonly healthWriter?: PlanHealthWriter;
 
   // Set in execute(); used by all phase methods for [PERF +Xms] elapsed-time logs.
   private perfStart = 0;
@@ -342,6 +370,7 @@ export class PlanExecutionOrchestrator {
     this.testExecutionRepository = deps.testExecutionRepository ?? sharedTestExecutionRepository;
     this.createSchemaValidator = deps.createSchemaValidator ?? (() => new PlanSchemaValidator());
     this.deviceOwnership = deps.deviceOwnership ?? daemonPlanDeviceOwnership;
+    this.healthWriter = deps.healthWriter ?? planHealthWriterFromEnv(this.timer);
     this.videoRecorder = deps.videoRecorder ?? {
       startVideoRecording: defaultStartVideoRecording,
       stopVideoRecording: defaultStopVideoRecording,
@@ -411,8 +440,15 @@ export class PlanExecutionOrchestrator {
         videoPath: finalizedVideo.videoFilePaths[0],
       });
 
+      const healthSummary = await reportPlanHealth(
+        this.healthWriter,
+        result,
+        this.timer.now() - startTime,
+      );
+
       const response: ExecutePlanResult = {
         success: result.success,
+        ...healthSummaryField(healthSummary),
         executedSteps: result.executedSteps,
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
@@ -427,6 +463,8 @@ export class PlanExecutionOrchestrator {
         // (#6887 review).
         ...planWarningsField(result.warnings),
         ...planSkippedStepsField(result.skippedSteps),
+        ...planToolResultsField(result.toolResults),
+        ...planToolResultsTruncatedField(result.toolResultsTruncated),
         ...planDeviceFailuresField(result.deviceFailures),
         videoWarnings: finalizedVideo.videoWarnings,
         ...(finalizedVideo.videoFilePaths.length > 0
@@ -447,6 +485,11 @@ export class PlanExecutionOrchestrator {
         errorMessage: String(error),
       });
 
+      const failureHealth = await reportPlanHealth(
+        this.healthWriter,
+        undefined,
+        this.timer.now() - startTime,
+      );
       const response: ExecutePlanResult = {
         success: false,
         executedSteps: 0,
@@ -454,6 +497,7 @@ export class PlanExecutionOrchestrator {
         error: `${error}`,
         platform: this.device.platform,
         deviceId: this.device.deviceId,
+        ...healthSummaryField(failureHealth),
       };
 
       logger.info(`[PERF] Returning error from executePlanTool (deviceId=${this.device.deviceId})`);
@@ -472,7 +516,7 @@ export class PlanExecutionOrchestrator {
 
     if (yamlContent.startsWith("base64:")) {
       this.perfLog("Decoding base64 plan content");
-      yamlContent = Buffer.from(yamlContent.substring(7), "base64").toString("utf-8");
+      yamlContent = decodePlanYamlContent(yamlContent);
       this.perfLog(`Base64 content decoded (${yamlContent.length} bytes)`);
     }
 
@@ -498,10 +542,18 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);
+    if (
+      this.nestedInPlan &&
+      (this.request.devices?.length || this.request.device || this.normalizedDevices.labels.length)
+    ) {
+      throw new ActionableError(
+        "Nested executePlan cannot use devices/device labels. Remove the labels; nested plans run on the enclosing plan's session/device.",
+      );
+    }
     this.reconcileDeviceLists();
     return plan;
   }

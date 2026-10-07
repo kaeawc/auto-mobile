@@ -79,6 +79,31 @@ const executePlanDebugSchema = z.object({
     .optional(),
 });
 
+const executePlanHealthSummarySchema = z
+  .object({
+    success: z.boolean(),
+    totalSteps: z.number().int(),
+    executedSteps: z.number().int(),
+    failedSteps: z.number().int(),
+    skippedSteps: z.number().int(),
+    warningCount: z.number().int(),
+    durationMs: z.number().int(),
+    slowestStep: z
+      .object({ stepIndex: z.number().int(), tool: z.string(), durationMs: z.number().int() })
+      .optional(),
+    tools: z.array(
+      z.object({
+        tool: z.string(),
+        count: z.number().int(),
+        failed: z.number().int(),
+        skipped: z.number().int(),
+        totalMs: z.number().int(),
+        maxMs: z.number().int(),
+      }),
+    ),
+  })
+  .describe("End-of-run aggregate of per-tool step latency, failures and skips");
+
 const executePlanResultSchema = z
   .object({
     success: z.boolean(),
@@ -112,6 +137,7 @@ const executePlanResultSchema = z
     deviceId: z.string().optional(),
     deviceMapping: z.record(z.string(), z.string()).optional(),
     debug: executePlanDebugSchema.optional(),
+    healthSummary: executePlanHealthSummarySchema.optional(),
     videoFilePaths: z.array(z.string()).optional(),
     videoRecordingIds: z.array(z.string()).optional(),
     videoWarnings: z
@@ -142,6 +168,26 @@ const executePlanResultSchema = z
       )
       .optional()
       .describe("Failed optional steps that were skipped while execution continued"),
+    toolResults: z
+      .array(
+        z.object({
+          stepIndex: z.number().int(),
+          tool: z.string(),
+          device: z.string().optional(),
+          result: z.record(z.string(), z.unknown()),
+          truncated: z.boolean().optional(),
+        }),
+      )
+      .optional()
+      .describe(
+        "Completed steps' tool payloads in plan step order (stepIndex is the plan step index), without bulky fields (observation, view hierarchies, screenshots, tap diagnostics, warnings); capped per step and, across all device tracks, per plan, with truncated:true when a payload was narrowed. Once the plan budget is spent later steps get no entry and toolResultsTruncated counts them. Executed only; failed and skipped steps are in failedStep/skippedSteps.",
+      ),
+    toolResultsTruncated: z
+      .object({ omittedSteps: z.number().int() })
+      .optional()
+      .describe(
+        "Present only when the plan-wide toolResults budget ran out: omittedSteps is how many completed steps with a payload have no toolResults entry.",
+      ),
   })
   .passthrough();
 

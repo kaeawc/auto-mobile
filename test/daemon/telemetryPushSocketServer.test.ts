@@ -33,6 +33,12 @@ class AuthTelemetryServer extends TelemetryPushSocketServer {
     return this.subscribed;
   }
 }
+
+class EventKeyTelemetryServer extends TelemetryPushSocketServer {
+  key(event: TelemetryEvent): string | null {
+    return this.pushEventKey(event);
+  }
+}
 streamSubscribeAuthCases(
   "telemetry-push",
   (timer, authenticator) => new AuthTelemetryServer(timer, authenticator),
@@ -64,6 +70,9 @@ class BackfillTelemetryServer extends TelemetryPushSocketServer {
   backfill(socket: Socket, filter: BackfillFilter): Promise<void> {
     return this["backfillRecentEvents"]("backfill", filter, socket);
   }
+  finish(): Promise<void> {
+    return this.finishBackfill("backfill");
+  }
 }
 
 describe("TelemetryPushSocketServer backfill characterization", () => {
@@ -73,6 +82,11 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
   let socket: FakeSocket;
   let restores: Array<() => void>;
   let navigationSpy: ReturnType<typeof spyOn<typeof navigation, "getNavigationEvents">>;
+  let networkSpy: ReturnType<typeof spyOn<typeof network, "getNetworkEvents">>;
+  let logSpy: ReturnType<typeof spyOn<typeof log, "getLogEvents">>;
+  let osSpy: ReturnType<typeof spyOn<typeof os, "getOsEvents">>;
+  let storageSpy: ReturnType<typeof spyOn<typeof storage, "getStorageEvents">>;
+  let layoutSpy: ReturnType<typeof spyOn<typeof layout, "getLayoutEvents">>;
   let infoSpy: ReturnType<typeof spyOn<typeof logger, "info">>;
   let warnSpy: ReturnType<typeof spyOn<typeof logger, "warn">>;
   const queryOrder: string[] = [];
@@ -101,15 +115,15 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       queryOrder.push("database");
       return db;
     });
-    const networkSpy = spyOn(network, "getNetworkEvents").mockImplementation(async () => {
+    networkSpy = spyOn(network, "getNetworkEvents").mockImplementation(async () => {
       queryOrder.push("network");
       return [];
     });
-    const logSpy = spyOn(log, "getLogEvents").mockImplementation(async () => {
+    logSpy = spyOn(log, "getLogEvents").mockImplementation(async () => {
       queryOrder.push("log");
       return [];
     });
-    const osSpy = spyOn(os, "getOsEvents").mockImplementation(async () => {
+    osSpy = spyOn(os, "getOsEvents").mockImplementation(async () => {
       queryOrder.push("os");
       return [];
     });
@@ -117,11 +131,11 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       queryOrder.push("navigation");
       return [];
     });
-    const storageSpy = spyOn(storage, "getStorageEvents").mockImplementation(async () => {
+    storageSpy = spyOn(storage, "getStorageEvents").mockImplementation(async () => {
       queryOrder.push("storage");
       return [];
     });
-    const layoutSpy = spyOn(layout, "getLayoutEvents").mockImplementation(async () => {
+    layoutSpy = spyOn(layout, "getLayoutEvents").mockImplementation(async () => {
       queryOrder.push("layout");
       return [];
     });
@@ -205,6 +219,73 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
     expect(queryOrder).toEqual([]);
     expect(messages()).toEqual([]);
     expect(infoSpy).not.toHaveBeenCalled();
+  });
+
+  test("queues distinct overlay sequences during backfill and deduplicates repeated sequence", async () => {
+    const filter = server.filter("overlay");
+    server.subscribe(socket, filter);
+    const overlayEvent = (sequence: number): TelemetryEvent => ({
+      category: "overlay",
+      timestamp: sequence,
+      deviceId: "device",
+      sessionId: "session",
+      data: { id: "panel", sequence, kind: "page_changed" },
+    });
+    server.pushTelemetryEvent(overlayEvent(1));
+    server.pushTelemetryEvent(overlayEvent(2));
+    server.pushTelemetryEvent(overlayEvent(3));
+    server.pushTelemetryEvent(overlayEvent(3));
+    await server.backfill(socket, filter);
+    // Explicitly finish because the harness's manual backfill bypasses onSubscribed.
+    await server["finishBackfill"]("backfill");
+    expect(messages().map(({ data }) => (data.data as { sequence: number }).sequence)).toEqual([
+      1, 2, 3,
+    ]);
+  });
+
+  test("preserves non-overlay event key serialization", () => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
+    expect(keys.key({ ...base, category: "navigation", data: { id: "event" } })).toBe(
+      '["navigation","device","session","event"]',
+    );
+    expect(keys.key({ ...base, category: "toolcall", data: { occurrenceId: 12 } })).toBe(
+      '["toolcall","device","session",12]',
+    );
+  });
+
+  test.each([
+    [{ id: "panel", occurrenceId: "ignored", sequenceNumber: 9, requestId: "ignored" }, "panel"],
+    [{ id: null, occurrenceId: "panel", sequenceNumber: 9, requestId: "ignored" }, "panel"],
+    [{ id: null, occurrenceId: null, sequenceNumber: 0, requestId: "ignored" }, 0],
+    [{ requestId: "panel" }, "panel"],
+  ] as const)("overlay identity retains id fallback precedence (%j)", (data, id) => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = { timestamp: 1, deviceId: "device", sessionId: "session" } as const;
+    expect(keys.key({ ...base, category: "overlay", data: { ...data, sequence: 2 } })).toBe(
+      JSON.stringify(["overlay", "device", "session", id, 2]),
+    );
+    expect(keys.key({ ...base, category: "overlay", data })).toBe(
+      JSON.stringify(["overlay", "device", "session", id]),
+    );
+    expect(keys.key({ ...base, category: "toolcall", data })).toBe(
+      JSON.stringify(["toolcall", "device", "session", id]),
+    );
+  });
+
+  test("overlay identity requires a valid id and a numeric sequence", () => {
+    const keys = new EventKeyTelemetryServer("/fake/key.sock", timer);
+    const base = {
+      category: "overlay",
+      timestamp: 1,
+      deviceId: "device",
+      sessionId: "session",
+    } as const;
+    expect(keys.key({ ...base, data: { sequence: 2 } })).toBeNull();
+    expect(keys.key({ ...base, data: { id: {}, occurrenceId: "panel", sequence: 2 } })).toBeNull();
+    expect(keys.key({ ...base, data: { id: "panel", sequence: "2" } })).toBe(
+      '["overlay","device","session","panel"]',
+    );
   });
 
   test("keeps query phases in order and skips screenshot lookup for no navigation rows", async () => {
@@ -451,4 +532,244 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
       );
     },
   );
+  describe("live/backfill dedupe identity (#10118)", () => {
+    const networkInput = (overrides: Partial<network.NetworkEventWithId> = {}) => ({
+      id: 1,
+      deviceId: "device",
+      sessionId: "session",
+      timestamp: 1000,
+      applicationId: "com.example",
+      url: "https://example.com/a",
+      method: "GET",
+      statusCode: 200,
+      durationMs: 5,
+      requestBodySize: -1,
+      responseBodySize: -1,
+      protocol: null,
+      requestId: null,
+      connectionId: null,
+      direction: null,
+      metadata: null,
+      sequenceNumber: null,
+      host: null,
+      path: null,
+      error: null,
+      requestHeaders: null,
+      responseHeaders: null,
+      requestBody: null,
+      responseBody: null,
+      contentType: null,
+      ...overrides,
+    });
+    // The live recorder input carries no row id: it is pushed before it is persisted.
+    const liveNetwork = (overrides: Partial<network.NetworkEventWithId> = {}): TelemetryEvent => {
+      const data: Partial<network.NetworkEventWithId> = networkInput(overrides);
+      delete data.id;
+      return {
+        category: "network",
+        timestamp: data.timestamp ?? 0,
+        deviceId: "device",
+        sessionId: "session",
+        data,
+      };
+    };
+    const sequences = () =>
+      messages().map((m) => (m.data.data as { sequenceNumber: number | null }).sequenceNumber);
+
+    // Subscribe, then deliver `live` events either while the backfill is still
+    // queued ("before") or after its rows were recorded as seen ("after").
+    const run = async (when: "before" | "after", live: TelemetryEvent[]) => {
+      const filter = server.filter();
+      server.subscribe(socket, filter);
+      if (when === "before") {
+        live.forEach((event) => server.pushTelemetryEvent(event));
+      }
+      await server.backfill(socket, filter);
+      if (when === "after") {
+        live.forEach((event) => server.pushTelemetryEvent(event));
+      }
+      await server.finish();
+    };
+
+    test.each(["before", "after"] as const)(
+      "a live network event whose sequence equals an unrelated backfilled row id is delivered (%s)",
+      async (when) => {
+        networkSpy.mockResolvedValue([networkInput({ id: 21, sequenceNumber: 500 })]);
+        await run(when, [liveNetwork({ sequenceNumber: 21, timestamp: 2000 })]);
+        expect(sequences().sort()).toEqual([21, 500]);
+      },
+    );
+
+    test.each(["before", "after"] as const)(
+      "the live copy of a backfilled network row is delivered once (%s)",
+      async (when) => {
+        networkSpy.mockResolvedValue([networkInput({ id: 7, sequenceNumber: 21 })]);
+        await run(when, [liveNetwork({ sequenceNumber: 21 })]);
+        expect(sequences()).toEqual([21]);
+      },
+    );
+
+    test("a live copy queued twice during one backfill is delivered once", async () => {
+      await run("before", [liveNetwork({ sequenceNumber: 3 }), liveNetwork({ sequenceNumber: 3 })]);
+      expect(sequences()).toEqual([3]);
+    });
+
+    test("an app restart re-using sequence numbers delivers both launches' events", async () => {
+      networkSpy.mockResolvedValue([networkInput({ id: 1, sequenceNumber: 21, timestamp: 1000 })]);
+      await run("after", [liveNetwork({ sequenceNumber: 21, timestamp: 9000 })]);
+      expect(messages().map((m) => m.data.timestamp)).toEqual([1000, 9000]);
+    });
+
+    test("equal sequence numbers from two apps queued during one backfill both arrive", async () => {
+      await run("before", [
+        liveNetwork({ sequenceNumber: 4, applicationId: "com.one" }),
+        liveNetwork({ sequenceNumber: 4, applicationId: "com.two" }),
+      ]);
+      expect(
+        messages().map((m) => (m.data.data as { applicationId: string }).applicationId),
+      ).toEqual(["com.one", "com.two"]);
+    });
+
+    test("without a sequence number, lifecycle records sharing a requestId all arrive", async () => {
+      const lifecycle = (direction: string) =>
+        liveNetwork({ requestId: "req-1", direction, timestamp: 1000 });
+      await run("before", [lifecycle("request"), lifecycle("response"), lifecycle("response")]);
+      expect(messages().map((m) => (m.data.data as { direction: string }).direction)).toEqual([
+        "request",
+        "response",
+      ]);
+    });
+
+    test("without a sequence number, the live copy of a stored requestId row is delivered once", async () => {
+      networkSpy.mockResolvedValue([
+        networkInput({ id: 3, requestId: "req-1", direction: "response" }),
+      ]);
+      await run("before", [liveNetwork({ requestId: "req-1", direction: "response" })]);
+      expect(messages()).toHaveLength(1);
+    });
+
+    test("network events with no sequence number or requestId are never deduplicated", async () => {
+      networkSpy.mockResolvedValue([networkInput({ id: 5 })]);
+      await run("before", [liveNetwork({ timestamp: 1000 })]);
+      expect(messages()).toHaveLength(2);
+    });
+
+    test.each(["before", "after"] as const)(
+      "the live copy of a backfilled crash is delivered once and a different crash is delivered (%s)",
+      async (when) => {
+        await seedFailure("occ-1", null);
+        const crash = (occurrenceId: string): TelemetryEvent => ({
+          category: "crash",
+          timestamp: 1,
+          deviceId: "device",
+          sessionId: "session",
+          data: { type: "crash", occurrenceId, groupId: occurrenceId, timestamp: 1 },
+        });
+        await run(when, [crash("occ-1"), crash("occ-2")]);
+        const delivered = messages().map(
+          (m) => (m.data.data as { occurrenceId: string }).occurrenceId,
+        );
+        expect(delivered.sort()).toEqual(["occ-1", "occ-2"]);
+      },
+    );
+
+    // These categories have no id on either path, so there is nothing to
+    // match on: a live event is never dropped because a stored row exists.
+    const identityFreeCases = [
+      [
+        "log",
+        () =>
+          logSpy.mockResolvedValue([
+            {
+              deviceId: "device",
+              timestamp: 1000,
+              applicationId: "com.example",
+              sessionId: "session",
+              level: 4,
+              tag: "T",
+              message: "m",
+              filterName: "f",
+            },
+          ]),
+        { level: 4, tag: "T", message: "m", filterName: "f" },
+      ],
+      [
+        "os",
+        () =>
+          osSpy.mockResolvedValue([
+            {
+              deviceId: "device",
+              timestamp: 1000,
+              applicationId: "com.example",
+              sessionId: "session",
+              category: "lifecycle",
+              kind: "resumed",
+              details: null,
+            },
+          ]),
+        { category: "lifecycle", kind: "resumed", details: null },
+      ],
+      [
+        "navigation",
+        () => navigationSpy.mockResolvedValue([row(1000, "session")]),
+        { destination: "Home", source: null },
+      ],
+      [
+        "storage",
+        () =>
+          storageSpy.mockResolvedValue([
+            {
+              deviceId: "device",
+              timestamp: 1000,
+              applicationId: "com.example",
+              sessionId: "session",
+              fileName: "prefs",
+              key: "k",
+              value: "v",
+              valueType: "string",
+              changeType: "set",
+              previousValue: null,
+            },
+          ]),
+        { fileName: "prefs", key: "k", value: "v", changeType: "set" },
+      ],
+      [
+        "layout",
+        () =>
+          layoutSpy.mockResolvedValue([
+            {
+              deviceId: "device",
+              timestamp: 1000,
+              applicationId: "com.example",
+              sessionId: "session",
+              subType: "recomposition",
+              composableName: null,
+              composableId: null,
+              recompositionCount: null,
+              durationMs: null,
+              likelyCause: null,
+              detailsJson: null,
+              screenName: null,
+            },
+          ]),
+        { subType: "recomposition" },
+      ],
+    ] as const;
+
+    test.each(identityFreeCases)(
+      "%s: a live event is never dropped for a stored row",
+      async (category, seed, liveData) => {
+        seed();
+        const live: TelemetryEvent = {
+          category,
+          timestamp: 1000,
+          deviceId: "device",
+          sessionId: "session",
+          data: { timestamp: 1000, applicationId: "com.example", ...liveData },
+        };
+        await run("before", [live]);
+        expect(messages().map((m) => m.data.category)).toEqual([category, category]);
+      },
+    );
+  });
 });

@@ -31,7 +31,9 @@
     /// - `GET /health` -> status, bundle ID, capabilities, and optional simulator UDID
     /// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
+    /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
+    /// - `POST /trigger` -> deliver a named host trigger to a registered SDK module (#1580)
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
         static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
@@ -46,6 +48,7 @@
             case networkMock = "/network/mock"
             case networkErrorSimulation = "/network/error-simulation"
             case networkFaultRules = "/network/fault-rules"
+            case magicTap = "/accessibility/magic-tap"
             case highlight = "/highlight"
             case dbExecute = "/db/execute"
             case dbList = "/db/list"
@@ -54,6 +57,7 @@
             case dbTableData = "/db/table-data"
             case dbTableStructure = "/db/table-structure"
             case preferences = "/preferences"
+            case trigger = "/trigger"
 
             var method: String {
                 switch self {
@@ -100,9 +104,14 @@
         private var bindPlanner = SdkBindPlanner()
         private let listenerFactory: (UInt16) throws -> any SdkHierarchyListener
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
+        /// Database and preference routes run here, not on `queue`: a statement waiting on the app's lock
+        /// must not stop `/health` and the hierarchy routes from answering (#10166). Serial, so work
+        /// on one database keeps its order.
+        private let storageQueue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.storage")
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
         private let preferenceRouteHandler = SdkPreferenceRouteHandler()
+        private let triggerRouteHandler = SdkTriggerRouteHandler()
 
         init(
             tracker: any SdkHierarchyServing,
@@ -347,16 +356,32 @@
                 handleNetworkErrorSimulation(connection, initialData: requestData)
             case .networkFaultRules:
                 handleNetworkFaultRules(connection, initialData: requestData)
+            case .magicTap:
+                DispatchQueue.main.async {
+                    guard self.requireApplicationActive(connection) else { return }
+                    #if canImport(UIKit)
+                        let handled = SdkMagicTap.performInApplication()
+                        let body = try? JSONEncoder().encode(["handled": handled])
+                        self.sendResponse(connection, statusCode: 200, body: body)
+                    #else
+                        self.sendResponse(connection, statusCode: 501, body: nil)
+                    #endif
+                }
             case .highlight:
                 handleHighlight(connection, initialData: requestData)
             case .dbExecute:
+                let receivedAt = SdkDatabaseBudget.now()
                 handleBodyRoute(connection, initialData: requestData) {
-                    self.databaseRouteHandler.handleExecuteSql(body: $0)
+                    self.databaseRouteHandler.handleExecuteSql(body: $0, receivedAt: receivedAt)
                 }
             case .dbList:
-                sendRouteResponse(connection, databaseRouteHandler.handleListDatabases())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                }
             case .dbCapabilities:
-                sendRouteResponse(connection, databaseRouteHandler.handleCapabilities())
+                storageQueue.async {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
+                }
             case .dbTables:
                 handleBodyRoute(connection, initialData: requestData) {
                     self.databaseRouteHandler.handleListTables(body: $0)
@@ -372,6 +397,10 @@
             case .preferences:
                 handleBodyRoute(connection, initialData: requestData) {
                     self.preferenceRouteHandler.handle(body: $0)
+                }
+            case .trigger:
+                withRequestBody(connection, initialData: requestData) { server, body in
+                    server.sendRouteResponse(connection, server.triggerRouteHandler.handle(body: body ?? Data()))
                 }
             }
         }
@@ -400,11 +429,19 @@
             return nil
         }
 
+        static var capabilities: Set<String> {
+            #if canImport(UIKit)
+                ["network-fault-rules", "magic-tap", "sdk-trigger"]
+            #else
+                ["network-fault-rules", "sdk-trigger"]
+            #endif
+        }
+
         func healthResponse() -> SdkRouteResponse {
             let payload = HealthPayload(
                 status: "ok",
                 bundleId: tracker?.bundleId,
-                capabilities: ["network-fault-rules"],
+                capabilities: Self.capabilities,
                 simulatorUdid: identity.udid
             )
             guard let data = try? JSONEncoder().encode(payload) else {
@@ -491,9 +528,20 @@
                     server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                     return
                 }
-                NetworkMockRuleStore.shared.setRules(payload.rules)
-                server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+                let rejected = NetworkMockRuleStore.shared.setRules(payload.rules)
+                server.sendResponse(
+                    connection,
+                    statusCode: 200,
+                    body: SdkHierarchyServer.setMockRulesResponseBody(rejected: rejected)
+                )
             }
+        }
+
+        /// `{"status":"ok","rejected":[{"mockId":…,"reason":…}]}`. An SDK that predates the report sends
+        /// only `status`, which the runner reads as "not reported" (issue #10101).
+        static func setMockRulesResponseBody(rejected: [RejectedMockRule]) -> Data {
+            let payload = SetMockRulesResponse(status: "ok", rejected: rejected)
+            return (try? JSONEncoder().encode(payload)) ?? Data("{\"status\":\"ok\"}".utf8)
         }
 
         private func handleNetworkErrorSimulation(_ connection: NWConnection, initialData: Data) {
@@ -563,7 +611,9 @@
             route: @escaping @Sendable (Data) -> SdkRouteResponse
         ) {
             withRequestBody(connection, initialData: initialData) { server, body in
-                server.sendRouteResponse(connection, route(body ?? Data()))
+                server.storageQueue.async {
+                    server.sendRouteResponse(connection, route(body ?? Data()))
+                }
             }
         }
 
@@ -754,6 +804,11 @@
 
     private struct SetMockRulesBody: Decodable {
         let rules: [NetworkMockRuleDTO]
+    }
+
+    private struct SetMockRulesResponse: Encodable {
+        let status: String
+        let rejected: [RejectedMockRule]
     }
 
     private struct SetNetworkFaultRulesBody: Decodable {

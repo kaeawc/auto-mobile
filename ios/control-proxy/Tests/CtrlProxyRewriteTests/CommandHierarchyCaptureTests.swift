@@ -4,6 +4,154 @@ import XCTest
 
 @MainActor
 final class CommandHierarchyCaptureTests: XCTestCase {
+    func testStaleHierarchyRequestCapturesEvenWithStrictlyNewerCache() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+        let request = RequestHierarchy(requestId: "fresh", sinceTimestamp: 0)
+
+        let payload = await fixture.handler.handle(.requestHierarchyIfStale(request))
+        let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+        XCTAssertEqual(response.requestId, "fresh")
+        XCTAssertEqual(response.data?.updatedAt, fixture.raw.updatedAt)
+        XCTAssertEqual(response.data?.insets.source, "ios-sdk-safe-area")
+        XCTAssertNotNil(response.frameContext)
+        XCTAssertEqual(response.servedFromCache, false)
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testStaleRequestCapturesWithRealIdleBackoffCache() async throws {
+        try await assertRealPollCacheDoesNotReplaceCapture(idle: true)
+    }
+
+    func testChangeAfterRecentActivePollIsCapturedWithRealDebouncer() async throws {
+        try await assertRealPollCacheDoesNotReplaceCapture(idle: false)
+    }
+
+    private func assertRealPollCacheDoesNotReplaceCapture(idle: Bool) async throws {
+        let timer = FakeProxyTimer(mode: .manual, initialTime: 10000)
+        let polled = ViewHierarchy(
+            updatedAt: timer.now(),
+            hierarchy: RewriteFakeElementLocator.defaultHierarchy.hierarchy
+        )
+        let pollLocator = RewriteFakeElementLocator(hierarchy: polled)
+        pollLocator.onCapture = {
+            pollLocator.hierarchy = ViewHierarchy(updatedAt: timer.now(), hierarchy: polled.hierarchy)
+        }
+        let perf = FakePerfTracking(flushResult: nil)
+        let debouncer = HierarchyDebouncer(hierarchyExtractor: pollLocator, perf: perf, timer: timer)
+        debouncer.start()
+        defer { debouncer.stop() }
+        if idle {
+            // Two unchanged polls grow the next cadence from 1s to 2s to 4s.
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs)
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs * HierarchyDebouncer.idleBackoffMultiplier)
+            timer.advance(by: HierarchyDebouncer.defaultPollIntervalMs + 1)
+        } else {
+            // The screen changes immediately after the initial active-cadence poll.
+            timer.advance(by: 1)
+        }
+        let beforeCalls = pollLocator.filteringRequests.count
+        let cached = try XCTUnwrap(debouncer.getLastHierarchy())
+        let cacheAge = timer.now() - cached.updatedAt
+        if idle {
+            XCTAssertGreaterThan(cacheAge, HierarchyDebouncer.defaultPollIntervalMs)
+        } else {
+            XCTAssertLessThan(cacheAge, HierarchyDebouncer.defaultPollIntervalMs)
+        }
+        let changed = ViewHierarchy(updatedAt: timer.now(), hierarchy: UIElementInfo(text: "command"))
+        let commandLocator = RewriteFakeElementLocator(hierarchy: changed)
+        let handler = CommandHandler(
+            elementLocator: commandLocator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: perf, hierarchyDebouncer: debouncer
+        )
+        XCTAssertEqual(debouncer.getLastHierarchy()?.hierarchy?.text, polled.hierarchy?.text)
+
+        let response = try await handler.handleRequestHierarchyIfStale(
+            RequestHierarchy(requestId: "reverify", sinceTimestamp: polled.updatedAt - 1), startTime: Date()
+        )
+
+        XCTAssertEqual(response.data?.hierarchy?.text, "command")
+        XCTAssertEqual(response.data?.updatedAt, timer.now())
+        XCTAssertEqual(response.servedFromCache, false)
+        XCTAssertEqual(commandLocator.filteringRequests, [false])
+        XCTAssertEqual(debouncer.getLastHierarchy()?.updatedAt, changed.updatedAt)
+        XCTAssertEqual(pollLocator.filteringRequests.count, beforeCalls)
+        XCTAssertEqual(beforeCalls, idle ? 3 : 1)
+    }
+
+    func testStaleHierarchyRequestCapturesWhenCacheIsOlderOrEqual() async throws {
+        for sinceTimestamp: Int64 in [1, 2] {
+            let fixture = CaptureFixture()
+            fixture.debouncer.cachedHierarchy = fixture.raw
+            let request = RequestHierarchy(requestId: "stale", sinceTimestamp: sinceTimestamp)
+
+            let payload = await fixture.handler.handle(.requestHierarchyIfStale(request))
+            let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+            XCTAssertEqual(response.type, "hierarchy_update")
+            try fixture.assertRawCaptures(count: 1)
+        }
+    }
+
+    func testStaleHierarchyRequestWithoutTimestampAlwaysCaptures() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(RequestHierarchy(requestId: "legacy")))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testUnconditionalHierarchyRequestAlwaysCapturesWithNewerCache() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+
+        _ = await fixture.handler.handle(.requestHierarchy(RequestHierarchy(requestId: "force", sinceTimestamp: 0)))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testStaleHierarchyRequestWithoutCacheCaptures() async throws {
+        let fixture = CaptureFixture()
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(RequestHierarchy(
+            requestId: "empty",
+            sinceTimestamp: 0
+        )))
+
+        try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testUnfilteredStaleHierarchyRequestAlwaysCaptures() async throws {
+        let fixture = CaptureFixture()
+        fixture.debouncer.cachedHierarchy = fixture.raw
+        let request = RequestHierarchy(requestId: "raw", disableAllFiltering: true, sinceTimestamp: 0)
+
+        _ = await fixture.handler.handle(.requestHierarchyIfStale(request))
+
+        XCTAssertEqual(fixture.locator.filteringRequests, [true])
+        XCTAssertTrue(fixture.debouncer.recordedCaptures.isEmpty)
+    }
+
+    func testStaleHierarchyRequestWithoutDebouncerCaptures() async throws {
+        let locator = RewriteFakeElementLocator()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"no-cache","sinceTimestamp":0}"#.utf8)
+        )
+
+        let payload = await handler.handle(request)
+        let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+
+        XCTAssertEqual(response.requestId, "no-cache")
+        XCTAssertEqual(locator.filteringRequests, [false])
+    }
+
     func testCaptureRecordsIntoRealDebouncerWhenWallClockStepsBack() async throws {
         let initial = ViewHierarchy(updatedAt: 20, hierarchy: UIElementInfo(text: "initial"))
         let captured = ViewHierarchy(updatedAt: 10, hierarchy: UIElementInfo(text: "command"))
@@ -112,6 +260,35 @@ final class CommandHierarchyCaptureTests: XCTestCase {
         XCTAssertEqual(response.data?.updatedAt, fixture.raw.updatedAt)
         XCTAssertEqual(response.data?.insets.source, "ios-sdk-safe-area")
         try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testRequestHierarchyIfStaleCapturesFreshOnEveryRequest() async throws {
+        let fixture = CaptureFixture()
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(
+            WebSocketRequest.self, from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"first"}"#.utf8)
+        )
+        let second = try decoder.decode(
+            WebSocketRequest.self, from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"second"}"#.utf8)
+        )
+
+        _ = await fixture.handler.handle(first)
+        _ = await fixture.handler.handle(second)
+
+        try fixture.assertRawCaptures(count: 2)
+    }
+
+    func testRequestHierarchyIfStaleDecodesSinceTimestamp() throws {
+        let request = try JSONDecoder().decode(
+            WebSocketRequest.self,
+            from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"legacy","sinceTimestamp":123}"#.utf8)
+        )
+
+        guard case let .requestHierarchyIfStale(payload) = request else {
+            return XCTFail("Expected request_hierarchy_if_stale")
+        }
+        XCTAssertEqual(payload.requestId, "legacy")
+        XCTAssertEqual(payload.sinceTimestamp, 123)
     }
 
     func testUnfilteredHierarchyRequestDoesNotRecord() async throws {

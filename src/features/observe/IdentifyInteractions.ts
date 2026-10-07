@@ -1,7 +1,14 @@
 import { Element } from "../../models/Element";
 import { ObserveResult } from "../../models/ObserveResult";
 import { ElementBounds } from "../../models/ElementBounds";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import {
+  DefaultClickableElementsQuery,
+  DefaultScrollableElementsQuery,
+} from "../utility/InteractiveElementQueries";
+import type {
+  ClickableElementsQuery,
+  ScrollableElementsQuery,
+} from "../../utils/interfaces/ElementTraitQueries";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
@@ -72,7 +79,8 @@ interface InteractionCandidate {
 }
 
 export class IdentifyInteractions {
-  private readonly elementFinder = new DefaultElementFinder();
+  private readonly clickableQuery: ClickableElementsQuery = new DefaultClickableElementsQuery();
+  private readonly scrollableQuery: ScrollableElementsQuery = new DefaultScrollableElementsQuery();
   private readonly elementParser = new DefaultElementParser();
   private readonly geometry = new DefaultElementGeometry();
 
@@ -155,12 +163,12 @@ export class IdentifyInteractions {
       candidates.push({ element, typeHint, hasText });
     };
 
-    const clickables = this.elementFinder.findClickableElements(viewHierarchy);
+    const clickables = this.clickableQuery.findClickableElements(viewHierarchy);
     for (const element of clickables) {
       addCandidate(element);
     }
 
-    const scrollables = this.elementFinder.findScrollableElements(viewHierarchy);
+    const scrollables = this.scrollableQuery.findScrollableElements(viewHierarchy);
     for (const element of scrollables) {
       addCandidate(element, "scroll");
     }

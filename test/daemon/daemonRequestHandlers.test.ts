@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { logger } from "../../src/utils/logger";
 import {
   DevicePoolStats,
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  type LivenessClaimOutcome,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
 import { DAEMON_SESSION_NOT_FOUND_CODE, DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -21,6 +26,8 @@ import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSess
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { ExecutionTracker } from "../../src/server/executionTracker";
+import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
+import type { DeviceLeaseRelinquishPort } from "../../src/daemon/deviceLeaseActivitySources";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -189,7 +196,7 @@ describe("handleDaemonRequest", () => {
       sessionManager,
       new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
     );
-    const claim = Promise.withResolvers<boolean>();
+    const claim = Promise.withResolvers<LivenessClaimOutcome>();
     const ownership = spyOn(sessionManager, "claimLivenessOwnership").mockImplementation(
       () => claim.promise,
     );
@@ -205,7 +212,7 @@ describe("handleDaemonRequest", () => {
       );
       expect(ownership).toHaveBeenCalledTimes(1);
       await sessionManager.releaseSession(sessionId);
-      claim.resolve(true);
+      claim.resolve("claimed");
       expect(await response).toEqual({
         success: false,
         error: `Session not found: ${sessionId}`,
@@ -270,6 +277,8 @@ describe("handleDaemonRequest", () => {
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      // Additive liveness state (#10051); a fresh session is live with its full lease.
+      liveness: { state: "live", remainingMs: session.heartbeatTimeoutMs },
     });
   });
 
@@ -307,7 +316,7 @@ describe("handleDaemonRequest", () => {
       const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
       const state = new FakeDaemonState(sessionManager, devicePool);
       const sessionId = "liveness-owner-session";
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 10_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
 
       await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
@@ -318,7 +327,9 @@ describe("handleDaemonRequest", () => {
         }),
         state,
       );
-      fakeTimer.advanceTime(1_000);
+      // The first owner's lease and its suspect grace window must lapse or the
+      // daemon rejects the second claim (#10050, #10051).
+      fakeTimer.advanceTime(10_001 + SUSPECT_GRACE_MS);
       const claim = await handleDaemonRequest(
         buildRequest("daemon/heartbeat", {
           sessionId,
@@ -371,20 +382,22 @@ describe("handleDaemonRequest", () => {
       ).toEqual({ success: true, result: { sessionId } });
       expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
 
-      // Replaying a displaced claim remains the existing successful no-op.
+      // Replaying a displaced claim is a structured failure that records nothing (#10050).
       expect(
-        (
-          await handleDaemonRequest(
-            buildRequest("daemon/heartbeat", {
-              sessionId,
-              livenessOwnerToken: first,
-              claimLivenessOwnership: true,
-              livenessPolicy: firstPolicy,
-            }),
-            state,
-          )
-        ).success,
-      ).toBe(true);
+        await handleDaemonRequest(
+          buildRequest("daemon/heartbeat", {
+            sessionId,
+            livenessOwnerToken: first,
+            claimLivenessOwnership: true,
+            livenessPolicy: firstPolicy,
+          }),
+          state,
+        ),
+      ).toEqual({
+        success: false,
+        code: "liveness_owner_superseded",
+        error: expect.stringContaining("no longer owns"),
+      });
       expect(sessionManager.getSession(sessionId)).toMatchObject(beforeStaleKeeper);
 
       expect(
@@ -405,6 +418,280 @@ describe("handleDaemonRequest", () => {
       });
     },
   );
+
+  describe("liveness ownership contention (#10050)", () => {
+    const sessionId = "contended-session";
+    const claimRequest = (token: string, livenessPolicy = "heartbeat") =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy,
+        livenessOwnerToken: token,
+        claimLivenessOwnership: true,
+      });
+    const tickRequest = (token: string) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: token,
+      });
+
+    async function stateWithSession(): Promise<FakeDaemonState> {
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      return new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      );
+    }
+
+    function snapshotOf(name: string) {
+      const session = sessionManager.getSession(name)!;
+      return {
+        livenessPolicy: session.livenessPolicy,
+        livenessOwnerToken: session.livenessOwnerToken,
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      };
+    }
+
+    test.each([
+      { owner: "proxy-a", challenger: "proxy-b" },
+      { owner: "proxy-b", challenger: "proxy-a" },
+    ])(
+      "rejects $challenger while $owner's lease is live and leaves $owner's state unchanged",
+      async ({ owner, challenger }) => {
+        const state = await stateWithSession();
+        expect((await handleDaemonRequest(claimRequest(owner), state)).success).toBe(true);
+        fakeTimer.advanceTime(5_000);
+        expect((await handleDaemonRequest(tickRequest(owner), state)).success).toBe(true);
+        const before = snapshotOf(sessionId);
+        fakeTimer.advanceTime(4_000);
+
+        // Even a claim that would widen the policy changes nothing.
+        for (const policy of ["heartbeat", "cli"]) {
+          expect(await handleDaemonRequest(claimRequest(challenger, policy), state)).toEqual({
+            success: false,
+            code: "liveness_owner_conflict",
+            error: expect.stringContaining(sessionId),
+          });
+          expect(snapshotOf(sessionId)).toEqual(before);
+        }
+
+        // The rejected challenger holds no ownership: its ticks are superseded
+        // no-ops, while the owner's tick still refreshes the lease.
+        expect(await handleDaemonRequest(tickRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_superseded",
+        });
+        expect(snapshotOf(sessionId)).toEqual(before);
+        expect((await handleDaemonRequest(tickRequest(owner), state)).success).toBe(true);
+        expect(snapshotOf(sessionId)).toMatchObject({
+          livenessOwnerToken: owner,
+          lastHeartbeat: fakeTimer.now(),
+        });
+      },
+    );
+
+    test.each([
+      { owner: "proxy-a", challenger: "proxy-b" },
+      { owner: "proxy-b", challenger: "proxy-a" },
+    ])(
+      "accepts $challenger once $owner's lease has expired and never lets $owner reclaim",
+      async ({ owner, challenger }) => {
+        const state = await stateWithSession();
+        await handleDaemonRequest(claimRequest(owner), state);
+        const leaseMs = sessionManager.getSession(sessionId)!.heartbeatTimeoutMs;
+
+        // The lease is inclusive of its last millisecond.
+        fakeTimer.advanceTime(leaseMs);
+        expect(await handleDaemonRequest(claimRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_conflict",
+        });
+        // Past the lease the owner's session is suspect (#10051) and still held for it.
+        fakeTimer.advanceTime(1);
+        expect(await handleDaemonRequest(claimRequest(challenger), state)).toMatchObject({
+          success: false,
+          code: "liveness_owner_conflict",
+        });
+        fakeTimer.advanceTime(SUSPECT_GRACE_MS);
+        expect((await handleDaemonRequest(claimRequest(challenger), state)).success).toBe(true);
+        expect(snapshotOf(sessionId)).toMatchObject({
+          livenessOwnerToken: challenger,
+          lastHeartbeat: fakeTimer.now(),
+        });
+
+        // The displaced owner's retried claim is a structured failure, not a
+        // silent success, and records nothing, even after the new owner lapses.
+        const afterTakeover = snapshotOf(sessionId);
+        for (const elapsed of [0, leaseMs + 1]) {
+          fakeTimer.advanceTime(elapsed);
+          expect(await handleDaemonRequest(claimRequest(owner), state)).toEqual({
+            success: false,
+            code: "liveness_owner_superseded",
+            error: expect.stringContaining(sessionId),
+          });
+          expect(snapshotOf(sessionId)).toEqual(afterTakeover);
+        }
+      },
+    );
+
+    test("lets the owner's stable token claim again while its lease is live", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(claimRequest("stable-token"), state);
+      fakeTimer.advanceTime(3_000);
+
+      expect((await handleDaemonRequest(claimRequest("stable-token"), state)).success).toBe(true);
+      expect(snapshotOf(sessionId)).toMatchObject({
+        livenessOwnerToken: "stable-token",
+        livenessPolicy: "heartbeat",
+        lastHeartbeat: fakeTimer.now(),
+      });
+    });
+
+    test("does not hold a one-shot CLI owner's lease against the next invocation", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(claimRequest("cli-1", "cli"), state);
+      fakeTimer.advanceTime(1_000);
+
+      expect((await handleDaemonRequest(claimRequest("cli-2", "cli"), state)).success).toBe(true);
+      expect(snapshotOf(sessionId)).toMatchObject({ livenessOwnerToken: "cli-2" });
+    });
+  });
+
+  describe("CLI heartbeat keeper on a proxy-owned session (#10054)", () => {
+    const sessionId = "keeper-vs-proxy";
+    const keeperRequest = (token: string | undefined, claim: boolean) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy: "cli",
+        livenessOwnerKind: "cli-keeper",
+        idleTimeoutMs: 600_000,
+        ...(token ? { livenessOwnerToken: token } : {}),
+        ...(claim ? { claimLivenessOwnership: true } : {}),
+      });
+    const proxyClaim = (token: string, livenessPolicy: string) =>
+      buildRequest("daemon/heartbeat", {
+        sessionId,
+        livenessPolicy,
+        livenessOwnerToken: token,
+        claimLivenessOwnership: true,
+      });
+
+    async function stateWithSession(): Promise<FakeDaemonState> {
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      return new FakeDaemonState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+      );
+    }
+
+    function snapshotOf() {
+      const session = sessionManager.getSession(sessionId)!;
+      return {
+        livenessPolicy: session.livenessPolicy,
+        livenessOwnerToken: session.livenessOwnerToken,
+        lastUsedAt: session.lastUsedAt,
+        lastHeartbeat: session.lastHeartbeat,
+        expiresAt: session.expiresAt,
+        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+        sessionTimeoutMs: session.sessionTimeoutMs,
+        hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+      };
+    }
+
+    test.each([
+      { name: "a foreign-token claim", token: "keeper", claim: true },
+      { name: "a claim with the proxy's own token", token: "proxy-a", claim: true },
+      { name: "a foreign-token tick", token: "keeper", claim: false },
+      { name: "a tick with the proxy's own token", token: "proxy-a", claim: false },
+      { name: "a tokenless heartbeat", token: undefined, claim: false },
+    ])(
+      "refuses $name with liveness_owner_is_proxy and changes nothing",
+      async ({ token, claim }) => {
+        const state = await stateWithSession();
+        expect((await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state)).success).toBe(
+          true,
+        );
+        fakeTimer.advanceTime(3_000);
+        const before = snapshotOf();
+        fakeTimer.advanceTime(2_000);
+
+        expect(await handleDaemonRequest(keeperRequest(token, claim), state)).toEqual({
+          success: false,
+          code: "liveness_owner_is_proxy",
+          error: expect.stringContaining(`owned by an MCP proxy`),
+        });
+        expect(snapshotOf()).toEqual(before);
+      },
+    );
+
+    test("names the session, the proxy ownership and session-info in the error", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state);
+
+      const refusal = await handleDaemonRequest(keeperRequest("keeper", true), state);
+
+      expect(refusal.error).toContain(sessionId);
+      expect(refusal.error).toContain("only liveness owner");
+      expect(refusal.error).toContain(`--daemon session-info ${sessionId}`);
+    });
+
+    test("refuses even when the proxy's lease has expired, where the generic conflict would not fire", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("proxy-a", "heartbeat"), state);
+      fakeTimer.advanceTime(sessionManager.getSession(sessionId)!.heartbeatTimeoutMs + 1);
+      const before = snapshotOf();
+
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
+        success: false,
+        code: "liveness_owner_is_proxy",
+      });
+      expect(snapshotOf()).toEqual(before);
+    });
+
+    test("keeps a one-shot CLI session on the keeper's claim and ticks as before", async () => {
+      const state = await stateWithSession();
+
+      expect(await handleDaemonRequest(keeperRequest("keeper", true), state)).toMatchObject({
+        success: true,
+        result: { sessionId, livenessPolicy: "cli-idle" },
+      });
+      expect(snapshotOf()).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "keeper",
+      });
+
+      fakeTimer.advanceTime(30_000);
+      expect(await handleDaemonRequest(keeperRequest("keeper", false), state)).toMatchObject({
+        success: true,
+      });
+      expect(snapshotOf()).toMatchObject({ lastHeartbeat: fakeTimer.now() });
+
+      // A later one-shot keeper with a new token claims the cli-idle session.
+      expect(await handleDaemonRequest(keeperRequest("keeper-2", true), state)).toMatchObject({
+        success: true,
+      });
+      expect(snapshotOf()).toMatchObject({ livenessOwnerToken: "keeper-2" });
+    });
+
+    test("does not refuse a one-shot --cli proxy's own declaration without the keeper marker", async () => {
+      const state = await stateWithSession();
+      await handleDaemonRequest(proxyClaim("cli-proxy", "heartbeat"), state);
+
+      expect(await handleDaemonRequest(proxyClaim("cli-proxy", "cli"), state)).toMatchObject({
+        success: true,
+        result: { livenessPolicy: "cli-idle" },
+      });
+      expect(snapshotOf()).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "cli-proxy",
+      });
+    });
+  });
 
   test("reports every displaced keeper tick while a stalled proxy times out", async () => {
     const sessionId = "stalled-proxy";
@@ -450,8 +737,11 @@ describe("handleDaemonRequest", () => {
       { heartbeatTimeoutMs: timeoutMs },
     );
     try {
-      for (let tick = 0; tick < 6; tick++) {
-        fakeTimer.advanceTime(Math.floor(timeoutMs / 5));
+      const tickMs = Math.floor(timeoutMs / 5);
+      // Lease plus the suspect grace window (#10051) must pass before the reap.
+      const ticksUntilReap = Math.floor((timeoutMs + SUSPECT_GRACE_MS) / tickMs) + 1;
+      for (let tick = 0; tick < ticksUntilReap; tick++) {
+        fakeTimer.advanceTime(tickMs);
         expect(
           await handleDaemonRequest(
             buildRequest("daemon/heartbeat", {
@@ -872,6 +1162,154 @@ describe("handleDaemonRequest", () => {
         identityUnresolved: true,
       },
     ]);
+  });
+
+  test("reports a device's lease status for a would-be lease taker (#10497)", async () => {
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+    );
+    spyOn(sessionManager, "getSessionForDevice").mockImplementation((deviceId) =>
+      deviceId === "emulator-5600" ? "session-abc" : null,
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.result).toMatchObject({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: "session-abc",
+      activeExecutions: 0,
+      streaming: false,
+    });
+    expect(
+      (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
+    ).toBe(false);
+  });
+
+  test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {
+    class ActivityState extends FakeDaemonState {
+      getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {
+        return {
+          sessionForDevice: () => null,
+          activeExecutionCount: () => 0,
+          toolIdleForMs: () => null,
+          hasStreamSubscriber: () => false,
+          clientActivity: () => ({ inFlightRequests: 2, idleForMs: 1_500 }),
+        };
+      }
+    }
+    const state = new ActivityState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.result).toEqual({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: null,
+      activeExecutions: 0,
+      inFlightRequests: 2,
+      streaming: false,
+      idleForMs: 1_500,
+    });
+  });
+
+  describe("daemon/relinquishDeviceLease (#10506 review)", () => {
+    function relinquishState(activity: { inFlightRequests: number; idleForMs: number | null }) {
+      const events: string[] = [];
+      class RelinquishState extends FakeDaemonState {
+        getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {
+          return {
+            sessionForDevice: () => null,
+            activeExecutionCount: () => 0,
+            toolIdleForMs: () => null,
+            hasStreamSubscriber: () => false,
+            clientActivity: () => {
+              events.push("activity-read");
+              // Anything the owner's event loop runs next lands after this.
+              queueMicrotask(() => events.push("next-microtask"));
+              return activity;
+            },
+          };
+        }
+        getDeviceLeaseRelinquishPort(): DeviceLeaseRelinquishPort {
+          return {
+            idleMs: 60_000,
+            release: async (deviceId) => {
+              events.push(`release:${deviceId}`);
+            },
+          };
+        }
+      }
+      const state = new RelinquishState(
+        sessionManager,
+        new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+      );
+      return { state, events };
+    }
+
+    test("releases an idle device in the same step as the use check", async () => {
+      const { state, events } = relinquishState({ inFlightRequests: 0, idleForMs: 120_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({
+        pid: process.pid,
+        deviceId: "emulator-5600",
+        released: true,
+        reason: "it reports no live session or recent activity",
+      });
+      // No other work can start between the check and the eviction.
+      expect(events).toEqual(["activity-read", "release:emulator-5600", "next-microtask"]);
+    });
+
+    test("keeps a device it is using and does not release it", async () => {
+      const { state, events } = relinquishState({ inFlightRequests: 1, idleForMs: 120_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({
+        released: false,
+        reason: "it has 1 CtrlProxy request(s) in flight on emulator-5600",
+      });
+      expect(events).not.toContain("release:emulator-5600");
+    });
+
+    test("keeps a recently used device as a transient refusal", async () => {
+      const { state } = relinquishState({ inFlightRequests: 0, idleForMs: 5_000 });
+
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", { deviceId: "emulator-5600" }),
+        state,
+      );
+
+      expect(response.result).toMatchObject({ released: false, transient: true });
+    });
+
+    test("rejects a request without a device id", async () => {
+      const { state } = relinquishState({ inFlightRequests: 0, idleForMs: null });
+      const response = await handleDaemonRequest(
+        buildRequest("daemon/relinquishDeviceLease", {}),
+        state,
+      );
+      expect(response.success).toBe(false);
+    });
   });
 
   test("returns an empty device-session list when no devices are connected", async () => {

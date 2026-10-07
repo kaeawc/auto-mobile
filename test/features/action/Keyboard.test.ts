@@ -210,23 +210,33 @@ describe("Keyboard", () => {
         },
       },
     };
-    fakeHierarchy.setResults([closedHierarchy, closedHierarchy, keyboardWindowHierarchy()]);
+    fakeHierarchy.setResults([
+      closedHierarchy,
+      closedHierarchy,
+      keyboardWindowHierarchy(),
+      keyboardWindowHierarchy(),
+    ]);
     const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
 
     expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
     expect(fakeAdb.wasCommandExecuted("shell input tap 110 70")).toBe(true);
-    expect(fakeHierarchy.getCallCount()).toBe(3);
+    expect(fakeHierarchy.getCallCount()).toBe(4);
     expect(fakeHierarchy.getReadOptions().slice(1)).toEqual([
       { timeoutMs: 2000, forceFresh: true },
       { timeoutMs: 1900, forceFresh: true },
+      { timeoutMs: 1800, forceFresh: true },
     ]);
-    expect(fakeTimer.getSleepHistory()).toEqual([100]);
+    expect(fakeTimer.getSleepHistory()).toEqual([100, 100]);
   });
 
   test("open taps focused input when keyboard is closed", async () => {
-    fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
+    fakeHierarchy.setResults([
+      focusedInputHierarchy(),
+      keyboardWindowHierarchy(),
+      keyboardWindowHierarchy(),
+    ]);
     const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
@@ -252,30 +262,87 @@ describe("Keyboard", () => {
     });
 
     test("shows the keyboard through a node click and sends no coordinate tap", async () => {
-      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        selectorField(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
       expect(result).toMatchObject({ success: true, open: true, message: "Keyboard opened" });
+      expect(fakeClient.focusedInputClickCount).toBe(0);
       expect(fakeClient.nodeActions).toEqual([
         { action: "click", selector: { resourceId: "com.example:id/notes" } },
       ]);
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
     });
 
+    test("clicks selectorless focused input without a tap or caret note", async () => {
+      fakeClient.focusedInputClickResult = { success: true, action: "click", totalTimeMs: 1 };
+      fakeHierarchy.setResults([
+        selectorField({ "resource-id": "" }),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
+      const result = await newKeyboard().execute("open");
+      expect(result).toMatchObject({ success: true, message: "Keyboard opened" });
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
+    test("selectorless click without node identity still requires the IME to appear", async () => {
+      fakeClient.focusedInputClickResult = { success: true, action: "click", totalTimeMs: 1 };
+      fakeHierarchy.setResults([selectorField({ "resource-id": "" })]);
+      fakeHierarchy.setDefaultResult(baseHierarchy());
+
+      const result = await newKeyboard().execute("open");
+
+      expect(result).toMatchObject({
+        success: false,
+        open: false,
+        message: "Failed to open keyboard",
+      });
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("does not tap after an unacknowledged selectorless click", async () => {
+      fakeClient.focusedInputClickResult = {
+        success: false,
+        action: "click",
+        totalTimeMs: 1,
+        error: "Action timeout after 5000ms",
+        dispatched: true,
+        acknowledged: false,
+      };
+      fakeHierarchy.setResults([selectorField({ "resource-id": "" })]);
+      const result = await newKeyboard().execute("open");
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("indeterminate");
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+    });
+
     test("still polls until the IME window appears after the click", async () => {
-      fakeHierarchy.setResults([selectorField(), baseHierarchy(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        selectorField(),
+        baseHierarchy(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
       expect(result.success).toBe(true);
-      expect(fakeTimer.getSleepHistory()).toEqual([100]);
+      expect(fakeTimer.getSleepHistory()).toEqual([100, 100]);
       expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
     });
 
     test("uses a test-tag selector when the runner supports node selectors", async () => {
       fakeHierarchy.setResults([
         selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+        keyboardWindowHierarchy(),
         keyboardWindowHierarchy(),
       ]);
 
@@ -289,6 +356,7 @@ describe("Keyboard", () => {
       fakeClient.supportsSelectors = false;
       fakeHierarchy.setResults([
         selectorField({ "resource-id": "", "test-tag": "notes-field" }),
+        keyboardWindowHierarchy(),
         keyboardWindowHierarchy(),
       ]);
 
@@ -316,7 +384,7 @@ describe("Keyboard", () => {
           },
         },
       };
-      fakeHierarchy.setResults([shared, keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([shared, keyboardWindowHierarchy(), keyboardWindowHierarchy()]);
 
       const result = await newKeyboard().execute("open");
 
@@ -332,7 +400,11 @@ describe("Keyboard", () => {
         totalTimeMs: 1,
         error: "Accessibility action is unavailable: click",
       };
-      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        selectorField(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
@@ -385,7 +457,11 @@ describe("Keyboard", () => {
         dispatched: true,
         acknowledged: true,
       };
-      fakeHierarchy.setResults([selectorField(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        selectorField(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
@@ -421,7 +497,11 @@ describe("Keyboard", () => {
         ["unique-id", { "unique-id": "notes-unique" }],
       ])("taps instead of clicking when the %s is shared by another node", async (_, ids) => {
         const field = { "resource-id": "", ...ids };
-        fakeHierarchy.setResults([withDuplicate(field, ids), keyboardWindowHierarchy()]);
+        fakeHierarchy.setResults([
+          withDuplicate(field, ids),
+          keyboardWindowHierarchy(),
+          keyboardWindowHierarchy(),
+        ]);
 
         const result = await newKeyboard().execute("open");
 
@@ -440,6 +520,7 @@ describe("Keyboard", () => {
         fakeHierarchy.setResults([
           withDuplicate({ "resource-id": "", ...ids }, sameTagOtherRow),
           keyboardWindowHierarchy(),
+          keyboardWindowHierarchy(),
         ]);
 
         await newKeyboard().execute("open");
@@ -452,6 +533,7 @@ describe("Keyboard", () => {
         fakeHierarchy.setResults([
           { ...selectorField(), ctrlProxyIncomplete: true },
           keyboardWindowHierarchy(),
+          keyboardWindowHierarchy(),
         ]);
 
         await newKeyboard().execute("open");
@@ -461,15 +543,22 @@ describe("Keyboard", () => {
       });
     });
 
-    test("reports a moved caret when only the tap fallback can show the keyboard", async () => {
+    test("reports a moved caret when an older runner rejects the focused input request", async () => {
       fakeClient.queueInsertStates(
         { isShowingHintText: false, selectionStart: 30, selectionEnd: 30 },
         { isShowingHintText: false, selectionStart: 12, selectionEnd: 12 },
       );
-      fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        focusedInputHierarchy(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
+      expect(fakeClient.focusedInputClickCount).toBe(1);
+      expect(fakeClient.nodeActions).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(true);
       expect(result.success).toBe(true);
       expect(result.message).toBe(
         "Keyboard opened (the tap used to show it moved the caret from 30-30 to 12-12)",
@@ -479,7 +568,11 @@ describe("Keyboard", () => {
     test("stays quiet when the tap fallback leaves the caret where it was", async () => {
       const state = { isShowingHintText: false, selectionStart: 5, selectionEnd: 9 };
       fakeClient.queueInsertStates(state, state);
-      fakeHierarchy.setResults([focusedInputHierarchy(), keyboardWindowHierarchy()]);
+      fakeHierarchy.setResults([
+        focusedInputHierarchy(),
+        keyboardWindowHierarchy(),
+        keyboardWindowHierarchy(),
+      ]);
 
       const result = await newKeyboard().execute("open");
 
@@ -705,6 +798,7 @@ describe("Keyboard", () => {
       baseHierarchy(),
       baseHierarchy(),
       keyboardWindowHierarchy(),
+      keyboardWindowHierarchy(),
     ]);
     const keyboard = newKeyboard();
 
@@ -712,8 +806,8 @@ describe("Keyboard", () => {
 
     expect(result.success).toBe(true);
     expect(result.open).toBe(true);
-    expect(fakeHierarchy.getCallCount()).toBe(5);
-    expect(fakeTimer.getSleepHistory()).toEqual([100, 100, 100]);
+    expect(fakeHierarchy.getCallCount()).toBe(6);
+    expect(fakeTimer.getSleepHistory()).toEqual([100, 100, 100, 100]);
   });
 
   test("close succeeds when the IME animation settles after several polls", async () => {
@@ -812,7 +906,7 @@ describe("Keyboard", () => {
     // The cache keeps serving the pre-action (closed) sample; only a forced-fresh
     // read observes the IME that actually opened.
     fakeHierarchy.setCachedResult(focusedInputHierarchy());
-    fakeHierarchy.setResults([keyboardWindowHierarchy()]);
+    fakeHierarchy.setResults([keyboardWindowHierarchy(), keyboardWindowHierarchy()]);
     const keyboard = newKeyboard();
 
     const result = await keyboard.execute("open");
@@ -820,9 +914,9 @@ describe("Keyboard", () => {
     expect(result.success).toBe(true);
     expect(result.open).toBe(true);
     // Pre-action read served from cache, one forced-fresh confirmation read.
-    expect(fakeHierarchy.getCallCount()).toBe(2);
+    expect(fakeHierarchy.getCallCount()).toBe(3);
     expect(fakeHierarchy.getReadOptions()[1]?.forceFresh).toBe(true);
-    expect(fakeTimer.getSleepCallCount()).toBe(0);
+    expect(fakeTimer.getSleepCallCount()).toBe(1);
   });
 
   test("close does not send Back off a stale cached IME-open sample", async () => {
@@ -846,13 +940,18 @@ describe("Keyboard", () => {
   });
 
   test("every confirmation read forces past the hierarchy cache", async () => {
-    fakeHierarchy.setResults([focusedInputHierarchy(), baseHierarchy(), keyboardWindowHierarchy()]);
+    fakeHierarchy.setResults([
+      focusedInputHierarchy(),
+      baseHierarchy(),
+      keyboardWindowHierarchy(),
+      keyboardWindowHierarchy(),
+    ]);
     const keyboard = newKeyboard();
 
     await keyboard.execute("open");
 
     const confirmationOptions = fakeHierarchy.getReadOptions().slice(1);
-    expect(confirmationOptions.length).toBe(2);
+    expect(confirmationOptions.length).toBe(3);
     confirmationOptions.forEach((option) => expect(option?.forceFresh).toBe(true));
   });
 

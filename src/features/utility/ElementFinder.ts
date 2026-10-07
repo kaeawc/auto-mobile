@@ -1,18 +1,18 @@
 import { isCollectionElementProperties } from "./elementProperties";
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
-import { nodeBounds as rawNodeBounds } from "../../models/ViewHierarchyResult";
 import { logger } from "../../utils/logger";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher } from "./TextMatcher";
+import { isClickableElementProperties, isEditableElementProperties } from "./elementProperties";
+import { DefaultFocusedInputQuery } from "./FocusedInput";
 import {
-  ANDROID_INPUT_CLASSES,
-  isClickableElementProperties,
-  isEditableElementProperties,
-} from "./elementProperties";
+  DefaultClickableElementsQuery,
+  DefaultScrollableElementsQuery,
+} from "./InteractiveElementQueries";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
@@ -22,6 +22,10 @@ import { ActionableError } from "../../models/ActionableError";
 import { isWithin, promoteClickableAncestor } from "./ElementResolver";
 import { SearchableHierarchy } from "./SearchableNode";
 import { compareSelectionRank } from "./selectionRank";
+import {
+  ambiguousStableViewIdMessage,
+  legacyBareStableViewIdMessage,
+} from "./StableViewIdGuidance";
 
 /**
  * `assignStableViewIds` disambiguates structural duplicates with a descendant
@@ -517,40 +521,6 @@ export class DefaultElementFinder implements ElementFinder {
     return null;
   }
 
-  private findFocusedTextInputInRoots(
-    rootNodes: ViewHierarchyNode[],
-    ANDROID_INPUT_CLASSES: readonly string[],
-  ): Element | null {
-    for (const rootNode of rootNodes) {
-      let foundElement: Element | null = null;
-      this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundElement) {
-          return;
-        } // Already found one
-
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        // Check for both 'class' and 'className' property names
-        const nodeClass = nodeProperties.class || nodeProperties.className;
-        if (
-          (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-          nodeClass &&
-          ANDROID_INPUT_CLASSES.some((cls) => nodeClass.includes(cls))
-        ) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            foundElement = parsedNode;
-          }
-        }
-      });
-
-      if (foundElement) {
-        return foundElement;
-      }
-    }
-
-    return null;
-  }
-
   private isClickableNode(props: Record<string, unknown>): boolean {
     return isClickableElementProperties(props);
   }
@@ -744,11 +714,7 @@ export class DefaultElementFinder implements ElementFinder {
       return;
     }
     if (id === base && this.hasLegacyBareStableViewIdFamily(fullCaptureRoots, base)) {
-      throw new ActionableError(
-        `Skeleton element id "${id}" uses the legacy bare duplicate encoding in this capture. ` +
-          "Re-observe the screen and use a current selector; legacy bare stable ids cannot safely " +
-          "identify a content-identical element.",
-      );
+      throw new ActionableError(legacyBareStableViewIdMessage(id));
     }
     const matchingViewIds = this.stableViewIdsSharingBase(fullCaptureRoots, base);
     const exactMatches = matchingViewIds.filter((viewId) => viewId === id).length;
@@ -763,16 +729,8 @@ export class DefaultElementFinder implements ElementFinder {
     const duplicateCount = matchingViewIds.length;
     if (duplicateCount > 1) {
       const suffixedIds = [...new Set(matchingViewIds.filter((viewId) => viewId !== base))];
-      const idHint =
-        suffixedIds.length > 0
-          ? ` Current capture suffixed ids: ${suffixedIds.map((viewId) => `"${viewId}"`).join(", ")}.`
-          : "";
       throw new ActionableError(
-        `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
-          `elements share structural stable id "${base}". A bare id cannot select a peer, ` +
-          "and a positional -N suffix can shift after an insert or reorder. Use text or " +
-          "textAny (with index when multiple text matches) instead." +
-          idHint,
+        ambiguousStableViewIdMessage(id, base, duplicateCount, suffixedIds),
       );
     }
   }
@@ -1255,65 +1213,9 @@ export class DefaultElementFinder implements ElementFinder {
     return this.findContainerNodeInternal(viewHierarchy, container);
   }
 
-  /**
-   * Find an element by its index in the flattened view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @param index - The index of the element to find
-   * @returns The element at the specified index or null if not found
-   */
-  findElementByIndex(
-    viewHierarchy: ViewHierarchyResult,
-    index: number,
-  ): { element: Element; text?: string } | null {
-    if (!viewHierarchy || index < 0) {
-      return null;
-    }
-
-    const flattenedElements = this.parser.flattenViewHierarchy(viewHierarchy, {
-      includeWindows: true,
-      windowOrder: "topmost-first",
-    });
-
-    if (index >= flattenedElements.length) {
-      return null;
-    }
-
-    const found = flattenedElements[index];
-    return {
-      element: found.element,
-      text: found.text,
-    };
-  }
-
-  /**
-   * Find scrollable elements in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns Array of scrollable elements
-   */
+  /** Delegates to `DefaultScrollableElementsQuery`; new callers should depend on `ScrollableElementsQuery`. */
   findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    if (!viewHierarchy) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const scrollables: Element[] = [];
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            scrollables.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    return scrollables;
+    return new DefaultScrollableElementsQuery(this.parser).findScrollableElements(viewHierarchy);
   }
 
   /**
@@ -1343,35 +1245,9 @@ export class DefaultElementFinder implements ElementFinder {
     return null;
   }
 
-  /**
-   * Find clickable elements in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns Array of clickable elements
-   */
+  /** Delegates to `DefaultClickableElementsQuery`; new callers should depend on `ClickableElementsQuery`. */
   findClickableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    if (!viewHierarchy) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const clickables: Element[] = [];
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (this.isClickableNode(nodeProperties)) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            clickables.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    return clickables;
+    return new DefaultClickableElementsQuery(this.parser).findClickableElements(viewHierarchy);
   }
 
   /**
@@ -1443,219 +1319,9 @@ export class DefaultElementFinder implements ElementFinder {
     return clickables;
   }
 
-  /**
-   * Find child elements within a parent element's bounds
-   * @param viewHierarchy - The view hierarchy to search
-   * @param parentElement - The parent element
-   * @returns Array of child elements
-   */
-  findChildElements(viewHierarchy: ViewHierarchyResult, parentElement: Element): Element[] {
-    if (!viewHierarchy || !parentElement) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const childElements: Element[] = [];
-    const parentBounds = parentElement.bounds;
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeBounds = this.parser.parseBounds(rawNodeBounds(node));
-
-        if (!nodeBounds) {
-          return;
-        }
-
-        // Check if the node is within the parent's bounds but not the parent itself
-        const isWithin =
-          nodeBounds.left >= parentBounds.left &&
-          nodeBounds.top >= parentBounds.top &&
-          nodeBounds.right <= parentBounds.right &&
-          nodeBounds.bottom <= parentBounds.bottom;
-
-        const isNotParent =
-          nodeBounds.left !== parentBounds.left ||
-          nodeBounds.top !== parentBounds.top ||
-          nodeBounds.right !== parentBounds.right ||
-          nodeBounds.bottom !== parentBounds.bottom;
-
-        if (isWithin && isNotParent) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            childElements.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    // Sort elements by vertical position
-    childElements.sort((a, b) => a.bounds.top - b.bounds.top);
-
-    return childElements;
-  }
-
-  /**
-   * Find elements that look like spannable text elements
-   * @param element - The parent element to search within
-   * @returns Array of spannable elements or null if none found
-   */
-  findSpannables(element: Element): Element[] | null {
-    if (!element) {
-      return null;
-    }
-
-    // Common classes for spannable text elements in Android
-    const spannableClasses = [
-      "android.widget.TextView",
-      "android.widget.EditText",
-      "android.widget.Button",
-      "android.widget.CheckBox",
-      "android.widget.RadioButton",
-      "android.widget.Switch",
-      "android.widget.Spinner",
-    ];
-
-    // Check if the element itself is a spannable
-    if (
-      element.class &&
-      spannableClasses.some((cls) => element.class?.includes(cls)) &&
-      element.text
-    ) {
-      return [element];
-    }
-
-    // Find all spannable children
-    const spannables: Element[] = [];
-
-    // Process each child if the node structure is available
-    if (element.node) {
-      const children = element.node;
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          this.collectSpannableArrayChild(child, spannableClasses, spannables);
-        }
-      } else if (typeof children === "object") {
-        const parsedNode = this.parser.parseNodeBounds(children);
-        this.collectDescendantSpannables(parsedNode, spannables);
-      }
-    }
-
-    return spannables.length > 0 ? spannables : null;
-  }
-
-  private collectSpannableArrayChild(
-    child: Record<string, unknown>,
-    spannableClasses: string[],
-    spannables: Element[],
-  ): void {
-    const parsedNode = this.parser.parseNodeBounds(child);
-    if (
-      parsedNode &&
-      parsedNode.class &&
-      spannableClasses.some((cls) => parsedNode.class?.includes(cls)) &&
-      parsedNode.text
-    ) {
-      spannables.push(parsedNode);
-    }
-
-    // Recursively search for spannables in this child
-    this.collectDescendantSpannables(parsedNode, spannables);
-  }
-
-  private collectDescendantSpannables(parsedNode: Element | null, spannables: Element[]): void {
-    if (parsedNode) {
-      const childSpannables = this.findSpannables(parsedNode);
-      if (childSpannables) {
-        spannables.push(...childSpannables);
-      }
-    }
-  }
-
-  /**
-   * Find a focused text input in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns The focused text input element or null if not found
-   */
-  findFocusedTextInput(viewHierarchy: any): any {
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatch = this.findFocusedTextInputInRoots(rootNodes, ANDROID_INPUT_CLASSES);
-    if (mainMatch) {
-      return mainMatch;
-    }
-
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const windowMatch = this.findFocusedTextInputInRoots(windowRoots, ANDROID_INPUT_CLASSES);
-      if (windowMatch) {
-        return windowMatch;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Check if an element is currently focused based on view hierarchy attributes
-   * @param element - The element to check
-   * @returns True if the element appears to be focused
-   */
-  isElementFocused(element: any): boolean {
-    // Check for focus-related attributes
-    const focused = element.focused === "true" || element.focused === true;
-    const selected = element.selected === "true" || element.selected === true;
-
-    // Some UI frameworks use 'isFocused' instead of 'focused'
-    const isFocused = element.isFocused === "true" || element.isFocused === true;
-
-    // Check if element has keyboard focus (for text inputs)
-    const hasKeyboardFocus =
-      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
-
-    return focused || selected || isFocused || hasKeyboardFocus;
-  }
-
-  /**
-   * Check whether an editable element owns input focus, excluding selection state.
-   * Android control-proxy nodes expose accessibility focus with the serialized
-   * `accessibility-focused` key; accept its raw camelCase spelling as well.
-   */
-  isElementKeyboardFocused(element: any): boolean {
-    const focused = element.focused === "true" || element.focused === true;
-    const isFocused = element.isFocused === "true" || element.isFocused === true;
-    const hasKeyboardFocus =
-      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
-    const accessibilityFocused =
-      element["accessibility-focused"] === "true" ||
-      element["accessibility-focused"] === true ||
-      element.accessibilityFocused === "true" ||
-      element.accessibilityFocused === true;
-
-    return focused || isFocused || hasKeyboardFocus || accessibilityFocused;
-  }
-
-  /**
-   * Validate that an element with optional text matches expectations
-   * @param foundElement - The element found by index
-   * @param expectedText - Optional expected text for validation
-   * @returns True if the element matches expectations
-   */
-  validateElementText(
-    foundElement: { element: Element; text?: string },
-    expectedText?: string,
-  ): boolean {
-    if (!expectedText) {
-      return true; // No text validation required
-    }
-
-    if (!foundElement.text) {
-      return false; // Expected text but element has no text
-    }
-
-    // Use partial matching for text validation
-    return this.textMatcher.partialTextMatch(foundElement.text, expectedText, false);
+  /** Delegates to `DefaultFocusedInputQuery`; new callers should depend on `FocusedInputQuery`. */
+  findFocusedTextInput(viewHierarchy: ViewHierarchyResult): Element | null {
+    return new DefaultFocusedInputQuery(this.parser).findFocusedTextInput(viewHierarchy);
   }
 
   /**

@@ -214,7 +214,7 @@ function validatePhoneNumber(phoneNumber: string): string {
   return trimmed;
 }
 
-function validateSmsMessage(message: string): string {
+export function validateSmsMessage(message: string): string {
   // Newlines would terminate the command on the wire; carriage returns and NULs would too.
   if (/[\r\n\0]/.test(message)) {
     throw new ActionableError(
@@ -247,7 +247,7 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
       const token = await this.tokenReader.read();
       signal?.throwIfAborted();
-      const output = await this.transport.execute("localhost", this.port, token, commands, signal);
+      const output = await this.transport.execute("127.0.0.1", this.port, token, commands, signal);
       const acknowledgement = parseConsoleAcknowledgement(output, token !== null, commands.length);
       if (!acknowledgement.ok && acknowledgement.reason !== undefined) {
         throw new ActionableError(`Emulator console rejected command: ${acknowledgement.reason}`);

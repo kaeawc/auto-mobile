@@ -10,11 +10,11 @@ import {
   indeterminateSimulatorUninstallError,
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "./simulatorUninstallBound";
-import type { IosInstalledAppRecord } from "./iosInstalledApp";
+import { getIosInstalledAppBundleId, type IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { promises as fs } from "fs";
 import * as path from "path";
-import type { ClearAppDataResult } from "../../models";
+import { AppNotInstalledError, type ClearAppDataResult } from "../../models";
 import { errorMessage } from "../describeUnknownError";
 import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainerData";
 
@@ -25,8 +25,14 @@ export interface IosDeviceBackend {
    * `signal` is the request's cancellation signal; the ambient request signal is
    * always honoured as well. A cancellation seen before the uninstall is
    * dispatched rejects without removing the app.
+   * `terminateFirst` defaults to true for simulator best-effort termination.
+   * Physical-device uninstall has no pre-termination step.
    */
-  uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void>;
+  uninstallApp(
+    bundleId: string,
+    signal?: AbortSignal,
+    options?: { terminateFirst?: boolean },
+  ): Promise<void>;
 }
 
 export interface DeviceAppUninstaller {
@@ -54,19 +60,25 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: IosDeviceBackendDeps,
   ) {}
 
-  async uninstallApp(bundleId: string, signal?: AbortSignal): Promise<void> {
+  async uninstallApp(
+    bundleId: string,
+    signal?: AbortSignal,
+    options: { terminateFirst?: boolean } = {},
+  ): Promise<void> {
     const requestSignal = combineWithAmbientAbort(signal);
     requestSignal?.throwIfAborted();
-    try {
-      await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
-        timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
-        ...(requestSignal ? { signal: requestSignal } : {}),
-      });
-    } catch (error) {
-      // A cancellation is not a terminate failure to shrug off: continuing would
-      // remove the app for a request the caller already abandoned (issue #10077).
-      requestSignal?.throwIfAborted();
-      logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+    if (options.terminateFirst !== false) {
+      try {
+        await this.deps.simctl.terminateApp(bundleId, this.deviceId, {
+          timeoutMs: SIMULATOR_PRE_UNINSTALL_TERMINATE_TIMEOUT_MS,
+          ...(requestSignal ? { signal: requestSignal } : {}),
+        });
+      } catch (error) {
+        // A cancellation is not a terminate failure to shrug off: continuing would
+        // remove the app for a request the caller already abandoned (issue #10077).
+        requestSignal?.throwIfAborted();
+        logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+      }
     }
     // The terminate may have succeeded just as the request was cancelled; fence
     // the destructive step so it is never dispatched for a cancelled request.
@@ -88,7 +100,11 @@ export class PhysicalIosDeviceBackend implements IosDeviceBackend {
     private readonly deps: Pick<IosDeviceBackendDeps, "deviceAppUninstaller">,
   ) {}
 
-  uninstallApp(bundleId: string): Promise<void> {
+  uninstallApp(
+    bundleId: string,
+    _signal?: AbortSignal,
+    _options?: { terminateFirst?: boolean },
+  ): Promise<void> {
     return this.deps.deviceAppUninstaller.uninstallApp(this.deviceId, bundleId, false);
   }
 }
@@ -350,7 +366,7 @@ export interface IosClearDataReinstaller {
 }
 
 export interface IosClearDataBackendDeps {
-  simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs">;
+  simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs" | "listAppsOrThrow">;
   createReinstaller: () => IosClearDataReinstaller;
   rm?: typeof fs.rm;
 }
@@ -371,6 +387,13 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
 
     const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
     if (!containerPath) {
+      // Only a successful listing that lacks the bundle proves "not installed"; any other
+      // container miss (or an unreadable listing) stays a retryable failure.
+      if (await this.isConfirmedNotInstalled(bundleId)) {
+        throw new AppNotInstalledError(
+          `App ${bundleId} is not installed on iOS simulator ${this.deviceId}; install the app first`,
+        );
+      }
       return {
         success: false,
         packageName: bundleId,
@@ -394,6 +417,16 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     } catch (error) {
       logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
       return { success: false, packageName: bundleId, error: errorMessage(error) };
+    }
+  }
+
+  private async isConfirmedNotInstalled(bundleId: string): Promise<boolean> {
+    try {
+      const apps = await this.deps.simctl.listAppsOrThrow(this.deviceId);
+      return !apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
+    } catch (error) {
+      logger.warn(`[iOS] Could not list installed apps to classify ${bundleId}: ${error}`);
+      return false;
     }
   }
 }

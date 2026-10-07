@@ -20,7 +20,6 @@ import {
   WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/observe/waitForTimeout";
 import {
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../features/storage/fileTransferTimeout";
@@ -35,6 +34,7 @@ import {
   DEFAULT_TEXT_REQUEST_TIMEOUT_MS,
 } from "../features/action/textTransportTimeout";
 import * as yaml from "js-yaml";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 import { PLAN_YAML_LOAD_OPTIONS } from "../utils/plan/planYaml";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -252,9 +252,6 @@ const TOOL_TIMEOUT_FLOORS: ReadonlyMap<string, number> = new Map(
     barrier: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
     criticalSection: BARRIER_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
     explore: DEFAULT_EXPLORE_TIMEOUT_MS + WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-    stageSharedStorage: SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
-    stageSharedStorageFixtures:
-      SHARED_STORAGE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
     putAppFile: APP_FILE_PUSH_TIMEOUT_MS + FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
     setDeviceResources: DEFAULT_DEVICE_RESOURCE_TIMEOUT_MS + START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
     uninstallApp: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
@@ -389,8 +386,7 @@ function resolveObserveWaitBudgetMs(args: Record<string, unknown>): number {
 }
 
 function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: number): number {
-  // stageSharedStorage AND stageSharedStorageFixtures share files[], not a
-  // fixtures[] field. Canonical putAppFile also uses files[]; its legacy flat
+  // Canonical putAppFile uses files[]; its legacy flat
   // single-file shape, missing/invalid arrays, and empty arrays get one push.
   // Count without visiting entries, so even an enormous sparse array is cheap.
   const count = Array.isArray(args.files) ? Math.max(1, args.files.length) : 1;
@@ -401,7 +397,7 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
-/** Default device request timeout of a show/update, mirrored from the overlay tool. */
+/** Default device request timeout of a show/update, mirrored from the prototype tool. */
 const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
 
 function countObservationAssets(assets: readonly unknown[], count: number): number {
@@ -534,15 +530,8 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
           WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
         ),
     ],
-    [
-      "stageSharedStorage",
-      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
-    ],
-    [
-      "stageSharedStorageFixtures",
-      (args) => resolveFileTransferBudgetMs(args, SHARED_STORAGE_PUSH_TIMEOUT_MS),
-    ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
+    ["prototype", resolveOverlayAwaitBudgetMs],
     ["overlay", resolveOverlayAwaitBudgetMs],
   ]);
 
@@ -869,7 +858,7 @@ function addPlanStepBudgets(
 
 function parsePlanContentForBudget(planContent: string): Record<string, unknown> | undefined {
   try {
-    return asRecord(yaml.load(planContent, PLAN_YAML_LOAD_OPTIONS));
+    return asRecord(yaml.load(decodePlanYamlContent(planContent), PLAN_YAML_LOAD_OPTIONS));
   } catch (error) {
     // Invalid YAML is surfaced by executePlan itself as a structured error; the request
     // deadline just falls back to the floor.

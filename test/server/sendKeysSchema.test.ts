@@ -206,6 +206,24 @@ describe("sendKeysSchema", () => {
     expect(modeValues).toHaveLength(2);
   });
 
+  test("accepts an optional auto, ime or a11y clear mode and leaves it unset by default", () => {
+    for (const mode of ["auto", "ime", "a11y"]) {
+      expect(
+        sendKeysSchema.parse({ platform: "android", commands: [{ action: "clear", mode }] })
+          .commands[0],
+      ).toEqual({ action: "clear", mode });
+    }
+    expect(
+      sendKeysSchema.parse({ platform: "android", commands: [{ action: "clear" }] }).commands[0],
+    ).toEqual({ action: "clear" });
+    for (const mode of ["eventAll", "imeKeyEvents", "unknown"]) {
+      expect(
+        sendKeysSchema.safeParse({ platform: "android", commands: [{ action: "clear", mode }] })
+          .success,
+      ).toBe(false);
+    }
+  });
+
   test("rejects empty sequences and sequences over 100 commands", () => {
     expect(sendKeysSchema.safeParse({ platform: "ios", commands: [] }).success).toBe(false);
     expect(

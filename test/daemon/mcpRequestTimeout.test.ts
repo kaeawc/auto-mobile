@@ -1513,7 +1513,7 @@ describe("argument budget deadline gaps", () => {
         type: "mcp_request",
         method: "tools/call",
         timeoutMs,
-        params: { name: "overlay", arguments: args },
+        params: { name: "prototype", arguments: args },
       });
     const headroom = WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS;
     test("the default wait outlives the tool's own default timeout", () => {
@@ -1801,6 +1801,17 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
     });
     expect(resolvePlan(content)).toBe(3 * observeWaitMs(300_000) + HEADROOM_MS);
     expect(resolvePlan(content)).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("base64 plan budgets match plain YAML and oversized encoded content saturates", () => {
+    const yamlContent =
+      "name: p\nsteps:\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n";
+    const plainBudget = resolvePlan(yamlContent);
+    expect(plainBudget).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+    expect(resolvePlan(`base64:${Buffer.from(yamlContent).toString("base64")}`)).toBe(plainBudget);
+    expect(resolvePlan(`base64:${"A".repeat(MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS)}`)).toBe(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
   });
 
   test("parallel device tracks take the longest track's sum, not the total", () => {

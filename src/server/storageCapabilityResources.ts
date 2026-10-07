@@ -37,6 +37,7 @@ import {
   type ResolvedUserTarget,
   type UserTargetRequest,
 } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 // Single RFC 6570 template; the optional {?appId} query variant matches both the
 // bare capabilities URI and the app-scoped form (issue #4933 ordering note: a
@@ -68,7 +69,10 @@ export interface StorageCapabilityUserResolver {
 
 export interface StorageCapabilityDependencies {
   appFileCoverage?: AppFileProviderCoverageReader;
-  sharedStorageReadCoverage?: (platform: Platform) => SharedStorageReadCoverage;
+  sharedStorageReadCoverage?: (
+    platform: Platform,
+    domain?: "user_files" | "media_library",
+  ) => SharedStorageReadCoverage;
   adbFactory?: AdbClientFactory;
   probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
@@ -166,7 +170,7 @@ async function resolveKeystoreDiscovery(
 
 function buildUri(deviceId: string, appId?: string): string {
   const base = `automobile:devices/${deviceId}/storage/capabilities`;
-  return appId ? `${base}?appId=${encodeURIComponent(appId)}` : base;
+  return appId ? `${base}?appId=${encodeUriSegment(appId)}` : base;
 }
 
 function resolveProviderCoverage(dependencies: StorageCapabilityDependencies) {
@@ -179,10 +183,11 @@ function resolveProviderCoverage(dependencies: StorageCapabilityDependencies) {
 function resolveSharedReadCoverage(
   dependencies: StorageCapabilityDependencies,
   platform: Platform,
+  domain: "user_files" | "media_library" = "user_files",
 ) {
   return dependencies.sharedStorageReadCoverage
-    ? dependencies.sharedStorageReadCoverage(platform)
-    : getSharedStorageReadService().describeReadCoverage?.(platform);
+    ? dependencies.sharedStorageReadCoverage(platform, domain)
+    : getSharedStorageReadService().describeReadCoverage?.(platform, domain);
 }
 
 /**
@@ -229,6 +234,11 @@ export async function getStorageCapabilitiesResource(
     );
     context.providerCoverage = resolveProviderCoverage(dependencies);
     context.sharedStorageReadCoverage = resolveSharedReadCoverage(dependencies, device.platform);
+    context.mediaLibraryReadCoverage = resolveSharedReadCoverage(
+      dependencies,
+      device.platform,
+      "media_library",
+    );
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
     }

@@ -12,23 +12,45 @@ import {
   type ObserverSessionStore,
 } from "./observerSessionRegistry";
 import {
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   DaemonRequest,
 } from "./types";
-import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
+import {
+  DeviceLabelMap,
+  type LivenessClaimOutcome,
+  type LivenessReleaseOutcome,
+  Session,
+  type SessionReleaseSnapshot,
+} from "./sessionManager";
+import type { LivenessLeasePhase, LivenessLeaseState } from "./livenessOwnerLease";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
 import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+  DAEMON_DEVICE_LEASE_STATUS_METHOD,
+  DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
+import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
+import {
+  daemonDeviceLeaseActivitySources,
+  daemonDeviceLeaseRelinquishPort,
+  type DeviceLeaseRelinquishPort,
+} from "./deviceLeaseActivitySources";
+import { decideOwnerRelinquish } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -45,6 +67,10 @@ export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  /** Overrides the production lease-activity sources (tests). */
+  getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
+  /** Overrides the production lease-relinquish policy and release (tests). */
+  getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
@@ -55,9 +81,15 @@ export interface DaemonStateAccess {
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
     recordHeartbeat?(sessionId: string): void;
     /** Claim the token permitted to refresh this session's liveness. */
-    claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<boolean>;
+    claimLivenessOwnership?(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome>;
+    releaseLivenessOwnership?(
+      sessionId: string,
+      ownerToken: string,
+    ): Promise<LivenessReleaseOutcome>;
     /** Verify that a keeper still owns the token permitted to refresh liveness. */
     hasLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
+    /** Lease phase (live, suspect, lapsed) and time remaining in it; absent for `cli-idle` (#10051). */
+    getSessionLeaseState?(sessionId: string): LivenessLeaseState | undefined;
     /** Recover daemon-local ownership only when no token is currently recorded. */
     claimUnownedLivenessOwnership?(sessionId: string, ownerToken: string): boolean;
     /** Opt a one-shot `--cli`-owned session out of the heartbeat contract (#6870). */
@@ -120,7 +152,13 @@ export type DaemonMethodResult = {
   success: boolean;
   result?: Record<string, unknown>;
   error?: string;
-  code?: typeof DAEMON_SESSION_NOT_FOUND_CODE | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE;
+  code?:
+    | typeof DAEMON_SESSION_NOT_FOUND_CODE
+    | typeof DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    | typeof DAEMON_LIVENESS_OWNER_UNOWNED_CODE
+    | typeof DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
+    | typeof DAEMON_LIVENESS_OWNER_CONFLICT_CODE
+    | typeof DAEMON_LIVENESS_OWNER_IS_PROXY_CODE;
 };
 
 /** Device-session listing entry; a quarantined UUID cannot be subscribed to until identity resolves. */
@@ -209,9 +247,19 @@ export async function handleDaemonRequest(
     };
   }
 
+  return handleInitializedDaemonRequest(request, state, executions);
+}
+
+async function handleInitializedDaemonRequest(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+  executions?: SessionExecutionCanceller,
+): Promise<DaemonMethodResult> {
   switch (request.method) {
     case DAEMON_REGISTER_SESSION_METHOD:
       return handleRegisterSession(request, state);
+    case DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD:
+      return handleReleaseLivenessOwnership(request, state);
     case DAEMON_HEARTBEAT_METHOD:
       return handleHeartbeat(request, state);
     case "daemon/refreshDevices":
@@ -226,12 +274,56 @@ export async function handleDaemonRequest(
       return handleReleaseSession(request, state, executions);
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
       return handleListDeviceSessions(request, state);
+    case DAEMON_DEVICE_LEASE_STATUS_METHOD:
+      return handleDeviceLeaseStatus(request, state);
+    case DAEMON_RELINQUISH_DEVICE_LEASE_METHOD:
+      return handleRelinquishDeviceLease(request, state);
     default:
       return {
         success: false,
         error: `Unsupported daemon method: ${request.method}`,
       };
   }
+}
+
+async function handleReleaseLivenessOwnership(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z
+    .object({
+      sessionId: z.string().min(1),
+      livenessOwnerToken: z.string().refine((token) => token.trim().length > 0),
+    })
+    .safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid releaseLivenessOwnership parameters: ${parsed.error.message}`,
+    };
+  }
+  const { sessionId, livenessOwnerToken } = parsed.data;
+  const outcome = await state
+    .getSessionManager()
+    .releaseLivenessOwnership?.(sessionId, livenessOwnerToken);
+  if (outcome === "not-found") {
+    return {
+      success: false,
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+      error: `Session not found: ${sessionId}`,
+    };
+  }
+  if (outcome === "not-owner" || outcome === undefined) {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
+      error: `Session ${sessionId}'s liveness can only be released by its current owner token; nothing changed.`,
+    };
+  }
+  return {
+    success: true,
+    result: { sessionId, alreadyUnowned: outcome === "already-unowned" },
+  };
 }
 
 async function handleHeartbeat(
@@ -245,6 +337,7 @@ async function handleHeartbeat(
         idleTimeoutMs?: number;
         livenessOwnerToken?: string;
         claimLivenessOwnership?: boolean;
+        livenessOwnerKind?: string;
       }
     | undefined;
   const sessionId = heartbeatParams?.sessionId;
@@ -269,47 +362,43 @@ async function handleHeartbeat(
       code: DAEMON_SESSION_NOT_FOUND_CODE,
     };
   }
+  const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
+  if (keeperRefusal) {
+    return keeperRefusal;
+  }
   const livenessOwnerToken =
     typeof heartbeatParams?.livenessOwnerToken === "string" &&
     heartbeatParams.livenessOwnerToken.length > 0
       ? heartbeatParams.livenessOwnerToken
       : undefined;
   const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
-  if (!livenessOwnerToken && session.livenessOwnerToken !== undefined) {
+  if (
+    !livenessOwnerToken &&
+    (session.livenessOwnerToken !== undefined || session.livenessOwnershipClaims?.size)
+  ) {
     // Tokenless clients predate liveness ownership. Keep them compatible
     // only until a token-bearing owner has claimed this session; afterward
     // they are stale by definition and must not change policy or deadlines.
     return { success: true, result: { sessionId } };
   }
   if (livenessOwnerToken) {
-    const ownsLiveness = claimsLivenessOwnership
-      ? ((await manager.claimLivenessOwnership?.(sessionId, livenessOwnerToken)) ?? false)
-      : (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false) ||
-        (manager.claimUnownedLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false);
-    // A claim can yield while release ends admission or replaces this UUID.
-    // Keep the request bound to the device session admitted above.
-    const currentSession = manager.getSession(sessionId);
-    if (
-      !currentSession ||
-      currentSession !== session ||
-      isSessionReleasing(manager, sessionId, currentSession)
-    ) {
-      return {
-        success: false,
-        error: `Session not found: ${sessionId}`,
-        code: DAEMON_SESSION_NOT_FOUND_CODE,
-      };
-    }
-    if (!ownsLiveness) {
-      // A stale reconnect must be a complete liveness no-op: it cannot
-      // restore a policy or extend lastUsedAt/lastHeartbeat/expiresAt.
-      return claimsLivenessOwnership
-        ? { success: true, result: { sessionId } }
-        : {
-            success: false,
-            code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
-            error: `The token no longer owns session ${sessionId}'s liveness. Re-claim with a fresh token and --claim-liveness-ownership, or stop the keeper.`,
-          };
+    const outcome = await resolveLivenessOwnership(
+      manager,
+      sessionId,
+      livenessOwnerToken,
+      claimsLivenessOwnership,
+    );
+    // No authorization crosses an await: check the session and owner at the final
+    // synchronous boundary before changing policy or recording the heartbeat.
+    const rejection = rejectHeartbeatWithoutOwnership(
+      manager,
+      session,
+      sessionId,
+      livenessOwnerToken,
+      outcome,
+    );
+    if (rejection) {
+      return rejection;
     }
     if (!claimsLivenessOwnership) {
       // A verified keeper proves only that its current owner is still
@@ -357,6 +446,116 @@ async function handleHeartbeat(
   }
   manager.recordHeartbeat?.(sessionId);
   return { success: true, result: { sessionId } };
+}
+
+/**
+ * A proxy owns a session when a token has claimed it under the strict heartbeat policy: stdio/HTTP
+ * proxies claim with `heartbeat`, while one-shot `--cli` owners move the session to `cli-idle`.
+ */
+function isProxyOwnedSession(session: Session): boolean {
+  return session.livenessPolicy === "heartbeat" && session.livenessOwnerToken !== undefined;
+}
+
+/**
+ * The external CLI keeper is for one-shot CLI sessions only. Refuse it on a proxy-owned session
+ * whatever its token or lease state, before any ownership or policy logic runs, so the refusal
+ * changes nothing on the session (#10054). Requests without the keeper marker are unaffected.
+ */
+export function refuseCliKeeperOnProxySession(
+  livenessOwnerKind: string | undefined,
+  session: Session,
+): DaemonMethodResult | undefined {
+  if (livenessOwnerKind !== CLI_KEEPER_LIVENESS_OWNER_KIND || !isProxyOwnedSession(session)) {
+    return undefined;
+  }
+  return {
+    success: false,
+    code: DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
+    error: `Session ${session.sessionId} is owned by an MCP proxy, which is the only liveness owner for its sessions, so this heartbeat was rejected and nothing changed. The external heartbeat keeper is for one-shot CLI sessions only. Let the harness's proxy keep the session alive and check its state with \`--daemon session-info ${session.sessionId}\`.`,
+  };
+}
+
+/**
+ * Verify the resolved ownership outcome at the synchronous heartbeat mutation boundary.
+ * Returns the failure to answer with, or undefined
+ * when the token owns the session. A rejected claim is a complete liveness
+ * no-op: it cannot change the owner, restore a policy, or extend
+ * lastUsedAt/lastHeartbeat/expiresAt (#10050).
+ */
+function rejectHeartbeatWithoutOwnership(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  session: Session,
+  sessionId: string,
+  livenessOwnerToken: string,
+  outcome: LivenessClaimOutcome,
+): DaemonMethodResult | undefined {
+  // A claim can yield while release ends admission or replaces this UUID.
+  // Keep the request bound to the device session admitted above.
+  const currentSession = manager.getSession(sessionId);
+  if (
+    outcome === "not-found" ||
+    !currentSession ||
+    currentSession !== session ||
+    isSessionReleasing(manager, sessionId, currentSession)
+  ) {
+    return {
+      success: false,
+      error: `Session not found: ${sessionId}`,
+      code: DAEMON_SESSION_NOT_FOUND_CODE,
+    };
+  }
+  const stillOwns =
+    manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ??
+    currentSession.livenessOwnerToken === livenessOwnerToken;
+  return livenessOwnershipFailure(
+    outcome === "claimed" && !stillOwns ? "superseded" : outcome,
+    sessionId,
+    currentSession.livenessOwnerToken !== undefined,
+  );
+}
+
+async function resolveLivenessOwnership(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  livenessOwnerToken: string,
+  claimsLivenessOwnership: boolean,
+): Promise<LivenessClaimOutcome> {
+  if (claimsLivenessOwnership) {
+    return (await manager.claimLivenessOwnership?.(sessionId, livenessOwnerToken)) ?? "superseded";
+  }
+  const ownsLiveness =
+    (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false) ||
+    (manager.claimUnownedLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false);
+  return ownsLiveness ? "claimed" : "superseded";
+}
+
+function livenessOwnershipFailure(
+  outcome: LivenessClaimOutcome,
+  sessionId: string,
+  hasOwner: boolean,
+): DaemonMethodResult | undefined {
+  if (outcome === "conflict") {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+      error: `Session ${sessionId} is owned by another liveness owner whose lease is still live, so this claim was rejected and nothing changed. Retry after the owner's lease expires, or claim with the owner's stable token.`,
+    };
+  }
+  if (outcome === "superseded" && !hasOwner) {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+      error: `Session ${sessionId}'s liveness is unowned. Explicitly claim ownership before sending keeper ticks; nothing changed.`,
+    };
+  }
+  if (outcome === "superseded") {
+    return {
+      success: false,
+      code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+      error: `The token no longer owns session ${sessionId}'s liveness. Another token has claimed it since. Re-claim with a fresh token and --claim-liveness-ownership once that owner's lease expires, or stop the keeper.`,
+    };
+  }
+  return undefined;
 }
 
 async function handleRefreshDevices(
@@ -444,9 +643,21 @@ async function handleSessionInfo(
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
     },
   };
+}
+
+/**
+ * Additive `liveness` field for `session-info` (#10051): `state` is `live`, or
+ * `suspect` while the owner's lease has expired and the session is held for its
+ * grace window; `remainingMs` counts down the lease (live) or the grace (suspect).
+ */
+function livenessInfo(
+  lease: LivenessLeaseState | undefined,
+): { liveness: { state: LivenessLeasePhase; remainingMs: number } } | Record<string, never> {
+  return lease ? { liveness: { state: lease.phase, remainingMs: lease.remainingMs } } : {};
 }
 
 async function handleActiveSessions(
@@ -562,4 +773,77 @@ async function handleListDeviceSessions(
       totalDeviceSessions: deviceSessions.length,
     },
   };
+}
+
+/**
+ * Report whether this daemon still uses a device, so another AutoMobile process
+ * can decide whether to take over its CtrlProxy forwarding lease (#10497).
+ */
+async function handleDeviceLeaseStatus(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid deviceLeaseStatus parameters: ${parsed.error.message}`,
+    };
+  }
+  const { deviceId } = parsed.data;
+  const manager = state.getSessionManager();
+  const sources =
+    state.getDeviceLeaseActivitySources?.() ??
+    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  return {
+    success: true,
+    result: {
+      pid: process.pid,
+      deviceId,
+      ...readDeviceLeaseActivity(sources, deviceId),
+    },
+  };
+}
+
+/**
+ * Give up this daemon's CtrlProxy forwarding lease on a device when it no longer
+ * uses it, so another AutoMobile process can take it (#10497). The use check and
+ * the release start in one synchronous step, so a tool call or CtrlProxy request
+ * this daemon begins afterwards cannot lose the lease to the requester; it builds
+ * a fresh client that competes for the lease again (#10506 review).
+ */
+async function handleRelinquishDeviceLease(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid relinquishDeviceLease parameters: ${parsed.error.message}`,
+    };
+  }
+  const { deviceId } = parsed.data;
+  const manager = state.getSessionManager();
+  const sources =
+    state.getDeviceLeaseActivitySources?.() ??
+    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
+  const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };
+  const decision = decideOwnerRelinquish(status, port.idleMs);
+  if (!decision.release) {
+    return {
+      success: true,
+      result: {
+        ...status,
+        released: false,
+        reason: decision.reason,
+        ...(decision.transient ? { transient: true } : {}),
+      },
+    };
+  }
+  // No await between the use check above and this call: release evicts the
+  // device's client synchronously before its first await.
+  await port.release(deviceId);
+  return { success: true, result: { ...status, released: true, reason: decision.reason } };
 }

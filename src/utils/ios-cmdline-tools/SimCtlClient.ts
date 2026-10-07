@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "./simctlArgs";
 import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
@@ -841,7 +842,7 @@ export class SimCtlClient implements SimCtl {
       throw new Error("Command cannot be empty");
     }
 
-    const fullArgs = ["simctl", ...args];
+    const fullArgs = buildSimctlArgs(args);
     logger.debug(`[iOS] Starting command: xcrun ${fullArgs.join(" ")}`);
     return this.spawnProcess("xcrun", fullArgs, options);
   }
@@ -879,7 +880,7 @@ export class SimCtlClient implements SimCtl {
     }
     const command = displayCommand ?? args.map((arg) => JSON.stringify(arg)).join(" ");
     const hostArgs = args;
-    const localArgs = ["simctl", ...hostArgs];
+    const localArgs = buildSimctlArgs(hostArgs);
 
     const fullCommand = `xcrun simctl ${command}`;
     const startTime = this.timer.now();
@@ -2950,7 +2951,7 @@ export class SimCtlClient implements SimCtl {
     path: string,
     context: ScreenshotCaptureContext,
   ): Promise<Buffer> {
-    const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, path];
+    const args = buildSimctlArgs(["io", deviceId, "screenshot", `--display=${display}`, path]);
     const captureSignal = context.signal;
     const errors: Buffer[] = [];
     const stderrText = (): string => Buffer.concat(errors).toString();

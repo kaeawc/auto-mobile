@@ -9,6 +9,9 @@ public struct WebSocketResponse: Codable, Sendable {
     public let success: Bool?
     public let totalTimeMs: Int64?
     public let error: String?
+    /// Additive machine-readable companion to `error` (see `CommandError.wireCode`); absent on
+    /// errors without one, so older hosts and golden envelopes are unchanged.
+    public let errorCode: String?
     /// Present only on a runner_busy error response.
     public let blockingCommandType: String?
     public let blockingElapsedMs: Int64?
@@ -34,6 +37,7 @@ public struct WebSocketResponse: Codable, Sendable {
         success: Bool? = nil,
         totalTimeMs: Int64? = nil,
         error: String? = nil,
+        errorCode: String? = nil,
         blockingCommandType: String? = nil,
         blockingElapsedMs: Int64? = nil,
         blockingDeadlineRemainingMs: Int64? = nil,
@@ -51,6 +55,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.success = success
         self.totalTimeMs = totalTimeMs
         self.error = error
+        self.errorCode = errorCode
         self.blockingCommandType = blockingCommandType
         self.blockingElapsedMs = blockingElapsedMs
         self.blockingDeadlineRemainingMs = blockingDeadlineRemainingMs
@@ -92,7 +97,8 @@ public struct WebSocketResponse: Codable, Sendable {
         type: String,
         requestId: String?,
         error: String,
-        totalTimeMs: Int64? = nil
+        totalTimeMs: Int64? = nil,
+        errorCode: String? = nil
     )
         -> WebSocketResponse
     {
@@ -101,7 +107,8 @@ public struct WebSocketResponse: Codable, Sendable {
             requestId: requestId,
             success: false,
             totalTimeMs: totalTimeMs,
-            error: error
+            error: error,
+            errorCode: errorCode
         )
     }
 
@@ -115,6 +122,7 @@ public struct WebSocketResponse: Codable, Sendable {
             success: success,
             totalTimeMs: totalTimeMs ?? fallbackTotalTimeMs,
             error: error,
+            errorCode: errorCode,
             blockingCommandType: blockingCommandType,
             blockingElapsedMs: blockingElapsedMs,
             blockingDeadlineRemainingMs: blockingDeadlineRemainingMs,

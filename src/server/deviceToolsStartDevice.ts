@@ -1,8 +1,9 @@
+import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
-import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
@@ -24,8 +25,10 @@ import {
   RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
+import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -52,6 +55,7 @@ import {
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
   runOperationWithinDeadline,
+  setAcquisitionStage,
   startDeviceSchema,
   validateBootIdentity,
   validatePooledDeviceMapping,
@@ -105,6 +109,7 @@ async function waitForDevicePreparation<T>(
 }
 
 type BootPreparationOptions = {
+  autolockEnabled: boolean;
   deviceMatcher: DeviceMatcher;
   bootDeadlineMs: number;
   requestedIdentity: string;
@@ -248,7 +253,9 @@ const bootAndPrepareDevice = async (
     state.boot.device.deviceId,
   );
   const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
+    setAcquisitionStage(budgets, "preparing the automation runner");
     const readinessResult = await prepareStartDeviceRunnerReadiness({
+      autolockEnabled: options.autolockEnabled,
       boot: state.boot!,
       args,
       operationName: budgets.operationName,
@@ -309,6 +316,7 @@ async function waitForBootedIosRunnerCleanup(
   deps: DeviceToolsDependencies,
   { state, signal, requestedIdentity }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "waiting for iOS runner removal cleanup");
   IOSCtrlProxyClient.resumeAfterDeviceStart(state.boot!.device.deviceId);
   // Removal cleanup can still be draining after simctl reports the new boot.
   await waitForDevicePreparation(
@@ -337,6 +345,7 @@ async function reserveBootReadiness(
   daemonState: DaemonState,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "reserving the device for readiness");
   const initialReservations: DeviceReadinessReservation[] = [];
   let reservationAccepted = false;
   let reservationAbandoned = false;
@@ -405,6 +414,7 @@ async function bindPreparedDevice(
     preparation,
     readinessResult,
     acquisitionReadinessKey,
+    autolockEnabled,
   }: BootPreparationOptions & {
     daemonState: DaemonState;
     preparation: BootPreparationState;
@@ -412,7 +422,11 @@ async function bindPreparedDevice(
     acquisitionReadinessKey: string;
   },
 ): Promise<string> {
+  setAcquisitionStage(budgets, "binding the device session");
   try {
+    // The System UI ANR recovery branch below skips `runOperationWithinDeadline`,
+    // so check cancellation before any binding side effect (#6034).
+    await throwIfBindingAborted(signal, readinessResult);
     state.boot = readinessResult.boot;
     preparation.recovered = readinessResult.recovered;
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
@@ -444,9 +458,7 @@ async function bindPreparedDevice(
     );
     // Recovery must revalidate the caller through the same autolock path;
     // a preserved UUID alone is not proof that this client owns the session.
-    // Read the flag once so the reuse decision below cannot disagree with
-    // the readiness recording that follows it.
-    const autolockEnabled = isDevicePoolAutolockEnabled();
+    // Reuse the acquisition snapshot for recovery, binding, and readiness recording.
     const boundSessionId =
       readinessResult.preservedSessionId && !autolockEnabled
         ? readinessResult.preservedSessionId
@@ -474,6 +486,7 @@ async function bindPreparedDevice(
                     releaseReadinessReservations.map((reservation) => reservation.owner),
                   ),
                   verifiedAndroidAvdIdentity: verifiedWarmAndroidAvdIdentity,
+                  autolockEnabled,
                   achievedReadiness: "automationReady",
                   collectCancellationSettlement: (settlement) => {
                     state.bindingSettlements.push(settlement);
@@ -485,6 +498,8 @@ async function bindPreparedDevice(
             },
           );
     if (readinessResult.preservedSessionId && !autolockEnabled) {
+      // Preserved-session validation can outlast the deadline; recheck before committing.
+      await throwIfBindingAborted(signal, readinessResult);
       // #6227 round 7: without autolock, System UI ANR recovery bypasses
       // `bindBootedDeviceSession` (and therefore its own
       // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -512,6 +527,28 @@ async function bindPreparedDevice(
   } finally {
     readinessResult.releaseRecoveryRouteLease?.();
   }
+}
+
+/**
+ * Reject a binding whose acquisition was already cancelled, retiring a System UI
+ * ANR replacement the same way a failed recovered-readiness check does.
+ */
+async function throwIfBindingAborted(
+  signal: AbortSignal | undefined,
+  readinessResult: Awaited<ReturnType<typeof prepareStartDeviceRunnerReadiness>>,
+): Promise<void> {
+  if (!signal?.aborted) {
+    return;
+  }
+  try {
+    await readinessResult.retireReplacement?.();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to retire System UI recovery replacement after cancellation: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  signal.throwIfAborted();
 }
 
 async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
@@ -570,11 +607,13 @@ async function bindBootedDeviceSession(
   sourceImage?: DeviceInfo,
   childProcess?: ChildProcess | null,
   {
+    autolockEnabled = captureAutolockPolicy(getDeviceToolsDependencies().env),
     readinessReservationOwners,
     verifiedAndroidAvdIdentity,
     achievedReadiness = "automationReady",
     collectCancellationSettlement,
   }: {
+    autolockEnabled?: boolean;
     readinessReservationOwners?: ReadonlySet<symbol>;
     verifiedAndroidAvdIdentity?: DeviceInfo;
     achievedReadiness?: DeviceReadinessLevel;
@@ -584,7 +623,7 @@ async function bindBootedDeviceSession(
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
   const daemonState = DaemonState.getInstance();
-  if (isDevicePoolAutolockEnabled() && daemonState.isInitialized()) {
+  if (autolockEnabled && daemonState.isInitialized()) {
     const autolockSessionId = await daemonState
       .getDevicePool()
       .autolockDevice(
@@ -598,6 +637,7 @@ async function bindBootedDeviceSession(
         verifiedAndroidAvdIdentity,
         achievedReadiness,
         collectCancellationSettlement,
+        { autolockEnabled },
       );
     if (autolockSessionId) {
       // #6227 (round 9): readiness is recorded INSIDE `autolockDevice`, before
@@ -717,6 +757,29 @@ function buildBootedResponse(
   });
 }
 
+function validateCameraPosterPlatform(args: StartDeviceArgs): void {
+  if (args.cameraPosterPath !== undefined && args.platform !== "android") {
+    throw new ActionableError(
+      "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
+    );
+  }
+  if (args.cameraPosterQr !== undefined && args.platform !== "android") {
+    throw new ActionableError(
+      "cameraPosterQr is unsupported on iOS. Use a stopped Android emulator.",
+    );
+  }
+}
+
+/** Replace `cameraPosterQr` with the rendered poster's `cameraPosterPath`. */
+async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promise<T> {
+  const { cameraPosterQr, ...rest } = args;
+  if (cameraPosterQr === undefined) {
+    return args;
+  }
+  const writer = getDeviceToolsDependencies().cameraPosterQrWriter ?? new FileQrPosterWriter();
+  return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
+}
+
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   const { prepareDevice, stripInternalAcquisitionParams } = hooks;
 
@@ -730,37 +793,53 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
+    validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
-    const target = {
-      ...args,
-      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
-    };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
-    return await prepareDevice(
-      target,
-      {
-        bootTimeoutMs: totalTimeoutMs,
-        automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
-        automationDeadlineMs: getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
-        operationName: "startDevice",
-        stableTarget:
-          args.platform === "android" && target.name && !args.deviceId
-            ? { platform: "android", stableId: target.name }
-            : args.platform === "ios" && args.deviceId
-              ? { platform: "ios", stableId: args.deviceId }
-              : undefined,
-        ...(args.platform === "android" && args.avdName && args.deviceId
-          ? {
-              androidAvdName: args.avdName,
-              requestedAndroidIdentifierPair: {
-                avdName: args.avdName,
-                deviceId: args.deviceId,
-              },
-            }
-          : {}),
-      },
-      progress,
+    return await runWithAcquisitionDeadline(
+      rawArgs,
+      getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
+      "startDevice",
+      async (deadlineMs, requestSignal, stage) => {
+        // Poster rendering runs under the acquisition deadline and cancellation.
+        const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
+          timer: getDeviceToolsDependencies().timer,
+          signal: requestSignal,
+          label: "startDevice camera poster",
+        });
+        const target = {
+          ...resolvedArgs,
+          ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+        };
+        return prepareDevice(
+          target,
+          {
+            bootTimeoutMs: totalTimeoutMs,
+            automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
+            automationDeadlineMs: deadlineMs,
+            stage,
+            operationName: "startDevice",
+            stableTarget:
+              args.platform === "android" && target.name && !args.deviceId
+                ? { platform: "android", stableId: target.name }
+                : args.platform === "ios" && args.deviceId
+                  ? { platform: "ios", stableId: args.deviceId }
+                  : undefined,
+            ...(args.platform === "android" && args.avdName && args.deviceId
+              ? {
+                  androidAvdName: args.avdName,
+                  requestedAndroidIdentifierPair: {
+                    avdName: args.avdName,
+                    deviceId: args.deviceId,
+                  },
+                }
+              : {}),
+          },
+          progress,
+          requestSignal,
+        );
+      },
     );
   };
 

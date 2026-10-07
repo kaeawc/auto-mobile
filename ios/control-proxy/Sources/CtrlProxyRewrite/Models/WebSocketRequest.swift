@@ -56,6 +56,8 @@ public enum WebSocketRequest: Decodable, Sendable {
     case getCurrentFocus(RequestEnvelope)
     case getTraversalOrder(RequestEnvelope)
     case addHighlight(RequestAddHighlight)
+    case magicTap(RequestEnvelope)
+    case sdkTrigger(RequestSdkTrigger)
     case getVoiceOverState(RequestEnvelope)
     case setVoiceOverState(RequestSetVoiceOverState)
 
@@ -157,6 +159,10 @@ public enum WebSocketRequest: Decodable, Sendable {
             self = try .getTraversalOrder(RequestEnvelope(from: decoder))
         case .addHighlight:
             self = try .addHighlight(RequestAddHighlight(from: decoder))
+        case .magicTap:
+            self = try .magicTap(RequestEnvelope(from: decoder))
+        case .sdkTrigger:
+            self = try .sdkTrigger(RequestSdkTrigger(from: decoder))
         case .getVoiceOverState:
             self = try .getVoiceOverState(RequestEnvelope(from: decoder))
         case .setVoiceOverState:
@@ -231,6 +237,8 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .getCurrentFocus: return .getCurrentFocus
         case .getTraversalOrder: return .getTraversalOrder
         case .addHighlight: return .addHighlight
+        case .magicTap: return .magicTap
+        case .sdkTrigger: return .sdkTrigger
         case .getVoiceOverState: return .getVoiceOverState
         case .setVoiceOverState: return .setVoiceOverState
         case .listPreferenceFiles: return .listPreferenceFiles
@@ -271,11 +279,13 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .recentApps(payload),
              let .getCurrentFocus(payload),
              let .getTraversalOrder(payload),
+             let .magicTap(payload),
              let .getVoiceOverState(payload),
              let .listPreferenceFiles(payload),
              let .getSdkCapabilities(payload):
             return payload
         case let .setVoiceOverState(payload): return payload
+        case let .sdkTrigger(payload): return payload
         case let .setHingeAngle(payload): return payload
         case let .tapCoordinates(payload): return payload
         case let .swipe(payload): return payload

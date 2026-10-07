@@ -23,6 +23,22 @@ import { FakeToolSelectionProfileProvenanceStore } from "../fakes/FakeToolSelect
  * instance.
  */
 describe("InMemoryToolSelectionProfileRegistry (#6148)", () => {
+  test("compact metadata preferences are live-only and independent of structured content", () => {
+    for (const registry of [
+      new InMemoryToolSelectionProfileRegistry(),
+      new PersistentToolSelectionProfileRegistry(new FakeToolSelectionProfileProvenanceStore()),
+    ]) {
+      registry.setActionsCompactMetadata("profile-a", false);
+      registry.setActionsCompactMetadata("profile-b", true);
+      registry.setToolResultsNoStructuredContent("profile-a", true);
+      registry.setActionsCompactMetadata(" ", false);
+      expect(registry.getActionsCompactMetadata("profile-a")).toBe(false);
+      expect(registry.getActionsCompactMetadata("profile-b")).toBe(true);
+      expect(registry.getActionsCompactMetadata("profile-c")).toBeUndefined();
+      expect(registry.getActionsCompactMetadata(" ")).toBeUndefined();
+      expect(registry.getToolResultsNoStructuredContent("profile-a")).toBe(true);
+    }
+  });
   test("recognizes a recorded uuid", () => {
     const registry = new InMemoryToolSelectionProfileRegistry();
     registry.record("minted-uuid");
@@ -149,12 +165,14 @@ describe("PersistentToolSelectionProfileRegistry (#6225)", () => {
     const before = new PersistentToolSelectionProfileRegistry(sharedRepo);
     before.record("minted-uuid");
     before.setToolResultsNoStructuredContent("minted-uuid", true);
+    before.setActionsCompactMetadata("minted-uuid", false);
 
     const after = new PersistentToolSelectionProfileRegistry(sharedRepo);
     await after.load();
 
     expect(after.has("minted-uuid")).toBe(true);
     expect(after.getToolResultsNoStructuredContent("minted-uuid")).toBeUndefined();
+    expect(after.getActionsCompactMetadata("minted-uuid")).toBeUndefined();
   });
 
   test("simulated daemon restart: a fabricated/never-minted value is still rejected after load()", async () => {

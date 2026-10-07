@@ -337,7 +337,10 @@ describe("scopeToFocus", () => {
   test("anchor scoping by resource-id keeps only the matched subtree", () => {
     const obs = androidFixture();
     const { result, focus } = scopeToFocus(obs, { resourceId: LIST });
-    expect(focus).toEqual({ by: "anchor", matched: true });
+    expect(focus).toEqual({
+      by: "anchor",
+      matched: true,
+    });
     expect(roots(result)).toHaveLength(1);
     expect(roots(result)[0]["resource-id"]).toBe(LIST);
     expect(countNodes(roots(result))).toBe(3); // list + 2 items
@@ -346,7 +349,10 @@ describe("scopeToFocus", () => {
   test("anchor scoping by substring text keeps the matching node's subtree", () => {
     const obs = androidFixture();
     const { result, focus } = scopeToFocus(obs, { text: "Title" });
-    expect(focus).toEqual({ by: "anchor", matched: true });
+    expect(focus).toEqual({
+      by: "anchor",
+      matched: true,
+    });
     expect(roots(result)).toHaveLength(1);
     expect(roots(result)[0]["resource-id"]).toBe(HEADER);
   });

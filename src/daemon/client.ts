@@ -126,6 +126,7 @@ const socketIdentityStatusSchema = z.object({
   releaseVersion: z.string().optional(),
   startedAt: z.number().finite().optional(),
   processGenerationToken: z.string().optional(),
+  processGenerationTokenUtc: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
   structuredSessionNotFound: z.boolean().optional(),
   acceptanceCapabilityFingerprint: z.string().nullable().optional(),

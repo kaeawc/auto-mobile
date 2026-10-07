@@ -166,7 +166,7 @@ describe("TapAnyElement", () => {
       expect(result.element).toBeNull();
     });
 
-    test("filters out element whose center is off-screen", () => {
+    test("filters out fully off-screen elements", () => {
       const offScreenElement = {
         bounds: { left: -200, top: -200, right: -100, bottom: -100 },
         text: "Hidden",
@@ -184,7 +184,7 @@ describe("TapAnyElement", () => {
       expect(result.element).toBeNull();
     });
 
-    test("keeps element whose center is on-screen", () => {
+    test("keeps elements with a visible part on-screen", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 
@@ -453,6 +453,27 @@ describe("TapAnyElement Android gesture dispatch", () => {
     expect(result.success).toBe(true);
     expect(calls).toHaveLength(2);
   });
+
+  test.each([undefined, 0] as const)(
+    "initial and retry taps stay inside the visible sliver (display=%s)",
+    async (displayId) => {
+      const element: Element = {
+        bounds: { left: 499, right: 509, top: 20, bottom: 40 },
+        clickable: true,
+        text: "Edge target",
+      };
+      const { tapAny, calls, observedHierarchy } = setup({ success: true }, false, element);
+      Object.assign(observedHierarchy, { displayId });
+      tapAny.setRefreshViewHierarchyForTesting(async () => observedHierarchy);
+      const result = await tapAny.execute({ action: "tap" });
+      expect(result.success).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(calls.map(({ x, y }) => ({ x, y }))).toEqual([
+        { x: 499, y: 30 },
+        { x: 499, y: 30 },
+      ]);
+    },
+  );
 
   test("unchanged hierarchy never retries a double tap or probes for a change", async () => {
     const { tapAny, calls } = setup();

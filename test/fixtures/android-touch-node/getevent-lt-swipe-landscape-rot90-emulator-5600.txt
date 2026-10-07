@@ -1,0 +1,24 @@
+# one swipe, mCurrentRotation=ROTATION_90 (user_rotation=1), finger moves natural (540,1500)->(540,900) = same physical motion as the portrait capture; on the rotated display that is (1500,540)->(900,540), i.e. a leftward swipe
+# NOTE: events were injected with sendevent; the kernel drops axes whose value did not change since the previous contact (here ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_PRESSURE, ABS_MT_TOUCH_MAJOR), and this node has no BTN_TOUCH key, so EV_KEY BTN_TOUCH is never reported.
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1
+[  190108.966127] EV_ABS       ABS_MT_TRACKING_ID   0000005c            
+[  190108.966127] EV_ABS       ABS_MT_POSITION_Y    00004fff            
+[  190108.966127] EV_SYN       SYN_REPORT           00000000            
+[  190109.061333] EV_ABS       ABS_MT_POSITION_Y    00004bff            
+[  190109.061333] EV_SYN       SYN_REPORT           00000000            
+[  190109.161108] EV_ABS       ABS_MT_POSITION_Y    000047ff            
+[  190109.161108] EV_SYN       SYN_REPORT           00000000            
+[  190109.277265] EV_ABS       ABS_MT_POSITION_Y    000043ff            
+[  190109.277265] EV_SYN       SYN_REPORT           00000000            
+[  190109.400336] EV_ABS       ABS_MT_POSITION_Y    00003fff            
+[  190109.400336] EV_SYN       SYN_REPORT           00000000            
+[  190109.496844] EV_ABS       ABS_MT_POSITION_Y    00003bff            
+[  190109.496844] EV_SYN       SYN_REPORT           00000000            
+[  190109.600316] EV_ABS       ABS_MT_POSITION_Y    000037ff            
+[  190109.600316] EV_SYN       SYN_REPORT           00000000            
+[  190109.740120] EV_ABS       ABS_MT_POSITION_Y    000033ff            
+[  190109.740120] EV_SYN       SYN_REPORT           00000000            
+[  190109.849312] EV_ABS       ABS_MT_POSITION_Y    00002fff            
+[  190109.849312] EV_SYN       SYN_REPORT           00000000            
+[  190109.984870] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190109.984870] EV_SYN       SYN_REPORT           00000000            

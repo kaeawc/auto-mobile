@@ -80,3 +80,26 @@ describe("FakeTimer async manual advancement", function () {
     expect(events).toEqual(["start@10", "end@10", "start@20", "end@20", "start@30", "end@30"]);
   });
 });
+
+test("injected event drain settles nested work before the next due event", async () => {
+  const timer = new FakeTimer();
+  const events: string[] = [];
+  let drained = false;
+  timer.setTimeout(() => {
+    events.push(`first@${timer.now()}`);
+    void Promise.resolve().then(() => {
+      timer.setTimeout(() => events.push(`nested@${timer.now()}`), 1);
+      drained = true;
+    });
+  }, 10);
+  timer.setTimeout(() => events.push(`last@${timer.now()}`), 20);
+  let drainCalls = 0;
+  await timer.advanceTimeAsync(30, async () => {
+    drainCalls++;
+    await Promise.resolve();
+  });
+  expect(drained).toBe(true);
+  expect(drainCalls).toBe(3);
+  expect(events).toEqual(["first@10", "nested@11", "last@20"]);
+  expect(timer.now()).toBe(30);
+});

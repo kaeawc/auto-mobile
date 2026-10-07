@@ -16,7 +16,6 @@ import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
  */
 
 import type { InsertTextState } from "./ctrlProxyProtocol";
-import { join } from "node:path";
 import WebSocket from "ws";
 import {
   AdbClientFactory,
@@ -120,8 +119,14 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState } from "../../../server/NetworkState";
-import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import {
+  buildNetworkMockRules,
+  NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  type NetworkMockPushResult,
+  type NetworkMockRuleSync,
+} from "../../../server/networkMockRules";
+import { pushNetworkMockRules } from "./networkMockRulesPush";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
@@ -144,6 +149,7 @@ import {
   ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
+  rethrowRealCtrlProxyWebSocketInTestError,
 } from "../DeviceServiceClient";
 import {
   observationStreamDeviceConnectionLostNotifier,
@@ -158,11 +164,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { screenshotTempIdToken } from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
 import {
-  readLockOwnerPid,
-  releaseExclusiveLock,
-  tryAcquireExclusiveLock,
-} from "../../../utils/fileLock";
-import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
+  FileCtrlProxyForwardLease,
+  NoOpCtrlProxyForwardLease,
+  type CtrlProxyForwardLease,
+  type ForwardLeaseReclaimResult,
+} from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -171,7 +177,7 @@ import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
-import { CtrlProxyFocus } from "./CtrlProxyFocus";
+import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
 import type { OverlaySpec } from "../../overlay/overlaySpec";
 import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
@@ -454,6 +460,15 @@ interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   previousProfileId?: string;
 }
 
+interface WsSetNetworkMockRulesResultMessage extends WsMessageBase {
+  type: "set_network_mock_rules_result";
+  requestId: string;
+  success?: boolean;
+  /** Absent: no app confirmed the rules. Present (even empty): the app compiled the list. */
+  rejectedMockIds?: string[];
+  rejectedReasons?: Record<string, string>;
+}
+
 interface WsKeyboardProfilesResultMessage extends WsMessageBase {
   type: "keyboard_profiles_result";
   requestId: string;
@@ -481,6 +496,7 @@ interface WsInsertTextResultMessage extends WsRequestBase {
 interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
   action: string;
+  approximated?: boolean;
 }
 
 interface WsSelectAllResultMessage extends WsRequestBase {
@@ -490,6 +506,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
+  alreadySatisfied?: boolean;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -970,6 +987,7 @@ type WebSocketMessage =
   | WsCommitTextResultMessage
   | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
+  | WsSetNetworkMockRulesResultMessage
   | WsKeyboardProfilesResultMessage
   | WsInsertTextStateResultMessage
   | WsInsertTextResultMessage
@@ -1146,7 +1164,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -1186,6 +1204,12 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     resourceId?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+  ): Promise<A11yActionResult>;
+
+  requestClickFocusedInput(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11yActionResult>;
 
   requestNodeAction(
@@ -1340,110 +1364,6 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 /** Isolation markers kept for hierarchy requests whose waiter already gave up. */
 const MAX_RETAINED_HIERARCHY_REQUEST_MARKERS = 64;
 
-/**
- * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
- * server is shared by AutoMobile processes, so its global forward listing alone
- * cannot identify which process owns a row.
- */
-interface CtrlProxyForwardLease {
-  tryAcquire(): boolean;
-  release(): void;
-  fork?(): CtrlProxyForwardLease;
-  /**
-   * PID of the process currently holding the lease, when a preceding
-   * {@link tryAcquire} call returned `false` (issue #6260). Lets the caller
-   * name the orphan in its actionable error instead of a bare "another
-   * process owns this" message the client cannot act on.
-   */
-  getLastOwnerPid(): number | undefined;
-}
-
-class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
-  private lockPath: string | null = null;
-  private readonly ownerToken = defaultIdGenerator.next();
-  private holders = 0;
-  private acquired = false;
-  private lastOwnerPid: number | undefined;
-
-  public constructor(private readonly deviceId: string) {}
-
-  private resolveLockPath(): string {
-    if (this.lockPath === null) {
-      // base64url makes arbitrary Android serials safe as one path segment.
-      this.lockPath = join(
-        // Agent-specific data directories are intentionally isolated, but a
-        // default ADB server is shared across agents for this OS user.
-        ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
-        `${Buffer.from(this.deviceId).toString("base64url")}.lock`,
-      );
-    }
-    return this.lockPath;
-  }
-
-  public tryAcquire(): boolean {
-    if (this.acquired) {
-      return true;
-    }
-    this.acquired = this.acquireHolder();
-    return this.acquired;
-  }
-
-  private acquireHolder(): boolean {
-    if (this.holders > 0) {
-      this.holders++;
-      return true;
-    }
-    // Shutdown recovery can evict a singleton while its setup remains in flight.
-    // Another client in this process must wait for that live lease, not reclaim it.
-    const acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
-      ownerToken: this.ownerToken,
-    });
-    this.holders = acquired ? 1 : 0;
-    this.lastOwnerPid = acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
-    return acquired;
-  }
-
-  public release(): void {
-    if (!this.acquired) {
-      return;
-    }
-    this.acquired = false;
-    this.releaseHolder();
-  }
-
-  private releaseHolder(): void {
-    this.holders--;
-    if (this.holders > 0) {
-      return;
-    }
-    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
-  }
-
-  public getLastOwnerPid(): number | undefined {
-    return this.lastOwnerPid;
-  }
-
-  /** A separate holder on the same process lease for one detached observer. */
-  public fork(): CtrlProxyForwardLease {
-    let acquired = false;
-    return {
-      tryAcquire: () => {
-        if (!acquired) {
-          acquired = this.acquireHolder();
-        }
-        return acquired;
-      },
-      release: () => {
-        if (acquired) {
-          acquired = false;
-          this.releaseHolder();
-        }
-      },
-      getLastOwnerPid: () => this.lastOwnerPid,
-    };
-  }
-}
-
 function portAllocationIdForClient(
   deviceId: string,
   transientObserver: boolean,
@@ -1455,12 +1375,22 @@ function portAllocationIdForClient(
 /**
  * Actionable message for a CtrlProxy forwarding-lease conflict (issue #6260).
  * Named the owning PID when known, so a client is pointed at the orphan
- * process rather than left to guess or, worse, blame the device.
+ * process rather than left to guess or, worse, blame the device. When the
+ * owner was asked and refused the takeover (issue #10497), the message names
+ * its socket and the reason, such as its live session.
  */
 function describeCtrlProxyForwardingLeaseConflict(
   deviceId: string,
   ownerPid: number | undefined,
+  refusal?: ForwardLeaseReclaimResult,
 ): string {
+  if (ownerPid !== undefined && refusal?.ownerSocketPath !== undefined) {
+    return (
+      `Another AutoMobile process (PID ${ownerPid}, socket ${refusal.ownerSocketPath}) owns ` +
+      `CtrlProxy forwarding for ${deviceId} and kept it because ${refusal.reason}. Release that ` +
+      `session or stop that process (\`kill ${ownerPid}\`), then retry.`
+    );
+  }
   if (ownerPid !== undefined) {
     return (
       `Another AutoMobile process (PID ${ownerPid}) owns CtrlProxy forwarding for ${deviceId}. ` +
@@ -1482,6 +1412,7 @@ function describeCtrlProxyForwardingLeaseConflict(
 function throwCtrlProxyForwardingLeaseConflict(
   deviceId: string,
   ownerPid: number | undefined,
+  refusal?: ForwardLeaseReclaimResult,
 ): never {
   if (ownerPid === process.pid) {
     // Same-process transient, NOT an orphan: shutdown recovery can evict a
@@ -1496,28 +1427,16 @@ function throwCtrlProxyForwardingLeaseConflict(
     // and let the caller's existing retry path recover once the lease frees.
     throw new Error(describeCtrlProxyForwardingLeaseConflict(deviceId, undefined));
   }
-  // Named explicitly (issue #6260): this exact string is matched by
+  // Named explicitly (issue #6260): this typed error is detected by
   // RunnerReadinessService to replace a generic, device-blaming
   // "runner did not become responsive" failure with the real, actionable
-  // cause — a stale/orphaned AutoMobile process still holding forwarding
-  // for this device, most commonly left behind by a `--daemon restart`
-  // that could not confirm the previous daemon stopped.
+  // cause, and to fail fast rather than retry to the deadline (#10485).
   throw new CtrlProxyForwardingLeaseConflictError(
-    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid),
+    describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid, refusal),
     ownerPid,
+    refusal?.ownerSocketPath,
+    refusal?.transient === true,
   );
-}
-
-class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
-  public tryAcquire(): boolean {
-    return true;
-  }
-
-  public release(): void {}
-
-  public getLastOwnerPid(): undefined {
-    return undefined;
-  }
 }
 
 /**
@@ -1678,6 +1597,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // request already on the wire, so a later response must be discarded rather than auto-pushed.
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   lateCancelledScreenshotRequestIds: Set<string> = new Set();
+  private readonly pendingFocusedInputClickIds: Set<string> = new Set();
 
   // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
   // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
@@ -1929,6 +1849,57 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
       }
     }
+  }
+
+  /** Devices whose singleton client holds the cross-process forwarding lease. */
+  public static getForwardLeaseHeldDeviceIds(): string[] {
+    return [...AndroidCtrlProxyClient.instances.entries()]
+      .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
+      .map(([deviceId]) => deviceId);
+  }
+
+  /**
+   * CtrlProxy use of a device by this process (#10497): requests in flight
+   * through its singleton and any detached observer, and time since the last
+   * request or since the lease was taken, whichever is later. `null` when
+   * this process neither holds the lease nor has used the device.
+   */
+  public static getForwardLeaseActivity(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+  ): { inFlightRequests: number; idleForMs: number | null } {
+    const clients = [
+      AndroidCtrlProxyClient.instances.get(deviceId),
+      ...[...AndroidCtrlProxyClient.activeObservers].filter(
+        (observer) => observer.device.deviceId === deviceId,
+      ),
+    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
+    const activities = clients.map((client) => client.getRequestActivity());
+    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
+    const lastTimes = [
+      ...activities.map((activity) => activity.lastActivityAt),
+      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
+    ].filter((time): time is number => time !== undefined);
+    return {
+      // A live detached observer is a read in progress even between its requests.
+      inFlightRequests:
+        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) + observers,
+      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+    };
+  }
+
+  /**
+   * Give up an idle device's forwarding lease (issue #10497): evict the
+   * singleton first so a new call builds a fresh client that re-acquires the
+   * lease, then close the old one, which removes its forward and releases it.
+   */
+  public static async releaseIdleForwardLease(deviceId: string): Promise<void> {
+    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    if (!client) {
+      return;
+    }
+    AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+    await client.close();
   }
 
   /**
@@ -2491,6 +2462,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Push THIS device's mock rules for a `mockNetwork`/`clearMockNetwork` call and wait (bounded)
+   * for the rules the app's regex engine rejected (issue #10101). A runner or SDK that does not
+   * report resolves to `unconfirmed`; only an undelivered push is a failure.
+   */
+  async pushNetworkMockRules(
+    rules: NetworkMockRuleSync[],
+    timeoutMs: number = NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  ): Promise<NetworkMockPushResult> {
+    return pushNetworkMockRules(
+      this.createDelegateContext(),
+      rules,
+      () =>
+        this.sendMessage(
+          serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })),
+        ),
+      timeoutMs,
+    );
+  }
+
+  /**
    * Push THIS device's mock rules and error simulation from the host store.
    * Runs on every (re)connect, and after a session release clears the store so
    * the device drops what that session installed (issue #10061).
@@ -2516,6 +2507,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             errorType: sim?.errorType,
             limit: sim?.limit,
             expiresAtEpochMs: sim?.expiresAt,
+            // What is left now, not the original duration: the device times it on its own
+            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
+            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
           }),
         ),
       );
@@ -3361,7 +3355,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult> {
     return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery);
   }
@@ -3553,7 +3547,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -3561,7 +3555,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -3642,6 +3636,65 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
+    return this.dispatchActionRequest(
+      action,
+      (requestId) =>
+        serializeCtrlProxyRequest(
+          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
+        ),
+      timeoutMs,
+      perf,
+      signal,
+    );
+  }
+
+  async requestClickFocusedInput(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    try {
+      return await this.dispatchActionRequest(
+        "click",
+        (requestId) => {
+          this.pendingFocusedInputClickIds.add(requestId);
+          return serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestClickFocusedInput({ requestId }),
+          );
+        },
+        timeoutMs,
+        perf,
+        signal,
+      );
+    } finally {
+      this.pendingFocusedInputClickIds.clear();
+    }
+  }
+
+  /**
+   * Very old runners reject the focused-input click during decoding without echoing its id; settle
+   * the pending clicks so the host can fall back instead of timing out.
+   */
+  private settleUnattributedFocusedClickRejection(
+    requestId: string | null | undefined,
+    rejectedCommand: string | undefined,
+    errorText: string,
+  ): void {
+    if (requestId || rejectedCommand !== "request_click_focused_input") {
+      return;
+    }
+    for (const id of this.pendingFocusedInputClickIds) {
+      this.requestManager.resolveError(id, errorText);
+    }
+  }
+
+  private async dispatchActionRequest(
+    action: string,
+    serializeRequest: (requestId: string) => string,
+    timeoutMs: number,
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
     const combinedSignal = combineWithAmbientAbort(signal);
     let pendingRequestId: string | undefined;
@@ -3670,8 +3723,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const requestId = this.requestManager.generateId("action");
       pendingRequestId = requestId;
       logger.debug(
-        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, ` +
-          `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
       );
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
@@ -3705,14 +3757,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
-        );
+        const message = serializeRequest(requestId);
         this.ws.send(message);
         dispatched = true;
         logger.debug(
-          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, ` +
-            `resourceId: ${resourceId}, selector: ${JSON.stringify(selector)})`,
+          `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
         );
       });
 
@@ -3737,6 +3786,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report a failed action.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return {
@@ -3893,6 +3944,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report an unconfirmed activation.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
       return unconfirmed(errorMessage(error));
     } finally {
@@ -3999,6 +4052,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (requestId) {
         this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
       return {
@@ -4422,6 +4477,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       return {
         success: false,
         totalTimeMs: this.timer.now() - startTime,
@@ -4583,6 +4640,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
@@ -4613,6 +4672,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     delayMs: number = 500,
     timeoutMs: number = 3000,
   ): Promise<boolean> {
+    const signal = combineWithAmbientAbort();
+    signal?.throwIfAborted();
     // Remember the most recent runner error text across attempts (issue #3062) so the terminal
     // warn — the one visible at the default log level — attributes the deterministic handler
     // failure, rather than collapsing every attempt into an anonymous "no hierarchy" (a runner
@@ -4638,7 +4699,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const hierarchyResult = await this.requestHierarchySync(
           new NoOpPerformanceTracker(),
           false,
-          undefined,
+          signal,
           timeoutMs,
           diagnostics,
         );
@@ -4667,6 +4728,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       {
         maxAttempts,
         delays: delayMs,
+        signal,
         shouldRetry: () => {
           if (identicalRunnerErrorStreak >= VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT) {
             shortCircuited = true;
@@ -4680,6 +4742,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         },
       },
     );
+
+    signal?.throwIfAborted();
 
     if (!result.success) {
       const runnerErrorSuffix = lastRunnerError ? ` (last runner error: ${lastRunnerError})` : "";
@@ -4706,12 +4770,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
-  /** Tell the Kotlin service that recording has started (enables interaction event emission). */
+  /** Send start_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStarted(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.startRecording()));
   }
 
-  /** Tell the Kotlin service that recording has stopped (disables interaction event emission). */
+  /** Send stop_recording for wire compatibility; currently has no effect on the device. */
   notifyRecordingStopped(): void {
     this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()));
   }
@@ -4914,6 +4978,30 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * Acquire this device's cross-process forwarding lease, taking it over from a
+   * live owner that reports it no longer uses the device (issue #10497).
+   */
+  private async acquireCtrlProxyForwardLease(): Promise<void> {
+    const lease = this.ctrlProxyForwardLease;
+    if (lease.tryAcquire()) {
+      return;
+    }
+    const ownerPid = lease.getLastOwnerPid();
+    const reclaim =
+      ownerPid !== undefined && ownerPid !== process.pid
+        ? await lease.tryReclaimFromStaleOwner?.()
+        : undefined;
+    if (reclaim?.acquired) {
+      return;
+    }
+    throwCtrlProxyForwardingLeaseConflict(
+      this.device.deviceId,
+      reclaim?.ownerPid ?? ownerPid,
+      reclaim,
+    );
+  }
+
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   async setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
@@ -4922,12 +5010,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.closed) {
       return;
     }
-    if (!this.ctrlProxyForwardLease.tryAcquire()) {
-      throwCtrlProxyForwardingLeaseConflict(
-        this.device.deviceId,
-        this.ctrlProxyForwardLease.getLastOwnerPid(),
-      );
-    }
+    await this.acquireCtrlProxyForwardLease();
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {
@@ -5017,15 +5100,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
     const orphanedPorts = new Set<number>();
     for (const line of stdout.split(/\r?\n/)) {
-      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-      if (
-        extra.length !== 0 ||
-        serial !== this.device.deviceId ||
-        remote !== `tcp:${PortManager.DEVICE_PORT}`
-      ) {
+      const forward = this.parseOwnPortForward(line);
+      if (!forward || forward.remote !== `tcp:${PortManager.DEVICE_PORT}`) {
         continue;
       }
-      const port = this.localPortFromForward(local);
+      const port = this.localPortFromForward(forward.local);
       if (port !== null && !livePorts.has(port)) {
         orphanedPorts.add(port);
       }
@@ -5093,14 +5172,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const expectedLocal = `tcp:${port}`;
     const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
     return result.stdout.split(/\r?\n/).some((line) => {
-      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-      return (
-        extra.length === 0 &&
-        serial === this.device.deviceId &&
-        local === expectedLocal &&
-        remote === expectedRemote
-      );
+      const forward = this.parseOwnPortForward(line);
+      return forward?.local === expectedLocal && forward.remote === expectedRemote;
     });
+  }
+
+  private parseOwnPortForward(line: string): { local: string; remote: string } | null {
+    const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+    if (serial !== this.device.deviceId) {
+      return null;
+    }
+    if (extra.length !== 0) {
+      // Ignore ambiguous rows so cleanup cannot remove an unrelated service's forward.
+      logger.debug(
+        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${serial}: ${line.trim()}`,
+      );
+      return null;
+    }
+    return local && remote ? { local, remote } : null;
   }
 
   private localPortFromForward(value: string | undefined): number | null {
@@ -5151,12 +5240,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       // the serial prevents another device's same-number forward from being
       // mistaken for this client's forward.
       const isActive = result.stdout.split(/\r?\n/).some((line) => {
-        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+        const forward = this.parseOwnPortForward(line);
         return (
-          extra.length === 0 &&
-          serial === this.device.deviceId &&
-          local === `tcp:${this.localPort}` &&
-          remote === `tcp:${PortManager.DEVICE_PORT}`
+          forward?.local === `tcp:${this.localPort}` &&
+          forward.remote === `tcp:${PortManager.DEVICE_PORT}`
         );
       });
       if (!isActive) {
@@ -5222,10 +5309,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.rejectedCommands.add(rejectedCommand);
       }
       const deviceError = message.error || "Runner reported an unstructured protocol error";
-      // Overlay failures preserve the device cause; capability refusal has its own pre-send error.
+      // Preserve capability refusals used by fallback callers, including focused-input clicks.
       const errorText =
         rejectedCommand &&
         [
+          "request_click_focused_input",
           "show_overlay",
           "update_overlay",
           "dismiss_overlay",
@@ -5237,6 +5325,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );
+      this.settleUnattributedFocusedClickRejection(message.requestId, rejectedCommand, errorText);
       if (message.requestId) {
         this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         this.requestManager.resolveError(message.requestId, errorText);
@@ -5408,6 +5497,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         error: message.error,
       })),
 
+    set_network_mock_rules_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? true,
+        totalTimeMs: 0,
+        rejectedMockIds: message.rejectedMockIds,
+        rejectedReasons: message.rejectedReasons,
+        error: message.error,
+      })),
+
     keyboard_profiles_result: (message) =>
       this.resolvePendingResponse(message, (message): KeyboardProfileCatalog => ({
         success: message.success,
@@ -5443,6 +5541,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         action: message.action,
         totalTimeMs: message.totalTimeMs,
         error: message.error,
+        ...(message.approximated === undefined ? {} : { approximated: message.approximated }),
         perfTiming: message.perfTiming,
       })),
 
@@ -5461,6 +5560,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         perfTiming: message.perfTiming,
+        ...(message.alreadySatisfied ? { alreadySatisfied: true } : {}),
       })),
 
     clipboard_result: (message) =>
@@ -6173,6 +6273,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
       logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
+      // The app may be back in front without a navigation event (#10193). The signal names this
+      // device: on the shared global manager another device's tick must not switch the app.
+      if (navigationPackage) {
+        this.getNavigationGraphManager()
+          .recordAppForeground(navigationPackage, this.device.deviceId)
+          .catch((error) =>
+            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
+          );
+      }
     } else {
       // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
       // non-SDK apps never emit navigation_event, so this is the only path that gives
@@ -6685,8 +6794,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private enqueueNavigationGraphWrite(event: NavigationEvent): Promise<void> {
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
     const navigationGraphManager = this.getNavigationGraphManager();
+    // Stamp the device that received the event: the manager's telemetry must not read the
+    // recorder's ambient context, which another device's client may have set (#10195).
+    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
     const navWrite = this.navigationWriteTail.then(
       () => navigationGraphManager.recordNavigationEvent(event),
       () => navigationGraphManager.recordNavigationEvent(event),

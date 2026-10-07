@@ -19,6 +19,8 @@ import {
   type AndroidTelemetryRecorder,
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
+import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
+
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
 interface CapturedCall {
@@ -102,9 +104,11 @@ describe("DefaultIosSdkEventIngestor", () => {
       navigationScreenshotsEnabled?: () => boolean;
       deviceId?: string;
       timer?: FakeTimer;
+      frameMetricsStore?: SdkFrameMetricsStore;
     } = {},
   ): DefaultIosSdkEventIngestor =>
     new DefaultIosSdkEventIngestor({
+      frameMetricsStore: overrides.frameMetricsStore,
       deviceId: overrides.deviceId ?? DEVICE_ID,
       timer: overrides.timer ?? new FakeTimer(),
       getNavigationGraphManager: () => navSink,
@@ -118,6 +122,57 @@ describe("DefaultIosSdkEventIngestor", () => {
     type,
     timestamp,
     payload,
+  });
+
+  test("frame events use batch app identity and host receipt time without recording telemetry", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(2000);
+    const store = new SdkFrameMetricsStore();
+    const target = buildIngestor({ timer, frameMetricsStore: store });
+    await target.recordSdkEvent(
+      event("frame_metrics_event", {
+        fps: 55,
+        frameTimeMs: 18,
+        jankFrames: 2,
+        bundleId: "untrusted.payload.app",
+      }),
+      "com.example.app",
+    );
+    expect(store.getFresh(DEVICE_ID, "com.example.app", timer.now(), 2500)).toEqual({
+      fps: 55,
+      frameTimeMs: 18,
+      jankFrames: 2,
+      receivedAt: 2000,
+    });
+    expect(store.getFresh("other-device", "com.example.app", timer.now(), 2500)).toBeNull();
+    expect(store.getFresh(DEVICE_ID, "untrusted.payload.app", timer.now(), 2500)).toBeNull();
+    expect(recorder.logs).toEqual([]);
+  });
+
+  test("malformed frame events and missing app identity do not overwrite a valid sample", async () => {
+    const timer = new FakeTimer();
+    const store = new SdkFrameMetricsStore();
+    const target = buildIngestor({ timer, frameMetricsStore: store });
+    const valid = { fps: 55, frameTimeMs: 18, jankFrames: 2 };
+    await target.recordSdkEvent(event("frame_metrics_event", valid), "com.example.app");
+    for (const bad of [
+      {},
+      { ...valid, fps: "55" },
+      { ...valid, fps: NaN },
+      { ...valid, fps: -1 },
+      { ...valid, frameTimeMs: Infinity },
+      { ...valid, frameTimeMs: 0 },
+      { ...valid, jankFrames: -1 },
+      { ...valid, jankFrames: 1.5 },
+    ]) {
+      await target.recordSdkEvent(event("frame_metrics_event", bad), "com.example.app");
+    }
+    await target.recordSdkEvent(event("frame_metrics_event", valid), null);
+    expect(store.getFresh(DEVICE_ID, "com.example.app", timer.now(), 2500)).toEqual({
+      ...valid,
+      receivedAt: timer.now(),
+    });
+    expect(recorder.logs).toEqual([]);
   });
 
   beforeEach(() => {
@@ -579,7 +634,7 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect((recorder.logs[0].event as { message: string }).message).toContain("totally_new_type");
   });
 
-  test("navigation records to the nav graph and to telemetry", async () => {
+  test("navigation records to the nav graph, stamped with this device, and not to telemetry beside it (#10195)", async () => {
     await ingestor.recordSdkEvent(
       event("navigation", {
         destination: "Home",
@@ -594,15 +649,21 @@ describe("DefaultIosSdkEventIngestor", () => {
       applicationId: "com.app",
       destination: "Home",
       source: "Login",
+      deviceId: DEVICE_ID,
     });
-    expect(recorder.navigation[0].event).toMatchObject({
-      destination: "Home",
-      source: "Login",
-      applicationId: "com.app",
-    });
+    // The graph manager records the navigation telemetry; a second record here would double it.
+    expect(recorder.navigation).toHaveLength(0);
   });
 
-  test.each(["none", "capture", "update", "lookup"] as const)(
+  test("the navigation graph write gets the SDK time for telemetry only, not for correlation", async () => {
+    await ingestor.recordSdkEvent(event("navigation", { destination: "Home" }, 424242), "com.app");
+
+    expect(navSink.recorded[0].telemetryTimestamp).toBe(424242);
+    // Graph correlation stays on host time: the SDK clock is not the hierarchy detector's.
+    expect(navSink.recorded[0].timestamp).toBeUndefined();
+  });
+
+  test.each(["none", "capture", "update"] as const)(
     "navigation keeps awaited side-effect order when %s fails",
     async (failure) => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
@@ -648,19 +709,7 @@ describe("DefaultIosSdkEventIngestor", () => {
           }
           return { success: true, data: "AAAA", format: "png" };
         },
-        findNavigationNodeId: async () => {
-          calls.push("lookup");
-          if (failure === "lookup") {
-            throw new Error("lookup failed");
-          }
-          return 0;
-        },
       });
-      const recordNavigation = recorder.recordNavigationEvent.bind(recorder);
-      recorder.recordNavigationEvent = async (value) => {
-        calls.push("telemetry");
-        await recordNavigation(value);
-      };
       try {
         const pending = subject.recordSdkEvent(
           event("navigation", { destination: "Home" }),
@@ -674,29 +723,23 @@ describe("DefaultIosSdkEventIngestor", () => {
         if (failure !== "capture") {
           expected.push("store", "graph", "update");
         }
-        if (failure === "none" || failure === "lookup") {
-          expected.push("lookup");
-        }
-        expected.push("telemetry");
         expect(calls).toEqual(expected);
         const warnings = loggerCallsWithPrefix(
           warning.mock.calls,
-          "[IosSdkEventIngestor] Navigation screenshot lookup failed:",
           "[IosSdkEventIngestor] Navigation screenshot update failed:",
         );
         expect(warnings).toEqual(
-          failure === "update" || failure === "lookup"
+          failure === "update"
             ? [
                 [
-                  `[IosSdkEventIngestor] Navigation screenshot ${failure} failed: ${failure} failed`,
-                  expect.objectContaining({ message: `${failure} failed` }),
+                  "[IosSdkEventIngestor] Navigation screenshot update failed: update failed",
+                  expect.objectContaining({ message: "update failed" }),
                 ],
               ]
             : [],
         );
-        expect(recorder.navigation[0].event.screenshotUri).toBe(
-          failure === "none" ? "automobile:navigation/nodes/0/screenshot?appId=com.app" : null,
-        );
+        // The graph manager records the navigation telemetry, never this ingestor (#10195).
+        expect(recorder.navigation).toHaveLength(0);
         expect(recorder.getContext()).toEqual({
           deviceId: "prev-device",
           sessionId: "prev-session",
@@ -748,28 +791,20 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(recorder.navigation).toHaveLength(1);
   });
 
-  test("navigation with screenshots enabled but no screenshot data records telemetry without a screenshotUri", async () => {
+  test("navigation with screenshots enabled but no screenshot data skips the screenshot update", async () => {
     // Exercises the navigationScreenshotsEnabled() branch: capture returns no data, so
-    // updateNodeScreenshot is skipped and the nav event still records with screenshotUri null.
+    // updateNodeScreenshot is skipped.
     const withScreenshots = buildIngestor({ navigationScreenshotsEnabled: () => true });
     await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
     expect(navSink.recorded).toHaveLength(1);
     expect(navSink.screenshotUpdates).toHaveLength(0);
-    expect(recorder.navigation).toHaveLength(1);
-    expect(
-      (recorder.navigation[0].event as { screenshotUri: string | null }).screenshotUri,
-    ).toBeNull();
   });
 
   /**
-   * Regression (#5851, follow-up to #5600/#5534/#4933): when a screenshot is
-   * captured and stored, the telemetry event's screenshotUri must be the
-   * app-SCOPED resource URI (`?appId=<applicationId>`), built via
-   * buildNavigationNodeScreenshotUri(node.id, applicationId). An unscoped URI
-   * resolves against the daemon's current foreground app, so a client following
-   * it while another app is foregrounded gets the wrong app's screenshot.
+   * A captured and stored screenshot is attached to the node of the app the event names. The
+   * telemetry URI that points at it is built by the graph manager, scoped by that app (#5851).
    */
-  test("navigation screenshot URI is scoped by applicationId (#5851)", async () => {
+  test("a stored navigation screenshot is attached to the named app's node (#10195)", async () => {
     const screenshotManagerSpy = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue({
       storeScreenshot: async () => "/screens/com.app/Home.webp",
     } as unknown as NavigationScreenshotManager);
@@ -785,16 +820,12 @@ describe("DefaultIosSdkEventIngestor", () => {
         telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
         failureRecorder,
         navigationScreenshotsEnabled: () => true,
-        findNavigationNodeId: async (applicationId, destination) =>
-          applicationId === "com.app" && destination === "Home" ? 42 : undefined,
       });
 
       await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
 
-      expect(recorder.navigation).toHaveLength(1);
-      expect((recorder.navigation[0].event as { screenshotUri: string | null }).screenshotUri).toBe(
-        "automobile:navigation/nodes/42/screenshot?appId=com.app",
-      );
+      expect(navSink.screenshotUpdates).toHaveLength(1);
+      expect(recorder.navigation).toHaveLength(0);
     } finally {
       screenshotManagerSpy.mockRestore();
     }

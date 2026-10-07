@@ -7,6 +7,7 @@ import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 // Issue #3223: the proxy MCP server re-emits daemon-forwarded list-changed
 // notifications to its own (external) client.
@@ -33,6 +34,7 @@ function createHarness() {
   };
   const { server, proxy } = createProxyMcpServer({
     proxyConfig: {
+      timer: new FakeTimer(),
       clientFactory: () => fakeClient,
       daemonManager: fakeManager,
       autoStartDaemon: false,
@@ -40,6 +42,19 @@ function createHarness() {
   });
   return { server, proxy, fakeClient };
 }
+
+beforeAll(async () => {
+  // Warm one-off SDK handler/schema initialization without sharing a measured harness.
+  const { server, proxy } = createHarness();
+  try {
+    await proxy.listTools();
+  } finally {
+    await server.close();
+    await proxy.close();
+    isAvailableSpy?.mockRestore();
+    isAvailableSpy = null;
+  }
+});
 
 describe("createProxyMcpServer list-changed forwarding", () => {
   test("daemon tools/list_changed is re-emitted as sendToolListChanged", async () => {

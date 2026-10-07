@@ -9,7 +9,9 @@ import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
   CLI_SESSION_LIVENESS_POLICY,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_VERSION,
@@ -19,6 +21,7 @@ import {
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -139,7 +142,7 @@ class SessionContinuityDaemonClient implements DaemonClientLike {
     this.daemonRequests.push(request);
     const response = await handleDaemonRequest(request, daemonStateFor(this.sessionManager));
     if (!response.success) {
-      throw new Error(response.error);
+      throw Object.assign(new Error(response.error), { code: response.code });
     }
     if (method === DAEMON_HEARTBEAT_METHOD && (this.options.dropHeartbeatResponses ?? 0) > 0) {
       this.options.dropHeartbeatResponses!--;
@@ -235,6 +238,45 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       ),
     ).toHaveLength(1);
     expect(sessionManager.getSession("minted")?.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("CLI exit then an independent proxy claims without release under main's rules", async () => {
+    const client = new SessionContinuityDaemonClient(sessionManager, "handoff-cli");
+    const cli = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["cli-token"]),
+    });
+    await cli.callTool("getAndroid", {});
+    expect(await cli.adoptCliSessionLiveness()).toBe("handoff-cli");
+    await cli.close();
+    expect(client.daemonRequests.map((request) => request.method)).toEqual([
+      DAEMON_HEARTBEAT_METHOD,
+      DAEMON_HEARTBEAT_METHOD,
+    ]);
+    expect(sessionManager.getSession("handoff-cli")).toMatchObject({
+      livenessOwnerToken: "cli-token",
+      livenessPolicy: "cli-idle",
+    });
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: "handoff-cli",
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["proxy-token"]),
+    });
+    try {
+      await proxy.ensureConnected();
+      expect(sessionManager.getSession("handoff-cli")).toMatchObject({
+        livenessOwnerToken: "proxy-token",
+        livenessPolicy: "heartbeat",
+      });
+    } finally {
+      await proxy.close();
+    }
   });
 
   test("the declared session outlives the think-time that reaps a heartbeat session", async () => {
@@ -339,6 +381,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     );
     timer.advanceTime(12_367);
     await monitor.tick();
+    // Past the lease the session is suspect (#10051), reaped once the grace window ends.
+    expect(reaped).toEqual([]);
+    timer.advanceTime(SUSPECT_GRACE_MS);
+    await monitor.tick();
     expect(reaped).toEqual([{ sessionId: "shared", reason: "heartbeat-timeout" }]);
   });
 
@@ -379,6 +425,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         params: {
           sessionId: "shared",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
         },
       },
@@ -461,6 +508,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         params: {
           sessionId: "shared",
           livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
           idleTimeoutMs: getCliSessionIdleTimeoutMs(),
           livenessOwnerToken: "ios-video-keeper",
         },
@@ -536,6 +584,53 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(cliHeartbeats).toHaveLength(1);
     expect(cliHeartbeats.every((call) => call.params.idleTimeoutMs === 120_000)).toBe(true);
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
+  });
+
+  test("a proxy reports deliberate ownership release without reclaiming or fencing", async () => {
+    const sessionUuid = "released-proxy";
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android");
+    const client = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: sessionUuid,
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs: 1_000,
+      idGenerator: new FakeIdGenerator(["proxy-token"]),
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await proxy.ensureConnected();
+      expect(
+        await handleDaemonRequest(
+          {
+            id: "release",
+            type: "daemon_request",
+            method: "daemon/releaseLivenessOwnership",
+            params: { sessionId: sessionUuid, livenessOwnerToken: "proxy-token" },
+          },
+          daemonStateFor(sessionManager),
+        ),
+      ).toMatchObject({ success: true });
+      const before = { ...sessionManager.getSession(sessionUuid)! };
+      await timer.advanceTimeAsync(3_000);
+      expect(sessionManager.getSession(sessionUuid)).toEqual(before);
+      expect(
+        client.daemonRequests
+          .filter((call) => call.method === DAEMON_HEARTBEAT_METHOD)
+          .map((call) => call.params.claimLivenessOwnership),
+      ).toEqual([true, undefined, undefined, undefined]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("no longer protects its deadline"),
+        ),
+      ).toHaveLength(1);
+      expect(proxy.isConnected()).toBe(true);
+    } finally {
+      await proxy.close();
+      warn.mockRestore();
+    }
   });
 
   test("the declaration carries this invocation's idle-timeout override", async () => {
@@ -731,10 +826,11 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     expect(declarations).toHaveLength(1);
   });
 
-  test("keeps a later CLI owner when a first MCP heartbeat reply is lost before reconnect", async () => {
+  test("rejects a CLI takeover of a live proxy session and lets the proxy resume after a lost first-heartbeat reply", async () => {
     // This exercises DaemonMcpProxy with the daemon's real request envelope.
-    // The daemon applies the original claim, drops its reply, then a CLI takes
-    // over before the old proxy reconnects with its remembered session.
+    // The daemon applies the original claim and drops its reply; a CLI then tries
+    // to take the session over before the old proxy reconnects. The proxy's lease
+    // is live, so the daemon rejects the CLI (#10050) and the proxy resumes.
     const sessionUuid = "continuity-android-session";
     await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
     const initialMcpClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid, {
@@ -774,26 +870,35 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       });
 
       await cli.callTool("observe", { sessionUuid });
-      expect(await cli.adoptCliSessionLiveness()).toBe(sessionUuid);
+      // The declaration is best-effort: the daemon refuses it, so nothing was declared.
+      expect(await cli.adoptCliSessionLiveness()).toBeUndefined();
       await cli.close();
-      const cliOwned = sessionManager.getSession(sessionUuid)!;
-      const beforeOldReconnect = {
-        livenessPolicy: cliOwned.livenessPolicy,
-        livenessOwnerToken: cliOwned.livenessOwnerToken,
-        lastUsedAt: cliOwned.lastUsedAt,
-        lastHeartbeat: cliOwned.lastHeartbeat,
-        expiresAt: cliOwned.expiresAt,
+      const proxyOwned = sessionManager.getSession(sessionUuid)!;
+      const afterRejectedCli = {
+        livenessPolicy: proxyOwned.livenessPolicy,
+        livenessOwnerToken: proxyOwned.livenessOwnerToken,
+        lastUsedAt: proxyOwned.lastUsedAt,
+        lastHeartbeat: proxyOwned.lastHeartbeat,
+        expiresAt: proxyOwned.expiresAt,
       };
-      expect(beforeOldReconnect).toMatchObject({
-        livenessPolicy: "cli-idle",
-        livenessOwnerToken: "cli-token",
+      expect(afterRejectedCli).toMatchObject({
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: "old-mcp-token",
       });
+
+      // The lost reply made that heartbeat a missing acknowledgement, so recovery (#10053) already
+      // re-sent the claim with the same token on the same transport and the daemon acknowledged it.
+      const claimsOnInitialClient = initialMcpClient.daemonRequests.filter(
+        (request) => request.params.claimLivenessOwnership === true,
+      );
+      expect(claimsOnInitialClient).toHaveLength(2);
 
       initialMcpClient.disconnect();
       await settleAsyncWork();
       await mcp.callTool("observe", {});
       await settleAsyncWork();
 
+      // After the reconnect the proxy resumes with the same token and no second claim.
       expect(replayedMcpClient.daemonRequests).toContainEqual({
         id: "continuity-1",
         type: "daemon_request",
@@ -802,10 +907,12 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           sessionId: sessionUuid,
           livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
           livenessOwnerToken: "old-mcp-token",
-          claimLivenessOwnership: true,
         },
       });
-      expect(sessionManager.getSession(sessionUuid)).toMatchObject(beforeOldReconnect);
+      expect(sessionManager.getSession(sessionUuid)).toMatchObject({
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: "old-mcp-token",
+      });
       expect(replayedMcpClient.toolCalls).toEqual([
         {
           name: "observe",
@@ -822,8 +929,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
   });
 
   test("does not let a stale token keeper extend a newer CLI-owned session", async () => {
+    // The CLI can only take the session once the proxy's 5 s lease has expired;
+    // rewind its last heartbeat to model a proxy that stalled past the lease.
     const sessionUuid = "stale-keeper-session";
-    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000, 5_000);
     const staleClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const staleProxy = new DaemonMcpProxy({
@@ -844,8 +953,16 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
 
     try {
       await staleProxy.callTool("observe", { sessionUuid });
+      await settleAsyncWork();
+      // Past the 5 s lease and the suspect grace window that follows it (#10051).
+      const owned = sessionManager.getSession(sessionUuid)!;
+      owned.lastHeartbeat -= 6_000 + SUSPECT_GRACE_MS;
+      // The owner lease is read from the owner's own heartbeats, which tool calls do not advance.
+      owned.lastOwnerHeartbeat =
+        (owned.lastOwnerHeartbeat ?? owned.lastHeartbeat) - (6_000 + SUSPECT_GRACE_MS);
       await cli.callTool("observe", { sessionUuid });
-      expect(await cli.adoptCliSessionLiveness()).toBe(sessionUuid);
+      const adopted = await cli.adoptCliSessionLiveness();
+      expect(adopted).toBe(sessionUuid);
       await cli.close();
 
       const cliOwned = sessionManager.getSession(sessionUuid)!;
@@ -856,6 +973,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         livenessPolicy: cliOwned.livenessPolicy,
         livenessOwnerToken: cliOwned.livenessOwnerToken,
       };
+      expect(beforeStaleKeeper).toMatchObject({
+        livenessPolicy: "cli-idle",
+        livenessOwnerToken: "cli-token",
+      });
       await timer.advanceTimeAsync(1_000);
       await settleAsyncWork();
 
@@ -870,6 +991,51 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       expect(sessionManager.getSession(sessionUuid)).toMatchObject(beforeStaleKeeper);
     } finally {
       await staleProxy.close();
+      await cli.close();
+    }
+  });
+
+  test("keeps a live proxy owner's ticks authoritative when a CLI tries to take its session", async () => {
+    const sessionUuid = "live-proxy-session";
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    const proxyClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => proxyClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      heartbeatIntervalMs: 1_000,
+      idGenerator: new FakeIdGenerator(["proxy-token"]),
+    });
+    const cli = new DaemonMcpProxy({
+      clientFactory: () => cliClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(["cli-token"]),
+    });
+
+    try {
+      await proxy.callTool("observe", { sessionUuid });
+      await cli.callTool("observe", { sessionUuid });
+      expect(await cli.adoptCliSessionLiveness()).toBeUndefined();
+      await cli.close();
+      expect(sessionManager.getSession(sessionUuid)).toMatchObject({
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: "proxy-token",
+      });
+
+      await timer.advanceTimeAsync(1_000);
+      await settleAsyncWork();
+
+      expect(sessionManager.getSession(sessionUuid)).toMatchObject({
+        livenessPolicy: "heartbeat",
+        livenessOwnerToken: "proxy-token",
+        lastHeartbeat: timer.now(),
+      });
+    } finally {
+      await proxy.close();
       await cli.close();
     }
   });

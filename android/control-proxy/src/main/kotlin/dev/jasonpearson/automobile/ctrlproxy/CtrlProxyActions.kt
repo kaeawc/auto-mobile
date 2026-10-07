@@ -259,6 +259,14 @@ interface CtrlProxyActions {
     delivery: ImeTextDelivery,
   ) = requestCommitText(requestId, text, priorImeId)
 
+  fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+    timeoutMs: Long?,
+  ) = requestCommitText(requestId, text, priorImeId, delivery)
+
   fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {}
 
   fun requestSetKeyboardProfile(requestId: String?, profileId: String)
@@ -271,6 +279,8 @@ interface CtrlProxyActions {
     requestImeAction(requestId, action)
 
   fun requestSelectAll(requestId: String?)
+
+  fun requestClickFocusedInput(requestId: String?)
 
   fun requestAction(
     requestId: String?,
@@ -316,13 +326,19 @@ interface CtrlProxyActions {
     occlusionEnabled: Boolean,
   )
 
-  fun setNetworkMockRules(rulesJson: String)
+  /**
+   * Pushes the rule list to the app's rule store. A non-null [requestId] asks for a
+   * `set_network_mock_rules_result` reply reporting the rules the device engine rejected
+   * (issue #10101); null keeps the fire-and-forget broadcast.
+   */
+  fun setNetworkMockRules(requestId: String?, rulesJson: String)
 
   fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   )
 
   fun getCurrentFocus(requestId: String?)

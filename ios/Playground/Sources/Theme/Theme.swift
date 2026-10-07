@@ -108,3 +108,26 @@ struct AutoMobileBackgroundModifier: ViewModifier {
             .foregroundStyle(theme.onBackground)
     }
 }
+
+// MARK: - Native content styling
+
+/// Inherited typography and ink for native controls and rows. This deliberately
+/// adds no containers, padding, backgrounds, overlays or accessibility elements.
+/// Apply per screen rather than at the app root: the TapAt fixture must retain
+/// its result-panel metrics and therefore its canvas bounds.
+struct PlaygroundContentModifier: ViewModifier {
+    @Environment(\.autoMobileTheme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .font(theme.typography.bodyLarge)
+            .foregroundStyle(theme.textPrimary)
+            .tint(theme.primary)
+    }
+}
+
+extension View {
+    func playgroundContent() -> some View {
+        modifier(PlaygroundContentModifier())
+    }
+}

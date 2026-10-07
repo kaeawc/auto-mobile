@@ -188,6 +188,19 @@ public final class AutoMobileNetwork: Sendable {
     /// let session = URLSession(configuration: config)
     /// ```
     ///
+    /// Captured requests run on one long-lived inner session that shares the process-wide cookie,
+    /// credential and URL-cache storage and one connection pool; authentication challenges (mTLS,
+    /// pinning, Basic/NTLM) are forwarded to your session delegate. Redirects are followed by the
+    /// inner session and your delegate's redirect callback is not consulted.
+    ///
+    /// The protocol declines, so your own stack handles them uncaptured: upload tasks (data, file or
+    /// stream bodies), web-socket and stream tasks, and requests carrying an `Upgrade` header.
+    /// Background sessions never use `protocolClasses`. A `URLProtocol` cannot see per-session
+    /// settings: a custom cookie storage, credential storage or cache, proxy or TLS configuration,
+    /// `waitsForConnectivity` and resource timeouts on your configuration are not applied to the
+    /// replayed request; task metrics are not reported; streamed request bodies cannot be replayed
+    /// after an authentication retry.
+    ///
     /// - Returns: A `URLProtocol` subclass suitable for `protocolClasses`.
     public func protocolClass() -> AnyClass {
         return AutoMobileURLProtocol.self
@@ -478,8 +491,14 @@ public final class AutoMobileNetwork: Sendable {
 ///
 /// This is an implementation detail -- consumers should register it via
 /// ``AutoMobileNetwork/protocolClass()`` rather than referencing this type directly.
-public class AutoMobileURLProtocol: URLProtocol {
-    private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
+///
+/// `@unchecked Sendable` (issue #5839): `URLProtocol` is `Sendable`, and the compiler cannot verify
+/// a subclass of a class other than `NSObject`. Every mutable stored property, instance and static,
+/// lives inside an `OSAllocatedUnfairLock` (`state`, `faultSchedulerStorage`,
+/// `innerSessionHostStorage`); everything else is an immutable `let`. The class is `final` so no
+/// subclass can add unguarded state.
+public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable {
+    static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     #if DEBUG
         /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
         /// (no real timer). Reset to `RealFaultScheduler()` in `tearDown`.
@@ -500,8 +519,8 @@ public class AutoMobileURLProtocol: URLProtocol {
     #endif
     private struct State: Sendable {
         var startTime: Date?
-        var urlSession: URLSession?
         var dataTask: URLSessionDataTask?
+        var pendingChallenge: InnerChallengeSender?
         var receivedResponse: URLResponse?
         var receivedData = Data()
         var totalBytesReceived = 0
@@ -514,17 +533,45 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     private static let supportedSchemes: Set<String> = ["http", "https"]
 
-    override public class func canInit(with request: URLRequest) -> Bool {
+    /// The one long-lived inner session every protocol instance runs on (issue #10138).
+    /// Tests swap it to inject a stub configuration; production never replaces it.
+    private static let innerSessionHostStorage = OSAllocatedUnfairLock(initialState: InnerSessionHost())
+    static var innerSessionHost: InnerSessionHost {
+        get { innerSessionHostStorage.withLock { $0 } }
+        set {
+            let old = innerSessionHostStorage.withLock { host in
+                let old = host
+                host = newValue
+                return old
+            }
+            withExtendedLifetime(old) {}
+        }
+    }
+
+    override public static func canInit(with request: URLRequest) -> Bool {
         guard let scheme = request.url?.scheme?.lowercased(),
               supportedSchemes.contains(scheme),
-              URLProtocol.property(forKey: handledKey, in: request) == nil
+              URLProtocol.property(forKey: handledKey, in: request) == nil,
+              !InnerSessionPolicy.shouldDecline(request: request)
         else {
             return false
         }
         return true
     }
 
-    override public class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    /// Task-aware check the URL loading system consults before the request-only one. Declines
+    /// task kinds a request-level `URLProtocol` cannot relay faithfully (issue #10139); the app's
+    /// own stack then handles them, uncaptured.
+    override public static func canInit(with task: URLSessionTask) -> Bool {
+        guard !InnerSessionPolicy.shouldDecline(task: task),
+              let request = task.currentRequest ?? task.originalRequest
+        else {
+            return false
+        }
+        return canInit(with: request)
+    }
+
+    override public static func canonicalRequest(for request: URLRequest) -> URLRequest {
         return request
     }
 
@@ -628,32 +675,29 @@ public class AutoMobileURLProtocol: URLProtocol {
         }
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
-        // Use ephemeral config to avoid inheriting our own URLProtocol (infinite loop).
-        // Ephemeral preserves standard HTTP semantics without persisting cookies/caches,
-        // which is acceptable since we're replaying on behalf of the caller's session.
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = config.protocolClasses?.filter { $0 != AutoMobileURLProtocol.self }
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        let task = session.dataTask(with: mutableRequest as URLRequest)
-        if storeTaskIfRunning(task, session: session), state.withLock({ !$0.stopped }) {
+        // One long-lived inner session (shared cookie, credential and URL-cache storage, one
+        // connection pool) so the app behaves as it does without the SDK. The handled marker above
+        // keeps the inner session from re-entering this protocol.
+        let host = Self.innerSessionHost
+        let task = host.makeTask(for: mutableRequest as URLRequest, owner: self)
+        if storeTaskIfRunning(task), state.withLock({ !$0.stopped }) {
             // Recheck cancellation after storage. Cancellation racing resume is
             // handled by URLSession, without holding our lock across a task callout.
             task.resume()
         } else {
+            // Cancelling a suspended task still completes it, which releases its owner route.
             task.cancel()
-            session.invalidateAndCancel()
         }
     }
 
     /// Accept a suspended task only while loading is active. Internal so the
     /// stop-before-store interleaving can be tested without making a request.
-    func storeTaskIfRunning(_ task: URLSessionDataTask, session: URLSession) -> Bool {
+    func storeTaskIfRunning(_ task: URLSessionDataTask) -> Bool {
         let result = state.withLock { state in
-            guard !state.stopped else { return (false, state.urlSession, state.dataTask) }
-            let previous = (state.urlSession, state.dataTask)
-            state.urlSession = session
+            guard !state.stopped else { return (false, state.dataTask) }
+            let previous = state.dataTask
             state.dataTask = task
-            return (true, previous.0, previous.1)
+            return (true, previous)
         }
         withExtendedLifetime(result) {}
         return result.0
@@ -662,25 +706,25 @@ public class AutoMobileURLProtocol: URLProtocol {
     override public func stopLoading() {
         // Mark the protocol stopped so a delayed fault whose timer fires later (or is
         // mid-serveFault) sees it under the state lock and does not invoke the client.
-        let (task, session) = state.withLock { state in
+        let (task, challenge) = state.withLock { state in
             state.stopped = true
-            return (state.dataTask, state.urlSession)
+            return (state.dataTask, state.pendingChallenge)
         }
 
+        // The inner session is shared and long-lived, so only this request's task is cancelled.
+        // The task's completion callback releases its route back to this instance.
         task?.cancel()
-        // Invalidate session to break the retain cycle (session -> delegate -> self)
-        session?.invalidateAndCancel()
+        // A challenge the app never answered must not leave the inner task waiting forever.
+        challenge?.resolveIfPending(.cancelAuthenticationChallenge, nil)
         clearSession()
     }
 
     private func clearSession() {
         let previous = state.withLock { state in
-            let previous = (state.urlSession, state.dataTask)
-            state.urlSession = nil
+            let previous = state.dataTask
             state.dataTask = nil
             return previous
         }
-        // A replaced session/task can release its delegate; keep releases outside the lock.
         withExtendedLifetime(previous) {}
     }
 
@@ -841,12 +885,16 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        let previous = state.withLock { state in
+        let (stopped, previous) = state.withLock { state in
             let previous = state.receivedResponse
             state.receivedResponse = response
-            return previous
+            return (state.stopped, previous)
         }
         withExtendedLifetime(previous) {}
+        guard !stopped else {
+            completionHandler(.cancel)
+            return
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         completionHandler(.allow)
     }
@@ -854,18 +902,24 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
     public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data) {
         // Accumulate response data for body capture (up to configured limit)
         let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
-        state.withLock { state in
+        let stopped = state.withLock { state in
             state.totalBytesReceived += data.count
             if state.receivedData.count < maxBytes {
                 state.receivedData.append(data.prefix(maxBytes - state.receivedData.count))
             }
+            return state.stopped
         }
+        guard !stopped else { return }
         client?.urlProtocol(self, didLoad: data)
     }
 
     public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
         let snapshot = state.withLock { $0 }
         let durationMs = snapshot.startTime.map { Date().timeIntervalSince($0) * 1000 }
+        // After stopLoading() the URL loading system owns the outer task again (it cancelled the
+        // load), so this instance must never call the client. The inner session can still deliver
+        // callbacks it had already queued when the cancel landed.
+        let client = snapshot.stopped ? nil : self.client
 
         if let error = error {
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
@@ -909,8 +963,39 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
 
             client?.urlProtocolDidFinishLoading(self)
         }
-        // Break retain cycle after completion
-        state.withLock { $0.urlSession }?.finishTasksAndInvalidate()
         clearSession()
+    }
+}
+
+// MARK: - Authentication challenges (issue #10139)
+
+extension AutoMobileURLProtocol {
+    /// Forwards an inner-session authentication challenge to the app through the URL loading
+    /// system and completes the inner challenge with whatever the app decides.
+    func forwardChallenge(
+        _ challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let sender = InnerChallengeSender(completionHandler)
+        let stopped = state.withLock { state -> Bool in
+            guard !state.stopped else { return true }
+            state.pendingChallenge = sender
+            return false
+        }
+        guard let client, !stopped else {
+            sender.resolveIfPending(.performDefaultHandling, nil)
+            return
+        }
+        // The failure response is dropped on purpose: with a failureResponse present the URL
+        // loading system consults the app but never calls back into our sender, so the inner
+        // challenge would wait forever (observed on macOS CFNetwork, issue #10139).
+        client.urlProtocol(self, didReceive: URLAuthenticationChallenge(
+            protectionSpace: challenge.protectionSpace,
+            proposedCredential: challenge.proposedCredential,
+            previousFailureCount: challenge.previousFailureCount,
+            failureResponse: nil,
+            error: challenge.error,
+            sender: sender
+        ))
     }
 }

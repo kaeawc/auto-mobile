@@ -1,3 +1,4 @@
+import { isDeviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -45,6 +46,8 @@ export interface ExecutionScopeOptions {
 }
 
 export interface ExecutionCancellationOptions {
+  /** Restrict a device cancellation to the owning kind of operation (e.g. executePlan). */
+  onlyToolName?: string;
   /**
    * Keeps the control-plane operation that triggered a device shutdown alive
    * while cancelling the device-bound work that must fail fast.
@@ -61,6 +64,7 @@ export interface ExecutionCancellationOptions {
 export type ExecutionCancellationReason = string | Error;
 
 export interface ActiveExecutionQuery {
+  onlyToolName?: string;
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
@@ -84,6 +88,8 @@ export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
   private deviceExecutions = new Map<string, Set<string>>();
+  /** Last time a tool execution bound to or finished on each device (#10497). */
+  private deviceLastActivityAt = new Map<string, number>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
@@ -348,6 +354,18 @@ export class ExecutionTracker {
     const deviceSet = this.deviceExecutions.get(deviceId) ?? new Set<string>();
     deviceSet.add(executionId);
     this.deviceExecutions.set(deviceId, deviceSet);
+    this.deviceLastActivityAt.set(deviceId, this.timer.now());
+  }
+
+  /** Number of in-flight tool executions bound to `deviceId`. */
+  getActiveDeviceExecutionCount(deviceId: string): number {
+    return this.deviceExecutions.get(deviceId)?.size ?? 0;
+  }
+
+  /** Time since the last tool execution bound to or ended on `deviceId`; null when none has. */
+  getDeviceIdleForMs(deviceId: string): number | null {
+    const lastActivityAt = this.deviceLastActivityAt.get(deviceId);
+    return lastActivityAt === undefined ? null : Math.max(0, this.timer.now() - lastActivityAt);
   }
 
   async cancelDeviceExecutions(
@@ -382,6 +400,10 @@ export class ExecutionTracker {
     for (const execution of this.executions.values()) {
       if (
         execution.id !== options.excludeExecutionId &&
+        (options.onlyToolName === undefined || execution.toolName === options.onlyToolName) &&
+        // Tool-scoped loss cancels only work already bound to this device. A
+        // session rebind (no tool filter) still fences unresolved calls too.
+        (options.onlyToolName === undefined || execution.deviceIds?.has(deviceId)) &&
         this.belongsToSessionFilter(execution, options.onlySessionUuid)
       ) {
         execution.revokedDeviceBindings ??= new Map();
@@ -530,6 +552,7 @@ export class ExecutionTracker {
         const execution = this.executions.get(executionId);
         return (
           executionId !== query?.excludeExecutionId &&
+          (query?.onlyToolName === undefined || execution?.toolName === query.onlyToolName) &&
           (query?.startedAtOrBefore === undefined ||
             (execution !== undefined && execution.startTime <= query.startedAtOrBefore))
         );
@@ -578,6 +601,7 @@ export class ExecutionTracker {
 
   private unregisterDeviceExecutions(executionId: string, deviceIds?: Set<string>): void {
     for (const deviceId of deviceIds ?? []) {
+      this.deviceLastActivityAt.set(deviceId, this.timer.now());
       const deviceSet = this.deviceExecutions.get(deviceId);
       deviceSet?.delete(executionId);
       if (deviceSet?.size === 0) {
@@ -620,6 +644,7 @@ export class ExecutionTracker {
     if (
       query?.startedAtOrBefore === undefined &&
       query?.excludeExecutionId === undefined &&
+      query?.onlyToolName === undefined &&
       query?.onlySessionUuid === undefined
     ) {
       return true;
@@ -629,6 +654,7 @@ export class ExecutionTracker {
       return (
         execution !== undefined &&
         executionId !== query?.excludeExecutionId &&
+        (query?.onlyToolName === undefined || execution.toolName === query.onlyToolName) &&
         this.belongsToSessionFilter(execution, query?.onlySessionUuid) &&
         (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore)
       );
@@ -693,6 +719,7 @@ export class ExecutionTracker {
       }
       if (
         execution.id === options.excludeExecutionId ||
+        (options.onlyToolName !== undefined && execution.toolName !== options.onlyToolName) ||
         !this.belongsToSessionFilter(execution, options.onlySessionUuid)
       ) {
         continue;
@@ -711,7 +738,7 @@ export class ExecutionTracker {
     execution: ActiveExecution,
     cancelReason: ExecutionCancellationReason,
   ): void {
-    if (typeof cancelReason === "string" && cancelReason.startsWith("device-disconnected:")) {
+    if (isDeviceLossCancellationReason(cancelReason)) {
       // Record the reason on the execution *before* aborting, so the tracker's own
       // authoritative `cancelReason` is set synchronously with the counted cancellation
       // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same

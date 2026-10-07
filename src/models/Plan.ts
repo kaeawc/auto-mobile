@@ -4,10 +4,15 @@ import type {
   ExecutePlanDebugInfo,
   PlanDeviceFailure,
   PlanSkippedStep,
+  PlanStepToolResult,
   PlanStepWarnings,
+  PlanToolResultsTruncation,
 } from "./ExecutePlanResult";
 
+import type { TapAtGeometry } from "./TapAtGeometry";
+
 export interface PlanStep {
+  geometry?: TapAtGeometry;
   tool: string;
   params: Record<string, any>;
   label?: string;
@@ -78,6 +83,10 @@ export interface PlanExecutionResult {
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, in plan step order, promoted out of the trace. */
   skippedSteps?: PlanSkippedStep[];
+  /** Bounded tool payloads of completed steps, in plan step order (issue #10090). */
+  toolResults?: PlanStepToolResult[];
+  /** Set when the plan-wide `toolResults` budget ran out (see {@link PlanToolResultsTruncation}). */
+  toolResultsTruncated?: PlanToolResultsTruncation;
 }
 
 export interface DeviceExecutionResult {

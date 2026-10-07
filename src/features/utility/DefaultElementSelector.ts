@@ -9,7 +9,7 @@ import { isTruthyFlag } from "./elementProperties";
 import { ResolverElementSelector } from "./ResolverElementSelector";
 import { DefaultElementFinder } from "./ElementFinder";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
@@ -265,7 +265,7 @@ export class DefaultElementSelector implements ElementSelector {
     });
     const visibleMatches = matches
       .map((element, matchIndex) => ({ element, index: matchIndex }))
-      .filter((match) => !isElementCenterOffScreen(match.element.bounds, screenSize));
+      .filter((match) => hasVisibleScreenPart(match.element.bounds, screenSize));
 
     if (visibleMatches.length === 0) {
       return { element: null, indexInMatches: -1, totalMatches, strategy };

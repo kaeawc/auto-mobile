@@ -20,6 +20,8 @@ public protocol SdkHierarchyFetching: Sendable {
     func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) async -> Bool
     /// nil means transport failure; false means the SDK found no handler.
     func performMagicTap() async -> Bool?
+    /// POST a trigger body to the SDK's `/trigger` route; nil means the SDK was unreachable.
+    func sendTrigger(_ body: Data) async -> SdkTriggerReply?
     /// Draw a highlight in the in-app SDK process.
     func addHighlight(id: String, shape: HighlightShape) async -> SdkHighlightOutcome
 }
@@ -27,4 +29,6 @@ public protocol SdkHierarchyFetching: Sendable {
 extension SdkHierarchyFetching {
     /// Older implementations have no Magic Tap bridge.
     public func performMagicTap() async -> Bool? { nil }
+    /// Older implementations have no trigger bridge.
+    public func sendTrigger(_: Data) async -> SdkTriggerReply? { nil }
 }

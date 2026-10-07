@@ -22,8 +22,10 @@ import {
   CtrlProxyHierarchyResponse,
   CtrlProxyPerfTiming,
 } from "../../src/features/observe/ios";
+import type { SdkTriggerRequest } from "../../src/features/observe/ios/CtrlProxySdkTrigger";
 import type {
   CtrlProxyMagicTapResult,
+  CtrlProxySdkTriggerResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
   CtrlProxyActionResult,
@@ -175,6 +177,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   // requestSetVoiceOverEnabled call history
   private setVoiceOverEnabledHistory: boolean[] = [];
+
+  private sdkTriggerHistory: SdkTriggerRequest[] = [];
+  private sdkTriggerResult: CtrlProxySdkTriggerResult = {
+    success: true,
+    available: true,
+    statusCode: 200,
+    totalTimeMs: 0,
+  };
 
   private actionHistory: Array<{
     action: string;
@@ -1322,6 +1332,27 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       action,
       totalTimeMs: 50,
     };
+  }
+
+  /** Script the next `requestSdkTrigger` results (default: delivered, HTTP 200). */
+  setSdkTriggerResult(result: CtrlProxySdkTriggerResult): void {
+    this.sdkTriggerResult = result;
+  }
+
+  getSdkTriggerHistory(): SdkTriggerRequest[] {
+    return [...this.sdkTriggerHistory];
+  }
+
+  async requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult> {
+    request.signal?.throwIfAborted();
+    await this.applyDelay("sdkTrigger");
+    this.checkFailure("sdkTrigger");
+    this.sdkTriggerHistory.push({
+      module: request.module,
+      trigger: request.trigger,
+      ...(request.payload ? { payload: request.payload } : {}),
+    });
+    return { ...this.sdkTriggerResult };
   }
 
   async requestMagicTap(

@@ -794,8 +794,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 50 rawValues", () => {
-    expect(rawValues.length).toBe(50);
+  test("Swift ResponseType declares exactly 51 rawValues", () => {
+    expect(rawValues.length).toBe(51);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -808,8 +808,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 43 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(43);
+  test("the decoder explicitly reshapes exactly 44 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(44);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {

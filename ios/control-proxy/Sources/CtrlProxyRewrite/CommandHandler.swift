@@ -246,6 +246,9 @@ final class CommandHandler: CommandHandling {
             case let .magicTap(payload):
                 return await handleMagicTap(payload, startTime: startTime)
 
+            case let .sdkTrigger(payload):
+                return await handleSdkTrigger(payload, startTime: startTime)
+
             case let .getVoiceOverState(payload):
                 return await handleGetVoiceOverState(payload, startTime: startTime)
 

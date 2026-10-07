@@ -23,6 +23,7 @@ For detailed usage of specific capabilities, see these focused skills:
 - `/text` - Text input, keyboard control, clipboard operations
 - `/gesture` - Tap, swipe, scroll, pinch, drag-and-drop
 - `/snapshot` - Capture and restore device state
+- `/navigate` - Build, inspect, and replay the app's navigation graph (`explore`, `getNavigationGraph`, `navigateTo`)
 
 ## Quick Reference
 

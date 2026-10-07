@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { MemoryAudit } from "../../../src/features/memory/MemoryAudit";
 import type { MemoryMetrics } from "../../../src/features/memory/MemoryMetricsCollector";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { createTestDatabase } from "../../db/testDbHelper";
 
 describe("MemoryAudit - Unit Tests", function () {
   let audit: MemoryAudit;
@@ -474,6 +475,50 @@ describe("MemoryAudit - Unit Tests", function () {
       const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
 
       expect(diagnostics).toBe("No memory issues detected");
+    });
+  });
+
+  describe("storeAuditResult", function () {
+    test("stores sendKeys arguments with typed text redacted", async function () {
+      const db = await createTestDatabase();
+      try {
+        const dbAudit = new MemoryAudit(
+          { deviceId: "test-device", name: "test", platform: "android" },
+          new FakeAdbClientFactory(),
+          db,
+        );
+        const snapshot = { javaHeapMb: 1, nativeHeapMb: 1, totalPssMb: 1, timestamp: 0, raw: "" };
+        const metrics: MemoryMetrics = {
+          preSnapshot: snapshot,
+          postSnapshot: snapshot,
+          javaHeapGrowthMb: 0,
+          nativeHeapGrowthMb: 0,
+          totalPssGrowthMb: 0,
+          gcEvents: [],
+          gcCount: 0,
+          gcTotalDurationMs: 0,
+          unreachableObjects: null,
+        };
+        await dbAudit["storeAuditResult"](
+          "com.example",
+          "sendKeys",
+          { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },
+          metrics,
+          [],
+          null,
+          true,
+        );
+        const row = await db
+          .selectFrom("memory_audit_results")
+          .select("tool_args")
+          .executeTakeFirstOrThrow();
+        expect(JSON.parse(row.tool_args ?? "null")).toEqual({
+          commands: [{ action: "type", text: "<text, 14 characters>" }],
+          platform: "android",
+        });
+      } finally {
+        await db.destroy();
+      }
     });
   });
 });

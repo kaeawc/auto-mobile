@@ -8,7 +8,10 @@ import type {
   HostCommandOptions,
 } from "../../../src/utils/HostCommandExecutor";
 import { CoreDeviceCapabilityProbe } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
-import { parseDevicectlDisplayInfo } from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import {
+  type DevicectlDisplayInfo,
+  parseDevicectlDisplayInfo,
+} from "../../../src/utils/ios-cmdline-tools/DevicectlDisplayInfo";
 import {
   DEVICECTL_DISPLAYS_COMMAND,
   DevicectlDisplayScreenshotCapture,
@@ -42,27 +45,11 @@ const capturedPanel: DisplayPanel = {
   sizePx: { width: 1206, height: 2622 },
 };
 
-/**
- * DERIVED (not a capture): the captured listing with its one display cloned into a
- * second, differently sized one. A Duo `info displays` capture is still owed (#8350),
- * so this only exercises selection among several displays, not real Duo naming.
- */
-function derivedTwoDisplayListing(innerUniqueId = "DERIVED-INNER-ID"): string {
-  const data = JSON.parse(capturedDisplays);
-  const [captured] = data.result.displays;
-  data.result.displays = [
-    { ...captured, name: "derived-cover", nativeSize: [1398, 2034], displayId: 1 },
-    {
-      ...captured,
-      name: "derived-inner",
-      nativeSize: [2007, 2853],
-      displayId: 2,
-      primary: false,
-      uniqueId: innerUniqueId,
-    },
-  ];
-  return JSON.stringify(data);
-}
+/** Typed (not parsed) listings: selection takes parsed objects, so no raw JSON is fabricated. */
+const twoDisplays: DevicectlDisplayInfo[] = [
+  { uniqueId: "COVER-ID", displayId: 1, name: "cover", nativeSize: { width: 1398, height: 2034 } },
+  { uniqueId: "INNER-ID", displayId: 2, name: "inner", nativeSize: { width: 2007, height: 2853 } },
+];
 
 const innerPanel: DisplayPanel = {
   key: "primary-1",
@@ -120,10 +107,8 @@ describe("findDevicectlDisplayUniqueId", () => {
   });
 
   test("selects one of several displays by size and refuses an ambiguous listing", () => {
-    expect(findDevicectlDisplayUniqueId(displaysOf(derivedTwoDisplayListing()), innerPanel)).toBe(
-      "DERIVED-INNER-ID",
-    );
-    const ambiguous = displaysOf(derivedTwoDisplayListing()).map((display) => ({
+    expect(findDevicectlDisplayUniqueId(twoDisplays, innerPanel)).toBe("INNER-ID");
+    const ambiguous = twoDisplays.map((display) => ({
       ...display,
       name: "LCD",
       nativeSize: { width: 2007, height: 2853 },
@@ -211,12 +196,14 @@ describe("DevicectlPanelScreenshotSource", () => {
 
   test("re-reads the unique ID on every capture instead of caching it", async () => {
     const h = sourceHarness();
-    h.commandInvoker.result = { kind: "ok", output: derivedTwoDisplayListing("FIRST-ID") };
-    await h.source.capturePanel({ deviceId: "sim-1", panel: innerPanel, panelCount: 2 });
-    h.commandInvoker.result = { kind: "ok", output: derivedTwoDisplayListing("SECOND-ID") };
-    await h.source.capturePanel({ deviceId: "sim-1", panel: innerPanel, panelCount: 2 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await h.source.capturePanel({ deviceId: "sim-1", panel: capturedPanel, panelCount: 2 });
+    }
     expect(h.commandInvoker.calls).toHaveLength(2);
-    expect(h.capture.calls.map((call) => call.displayUniqueId)).toEqual(["FIRST-ID", "SECOND-ID"]);
+    expect(h.capture.calls.map((call) => call.displayUniqueId)).toEqual([
+      CAPTURED_UNIQUE_ID,
+      CAPTURED_UNIQUE_ID,
+    ]);
   });
 
   test("an unmatched panel or unparsable listing falls back without capturing", async () => {

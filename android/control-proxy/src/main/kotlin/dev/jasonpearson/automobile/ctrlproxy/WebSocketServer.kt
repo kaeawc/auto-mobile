@@ -61,6 +61,8 @@ class WebSocketServer(
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
   /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
   private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
+  /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
+  private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -79,7 +81,8 @@ class WebSocketServer(
      * Maximum accepted inbound WebSocket frame (64 MiB). ktor caps frame size by default;
      * `Long.MAX_VALUE` removed the ceiling so a single hostile frame advertising a multi-GB length
      * would be buffered into memory -> OutOfMemoryError, downing the runner. Cap it above any
-     * legitimate command/hierarchy payload (issue #3711, the twin of iOS #3626).
+     * legitimate command/hierarchy payload (issue #3711, the twin of iOS #3626). Request types with
+     * a contract-bounded payload get a tighter cap from [InboundFrameLimits] (#9935).
      */
     internal const val MAX_FRAME_SIZE_BYTES: Long = 64L * 1024 * 1024
 
@@ -193,6 +196,7 @@ class WebSocketServer(
         is SetTextResult -> response.requestId
         is CommitTextResult -> response.requestId
         is SetKeyboardProfileResult -> response.requestId
+        is SetNetworkMockRulesResult -> response.requestId
         is KeyboardProfileCatalogResult -> response.requestId
         is ImeActionResult -> response.requestId
         is SelectAllResult -> response.requestId
@@ -315,6 +319,10 @@ class WebSocketServer(
     // The IME commits and clears password fields; older APKs refuse them.
     add("ime_password_commit_v1")
     add("tap_double_v1")
+    // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
+    // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
+    // reply when this flag is present, so an older runner never costs them a timeout.
+    add("network_mock_rules_report_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the overlay would silently land on the default display.
@@ -600,11 +608,7 @@ class WebSocketServer(
                     // Listen for incoming messages
                     for (frame in incoming) {
                       when (frame) {
-                        is Frame.Text -> {
-                          val text = frame.readText()
-                          Log.d(TAG, inboundFrameLogLine(connectionId, text))
-                          handleClientMessage(text, client)
-                        }
+                        is Frame.Text -> handleInboundTextFrame(connectionId, frame, client)
                         is Frame.Close -> {
                           Log.d(TAG, "Client #$connectionId closed connection")
                         }
@@ -975,10 +979,12 @@ class WebSocketServer(
    */
   internal fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
+      // Replies only when asked to (issue #10101): a requestId means the host awaits the report
+      // of rejected rules; without one it is the fire-and-forget push and no owner may leak.
+      is SetNetworkMockRules -> request.requestId != null
       is SetHierarchyInterval,
       is SetRecompositionTracking,
       is SetAccessibilityFlags,
-      is SetNetworkMockRules,
       is SetNetworkErrorSimulation,
       is StartRecording,
       is StopRecording -> false
@@ -1038,6 +1044,42 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
+  /**
+   * Checks [frame] against its request type's cap on the raw bytes, so an oversized frame is
+   * answered with a correlated error without being decoded into a String or deserialized (#9935).
+   */
+  internal suspend fun handleInboundTextFrame(
+    connectionId: Int,
+    frame: Frame.Text,
+    connection: ConnectedClient,
+  ) {
+    val rejection = inboundFrameLimits.check(frame.data)
+    if (rejection == null) {
+      val text = frame.readText()
+      Log.d(TAG, inboundFrameLogLine(connectionId, text))
+      handleClientMessage(text, connection)
+      return
+    }
+    // Sizes and type only: the frame may carry asset bytes or typed input.
+    Log.w(TAG, "Rejected frame from client #$connectionId: ${rejection.message}")
+    sendErrorResponse(
+      connection,
+      if (rejection.type in overlayRequestTypes) {
+        OverlayResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = rejection.requestId,
+          success = false,
+          error = rejection.message,
+        )
+      } else {
+        CorrelatedErrorReporter.frame(
+          requestId = rejection.requestId,
+          errorMessage = rejection.message,
+        )
+      },
+    )
+  }
+
   internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {

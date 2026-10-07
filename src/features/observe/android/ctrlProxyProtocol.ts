@@ -686,9 +686,14 @@ export interface SetAccessibilityFlagsMessage {
   occlusionEnabled: boolean;
 }
 
-/** `@SerialName("set_network_mock_rules")` → `SetNetworkMockRules` (sent without requestId) */
+/**
+ * `@SerialName("set_network_mock_rules")` → `SetNetworkMockRules`. Sent without requestId for the
+ * fire-and-forget reconnect push; with one, a CtrlProxy advertising
+ * {@link NETWORK_MOCK_RULES_REPORT_CAPABILITY} answers with `set_network_mock_rules_result`.
+ */
 export interface SetNetworkMockRulesMessage {
   type: "set_network_mock_rules";
+  requestId?: string;
   rules: NetworkMockRuleSync[];
 }
 
@@ -698,7 +703,10 @@ export interface SetNetworkErrorSimulationMessage {
   enabled: boolean;
   errorType: string | null;
   limit: number | null;
+  /** Host-clock epoch; kept for SDKs that predate `remainingMs`. */
   expiresAtEpochMs: number | null;
+  /** Time left, timed by the device's own monotonic clock; preferred when present (#10062). */
+  remainingMs: number | null;
 }
 
 // =============================================================================
@@ -857,6 +865,13 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
  */
 export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
 
+/**
+ * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
+ * with `set_network_mock_rules_result` naming the rules the app's regex engine rejected (#10101).
+ * The host only waits for that reply when the flag is present.
+ */
+export const NETWORK_MOCK_RULES_REPORT_CAPABILITY = "network_mock_rules_report_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -866,6 +881,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "gesture_display_id_v1",
   "tap_double_v1",
   OVERLAY_DISPLAY_CAPABILITY,
+  NETWORK_MOCK_RULES_REPORT_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -886,6 +902,7 @@ export const ANDROID_REQUEST_ID_RESPONSE_TYPES: ReadonlySet<string> = new Set([
   "commit_text_result",
   "cancel_ime_commit_result",
   "set_keyboard_profile_result",
+  "set_network_mock_rules_result",
   "keyboard_profiles_result",
   "insert_text_state_result",
   "insert_text_result",
@@ -1539,6 +1556,7 @@ export const ctrlProxyRequests = {
     errorType?: string | null;
     limit?: number | null;
     expiresAtEpochMs?: number | null;
+    remainingMs?: number | null;
   }): SetNetworkErrorSimulationMessage {
     return {
       type: "set_network_error_simulation",
@@ -1546,6 +1564,7 @@ export const ctrlProxyRequests = {
       errorType: args.errorType ?? null,
       limit: args.limit ?? null,
       expiresAtEpochMs: args.expiresAtEpochMs ?? null,
+      remainingMs: args.remainingMs ?? null,
     };
   },
 

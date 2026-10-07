@@ -939,10 +939,11 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
           errorType: "timeout",
           limit: 3,
           expiresAtEpochMs: 1720000000000,
+          remainingMs: 30000,
         }),
       ),
       expected:
-        '{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":3,"expiresAtEpochMs":1720000000000}',
+        '{"type":"set_network_error_simulation","enabled":true,"errorType":"timeout","limit":3,"expiresAtEpochMs":1720000000000,"remainingMs":30000}',
     },
     {
       builder: "setNetworkErrorSimulation",
@@ -951,7 +952,7 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         ctrlProxyRequests.setNetworkErrorSimulation({ enabled: false }),
       ),
       expected:
-        '{"type":"set_network_error_simulation","enabled":false,"errorType":null,"limit":null,"expiresAtEpochMs":null}',
+        '{"type":"set_network_error_simulation","enabled":false,"errorType":null,"limit":null,"expiresAtEpochMs":null,"remainingMs":null}',
     },
     {
       builder: "requestInstalledPackages",

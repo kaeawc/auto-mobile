@@ -310,9 +310,14 @@ extension ElementLocator {
     /// resolution that can block when the app backgrounds (issue #9082). Live lookup
     /// is gated on foreground state and a no-wait existence check before snapshotting.
     /// Evaluate captured keyboard visibility only when usable inputs lack captured focus.
+    /// A hardware keyboard or an iPad floating/undocked keyboard can be absent from the
+    /// app's tree while SpringBoard still hosts it, so SpringBoard is consulted when the
+    /// captured tree has no keyboard, as the runner's `isKeyboardVisible` does (issue #9290).
+    /// It is evaluated last because it is a live query.
     nonisolated static func keyboardFocusDecision(
         textInputCandidates: [(frame: CGRect, hasFocus: Bool)],
-        keyboardVisibleInSnapshot: @autoclosure () -> Bool
+        keyboardVisibleInSnapshot: @autoclosure () -> Bool,
+        keyboardVisibleInSpringBoard: @autoclosure () -> Bool
     )
         -> KeyboardFocusDecision
     {
@@ -323,7 +328,7 @@ extension ElementLocator {
         if let focused = usableInputs.first(where: { $0.hasFocus }) {
             return .useSnapshotFrame(focused.frame)
         }
-        return keyboardVisibleInSnapshot() ? .liveQuery : .skip
+        return keyboardVisibleInSnapshot() || keyboardVisibleInSpringBoard() ? .liveQuery : .skip
     }
 
     /// Live focus overrides captured focus for usable frames. Snapshot-derived focus

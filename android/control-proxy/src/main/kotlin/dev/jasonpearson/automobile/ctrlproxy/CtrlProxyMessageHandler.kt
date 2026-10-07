@@ -461,7 +461,8 @@ class CtrlProxyMessageHandler(
         )
       is SetNetworkMockRules ->
         actions.setNetworkMockRules(
-          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules)
+          request.requestId,
+          json.encodeToString(ListSerializer(NetworkMockRuleDto.serializer()), request.rules),
         )
       is SetNetworkErrorSimulation ->
         actions.setNetworkErrorSimulation(
@@ -469,6 +470,7 @@ class CtrlProxyMessageHandler(
           request.errorType,
           request.limit,
           request.expiresAtEpochMs,
+          request.remainingMs,
         )
       is GetCurrentFocus -> actions.getCurrentFocus(request.requestId)
       is GetTraversalOrder -> actions.getTraversalOrder(request.requestId)

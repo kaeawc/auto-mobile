@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import type { BootedDevice } from "../../src/models";
 import type { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
@@ -121,6 +122,7 @@ function planDisconnectMonitorHarness() {
       reconcileDiscoveryObservation: async () => {
         actions.push("reconcile");
       },
+      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAllDevices: () => (pooled ? devices : []),
       getDevice: (id: string) => (pooled && id === device.id ? device : null),
       isDeviceLeasedForAndroidStartup: () => false,

@@ -4,8 +4,9 @@ import {
   IOS_FILES_FIXTURE_BUNDLE_ID,
 } from "../../src/server/appFileService";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
+import * as hostPath from "node:path";
 import { createSharedStorageReadServiceForTesting } from "../../src/server/sharedStorageReadService";
 import type { SharedStorageUserResolver } from "../../src/server/sharedStorageReadService";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -561,8 +562,10 @@ describe("iOS Simulator bounded fixture reads", () => {
         };
       },
       readdir: async (path) =>
-        [...files.keys()]
-          .filter((file) => file.startsWith(`${path}/`))
+        [...new Set([...files.keys(), ...directories, ...symlinks])]
+          .filter(
+            (file) => file.startsWith(`${path}/`) && !file.slice(path.length + 1).includes("/"),
+          )
           .map((file) => ({ name: file.slice(path.length + 1) })),
       readFileBuffer: async (path) => {
         reads.push(path);
@@ -574,7 +577,7 @@ describe("iOS Simulator bounded fixture reads", () => {
       iosFixtureReader: reader,
     });
     const request = { deviceId: device.deviceId, namespace: "run" };
-    return { service, request, simctl, symlinks, reads };
+    return { service, request, simctl, symlinks, reads, files, directories };
   }
 
   test("lists only the fixture namespace using fake simctl and filesystem", async () => {
@@ -597,6 +600,45 @@ describe("iOS Simulator bounded fixture reads", () => {
     expect(binary.text).toBeUndefined();
     expect(binary.mimeType).toBe("image/png");
     expect(reads.every((path) => path.startsWith("/fixture/Documents/automobile/run/"))).toBe(true);
+  });
+
+  test("keeps Simulator paths POSIX when host path functions use Windows semantics", async () => {
+    const spies = [
+      spyOn(hostPath, "resolve").mockImplementation(hostPath.win32.resolve),
+      spyOn(hostPath, "join").mockImplementation(hostPath.win32.join),
+      spyOn(hostPath, "relative").mockImplementation(hostPath.win32.relative),
+      spyOn(hostPath, "isAbsolute").mockImplementation(hostPath.win32.isAbsolute),
+    ];
+    try {
+      expect(hostPath.join("/fixture", "Documents")).toBe("\\fixture\\Documents");
+      const { service, request, files, directories, symlinks, reads } = harness();
+      directories.add("/fixture/Documents/automobile/run/nested");
+      files.set("/fixture/Documents/automobile/run/nested/note.txt", Buffer.from("nested"));
+      const listing = await service.list(request);
+      expect(listing.observation).toBe("complete");
+      expect(listing.files.map((file) => file.path)).toEqual([
+        "note.txt",
+        "photo.png",
+        "nested/note.txt",
+      ]);
+      expect((await service.read({ ...request, path: "nested/note.txt" })).text).toBe("nested");
+      expect(reads).toEqual(["/fixture/Documents/automobile/run/nested/note.txt"]);
+      reads.length = 0;
+      for (const path of ["../secret", "..\\secret", "/secret", "\\\\host\\share\\secret"]) {
+        await expect(service.read({ ...request, path })).rejects.toThrow();
+      }
+      symlinks.add("/fixture/Documents/automobile/run/nested");
+      expect((await service.read({ ...request, path: "nested/note.txt" })).observation).toBe(
+        "unavailable",
+      );
+      symlinks.add("/fixture/Documents/automobile/run");
+      expect((await service.list(request)).observation).toBe("unavailable");
+      expect(reads).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
   });
 
   test("missing files and namespaces remain typed missing observations", async () => {

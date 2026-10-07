@@ -13,6 +13,10 @@ import {
   enrichDeviceLossOutcome,
 } from "../../src/server/deviceLossOutcome";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { AndroidTransportAliases } from "../../src/utils/androidSerial";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -29,6 +33,8 @@ afterEach(() => {
 function harness() {
   serverConfig.setPlanExecutionActive(true);
   const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  const transportAliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
   const incidents = new InMemoryEmulatorLossIncidentStore(timer, new FakeIdGenerator());
   const device: PooledDevice = {
     id: "emulator-5554",
@@ -93,6 +99,7 @@ function harness() {
     offlineRecoveryAttemptedIncarnations: new Map(),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
+      mapAndroidDiscovery: transportAliases.mapDiscovery.bind(transportAliases),
       reconcileDiscoveryObservation: async () => {
         throw new Error("Plan discovery must remain presence-only");
       },
@@ -145,6 +152,8 @@ function harness() {
     daemon,
     timer,
     manager,
+    adb,
+    transportAliases,
     device,
     peer,
     devices,
@@ -171,6 +180,42 @@ function harness() {
 }
 
 describe("confirmed plan device loss", () => {
+  test.each(["sweep", "confirmation"])(
+    "a proven Android transport alias present at %s keeps the plan alive",
+    async (boundary) => {
+      const h = harness();
+      const plan = h.start("executePlan");
+      const alias = { deviceId: "localhost:5555", name: "Pixel", platform: "android" as const };
+      const canonical = { deviceId: h.device.id, name: "Pixel", platform: "android" as const };
+      const rows = [canonical, alias];
+      h.adb.setCommandResponse("getprop ro.serialno", createExecResult(h.device.id, ""));
+      h.adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("1", ""));
+      h.adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+      h.transportAliases.fold(
+        rows,
+        await h.transportAliases.prepare(rows),
+        new Set(h.devices.keys()),
+      );
+      if (boundary === "sweep") {
+        h.manager.bootedDevices.push(alias);
+      } else {
+        await h.tick();
+        h.manager.onDiscovery = () => {
+          if (h.manager.calls.length === 4) {
+            h.manager.bootedDevices.push(alias);
+          }
+        };
+      }
+      await h.tick();
+      await h.tick();
+      expect(h.manager.calls).toHaveLength(boundary === "sweep" ? 2 : 5);
+      expect(h.daemon["deviceDisconnectMisses"].has(h.device.id)).toBe(false);
+      expect(plan.abortController.signal.aborted).toBe(false);
+      expect(await h.incidents.list()).toEqual([]);
+      expect(h.transportAliases.mapDiscovery([alias])).toEqual([canonical]);
+    },
+  );
+
   test("repeated checks cannot confirm before the named window elapses", async () => {
     const h = harness();
     const plan = h.start("executePlan");

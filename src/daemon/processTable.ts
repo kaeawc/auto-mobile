@@ -6,7 +6,21 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
 import { isDaemonEntryScriptPath } from "./DaemonLauncher";
 import { isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
-import { darwinProcessGenerationToken, readLinuxProcessGenerationToken } from "./processGeneration";
+import {
+  DARWIN_PS_LSTART_ENV,
+  darwinProcessGenerationToken,
+  readDarwinProcessGenerationToken,
+  readLinuxProcessGenerationToken,
+} from "./processGeneration";
+
+/**
+ * Darwin process-table scan. Runs under the same pinned locale and UTC zone as
+ * the single-PID token read so a scan token equals a direct read of the same
+ * live process regardless of either reader's `TZ`.
+ */
+export const DARWIN_PROCESS_TABLE_COMMAND = `${Object.entries(DARWIN_PS_LSTART_ENV)
+  .map(([name, value]) => `${name}=${value}`)
+  .join(" ")} ps -axo pid=,ppid=,lstart=,command=`;
 
 export interface DaemonProcessRecord {
   pid: number;
@@ -294,18 +308,18 @@ function parseLstart(value: string): number | undefined {
   const second = parseInt(match[5], 10);
   const year = parseInt(match[6], 10);
 
-  // `ps lstart` reports local wall-clock time. Constructing this date locally
-  // keeps its epoch comparable to the Date.now() timestamp written to the PID
-  // file, while the component check rejects JavaScript's overflow normalization.
-  // During a fall-back repeated hour, this local time is ambiguous and Date applies its fixed offset rule.
-  const startedAt = new Date(year, month, day, hour, minute, second);
+  // The scan runs `ps` with TZ pinned to UTC (DARWIN_PS_LSTART_ENV), so `lstart`
+  // is UTC wall-clock time and maps to exactly one epoch, comparable to the
+  // Date.now() timestamp written to the PID file, with no repeated DST hour. The
+  // component check rejects JavaScript's overflow normalization.
+  const startedAt = new Date(Date.UTC(year, month, day, hour, minute, second));
   const hasComponentMismatch = [
-    startedAt.getFullYear() !== year,
-    startedAt.getMonth() !== month,
-    startedAt.getDate() !== day,
-    startedAt.getHours() !== hour,
-    startedAt.getMinutes() !== minute,
-    startedAt.getSeconds() !== second,
+    startedAt.getUTCFullYear() !== year,
+    startedAt.getUTCMonth() !== month,
+    startedAt.getUTCDate() !== day,
+    startedAt.getUTCHours() !== hour,
+    startedAt.getUTCMinutes() !== minute,
+    startedAt.getUTCSeconds() !== second,
   ];
   if (hasComponentMismatch.some(Boolean)) {
     return undefined;
@@ -426,6 +440,13 @@ export function parseWindowsDaemonProcessTable(
 
 export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
+  /**
+   * Opaque OS generation token for the process currently holding `pid`
+   * (issue #10108). Optional: a checker without it leaves a recorded PID
+   * trusted as live, which is the safe default. Returns undefined when the
+   * token cannot be read; callers must never read that as "the PID is free".
+   */
+  readProcessGenerationToken?(pid: number): string | undefined;
 }
 
 export interface DaemonProcessSignaler {
@@ -481,7 +502,7 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
     };
 
     if (isDarwin) {
-      const { output } = runScan("LC_ALL=C ps -axo pid=,ppid=,lstart=,command=");
+      const { output } = runScan(DARWIN_PROCESS_TABLE_COMMAND);
       return parseDarwinDaemonProcessTable(output, this.activeEntryScript);
     }
 
@@ -510,6 +531,13 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
 
   isProcessRunning(pid: number): boolean {
     return isDaemonProcessRunning(pid, { debugLog: logger.debug });
+  }
+
+  readProcessGenerationToken(pid: number): string | undefined {
+    if (this.platform === "darwin") {
+      return readDarwinProcessGenerationToken(pid);
+    }
+    return this.platform === "linux" ? this.linuxProcessGenerationTokenForPid(pid) : undefined;
   }
 }
 

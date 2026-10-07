@@ -86,6 +86,7 @@ function variantContent(
 // row keeps its background behind the bars and pads its content into the safe area, so the
 // controls stay reachable, readable over any app, and inside the window's own bounds.
 const CONTROL_BACKGROUND = "#CC000000";
+const CONTROL_ROW_CLEARANCE = 44;
 const CONTROL_TEXT_COLOR = "#FFFFFFFF";
 
 function controlText(
@@ -183,7 +184,17 @@ export function composeVariantCarousel(input: unknown): OverlaySpec {
         {
           type: "box",
           testTag: `variant-${index}-content`,
-          style: { width: "fill", height: "fill" },
+          // Fullscreen: end the content above the control row instead of under it (#10437). The
+          // row is its text height plus 16 of padding and the bottom system bar, so reserve the
+          // same; floating pages drop the content and need no reserve.
+          ...(floating
+            ? {}
+            : { safeAreaPadding: { types: ["systemBars", "cutout"], edges: ["bottom"] } }),
+          style: {
+            width: "fill",
+            height: "fill",
+            ...(floating ? {} : { padding: { bottom: CONTROL_ROW_CLEARANCE } }),
+          },
           children: [content],
         },
         controls,

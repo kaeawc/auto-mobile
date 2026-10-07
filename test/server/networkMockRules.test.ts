@@ -3,9 +3,47 @@ import { NetworkState } from "../../src/server/NetworkState";
 import {
   buildNetworkMockRules,
   describeInvalidMockPattern,
+  parseMockRuleReport,
 } from "../../src/server/networkMockRules";
 
 const DEVICE = "emulator-5554";
+
+describe("parseMockRuleReport (#10101)", function () {
+  test("an absent rejectedMockIds is not a report, so nothing is claimed installed", function () {
+    expect(parseMockRuleReport({})).toEqual({ status: "unconfirmed" });
+    expect(parseMockRuleReport({ rejectedMockIds: null })).toEqual({ status: "unconfirmed" });
+    expect(parseMockRuleReport({ rejectedMockIds: "m1" })).toEqual({ status: "unconfirmed" });
+  });
+
+  test("an empty list is a report that nothing was rejected", function () {
+    expect(parseMockRuleReport({ rejectedMockIds: [] })).toEqual({
+      status: "reported",
+      rejected: [],
+    });
+  });
+
+  test("pairs each rejected id with the device's reason", function () {
+    expect(
+      parseMockRuleReport({
+        rejectedMockIds: ["m1", "m2"],
+        rejectedReasons: { m1: "invalid regex: a", m2: "invalid regex: b" },
+      }),
+    ).toEqual({
+      status: "reported",
+      rejected: [
+        { mockId: "m1", reason: "invalid regex: a" },
+        { mockId: "m2", reason: "invalid regex: b" },
+      ],
+    });
+  });
+
+  test("a rejected id the device gave no reason for still gets listed", function () {
+    expect(parseMockRuleReport({ rejectedMockIds: ["m1", 7], rejectedReasons: {} })).toEqual({
+      status: "reported",
+      rejected: [{ mockId: "m1", reason: "no reason reported by the device" }],
+    });
+  });
+});
 
 describe("buildNetworkMockRules", function () {
   let state: NetworkState;
@@ -25,7 +63,7 @@ describe("buildNetworkMockRules", function () {
 
   test("maps every mock field onto the wire shape", function () {
     const mock = state.addMock(DEVICE, {
-      host: "api\\.example\\.com",
+      host: "^api\\.example\\.com$",
       path: "/v1/items",
       method: "GET",
       limit: 3,
@@ -38,7 +76,7 @@ describe("buildNetworkMockRules", function () {
     expect(buildNetworkMockRules(state, DEVICE)).toEqual([
       {
         mockId: mock.mockId,
-        host: "api\\.example\\.com",
+        host: "^api\\.example\\.com$",
         path: "/v1/items",
         method: "GET",
         limit: 3,
@@ -156,7 +194,7 @@ describe("describeInvalidMockPattern", function () {
   });
 
   test("accepts leading inline flags that JavaScript cannot compile", function () {
-    for (const pattern of ["(?i)api\\.example\\.com", "(?is)a.b", "(?i)(?-s)x", "(?x) a {b "]) {
+    for (const pattern of ["(?i)^api\\.example\\.com$", "(?is)a.b", "(?i)(?-s)x", "(?x) a {b "]) {
       expect(describeInvalidMockPattern(pattern)).toBeNull();
     }
   });

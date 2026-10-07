@@ -9,8 +9,10 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +65,8 @@ data class InteractiveOverlayRequest(
    * that a person holding the device can use, whatever the placement.
    */
   val persistent: Boolean = false,
+  /** Dark or light host chrome as the spec paints it; null follows the device setting. */
+  val darkTheme: Boolean? = null,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
 ) {
@@ -600,10 +604,12 @@ private fun InteractiveOverlayWindowContent(
   val scope = rememberCoroutineScope()
   if (chrome.dismissVisible) {
     Column(Modifier.fillMaxSize()) {
-      // Reserve opaque, inset-aware space and clip the spec below it. Modal scrims cannot cover it.
+      // Reserve inset-aware space and clip the spec below it. Modal scrims cannot cover it. The
+      // bar is translucent, themed like the spec, and only as tall as its small button (#10437).
+      val dismissColors = overlayDismissColors(request.darkTheme ?: isSystemInDarkTheme())
       Box(
         Modifier.fillMaxWidth()
-          .background(Color.White)
+          .background(dismissColors.background)
           .windowInsetsPadding(
             WindowInsets.systemBars
               .union(WindowInsets.displayCutout)
@@ -612,10 +618,11 @@ private fun InteractiveOverlayWindowContent(
       ) {
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
-          modifier = Modifier.align(Alignment.CenterEnd),
-          colors = ButtonDefaults.textButtonColors(contentColor = Color.Black),
+          modifier = Modifier.align(Alignment.CenterEnd).height(32.dp),
+          contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+          colors = ButtonDefaults.textButtonColors(contentColor = dismissColors.content),
         ) {
-          Text("Dismiss AutoMobile overlay")
+          Text("Dismiss AutoMobile overlay", style = MaterialTheme.typography.labelMedium)
         }
       }
       Box(

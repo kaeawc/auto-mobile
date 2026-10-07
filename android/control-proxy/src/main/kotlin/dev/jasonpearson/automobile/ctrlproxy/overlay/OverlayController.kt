@@ -186,9 +186,11 @@ class OverlayController(
         requestDismiss = { removeActive() },
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
       )
+    val mappedSpec = mapOverlaySpec(validated, runtime.current.pages)
     val interactive =
       request.copy(
-        hasTextField = mapOverlaySpec(validated, runtime.current.pages).hasTextField,
+        hasTextField = mappedSpec.hasTextField,
+        darkTheme = overlayAuthoredTheme(mappedSpec.root)?.dark,
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
           OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }

@@ -1,5 +1,6 @@
 import type { CurrentFocusResult, Element } from "../../src/models";
 import type { AccessibilityFocusService } from "../../src/features/accessibility/SetAccessibilityFocus";
+import type { FocusActionOutcome } from "../../src/features/observe/android/CtrlProxyFocus";
 
 type FocusCall = { method: "set" | "clear"; resourceId: string };
 
@@ -10,6 +11,8 @@ type FocusCall = { method: "set" | "clear"; resourceId: string };
 export class FakeAccessibilityFocusService implements AccessibilityFocusService {
   calls: FocusCall[] = [];
   currentFocusElement: Element | null = null;
+  /** What the runner reported for set/clear; defaults to a real action being performed. */
+  outcome: FocusActionOutcome = { alreadySatisfied: false };
   private setThrows: Error | null = null;
   private clearThrows: Error | null = null;
   private currentFocusThrows: Error | null = null;
@@ -35,18 +38,20 @@ export class FakeAccessibilityFocusService implements AccessibilityFocusService 
     this.currentFocusError = error;
   }
 
-  async setAccessibilityFocus(resourceId: string): Promise<void> {
+  async setAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome> {
     this.calls.push({ method: "set", resourceId });
     if (this.setThrows) {
       throw this.setThrows;
     }
+    return this.outcome;
   }
 
-  async clearAccessibilityFocus(resourceId: string): Promise<void> {
+  async clearAccessibilityFocus(resourceId: string): Promise<FocusActionOutcome> {
     this.calls.push({ method: "clear", resourceId });
     if (this.clearThrows) {
       throw this.clearThrows;
     }
+    return this.outcome;
   }
 
   async requestCurrentFocus(): Promise<CurrentFocusResult> {

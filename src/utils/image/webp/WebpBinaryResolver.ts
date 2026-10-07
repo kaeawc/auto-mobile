@@ -25,7 +25,28 @@ interface WebpArchiveInfo {
   sha256: string;
 }
 
+/**
+ * Narrow filesystem seam for binary discovery and cache preparation, so tests
+ * can resolve binaries without touching the real disk.
+ */
+export interface WebpBinaryFileSystem {
+  isExecutableFile(filePath: string, platform: NodeJS.Platform): Promise<boolean>;
+  ensureDirectory(dirPath: string): Promise<void>;
+  makeExecutable(filePath: string): Promise<void>;
+}
+
+export const defaultWebpBinaryFileSystem: WebpBinaryFileSystem = {
+  isExecutableFile: (filePath, platform) => isExecutableFile(filePath, platform),
+  ensureDirectory: async (dirPath) => {
+    await fs.mkdir(dirPath, { recursive: true });
+  },
+  makeExecutable: async (filePath) => {
+    await fs.chmod(filePath, 0o755).catch(() => undefined);
+  },
+};
+
 export interface WebpBinaryResolverOptions {
+  fileSystem?: WebpBinaryFileSystem;
   projectRoot?: string;
   cacheDir?: string;
   platform?: NodeJS.Platform;
@@ -66,6 +87,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly archiveExtractor: ArchiveExtractor;
   private readonly processExecutor: HostProcessExecutor;
   private readonly checksumCalculator: ChecksumCalculator;
+  private readonly fileSystem: WebpBinaryFileSystem;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
@@ -77,6 +99,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     this.archiveExtractor = options.archiveExtractor ?? new DefaultArchiveExtractor();
     this.processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
     this.checksumCalculator = options.checksumCalculator ?? new DefaultChecksumCalculator();
+    this.fileSystem = options.fileSystem ?? defaultWebpBinaryFileSystem;
   }
 
   async resolve(): Promise<ResolvedWebpBinaries> {
@@ -139,7 +162,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private async resolveBinary(binary: WebpBinary, envVar: string): Promise<string> {
     const override = this.env[envVar]?.trim();
     if (override) {
-      if (await isExecutableFile(override, this.platform)) {
+      if (await this.fileSystem.isExecutableFile(override, this.platform)) {
         return override;
       }
       throw new ActionableError(
@@ -179,7 +202,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       }
       for (const name of candidateBinaryNames(binary, this.platform)) {
         const candidate = path.join(entry, name);
-        if (await isExecutableFile(candidate, this.platform)) {
+        if (await this.fileSystem.isExecutableFile(candidate, this.platform)) {
           return candidate;
         }
       }
@@ -199,7 +222,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       "win32-x64",
       `${binary}.exe`,
     );
-    return (await isExecutableFile(candidate, this.platform)) ? candidate : null;
+    return (await this.fileSystem.isExecutableFile(candidate, this.platform)) ? candidate : null;
   }
 
   private async findOrDownloadOffPlatformBinary(binary: WebpBinary): Promise<string | null> {
@@ -214,14 +237,14 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       "bin",
       executableName(binary, this.platform),
     );
-    if (await isExecutableFile(binaryPath, this.platform)) {
+    if (await this.fileSystem.isExecutableFile(binaryPath, this.platform)) {
       return binaryPath;
     }
 
     await this.provisionArchiveOnce(archive);
-    await fs.chmod(binaryPath, 0o755).catch(() => undefined);
+    await this.fileSystem.makeExecutable(binaryPath);
 
-    if (await isExecutableFile(binaryPath, this.platform)) {
+    if (await this.fileSystem.isExecutableFile(binaryPath, this.platform)) {
       return binaryPath;
     }
 
@@ -246,7 +269,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   private async provisionArchive(archive: WebpArchiveInfo): Promise<void> {
-    await fs.mkdir(this.cacheDir, { recursive: true });
+    await this.fileSystem.ensureDirectory(this.cacheDir);
     const archivePath = path.join(this.cacheDir, archive.archiveName);
     await this.fileDownloader.download(
       `${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`,

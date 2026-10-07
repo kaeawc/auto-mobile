@@ -100,6 +100,13 @@ function harness(platform: "android" | "ios", mode: Mode) {
   watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
     android.requestTapCoordinates.bind(android),
   );
+  // The real method opens a localhost WebSocket (a host emulator's adb forward can answer it), so
+  // keep the sequential two-tap path under test deterministic and off the network.
+  watch(AndroidCtrlProxyClient.prototype, "requestDoubleTapCoordinates").mockResolvedValue({
+    success: false,
+    totalTimeMs: 0,
+    error: "tap_double_v1 is not confirmed by the connected device service",
+  });
   watch(AndroidCtrlProxyClient.prototype, "requestSwipe").mockImplementation(
     android.requestSwipe.bind(android),
   );

@@ -3,6 +3,7 @@ import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { BaseResult } from "../shared/types";
 import type { CtrlProxyActionResult, DelegateContext } from "./types";
@@ -60,6 +61,8 @@ export async function sendIOSPressCommand(
       acknowledged: result.acknowledged ?? dispatched,
     };
   } catch (error) {
+    // A unit test reached the real WebSocket factory; fail it, never report a transport miss.
+    rethrowRealCtrlProxyWebSocketInTestError(error);
     // A runner refusal acknowledges dispatch; the caller's abort reason does not.
     if (dispatched && error instanceof ActionableError && error !== signal?.reason) {
       throw error;

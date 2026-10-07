@@ -408,6 +408,39 @@ class PlanSchemaValidatorTest {
   }
 
   @Test
+  fun `reports a null description as an error naming the field`() {
+    val yaml =
+      """
+      name: login
+      description:
+      steps:
+        - tool: launchApp
+          appId: com.example.app
+      """
+        .trimIndent()
+
+    val result = PlanSchemaValidator.validateYaml(yaml)
+    assertFalse(result.valid)
+    assertTrue(result.errors.any { it.field == "description" }, "errors=${result.errors}")
+  }
+
+  @Test
+  fun `reports a non-object parameters value as an error`() {
+    val yaml =
+      """
+      name: login
+      parameters: [user, pass]
+      steps:
+        - tool: observe
+      """
+        .trimIndent()
+
+    val result = PlanSchemaValidator.validateYaml(yaml)
+    assertFalse(result.valid)
+    assertTrue(result.errors.any { it.field == "parameters" }, "errors=${result.errors}")
+  }
+
+  @Test
   fun `allows deprecated description in steps`() {
     val yaml =
       """

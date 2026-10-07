@@ -5267,7 +5267,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performSetText: text='${text.take(20)}...' resourceId=$resourceId")
+    // Never log the text: the target may be a password field.
+    Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
     perfProvider.serial("performSetText")
 
     try {

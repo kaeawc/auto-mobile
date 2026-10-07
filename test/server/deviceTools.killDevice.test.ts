@@ -5865,6 +5865,12 @@ describe("killDevice handler", () => {
       const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
         (target) => originalGetInstance(target, new FakeAdbClientFactory()),
       );
+      // The restored observer's reconnect fails as it would with no CtrlProxy
+      // listening, without opening a real WebSocket to a host emulator (#10470).
+      const reconnectSpy = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "ensureConnected",
+      ).mockResolvedValue(false);
       try {
         const tool = ToolRegistry.getTool("killDevice");
         if (!tool) {
@@ -5875,6 +5881,7 @@ describe("killDevice handler", () => {
 
         expect(getInstanceSpy).toHaveBeenCalled();
       } finally {
+        reconnectSpy.mockRestore();
         getInstanceSpy.mockRestore();
         closeSpy.mockRestore();
       }

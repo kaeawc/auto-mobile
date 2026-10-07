@@ -92,6 +92,20 @@ describe("finalizeToolResponse serialized shape compatibility", () => {
     ).toMatchSnapshot();
   });
 
+  test("skeleton does not recollect intentionally empty element categories", () => {
+    const source = observation();
+    source.elements = { clickable: [], scrollable: [], text: [], media: [] };
+    const before = JSON.stringify(source);
+    const response = finalizeToolResponse(createStructuredToolResponse(source), {
+      name: "observe",
+      args: { project: "skeleton" },
+    });
+    const payload = JSON.parse(wire(response)) as ObserveResult;
+    expect(payload.skeleton).toEqual([]);
+    expect(payload.context).toBeUndefined();
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
   test("diff with full projection", () => {
     serverConfig.setActionsDiffObserveEnabled(true);
     const baseline = new Map<string, ObserveResult>();

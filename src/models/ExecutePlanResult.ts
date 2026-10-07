@@ -78,6 +78,29 @@ export interface PlanDeviceFailure {
   failureObservation?: FailureObservationSummary;
 }
 
+/** Per-tool aggregate over the steps a plan run executed. */
+export interface PlanToolHealth {
+  tool: string;
+  count: number;
+  failed: number;
+  skipped: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+/** Compact end-of-run summary of what the plan path already observed. */
+export interface PlanHealthSummary {
+  success: boolean;
+  totalSteps: number;
+  executedSteps: number;
+  failedSteps: number;
+  skippedSteps: number;
+  warningCount: number;
+  durationMs: number;
+  slowestStep?: { stepIndex: number; tool: string; durationMs: number };
+  tools: PlanToolHealth[];
+}
+
 export interface ExecutePlanResult {
   success: boolean;
   executedSteps: number;
@@ -96,6 +119,8 @@ export interface ExecutePlanResult {
   deviceId?: string; // The device ID that executed the plan (e.g., "emulator-5554" or "7B3A3792-DB53-4654-BA94-27A1D305C3B7")
   deviceMapping?: Record<string, string>; // Maps device labels to device IDs (e.g., {"A": "emulator-5554", "B": "emulator-5556"})
   debug?: ExecutePlanDebugInfo;
+  /** Opt-in (AUTOMOBILE_PLAN_HEALTH_DIR set): compact end-of-run aggregate of step latency, failures and skips (#2306). */
+  healthSummary?: PlanHealthSummary;
   /** Best-effort warnings from completed steps and sub-steps that ran before a failed or skipped step failed (issue #6868). */
   warnings?: PlanStepWarnings[];
   /** Failed optional steps, reported regardless of captureObserveSteps. */

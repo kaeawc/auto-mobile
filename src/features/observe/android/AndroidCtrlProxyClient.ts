@@ -150,6 +150,7 @@ import {
   ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
+  rethrowRealCtrlProxyWebSocketInTestError,
 } from "../DeviceServiceClient";
 import {
   observationStreamDeviceConnectionLostNotifier,
@@ -1163,7 +1164,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -1701,6 +1702,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // request already on the wire, so a later response must be discarded rather than auto-pushed.
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   lateCancelledScreenshotRequestIds: Set<string> = new Set();
+  private readonly pendingFocusedInputClickIds: Set<string> = new Set();
 
   // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
   // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
@@ -3407,7 +3409,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult> {
     return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery);
   }
@@ -3705,14 +3707,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.dispatchActionRequest(
-      "click",
-      (requestId) =>
-        serializeCtrlProxyRequest(ctrlProxyRequests.requestClickFocusedInput({ requestId })),
-      timeoutMs,
-      perf,
-      signal,
-    );
+    try {
+      return await this.dispatchActionRequest(
+        "click",
+        (requestId) => {
+          this.pendingFocusedInputClickIds.add(requestId);
+          return serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestClickFocusedInput({ requestId }),
+          );
+        },
+        timeoutMs,
+        perf,
+        signal,
+      );
+    } finally {
+      this.pendingFocusedInputClickIds.clear();
+    }
+  }
+
+  /**
+   * Very old runners reject the focused-input click during decoding without echoing its id; settle
+   * the pending clicks so the host can fall back instead of timing out.
+   */
+  private settleUnattributedFocusedClickRejection(
+    requestId: string | null | undefined,
+    rejectedCommand: string | undefined,
+    errorText: string,
+  ): void {
+    if (requestId || rejectedCommand !== "request_click_focused_input") {
+      return;
+    }
+    for (const id of this.pendingFocusedInputClickIds) {
+      this.requestManager.resolveError(id, errorText);
+    }
   }
 
   private async dispatchActionRequest(
@@ -3813,6 +3840,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report a failed action.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return {
@@ -3969,6 +3998,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           this.timer.now() - startTime,
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never report an unconfirmed activation.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
       return unconfirmed(errorMessage(error));
     } finally {
@@ -4075,6 +4106,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       if (requestId) {
         this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
       return {
@@ -4498,6 +4531,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           error instanceof Error ? error : new Error(String(error)),
         );
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       return {
         success: false,
         totalTimeMs: this.timer.now() - startTime,
@@ -4659,6 +4694,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
@@ -5319,6 +5356,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );
+      this.settleUnattributedFocusedClickRejection(message.requestId, rejectedCommand, errorText);
       if (message.requestId) {
         this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         this.requestManager.resolveError(message.requestId, errorText);

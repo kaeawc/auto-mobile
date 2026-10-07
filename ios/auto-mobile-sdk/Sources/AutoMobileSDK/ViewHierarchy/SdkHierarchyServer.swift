@@ -33,6 +33,7 @@
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
     /// - `POST /accessibility/magic-tap` -> invoke the app responder chain, returning handled
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
+    /// - `POST /trigger` -> deliver a named host trigger to a registered SDK module (#1580)
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
         static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
@@ -56,6 +57,7 @@
             case dbTableData = "/db/table-data"
             case dbTableStructure = "/db/table-structure"
             case preferences = "/preferences"
+            case trigger = "/trigger"
 
             var method: String {
                 switch self {
@@ -109,6 +111,7 @@
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
         private let preferenceRouteHandler = SdkPreferenceRouteHandler()
+        private let triggerRouteHandler = SdkTriggerRouteHandler()
 
         init(
             tracker: any SdkHierarchyServing,
@@ -395,6 +398,10 @@
                 handleBodyRoute(connection, initialData: requestData) {
                     self.preferenceRouteHandler.handle(body: $0)
                 }
+            case .trigger:
+                withRequestBody(connection, initialData: requestData) { server, body in
+                    server.sendRouteResponse(connection, server.triggerRouteHandler.handle(body: body ?? Data()))
+                }
             }
         }
 
@@ -424,9 +431,9 @@
 
         static var capabilities: Set<String> {
             #if canImport(UIKit)
-                ["network-fault-rules", "magic-tap"]
+                ["network-fault-rules", "magic-tap", "sdk-trigger"]
             #else
-                ["network-fault-rules"]
+                ["network-fault-rules", "sdk-trigger"]
             #endif
         }
 

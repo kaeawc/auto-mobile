@@ -5,6 +5,7 @@
  * device owner status queries, and permission requests.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import WebSocket from "ws";
 import fs from "fs/promises";
@@ -129,6 +130,8 @@ export class CtrlProxyCertificates {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] CA cert install request failed after ${duration}ms: ${error}`);
       return {
@@ -244,6 +247,8 @@ export class CtrlProxyCertificates {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] CA cert file install request failed", error);
       return {
         success: false,
@@ -352,6 +357,8 @@ export class CtrlProxyCertificates {
       if (requestId) {
         this.context.requestManager.resolveError(requestId, errorMessage(error), duration);
       }
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       return {
         success: false,
         action: "remove",
@@ -430,6 +437,8 @@ export class CtrlProxyCertificates {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Device owner status request failed after ${duration}ms: ${error}`);
       return {
@@ -537,6 +546,8 @@ export class CtrlProxyCertificates {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Permission request failed after ${duration}ms: ${error}`);
       return {

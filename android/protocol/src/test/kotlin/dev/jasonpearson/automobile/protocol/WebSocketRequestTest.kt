@@ -9,6 +9,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 
 class WebSocketRequestTest {
@@ -17,6 +18,20 @@ class WebSocketRequestTest {
     prettyPrint = false
     ignoreUnknownKeys = true
     classDiscriminator = "type"
+  }
+
+  @Test
+  fun `clear field delivery round trips without a text sentinel`() {
+    val literal =
+      """{"type":"request_commit_text","requestId":"clear-1","text":"","delivery":"clearField"}"""
+    val request = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals(ImeTextDelivery.CLEAR_FIELD, request.delivery)
+    assertEquals("", request.text)
+    assertEquals(literal, json.encodeToString<WebSocketRequest>(request))
+    assertEquals(
+      request,
+      json.decodeFromString<WebSocketRequest>(json.encodeToString<WebSocketRequest>(request)),
+    )
   }
 
   @Test
@@ -775,5 +790,16 @@ class WebSocketRequestTest {
       """{"type":"show_overlay","requestId":"r","spec":{"id":"panel","extra":true,"window":{"placement":{"type":"fullscreen","future":true}},"root":{"type":"text","text":"Hello","unknown":1}}}"""
     val request = assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literal))
     assertEquals(OverlayTextNode(text = "Hello"), request.spec.root)
+  }
+
+  companion object {
+    // Initialize serializer discovery outside individual protocol-test timing.
+    @JvmStatic
+    @BeforeAll
+    fun initializeRequestSerialization() {
+      val json = Json { classDiscriminator = "type" }
+      val request = RequestCommitText(text = "", delivery = ImeTextDelivery.CLEAR_FIELD)
+      json.decodeFromString<WebSocketRequest>(json.encodeToString<WebSocketRequest>(request))
+    }
   }
 }

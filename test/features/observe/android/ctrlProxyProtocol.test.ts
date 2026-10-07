@@ -43,6 +43,17 @@ describe("IME commit budget serialization", () => {
   });
 });
 
+test("clearField serializes as a protocol delivery without a text sentinel", () => {
+  expect(
+    serializeCtrlProxyRequest({
+      type: "request_commit_text",
+      requestId: "clear-1",
+      text: "",
+      delivery: "clearField",
+    }),
+  ).toBe('{"type":"request_commit_text","requestId":"clear-1","text":"","delivery":"clearField"}');
+});
+
 describe("Android millisecond serialization", () => {
   const gestures = (value: number): CtrlProxyRequest[] => [
     { type: "request_tap_coordinates", requestId: "ms", x: 1.5, y: 2.5, duration: value },

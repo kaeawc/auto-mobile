@@ -215,6 +215,16 @@ export class FakeTimer implements Timer {
   }
 
   /**
+   * Fake milliseconds until the earliest pending sleep, timeout, or interval tick is
+   * due, or undefined when nothing is pending. Manual mode only: auto-advance work is
+   * dispatched on its own and is not counted.
+   */
+  getMsUntilNextDueEvent(): number | undefined {
+    const next = this.nextDueEvent(Number.POSITIVE_INFINITY);
+    return next === undefined ? undefined : Math.max(0, next.dueAt - this.currentTime);
+  }
+
+  /**
    * Get the current fake time.
    */
   now(): number {

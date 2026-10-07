@@ -14,7 +14,7 @@ export type IOSDispatchResult<T> = T & Pick<CtrlProxyActionResult, "dispatched" 
  * Device-mutating runner commands that carry the host's wait budget as `timeoutMs` (#10084).
  * The runner will not start one that waited in its queue past that budget or whose connection
  * closed, so an action never lands after the host reported it failed. `request_swipe` already
- * sends its own `timeoutMs`. Read-only requests, storage and SQL commands are not listed.
+ * sends its own `timeoutMs`. Read-only requests, storage reads and SQL commands are not listed.
  */
 const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "request_tap_coordinates",
@@ -42,6 +42,10 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "set_hinge_angle",
   "request_clipboard",
   "set_voiceover_state",
+  // Mutating storage commands (#10500); preference reads and SQL stay without a deadline.
+  "set_preference",
+  "remove_preference",
+  "clear_preferences",
 ]);
 
 /** The single place iOS requests learn their wire deadline; installed on the iOS delegate context. */

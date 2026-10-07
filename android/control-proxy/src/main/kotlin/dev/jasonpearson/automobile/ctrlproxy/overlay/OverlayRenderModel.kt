@@ -109,6 +109,9 @@ private fun mapOverlayNode(
           "pageCount" to OverlayScalar.Numeric(context.second.toDouble()),
         )
   requireOverlayRenderSizes(node.style, path)
+  node.styleWhen?.forEachIndexed { index, entry ->
+    requireOverlayRenderSizes(entry.style, "$path.styleWhen[$index]")
+  }
   val role =
     when (node) {
       is OverlayBoxNode -> "box"
@@ -164,7 +167,7 @@ private fun mapOverlayNode(
     text,
     node.testTag,
     node.visibleWhen?.holds(localState) ?: true,
-    mapOverlayStyle(node.style ?: OverlayStyle()),
+    mapOverlayStyle(resolveOverlayStyle(node.style, node.styleWhen, localState)),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,
     children,

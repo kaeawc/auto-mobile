@@ -11,7 +11,7 @@ import {
  * This is the forward half of the MCP-process -> daemon-process hand-off.
  */
 describe("parseDaemonArgs output-reduction flags", () => {
-  test("defaults are undefined when no flag is passed", () => {
+  test("unspecified output-reduction options remain undefined", () => {
     const options = parseDaemonArgs([]);
     expect(options.observeResultIncludeElements).toBeUndefined();
     expect(options.toolResultsNoStructuredContent).toBeUndefined();
@@ -80,7 +80,7 @@ describe("parseDaemonArgs output-reduction flags", () => {
  * hand-adjacent flag strings; this round-trip guards them from drifting apart.
  */
 describe("output-reduction daemon-arg round trip", () => {
-  test("outputReductionFlagsToArgs emits nothing when all flags are off", () => {
+  test("outputReductionFlagsToArgs emits nothing when no flags are specified", () => {
     expect(outputReductionFlagsToArgs({})).toEqual([]);
   });
 

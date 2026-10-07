@@ -27,6 +27,29 @@ describe("PlanSchemaValidator", () => {
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
   });
 
+  it("validates native tap geometry and rejects incomplete provenance", () => {
+    const geometry = {
+      platform: "ios",
+      deviceWidth: 390,
+      deviceHeight: 844,
+      orientation: 0,
+      x: 2.125,
+      y: 3.75,
+    };
+    const validate = (value: unknown) =>
+      validator.validateYaml(
+        dump({
+          name: "native",
+          steps: [{ tool: "tapAt", params: { x: 2.125, y: 3.75 }, geometry: value }],
+        }),
+      ).valid;
+    expect(validate(geometry)).toBe(true);
+    expect(validate({ ...geometry, orientation: 4 })).toBe(false);
+    expect(validate({ ...geometry, deviceWidth: 0 })).toBe(false);
+    expect(validate({ ...geometry, platform: "other" })).toBe(false);
+    expect(validate({ platform: "ios" })).toBe(false);
+  });
+
   it("keeps both setDeviceState field requirements aligned with the live tool", () => {
     const targetingKeys = ["platform", "deviceId", "sessionUuid", "keepScreenAwake", "device"];
     const fields = Object.keys(setDeviceStateSchema.shape)

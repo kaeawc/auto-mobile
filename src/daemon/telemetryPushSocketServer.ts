@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   createDefaultStreamSocketAuthenticator,
@@ -593,30 +594,20 @@ export function telemetryEventIdentityKey(event: TelemetryEvent): string | null 
 }
 
 // Singleton instance
-let socketServer: TelemetryPushSocketServer | null = null;
+const socketServer = new SocketServerSingleton<TelemetryPushSocketServer>();
 
 export function getTelemetryPushServer(): TelemetryPushSocketServer | null {
-  return socketServer;
+  return socketServer.instance;
 }
 
 export function getTelemetryPushSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG);
 }
 
 export async function startTelemetryPushSocketServer(): Promise<TelemetryPushSocketServer> {
-  if (!socketServer) {
-    socketServer = new TelemetryPushSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
-  return socketServer;
+  return await socketServer.start(() => new TelemetryPushSocketServer());
 }
 
 export async function stopTelemetryPushSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

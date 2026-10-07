@@ -56,6 +56,28 @@ describe("Shared-storage read resources", () => {
     expect(templates).toContain("automobile:devices/{deviceId}/downloads/{namespace}/{path}");
   });
 
+  test("canonical media templates route the domain and publish canonical file links", async () => {
+    const domains: Array<string | undefined> = [];
+    registerSharedStorageResources({
+      ...fakeService,
+      list: async (request) => {
+        domains.push(request.domain);
+        return fakeService.list(request);
+      },
+      read: async (request) => {
+        domains.push(request.domain);
+        return fakeService.read(request);
+      },
+    });
+    const base = "automobile:devices/emulator-5554/storage-domains/media_library/automobile-media";
+    const listing = ResourceRegistry.matchTemplate(base)!;
+    const payload = JSON.parse((await listing.template.handler(listing.params)).text!);
+    expect(payload.files[0].resourceUri).toBe(`${base}/docs/read%20me.txt`);
+    const file = ResourceRegistry.matchTemplate(`${base}/photo.png`)!;
+    expect((await file.template.handler(file.params)).blob).toBe("AAH/");
+    expect(domains).toEqual(["media_library", "media_library"]);
+  });
+
   test("lists a namespace as JSON with verification metadata", async () => {
     registerSharedStorageResources(fakeService);
     const match = ResourceRegistry.matchTemplate(

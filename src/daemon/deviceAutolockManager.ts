@@ -1,3 +1,4 @@
+import { captureAutolockPolicy } from "./deviceAutolockPolicy";
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -5,7 +6,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
 import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
-import { getDevicePoolTimeoutMs, isDevicePoolAutolockEnabled } from "./poolConfig";
+import { getDevicePoolTimeoutMs, type Environment } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
 import type {
@@ -91,6 +92,7 @@ export class DeviceAutolockManager {
     private readonly pool: DeviceAutolockPoolPort,
     private readonly deviceSessionRepository: Pick<DeviceSessionRepository, "markAutolockSession">,
     private readonly idGenerator: IdGenerator,
+    private readonly env?: Environment,
   ) {}
 
   /**
@@ -106,18 +108,33 @@ export class DeviceAutolockManager {
    * @returns The assigned session ID, or undefined if autolock is disabled
    */
   async autolockDevice(
-    deviceId: string,
-    platform: Platform,
-    mcpSessionId?: string,
-    sourceImage?: DeviceInfo,
-    childProcess?: DeviceAutolockChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
+    ...[
+      deviceId,
+      platform,
+      mcpSessionId,
+      sourceImage,
+      childProcess,
+      expectedIdentity,
+      readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
+      achievedReadiness = "automationReady",
+      collectCancellationSettlement,
+      policy = {},
+    ]: [
+      deviceId: string,
+      platform: Platform,
+      mcpSessionId?: string,
+      sourceImage?: DeviceInfo,
+      childProcess?: DeviceAutolockChildProcess | null,
+      expectedIdentity?: ExpectedIdentity,
+      readinessReservationOwners?: ReadonlySet<symbol>,
+      verifiedAndroidAvdIdentity?: DeviceInfo,
+      achievedReadiness?: DeviceReadinessLevel,
+      collectCancellationSettlement?: (settlement: Promise<void>) => void,
+      policy?: { autolockEnabled?: boolean },
+    ]
   ): Promise<string | undefined> {
-    if (!isDevicePoolAutolockEnabled()) {
+    if (!(policy.autolockEnabled ?? captureAutolockPolicy(this.env))) {
       return undefined;
     }
     return this.pool.withTargetDeviceDiscovery({
@@ -714,8 +731,12 @@ export class DeviceAutolockManager {
    * session UUID may drive it. A mismatched or absent session UUID is rejected.
    * No-op when autolock is disabled or the device is not locked.
    */
-  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
-    if (!isDevicePoolAutolockEnabled()) {
+  assertAutolockAccess(
+    deviceId: string,
+    sessionUuid: string | undefined,
+    autolockEnabled = captureAutolockPolicy(this.env),
+  ): void {
+    if (!autolockEnabled) {
       return;
     }
 

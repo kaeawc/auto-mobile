@@ -132,7 +132,7 @@ class DefaultSharedStorageService implements SharedStorageService {
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
     if (request.device.platform !== "android") {
-      throw new ActionableError("stageSharedStorage is only supported on Android devices.");
+      throw new ActionableError("Shared storage staging is only supported on Android devices.");
     }
     const namespace = normalizeSharedStorageNamespace(request.namespace);
     const preparedFiles = await this.prepareFiles(request.files);

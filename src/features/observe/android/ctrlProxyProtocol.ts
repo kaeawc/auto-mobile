@@ -226,6 +226,7 @@ export interface RequestCommitTextMessage {
   text: string;
   priorImeId?: string;
   delivery?: "keyEvents";
+  timeoutMs?: number;
 }
 
 export interface RequestCancelImeCommitMessage {
@@ -282,6 +283,12 @@ export interface RequestActionMessage {
     collectionRow?: number;
     collectionColumn?: number;
   };
+}
+
+/** `@SerialName("request_click_focused_input")` → `RequestClickFocusedInput`. */
+export interface RequestClickFocusedInputMessage {
+  type: "request_click_focused_input";
+  requestId: string;
 }
 
 /** `@SerialName("request_activate_accessibility_link")` → `RequestActivateAccessibilityLink` */
@@ -755,6 +762,7 @@ export type CtrlProxyRequest =
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
+  | RequestClickFocusedInputMessage
   | RequestActivateAccessibilityLinkMessage
   | RequestHitTestMessage
   | RequestClipboardMessage
@@ -967,6 +975,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_ime_action: true,
   request_select_all: true,
   request_action: true,
+  request_click_focused_input: true,
   request_activate_accessibility_link: true,
   request_hit_test: true,
   request_clipboard: true,
@@ -1117,6 +1126,10 @@ export const ctrlProxyRequests = {
       requestId: args.requestId,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
     };
+  },
+
+  requestClickFocusedInput(args: { requestId: string }): RequestClickFocusedInputMessage {
+    return { type: "request_click_focused_input", requestId: args.requestId };
   },
 
   requestAction(args: {

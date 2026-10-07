@@ -14,18 +14,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,6 +35,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import kotlinx.coroutines.Dispatchers
@@ -102,7 +102,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
 
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text("Network Test") },
           navigationIcon = {
             IconButton(
@@ -121,7 +121,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
       ) {
         // Random user image
         item {
-          Card(
+          AutoMobileContentCard(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
           ) {
@@ -138,7 +138,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                 contentScale = ContentScale.Crop,
               )
               Spacer(Modifier.height(8.dp))
-              Button(
+              AutoMobileContentButton(
                 onClick = { randomSeed.value++ },
                 modifier = Modifier.semantics { testTag = "load_random_user" },
               ) {
@@ -150,7 +150,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
 
         // HTTP test buttons
         item {
-          Card(
+          AutoMobileContentCard(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
           ) {
@@ -164,7 +164,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
-                Button(
+                AutoMobileContentButton(
                   onClick = { makeRequest("GET 200", "https://httpbin.org/get") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_get_200" },
                   colors =
@@ -173,7 +173,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                   Text("GET 200")
                 }
 
-                Button(
+                AutoMobileContentButton(
                   onClick = {
                     makeRequest(
                       "POST 200",
@@ -196,21 +196,21 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
-                OutlinedButton(
+                AutoMobileContentOutlinedButton(
                   onClick = { makeRequest("404", "https://httpbin.org/status/404") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_404" },
                 ) {
                   Text("404")
                 }
 
-                OutlinedButton(
+                AutoMobileContentOutlinedButton(
                   onClick = { makeRequest("500", "https://httpbin.org/status/500") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_500" },
                 ) {
                   Text("500")
                 }
 
-                OutlinedButton(
+                AutoMobileContentOutlinedButton(
                   onClick = { makeRequest("Timeout", "https://httpbin.org/delay/10") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_timeout" },
                 ) {
@@ -222,14 +222,14 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
               ) {
-                OutlinedButton(
+                AutoMobileContentOutlinedButton(
                   onClick = { makeRequest("DNS Fail", "https://doesnotexist.invalid/test") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_dns_fail" },
                 ) {
                   Text("DNS Fail")
                 }
 
-                OutlinedButton(
+                AutoMobileContentOutlinedButton(
                   onClick = { makeRequest("302", "https://httpbin.org/redirect/1") },
                   modifier = Modifier.weight(1f).semantics { testTag = "http_302" },
                 ) {
@@ -249,7 +249,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
               verticalAlignment = Alignment.CenterVertically,
             ) {
               Text("Results", style = MaterialTheme.typography.titleMedium)
-              OutlinedButton(onClick = { results.clear() }) {
+              AutoMobileContentOutlinedButton(onClick = { results.clear() }) {
                 Text("Clear")
               }
             }
@@ -271,7 +271,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                 result.statusCode in 200..299 -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.onSurface
               }
-            Card(
+            AutoMobileContentCard(
               modifier = Modifier.fillMaxWidth(),
               colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.1f)),
             ) {

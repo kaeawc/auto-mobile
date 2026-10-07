@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
 import {
@@ -60,25 +61,16 @@ export class VideoRecordingSocketServer extends ConfigSocketServer<
   }
 }
 
-let socketServer: VideoRecordingSocketServer | null = null;
+const socketServer = new SocketServerSingleton<VideoRecordingSocketServer>();
 
 export function getVideoRecordingSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG);
 }
 
 export async function startVideoRecordingSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new VideoRecordingSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new VideoRecordingSocketServer());
 }
 
 export async function stopVideoRecordingSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

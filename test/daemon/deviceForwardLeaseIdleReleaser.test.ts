@@ -3,6 +3,7 @@ import {
   DeviceForwardLeaseIdleReleaser,
   type DeviceForwardLeaseIdlePort,
 } from "../../src/daemon/deviceForwardLeaseIdleReleaser";
+import type { DeviceLeaseActivity } from "../../src/daemon/deviceLeaseActivity";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const IDLE_MS = 60_000;
@@ -11,6 +12,7 @@ class FakeLeasePort implements DeviceForwardLeaseIdlePort {
   held = new Set<string>();
   sessions = new Map<string, string>();
   active = new Map<string, number>();
+  inFlight = new Map<string, number>();
   streaming = new Set<string>();
   idle = new Map<string, number | null>();
   released: string[] = [];
@@ -18,17 +20,14 @@ class FakeLeasePort implements DeviceForwardLeaseIdlePort {
   heldDeviceIds(): string[] {
     return [...this.held];
   }
-  sessionForDevice(deviceId: string): string | null {
-    return this.sessions.get(deviceId) ?? null;
-  }
-  activeExecutionCount(deviceId: string): number {
-    return this.active.get(deviceId) ?? 0;
-  }
-  hasStreamSubscriber(deviceId: string): boolean {
-    return this.streaming.has(deviceId);
-  }
-  idleForMs(deviceId: string): number | null {
-    return this.idle.get(deviceId) ?? null;
+  activity(deviceId: string): DeviceLeaseActivity {
+    return {
+      sessionId: this.sessions.get(deviceId) ?? null,
+      activeExecutions: this.active.get(deviceId) ?? 0,
+      inFlightRequests: this.inFlight.get(deviceId) ?? 0,
+      streaming: this.streaming.has(deviceId),
+      idleForMs: this.idle.get(deviceId) ?? null,
+    };
   }
   async release(deviceId: string): Promise<void> {
     this.released.push(deviceId);
@@ -58,11 +57,13 @@ describe("DeviceForwardLeaseIdleReleaser (#10497)", () => {
     expect(port.released).toEqual(["emulator-5600"]);
   });
 
-  test("keeps the lease while a session, tool call, or stream subscriber uses the device", async () => {
+  test("keeps the lease while a session, tool call, CtrlProxy request, or stream uses the device", async () => {
     await releaser.sweep();
     for (const busy of [
       () => port.sessions.set("emulator-5600", "session-1"),
       () => port.active.set("emulator-5600", 1),
+      // A resource read or initial frame: no tool call, but a request in flight.
+      () => port.inFlight.set("emulator-5600", 1),
       () => port.streaming.add("emulator-5600"),
     ]) {
       busy();
@@ -70,6 +71,7 @@ describe("DeviceForwardLeaseIdleReleaser (#10497)", () => {
       expect(await releaser.sweep()).toEqual([]);
       port.sessions.clear();
       port.active.clear();
+      port.inFlight.clear();
       port.streaming.clear();
     }
     // The idle clock restarts from the last busy sweep, not from first sight.
@@ -79,7 +81,7 @@ describe("DeviceForwardLeaseIdleReleaser (#10497)", () => {
     expect(await releaser.sweep()).toEqual(["emulator-5600"]);
   });
 
-  test("recent tool activity defers release even without a busy sweep", async () => {
+  test("recent CtrlProxy or tool activity defers release even without a busy sweep", async () => {
     await releaser.sweep();
     timer.setCurrentTime(IDLE_MS * 2);
     port.idle.set("emulator-5600", 1_000);

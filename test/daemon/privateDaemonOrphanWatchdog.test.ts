@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS,
   PrivateDaemonOrphanWatchdog,
-  isPrivateDaemonSocket,
+  isHarnessPrivateDaemon,
   resolvePrivateDaemonOrphanIdleMs,
   type PrivateDaemonOrphanPort,
 } from "../../src/daemon/privateDaemonOrphanWatchdog";
@@ -80,13 +80,18 @@ describe("PrivateDaemonOrphanWatchdog (#10497)", () => {
     watchdog.stop();
   });
 
-  test("applies only to non-default sockets and honours the env override", () => {
-    expect(isPrivateDaemonSocket("/tmp/priv/daemon.sock", "/tmp/auto-mobile-daemon-501.sock")).toBe(
-      true,
-    );
+  test("arms only for harness-style private daemons, never a custom long-lived socket", () => {
+    const defaultSocket = "/tmp/auto-mobile-daemon-501.sock";
+    const harnessEnv = { AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/priv/aux" };
+    expect(isHarnessPrivateDaemon("/tmp/priv/daemon.sock", defaultSocket, harnessEnv)).toBe(true);
+    // A user's own daemon on a custom control socket, with shared aux sockets.
+    expect(isHarnessPrivateDaemon("/Users/me/am.sock", defaultSocket, {})).toBe(false);
     expect(
-      isPrivateDaemonSocket("/tmp/auto-mobile-daemon-501.sock", "/tmp/auto-mobile-daemon-501.sock"),
+      isHarnessPrivateDaemon("/Users/me/am.sock", defaultSocket, {
+        AUTOMOBILE_AUX_SOCKET_DIR: " ",
+      }),
     ).toBe(false);
+    expect(isHarnessPrivateDaemon(defaultSocket, defaultSocket, harnessEnv)).toBe(false);
     expect(resolvePrivateDaemonOrphanIdleMs({})).toBe(DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS);
     expect(
       resolvePrivateDaemonOrphanIdleMs({ AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "0" }),

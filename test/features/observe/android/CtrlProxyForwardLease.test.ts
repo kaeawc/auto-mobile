@@ -157,6 +157,37 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
     expect(probe.queries).toEqual([]);
   });
 
+  test("refuses an owner that just took the lease as transient, using its acquire time", async () => {
+    foreignOwner();
+    timer.advanceTime(5_000);
+    const requester = lease(
+      new FakeOwnerProbe({
+        kind: "status",
+        status: {
+          pid: FOREIGN_PID,
+          deviceId: DEVICE,
+          sessionId: null,
+          activeExecutions: 0,
+          idleForMs: null,
+        },
+      }),
+    );
+    expect(requester.tryAcquire()).toBe(false);
+    const result = await requester.tryReclaimFromStaleOwner();
+    expect(result.acquired).toBe(false);
+    expect(result.transient).toBe(true);
+    expect(result.reason).toContain("5s ago");
+  });
+
+  test("reports when this process took the lease, only while holding it", () => {
+    const own = lease(new FakeOwnerProbe({ kind: "unreachable", detail: "unused" }));
+    expect(own.getAcquiredAt()).toBeUndefined();
+    expect(own.tryAcquire()).toBe(true);
+    expect(own.getAcquiredAt()).toBe(100_000);
+    own.release();
+    expect(own.getAcquiredAt()).toBeUndefined();
+  });
+
   test("decodes device ids from lease file names", () => {
     const name = ctrlProxyForwardLeaseFileName("192.168.1.5:5555");
     expect(deviceIdFromCtrlProxyForwardLeaseFileName(name)).toBe("192.168.1.5:5555");

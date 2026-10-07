@@ -5,7 +5,7 @@ import { logger } from "../utils/logger";
 export interface PrivateDaemonOrphanPort {
   /** Current parent PID; 1 once the launching parent has exited and init adopted us. */
   parentPid(): number;
-  /** Connected socket and HTTP MCP clients. */
+  /** Connected control-socket, auxiliary-socket and HTTP MCP clients. */
   clientCount(): number;
   /** Live device sessions. */
   liveSessionCount(): number;
@@ -26,11 +26,17 @@ export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = proces
 }
 
 /**
- * A private daemon runs on a non-default socket (a test, lane, or harness). The
- * user's resident daemon on the default socket is never subject to the watchdog.
+ * A harness-style private daemon (a test, lane, or acceptance run) isolates both
+ * its control socket and its auxiliary socket directory. A user's long-lived
+ * daemon that merely uses a custom control socket is never subject to the
+ * watchdog, nor is the resident daemon on the default socket.
  */
-export function isPrivateDaemonSocket(socketPath: string, defaultSocketPath: string): boolean {
-  return socketPath !== defaultSocketPath;
+export function isHarnessPrivateDaemon(
+  socketPath: string,
+  defaultSocketPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return socketPath !== defaultSocketPath && (env.AUTOMOBILE_AUX_SOCKET_DIR?.trim() ?? "") !== "";
 }
 
 /**

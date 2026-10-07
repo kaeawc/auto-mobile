@@ -10,6 +10,8 @@ import {
 
 const metadata = { socketPath: "/tmp/priv/daemon.sock", acquiredAt: 1_000 };
 const idleMs = 60_000;
+// Long after the owner took the lease at metadata.acquiredAt.
+const now = 1_000_000;
 
 function status(overrides: Partial<DeviceLeaseOwnerStatus> = {}): DeviceLeaseOwnerStatus {
   return {
@@ -49,8 +51,13 @@ describe("forwarding-lease owner metadata", () => {
 describe("decideForwardLeaseReclaim", () => {
   test("refuses an owner that recorded no socket, keeping the pre-#10497 behaviour", () => {
     expect(
-      decideForwardLeaseReclaim({ ownerPid: 4242, metadata: undefined, report: undefined, idleMs })
-        .action,
+      decideForwardLeaseReclaim({
+        ownerPid: 4242,
+        metadata: undefined,
+        report: undefined,
+        idleMs,
+        now,
+      }).action,
     ).toBe("refuse");
   });
 
@@ -60,6 +67,7 @@ describe("decideForwardLeaseReclaim", () => {
       metadata,
       report: { kind: "unreachable", detail: "ECONNREFUSED" },
       idleMs,
+      now,
     });
     expect(decision).toEqual({
       action: "reclaim",
@@ -72,9 +80,9 @@ describe("decideForwardLeaseReclaim", () => {
       { kind: "no-response", detail: "no answer within 2000ms" } as const,
       { kind: "unsupported", detail: "Unsupported daemon method" } as const,
     ]) {
-      expect(decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report, idleMs }).action).toBe(
-        "refuse",
-      );
+      expect(
+        decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report, idleMs, now }).action,
+      ).toBe("refuse");
     }
   });
 
@@ -84,6 +92,7 @@ describe("decideForwardLeaseReclaim", () => {
       metadata,
       report: { kind: "status", status: status({ pid: 9999, sessionId: "s-new" }) },
       idleMs,
+      now,
     });
     expect(decision.action).toBe("reclaim");
     expect(decision.reason).toContain("now served by PID 9999");
@@ -95,6 +104,7 @@ describe("decideForwardLeaseReclaim", () => {
       metadata,
       report: { kind: "status", status: status({ sessionId: "session-abc" }) },
       idleMs,
+      now,
     });
     expect(decision).toEqual({
       action: "refuse",
@@ -113,6 +123,7 @@ describe("decideForwardLeaseReclaim", () => {
         metadata,
         report: { kind: "status", status: status(overrides) },
         idleMs,
+        now,
       });
       expect(decision.action).toBe("refuse");
     }
@@ -126,8 +137,48 @@ describe("decideForwardLeaseReclaim", () => {
           metadata,
           report: { kind: "status", status: status({ idleForMs }) },
           idleMs,
+          now,
         }).action,
       ).toBe("reclaim");
     }
+  });
+
+  test("treats an owner with no recorded use that took the lease recently as active (#10497 review)", () => {
+    const decision = decideForwardLeaseReclaim({
+      ownerPid: 4242,
+      metadata: { ...metadata, acquiredAt: now - 5_000 },
+      report: { kind: "status", status: status({ idleForMs: null }) },
+      idleMs,
+      now,
+    });
+    expect(decision).toEqual({
+      action: "refuse",
+      reason: "it used emulator-5600 5s ago",
+      transient: true,
+    });
+  });
+
+  test("refuses an owner with CtrlProxy requests in flight, not as a transient refusal", () => {
+    const decision = decideForwardLeaseReclaim({
+      ownerPid: 4242,
+      metadata,
+      report: { kind: "status", status: status({ inFlightRequests: 2 }) },
+      idleMs,
+      now,
+    });
+    expect(decision.action).toBe("refuse");
+    expect(decision).not.toHaveProperty("transient");
+  });
+
+  test("marks only time-based refusals transient", () => {
+    const transientOf = (report: Parameters<typeof decideForwardLeaseReclaim>[0]["report"]) => {
+      const decision = decideForwardLeaseReclaim({ ownerPid: 4242, metadata, report, idleMs, now });
+      return decision.action === "refuse" ? (decision.transient ?? false) : undefined;
+    };
+    expect(transientOf({ kind: "no-response", detail: "slow" })).toBe(true);
+    expect(transientOf({ kind: "unsupported", detail: "old" })).toBe(false);
+    expect(transientOf({ kind: "status", status: status({ sessionId: "s" }) })).toBe(false);
+    expect(transientOf({ kind: "status", status: status({ streaming: true }) })).toBe(false);
+    expect(transientOf({ kind: "status", status: status({ idleForMs: 1 }) })).toBe(true);
   });
 });

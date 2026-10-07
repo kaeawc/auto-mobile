@@ -48,6 +48,8 @@ export interface ForwardLeaseReclaimResult {
   ownerPid?: number;
   ownerSocketPath?: string;
   reason: string;
+  /** A time-based refusal that may lift if retried shortly. */
+  transient?: boolean;
 }
 
 /**
@@ -74,6 +76,8 @@ export interface CtrlProxyForwardLease {
   tryReclaimFromStaleOwner?(): Promise<ForwardLeaseReclaimResult>;
   /** Whether this process currently holds the lease. */
   isHeld?(): boolean;
+  /** When this process last took the lease, while it holds it. */
+  getAcquiredAt?(): number | undefined;
 }
 
 export interface FileCtrlProxyForwardLeaseDeps {
@@ -91,6 +95,7 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private holders = 0;
   private acquired = false;
   private lastOwnerPid: number | undefined;
+  private acquiredAt: number | undefined;
   private readonly lockDir: () => string;
   private readonly ownerProbe: ForwardLeaseOwnerProbe;
   private readonly ownerSocketPath: () => string | undefined;
@@ -141,6 +146,10 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     return this.acquired;
   }
 
+  public getAcquiredAt(): number | undefined {
+    return this.isHeld() ? this.acquiredAt : undefined;
+  }
+
   public isHeld(): boolean {
     return this.acquired || this.holders > 0;
   }
@@ -163,6 +172,7 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       metadata: this.ownerMetadata(),
     });
     this.holders = acquired ? 1 : 0;
+    this.acquiredAt = acquired ? this.timer.now() : undefined;
     this.lastOwnerPid = acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
     return acquired;
   }
@@ -183,10 +193,19 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       metadata,
       report,
       idleMs: this.idleMs,
+      now: this.timer.now(),
     });
     this.lastOwnerPid = observed.pid;
     const owner = { ownerPid: observed.pid, ownerSocketPath: metadata?.socketPath };
-    if (decision.action === "refuse" || this.isHeld()) {
+    if (decision.action === "refuse") {
+      return {
+        acquired: false,
+        ...owner,
+        reason: decision.reason,
+        ...(decision.transient ? { transient: true } : {}),
+      };
+    }
+    if (this.isHeld()) {
       return { acquired: false, ...owner, reason: decision.reason };
     }
     const tookOver = takeOverExclusiveLock(lockPath, observed, {
@@ -195,7 +214,12 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       metadata: this.ownerMetadata(),
     });
     if (!tookOver) {
-      return { acquired: false, ...owner, reason: "another process claimed the lease first" };
+      return {
+        acquired: false,
+        ...owner,
+        reason: "another process claimed the lease first",
+        transient: true,
+      };
     }
     logger.warn(
       `[CTRL_PROXY] Took over CtrlProxy forwarding lease for ${this.deviceId} from PID ` +
@@ -203,6 +227,7 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     );
     this.holders = 1;
     this.acquired = true;
+    this.acquiredAt = this.timer.now();
     this.lastOwnerPid = undefined;
     return { acquired: true, ...owner, reason: decision.reason };
   }

@@ -14,11 +14,7 @@ import { join } from "node:path";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
-import {
-  CtrlProxyForwardingLeaseConflictError,
-  clearForwardingLeaseConflict,
-  recentForwardingLeaseConflict,
-} from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
+import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import type { ForwardLeaseReclaimResult } from "../../../src/features/observe/android/CtrlProxyForwardLease";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
@@ -1835,10 +1831,9 @@ describe("AndroidCtrlProxyClient", function () {
         /PID 15836, socket \/tmp\/ovl-priv\/daemon\.sock\).*live session session-abc/,
       );
       expect(lease.reclaimAttempts).toBe(1);
-      expect(recentForwardingLeaseConflict([testDevice.deviceId])).toBe(caught as Error);
+      expect((caught as CtrlProxyForwardingLeaseConflictError).transient).toBe(false);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52004");
     } finally {
-      clearForwardingLeaseConflict(testDevice.deviceId);
       await client.close();
     }
   });
@@ -1869,7 +1864,6 @@ describe("AndroidCtrlProxyClient", function () {
       const caught = await client.setupPortForwarding().catch((error: unknown) => error);
       expect(caught).not.toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
       expect(lease.reclaimAttempts).toBe(1);
-      expect(recentForwardingLeaseConflict([testDevice.deviceId])).toBeUndefined();
     } finally {
       await client.close();
     }

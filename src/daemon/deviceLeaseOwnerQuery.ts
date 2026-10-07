@@ -36,6 +36,7 @@ const responseSchema = z.object({
       deviceId: z.string(),
       sessionId: z.string().nullable(),
       activeExecutions: z.number().int().nonnegative(),
+      inFlightRequests: z.number().int().nonnegative().optional(),
       streaming: z.boolean().optional(),
       idleForMs: z.number().nonnegative().nullable(),
     })

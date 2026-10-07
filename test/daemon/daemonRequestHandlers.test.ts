@@ -26,6 +26,7 @@ import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSess
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { ExecutionTracker } from "../../src/server/executionTracker";
+import type { DeviceLeaseActivitySources } from "../../src/daemon/deviceLeaseActivity";
 
 class FakeDevicePool {
   stats: DevicePoolStats;
@@ -1187,6 +1188,39 @@ describe("handleDaemonRequest", () => {
     expect(
       (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
     ).toBe(false);
+  });
+
+  test("reports CtrlProxy requests and idleness that no tool call is bound to (#10497 review)", async () => {
+    class ActivityState extends FakeDaemonState {
+      getDeviceLeaseActivitySources(): DeviceLeaseActivitySources {
+        return {
+          sessionForDevice: () => null,
+          activeExecutionCount: () => 0,
+          toolIdleForMs: () => null,
+          hasStreamSubscriber: () => false,
+          clientActivity: () => ({ inFlightRequests: 2, idleForMs: 1_500 }),
+        };
+      }
+    }
+    const state = new ActivityState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 1, assigned: 0, error: 0 }),
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.result).toEqual({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: null,
+      activeExecutions: 0,
+      inFlightRequests: 2,
+      streaming: false,
+      idleForMs: 1_500,
+    });
   });
 
   test("returns an empty device-session list when no devices are connected", async () => {

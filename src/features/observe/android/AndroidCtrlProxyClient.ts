@@ -26,11 +26,7 @@ import { logger, type Logger } from "../../../utils/logger";
 import { displayTransitions } from "../DisplayTransition";
 import { linkWindowRoots } from "../linkWindowRoots";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
-import {
-  CtrlProxyForwardingLeaseConflictError,
-  clearForwardingLeaseConflict,
-  recordForwardingLeaseConflict,
-} from "../shared/CtrlProxyForwardingLeaseConflictError";
+import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
   BootedDevice,
   ImeAction,
@@ -1417,13 +1413,12 @@ function throwCtrlProxyForwardingLeaseConflict(
   // RunnerReadinessService to replace a generic, device-blaming
   // "runner did not become responsive" failure with the real, actionable
   // cause, and to fail fast rather than retry to the deadline (#10485).
-  const conflict = new CtrlProxyForwardingLeaseConflictError(
+  throw new CtrlProxyForwardingLeaseConflictError(
     describeCtrlProxyForwardingLeaseConflict(deviceId, ownerPid, refusal),
     ownerPid,
     refusal?.ownerSocketPath,
+    refusal?.transient === true,
   );
-  recordForwardingLeaseConflict(deviceId, conflict);
-  throw conflict;
 }
 
 /**
@@ -1843,6 +1838,36 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return [...AndroidCtrlProxyClient.instances.entries()]
       .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
       .map(([deviceId]) => deviceId);
+  }
+
+  /**
+   * CtrlProxy use of a device by this process (#10497): requests in flight
+   * through its singleton and any detached observer, and time since the last
+   * request or since the lease was taken, whichever is later. `null` when
+   * this process neither holds the lease nor has used the device.
+   */
+  public static getForwardLeaseActivity(
+    deviceId: string,
+    timer: Timer = defaultTimer,
+  ): { inFlightRequests: number; idleForMs: number | null } {
+    const clients = [
+      AndroidCtrlProxyClient.instances.get(deviceId),
+      ...[...AndroidCtrlProxyClient.activeObservers].filter(
+        (observer) => observer.device.deviceId === deviceId,
+      ),
+    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
+    const activities = clients.map((client) => client.getRequestActivity());
+    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
+    const lastTimes = [
+      ...activities.map((activity) => activity.lastActivityAt),
+      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
+    ].filter((time): time is number => time !== undefined);
+    return {
+      // A live detached observer is a read in progress even between its requests.
+      inFlightRequests:
+        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) + observers,
+      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+    };
   }
 
   /**
@@ -4919,7 +4944,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private async acquireCtrlProxyForwardLease(): Promise<void> {
     const lease = this.ctrlProxyForwardLease;
     if (lease.tryAcquire()) {
-      clearForwardingLeaseConflict(this.device.deviceId);
       return;
     }
     const ownerPid = lease.getLastOwnerPid();
@@ -4928,7 +4952,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ? await lease.tryReclaimFromStaleOwner?.()
         : undefined;
     if (reclaim?.acquired) {
-      clearForwardingLeaseConflict(this.device.deviceId);
       return;
     }
     throwCtrlProxyForwardingLeaseConflict(

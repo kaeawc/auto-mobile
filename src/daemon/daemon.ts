@@ -60,9 +60,12 @@ import {
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
 import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
+import { getLiveAuxSocketConnectionCount } from "./socketServer/BaseSocketServer";
+import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
+import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
 import {
   PrivateDaemonOrphanWatchdog,
-  isPrivateDaemonSocket,
+  isHarnessPrivateDaemon,
   resolvePrivateDaemonOrphanIdleMs,
 } from "./privateDaemonOrphanWatchdog";
 import {
@@ -2432,15 +2435,13 @@ export class Daemon {
 
   /** Give up idle devices' CtrlProxy forwarding leases (#10497). */
   private startForwardLeaseIdleReleaser(): void {
+    const activitySources = daemonDeviceLeaseActivitySources((deviceId) =>
+      this.sessionManager.getSessionForDevice(deviceId),
+    );
     this.forwardLeaseIdleReleaser = new DeviceForwardLeaseIdleReleaser(
       {
         heldDeviceIds: () => AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds(),
-        sessionForDevice: (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
-        activeExecutionCount: (deviceId) =>
-          executionTracker.getActiveDeviceExecutionCount(deviceId),
-        hasStreamSubscriber: (deviceId) =>
-          getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false,
-        idleForMs: (deviceId) => executionTracker.getDeviceIdleForMs(deviceId),
+        activity: (deviceId) => readDeviceLeaseActivity(activitySources, deviceId),
         release: (deviceId) => AndroidCtrlProxyClient.releaseIdleForwardLease(deviceId),
       },
       resolveCtrlProxyForwardLeaseIdleMs(),
@@ -2451,14 +2452,16 @@ export class Daemon {
 
   /** Stop a private daemon that outlived its launcher with nothing using it (#10497). */
   private startPrivateDaemonOrphanWatchdog(): void {
-    if (process.platform === "win32" || !isPrivateDaemonSocket(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
+    if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
       return;
     }
     this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
       {
         parentPid: () => process.ppid,
         clientCount: () =>
-          (this.socketServer?.getClientConnectionCount() ?? 0) + this.transports.size,
+          (this.socketServer?.getClientConnectionCount() ?? 0) +
+          getLiveAuxSocketConnectionCount() +
+          this.transports.size,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
           setImmediate(() => process.kill(process.pid, "SIGTERM"));

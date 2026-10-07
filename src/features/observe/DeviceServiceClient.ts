@@ -225,6 +225,7 @@ export abstract class DeviceServiceClient {
   // orphan-naming diagnostic to this exact condition instead of any stored
   // error.
   private lastConnectionFailureIsForwardingLeaseConflict: boolean = false;
+  private lastConnectionFailureIsTransientLeaseConflict: boolean = false;
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -272,6 +273,8 @@ export abstract class DeviceServiceClient {
   // Injected dependencies
   protected readonly timer: Timer;
   protected readonly requestManager: RequestManager;
+  /** Last fire-and-forget send through {@link sendMessage}. */
+  private lastSendAt: number | undefined;
   protected readonly webSocketFactory: WebSocketFactory;
   protected readonly config: ConnectionConfig;
   protected readonly retryExecutor: RetryExecutor;
@@ -420,6 +423,7 @@ export abstract class DeviceServiceClient {
     this.backgroundReconnectPaused = false;
     this.lastConnectionFailureMessage = undefined;
     this.lastConnectionFailureIsForwardingLeaseConflict = false;
+    this.lastConnectionFailureIsTransientLeaseConflict = false;
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
@@ -872,6 +876,8 @@ export abstract class DeviceServiceClient {
               this.backgroundReconnectPaused = false;
               this.lastConnectionFailureMessage = undefined;
               this.lastConnectionFailureIsForwardingLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
               this.markLivenessSeen();
 
               // Start health check monitoring
@@ -995,6 +1001,8 @@ export abstract class DeviceServiceClient {
     this.lastConnectionFailureMessage = errorMessage(error);
     this.lastConnectionFailureIsForwardingLeaseConflict =
       error instanceof CtrlProxyForwardingLeaseConflictError;
+    this.lastConnectionFailureIsTransientLeaseConflict =
+      error instanceof CtrlProxyForwardingLeaseConflictError && error.transient;
     logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
     this.onConnectAttemptFailed();
   }
@@ -1041,6 +1049,14 @@ export abstract class DeviceServiceClient {
    */
   public isLastConnectionFailureForwardingLeaseConflict(): boolean {
     return this.lastConnectionFailureIsForwardingLeaseConflict;
+  }
+
+  /**
+   * Whether that lease conflict is a time-based refusal (recent owner use, or
+   * an owner too busy to answer) that a readiness wait should retry (#10485).
+   */
+  public isLastConnectionFailureTransientLeaseConflict(): boolean {
+    return this.lastConnectionFailureIsTransientLeaseConflict;
   }
 
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {
@@ -1427,7 +1443,24 @@ export abstract class DeviceServiceClient {
       logger.warn(`[${this.logTag}] Cannot send message: WebSocket not connected`);
       return false;
     }
+    this.lastSendAt = this.timer.now();
     this.ws.send(message);
     return true;
+  }
+
+  /**
+   * Requests in flight through this client and when it was last used, so a
+   * daemon can tell a device it is actively driving from an idle one before
+   * giving up or yielding its CtrlProxy forwarding lease (#10497). Covers every
+   * request-response exchange (tool calls, resource reads, initial frames)
+   * because they all register with the shared request manager.
+   */
+  getRequestActivity(): { inFlightRequests: number; lastActivityAt: number | undefined } {
+    const requestActivityAt = this.requestManager.getLastActivityAt();
+    const lastActivityAt =
+      requestActivityAt === undefined || this.lastSendAt === undefined
+        ? (requestActivityAt ?? this.lastSendAt)
+        : Math.max(requestActivityAt, this.lastSendAt);
+    return { inFlightRequests: this.requestManager.getPendingCount(), lastActivityAt };
   }
 }

@@ -77,6 +77,8 @@ export interface DeviceLeaseOwnerStatus {
   sessionId: string | null;
   /** Tool executions currently bound to this device in the owner. */
   activeExecutions: number;
+  /** CtrlProxy requests in flight through the owner's clients for this device. */
+  inFlightRequests?: number;
   /** Whether a device-data stream subscriber (e.g. the IDE plugin) watches this device. */
   streaming?: boolean;
   /** Time since the owner's last tool activity on this device; null when it has none. */
@@ -99,13 +101,24 @@ export interface ForwardLeaseOwnerProbe {
 
 export type ForwardLeaseReclaimDecision =
   | { action: "reclaim"; reason: string }
-  | { action: "refuse"; reason: string };
+  | {
+      action: "refuse";
+      reason: string;
+      /**
+       * The refusal is time-based (recent use, or a busy owner that did not
+       * answer) and may lift within the caller's budget, so a readiness wait
+       * should retry rather than fail fast (#10485 review).
+       */
+      transient?: boolean;
+    };
 
 export interface ForwardLeaseReclaimInput {
   ownerPid: number;
   metadata: ForwardLeaseOwnerMetadata | undefined;
   report: ForwardLeaseOwnerReport | undefined;
   idleMs: number;
+  /** Requester's clock, compared with the owner's recorded acquire time. */
+  now: number;
 }
 
 /**
@@ -133,9 +146,10 @@ export function decideForwardLeaseReclaim(
       return {
         action: "refuse",
         reason: `its control socket ${metadata.socketPath} could not report lease status (${report.detail})`,
+        transient: report.kind === "no-response",
       };
     case "status":
-      return decideFromOwnerStatus(ownerPid, metadata, report.status, idleMs);
+      return decideFromOwnerStatus(ownerPid, metadata, report.status, idleMs, input.now);
   }
 }
 
@@ -144,6 +158,7 @@ function decideFromOwnerStatus(
   metadata: ForwardLeaseOwnerMetadata,
   status: DeviceLeaseOwnerStatus,
   idleMs: number,
+  now: number,
 ): ForwardLeaseReclaimDecision {
   if (status.pid !== ownerPid) {
     return {
@@ -163,16 +178,26 @@ function decideFromOwnerStatus(
       reason: `it has ${status.activeExecutions} tool call(s) in flight on ${status.deviceId}`,
     };
   }
+  if ((status.inFlightRequests ?? 0) > 0) {
+    return {
+      action: "refuse",
+      reason: `it has ${status.inFlightRequests} CtrlProxy request(s) in flight on ${status.deviceId}`,
+    };
+  }
   if (status.streaming === true) {
     return {
       action: "refuse",
       reason: `a device-data stream subscriber is watching ${status.deviceId}`,
     };
   }
-  if (status.idleForMs !== null && status.idleForMs < idleMs) {
+  // No recorded use: fall back to when the owner took the lease, so an owner
+  // that just acquired it is not treated as idle (#10497 review).
+  const idleForMs = status.idleForMs ?? now - metadata.acquiredAt;
+  if (idleForMs < idleMs) {
     return {
       action: "refuse",
-      reason: `it used ${status.deviceId} ${Math.round(status.idleForMs / 1000)}s ago`,
+      reason: `it used ${status.deviceId} ${Math.round(Math.max(0, idleForMs) / 1000)}s ago`,
+      transient: true,
     };
   }
   return { action: "reclaim", reason: `it reports no live session or recent activity` };

@@ -16,6 +16,21 @@ describe("RequestManager", () => {
     manager.reset();
   });
 
+  test("records when a request was last registered or settled (#10497)", async () => {
+    expect(manager.getLastActivityAt()).toBeUndefined();
+    fakeTimer.setCurrentTime(1_000);
+    const pending = manager.register("a", "hierarchy", 5_000, () => null);
+    expect(manager.getLastActivityAt()).toBe(1_000);
+    fakeTimer.setCurrentTime(3_000);
+    manager.resolve("a", { ok: true });
+    await pending;
+    expect(manager.getLastActivityAt()).toBe(3_000);
+    const timedOut = manager.register("b", "hierarchy", 100, () => null);
+    fakeTimer.advanceTime(100);
+    await timedOut;
+    expect(manager.getLastActivityAt()).toBe(3_100);
+  });
+
   test("throwing response error factory rejects and clears the waiter", async () => {
     const failure = new Error("factory failed");
     const promise = manager.register(

@@ -1,70 +1,74 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { forwardingLeaseConflictCause } from "../../src/server/forwardingLeaseConflictOutcome";
+import { describe, expect, test } from "bun:test";
 import {
-  CtrlProxyForwardingLeaseConflictError,
-  FORWARDING_LEASE_CONFLICT_TTL_MS,
-  clearForwardingLeaseConflict,
-  recordForwardingLeaseConflict,
-} from "../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
+  forwardingLeaseConflictCause,
+  type ForwardingLeaseConflictLookup,
+} from "../../src/server/forwardingLeaseConflictOutcome";
+import { CtrlProxyForwardingLeaseConflictError } from "../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
+import { MissingViewHierarchyError } from "../../src/features/action/MissingViewHierarchyError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 const DEVICE = "emulator-5600";
-const conflict = new CtrlProxyForwardingLeaseConflictError(
-  "Another AutoMobile process (PID 15836, socket /tmp/ovl-priv/daemon.sock) owns CtrlProxy forwarding for emulator-5600",
-  15836,
-  "/tmp/ovl-priv/daemon.sock",
-);
+const MESSAGE =
+  "Another AutoMobile process (PID 15836, socket /tmp/ovl-priv/daemon.sock) owns CtrlProxy forwarding for emulator-5600";
+
+/** The device's client: its latest connect failed on the lease, or it did not. */
+function lookup(conflicted: boolean): ForwardingLeaseConflictLookup {
+  return (deviceId) => (conflicted && deviceId === DEVICE ? MESSAGE : undefined);
+}
 
 describe("forwardingLeaseConflictCause (#10485)", () => {
-  afterEach(() => clearForwardingLeaseConflict(DEVICE));
-
-  test("reports a recorded conflict instead of a missing hierarchy", () => {
-    const timer = new FakeTimer();
-    recordForwardingLeaseConflict(DEVICE, conflict, timer);
+  test("explains a missing hierarchy on a device whose latest connect hit the lease", () => {
     const cause = forwardingLeaseConflictCause(
-      new ActionableError("Cannot perform action without view hierarchy"),
+      new MissingViewHierarchyError(),
       new Set([DEVICE]),
-      timer,
+      lookup(true),
     );
     expect(cause).toBeInstanceOf(ActionableError);
-    expect(cause?.message).toBe(conflict.message);
+    expect(cause?.message).toBe(MESSAGE);
   });
 
-  test("reports a recorded conflict instead of device loss", () => {
-    const timer = new FakeTimer();
-    recordForwardingLeaseConflict(DEVICE, conflict, timer);
+  test("leaves a missing hierarchy alone once a fresh connect cleared the conflict", () => {
     expect(
-      forwardingLeaseConflictCause(new DeviceLostError(DEVICE, "gone"), [DEVICE], timer)?.message,
-    ).toBe(conflict.message);
+      forwardingLeaseConflictCause(new MissingViewHierarchyError(), [DEVICE], lookup(false)),
+    ).toBeUndefined();
   });
 
-  test("ignores other devices, cleared conflicts, and expired conflicts", () => {
-    const timer = new FakeTimer();
-    recordForwardingLeaseConflict(DEVICE, conflict, timer);
-    expect(forwardingLeaseConflictCause(new Error("x"), ["emulator-5554"], timer)).toBeUndefined();
-    expect(forwardingLeaseConflictCause(new Error("x"), undefined, timer)).toBeUndefined();
-    timer.advanceTime(FORWARDING_LEASE_CONFLICT_TTL_MS);
-    expect(forwardingLeaseConflictCause(new Error("x"), [DEVICE], timer)).toBeUndefined();
-    recordForwardingLeaseConflict(DEVICE, conflict, timer);
-    clearForwardingLeaseConflict(DEVICE);
-    expect(forwardingLeaseConflictCause(new Error("x"), [DEVICE], timer)).toBeUndefined();
+  test("never hijacks device loss or unrelated (adb-only) failures", () => {
+    for (const error of [
+      new DeviceLostError(DEVICE, "gone"),
+      new ActionableError("Failed to install APK: INSTALL_FAILED_INSUFFICIENT_STORAGE"),
+      new Error("adb: device offline"),
+    ]) {
+      expect(forwardingLeaseConflictCause(error, [DEVICE], lookup(true))).toBeUndefined();
+    }
   });
 
-  test("keeps a failure that already names the conflict", () => {
-    const timer = new FakeTimer();
-    recordForwardingLeaseConflict(DEVICE, conflict, timer);
+  test("ignores other devices", () => {
     expect(
       forwardingLeaseConflictCause(
-        new Error(`getAndroid automation runner readiness failed: ${conflict.message}`),
-        [DEVICE],
-        timer,
+        new MissingViewHierarchyError(),
+        ["emulator-5554"],
+        lookup(true),
       ),
     ).toBeUndefined();
   });
 
-  test("wraps a thrown conflict as an actionable error", () => {
-    expect(forwardingLeaseConflictCause(conflict, [])?.message).toBe(conflict.message);
+  test("surfaces a conflict found in the cause chain", () => {
+    const conflict = new CtrlProxyForwardingLeaseConflictError(MESSAGE, 15836);
+    expect(forwardingLeaseConflictCause(conflict, [], lookup(false))?.message).toBe(MESSAGE);
+    const wrapped = new ActionableError("observe failed", { cause: conflict });
+    expect(forwardingLeaseConflictCause(wrapped, [], lookup(false))?.message).toBe(MESSAGE);
+  });
+
+  test("keeps a failure that already names the conflict", () => {
+    const conflict = new CtrlProxyForwardingLeaseConflictError(MESSAGE, 15836);
+    expect(
+      forwardingLeaseConflictCause(
+        new Error(`getAndroid automation runner readiness failed: ${MESSAGE}`, { cause: conflict }),
+        [DEVICE],
+        lookup(true),
+      ),
+    ).toBeUndefined();
   });
 });

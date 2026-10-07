@@ -404,30 +404,64 @@ export function releaseExclusiveLock(
     return;
   }
 
-  const { pid: ownerPid, token: lockToken } = parseLockContent(content);
-  if (ownerPid !== pid) {
+  if (!isOwnLockContent(parseLockContent(content), pid, ownerToken)) {
     // The lock is no longer ours — do not delete another opener's file.
     return;
+  }
+
+  // A live owner's lock can now be taken over (#10497), so the read above may
+  // already be stale: a taker could replace the file between that read and an
+  // unlink-by-path, which would delete the TAKER's lock. Claim the exact file
+  // instance by renaming it to a unique marker, verify the marker is ours, and
+  // only then delete it; a displaced foreign lock is restored instead.
+  const releaseMarker = `${lockFilePath}.${pid}.release.${++releaseMarkerCounter}`;
+  try {
+    renameSync(lockFilePath, releaseMarker);
+  } catch (error) {
+    // Already gone (released or taken over and removed); nothing of ours remains.
+    logger.debug(`src/utils/fileLock.ts: release rename found no lock: ${error}`);
+    return;
+  }
+  let claimed: LockContent | undefined;
+  try {
+    claimed = parseLockContent(readFileSync(releaseMarker, "utf-8").trim());
+  } catch (error) {
+    logger.warn(`src/utils/fileLock.ts: release marker unreadable at ${releaseMarker}: ${error}`);
+  }
+  if (claimed === undefined || !isOwnLockContent(claimed, pid, ownerToken)) {
+    restoreDisplacedLock(lockFilePath, releaseMarker);
+    return;
+  }
+  try {
+    unlinkSync(releaseMarker);
+  } catch (error) {
+    logger.warn(
+      `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
+    );
+    // The lock could not be deleted, so put it back rather than strand it under
+    // the marker name; linking never clobbers a lock someone took meanwhile.
+    try {
+      linkSync(releaseMarker, lockFilePath);
+    } catch (restoreError) {
+      logger.warn(`src/utils/fileLock.ts: could not restore unreleased lock: ${restoreError}`);
+    }
+  }
+}
+
+let releaseMarkerCounter = 0;
+
+function isOwnLockContent(
+  content: LockContent,
+  pid: number,
+  ownerToken: string | undefined,
+): boolean {
+  if (content.pid !== pid) {
+    return false;
   }
   // Incarnation check: with a token supplied, a same-PID lock bearing a DIFFERENT
   // token belongs to another incarnation that recycled our PID — leave it. A lock
   // with no token line predates tokens and is treated as ours (PID match).
-  if (ownerToken !== undefined && lockToken !== undefined && lockToken !== ownerToken) {
-    return;
-  }
-
-  try {
-    unlinkSync(lockFilePath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      logger.warn(
-        `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
-      );
-      return;
-    }
-    // Concurrent release already removed the lock, so there is nothing to delete.
-    logger.debug(`src/utils/fileLock.ts: release raced with removal: ${error}`);
-  }
+  return ownerToken === undefined || content.token === undefined || content.token === ownerToken;
 }
 
 /**

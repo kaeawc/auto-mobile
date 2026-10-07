@@ -2,19 +2,14 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { SingleFlightInterval } from "../utils/SingleFlightInterval";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { isDeviceLeaseBusy, type DeviceLeaseActivity } from "./deviceLeaseActivity";
 
 /** What the idle releaser needs to know and do about each device lease. */
 export interface DeviceForwardLeaseIdlePort {
   /** Devices whose CtrlProxy forwarding lease this process holds. */
   heldDeviceIds(): string[];
-  /** This daemon's live session on the device, if any. */
-  sessionForDevice(deviceId: string): string | null;
-  /** In-flight tool executions bound to the device. */
-  activeExecutionCount(deviceId: string): number;
-  /** Whether an IDE/device-data stream subscriber is watching the device. */
-  hasStreamSubscriber(deviceId: string): boolean;
-  /** Time since the last tool activity on the device; null when none was recorded. */
-  idleForMs(deviceId: string): number | null;
+  /** Sessions, tool calls, CtrlProxy requests and streams using the device. */
+  activity(deviceId: string): DeviceLeaseActivity;
   /** Give up the device's lease (close its CtrlProxy client and forward). */
   release(deviceId: string): Promise<void>;
 }
@@ -87,11 +82,8 @@ export class DeviceForwardLeaseIdleReleaser {
   }
 
   private isIdle(deviceId: string, now: number): boolean {
-    if (
-      this.port.sessionForDevice(deviceId) !== null ||
-      this.port.activeExecutionCount(deviceId) > 0 ||
-      this.port.hasStreamSubscriber(deviceId)
-    ) {
+    const activity = this.port.activity(deviceId);
+    if (isDeviceLeaseBusy(activity)) {
       this.lastBusyAt.set(deviceId, now);
       return false;
     }
@@ -101,7 +93,7 @@ export class DeviceForwardLeaseIdleReleaser {
       this.lastBusyAt.set(deviceId, now);
       return false;
     }
-    const toolIdleForMs = this.port.idleForMs(deviceId) ?? Number.POSITIVE_INFINITY;
-    return Math.min(now - lastBusyAt, toolIdleForMs) >= this.idleMs;
+    const idleForMs = activity.idleForMs ?? Number.POSITIVE_INFINITY;
+    return Math.min(now - lastBusyAt, idleForMs) >= this.idleMs;
   }
 }

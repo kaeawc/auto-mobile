@@ -13,6 +13,17 @@ import { ensureSecureDir, secureFile } from "../../utils/filesystem/securePermis
 import { AUX_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./LineFramer";
 import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
+/** Open connections across every auxiliary socket server in this process. */
+const liveAuxConnections = new Set<Socket>();
+
+/**
+ * Clients (stream subscribers, recorders, IDE plugins) connected to any
+ * auxiliary daemon socket, for the orphaned private-daemon watchdog (#10497).
+ */
+export function getLiveAuxSocketConnectionCount(): number {
+  return liveAuxConnections.size;
+}
+
 export const AUX_SOCKET_BIND_LIVENESS_PROBE_TIMEOUT_MS = 1_000;
 
 /**
@@ -245,7 +256,9 @@ export abstract class BaseSocketServer {
       this.onConnectionError(socket, error);
     });
 
+    liveAuxConnections.add(socket);
     socket.on("close", () => {
+      liveAuxConnections.delete(socket);
       this.onConnectionClose(socket);
     });
 

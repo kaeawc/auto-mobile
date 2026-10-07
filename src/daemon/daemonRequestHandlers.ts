@@ -43,7 +43,8 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
-import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
+import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
+import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -60,6 +61,8 @@ export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  /** Overrides the production lease-activity sources (tests). */
+  getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
@@ -778,15 +781,16 @@ async function handleDeviceLeaseStatus(
     };
   }
   const { deviceId } = parsed.data;
+  const manager = state.getSessionManager();
+  const sources =
+    state.getDeviceLeaseActivitySources?.() ??
+    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
   return {
     success: true,
     result: {
       pid: process.pid,
       deviceId,
-      sessionId: state.getSessionManager().getSessionForDevice?.(deviceId) ?? null,
-      activeExecutions: executionTracker.getActiveDeviceExecutionCount(deviceId),
-      streaming: getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false,
-      idleForMs: executionTracker.getDeviceIdleForMs(deviceId),
+      ...readDeviceLeaseActivity(sources, deviceId),
     },
   };
 }

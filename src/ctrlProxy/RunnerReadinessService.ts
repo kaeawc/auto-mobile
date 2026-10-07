@@ -177,6 +177,8 @@ export interface ReadinessClient {
    * surfacing `primaryUserStartState`/`deviceLock`, not raw transport text.
    */
   isLastConnectionFailureForwardingLeaseConflict?(): boolean;
+  /** Whether that conflict is a time-based refusal worth retrying within budget (#10485). */
+  isLastConnectionFailureTransientLeaseConflict?(): boolean;
   /**
    * Clear the client's connection-attempt budget and cooldown clock (issue
    * #7538). Called after {@link ReadinessAndroidManager.rebindIfUnhealthy}
@@ -1061,9 +1063,7 @@ export class RunnerReadinessService {
         connected = await this.runPhase(context, phase, attempts, () =>
           client.waitForConnection(1, 0),
         );
-        if (!connected && client.isLastConnectionFailureForwardingLeaseConflict?.()) {
-          // Another process kept the lease after being asked (#10497); retrying
-          // until the deadline cannot change that, so fail fast (#10485).
+        if (!connected && isTerminalLeaseConflict(client)) {
           await this.failUnresponsiveClient(context, client, phase, attempts);
         }
       }
@@ -1600,6 +1600,19 @@ export class RunnerReadinessService {
     }
     throw failure;
   }
+}
+
+/**
+ * The owner kept the lease for a live session, stream, or in-flight work
+ * (#10497); retrying to the deadline cannot change that, so readiness fails
+ * fast (#10485). A time-based refusal (recent use, busy owner) is retried
+ * within the existing readiness budget instead.
+ */
+function isTerminalLeaseConflict(client: ReadinessClient): boolean {
+  return (
+    (client.isLastConnectionFailureForwardingLeaseConflict?.() ?? false) &&
+    !(client.isLastConnectionFailureTransientLeaseConflict?.() ?? false)
+  );
 }
 
 function phaseElapsedLabel(phase: string): string {

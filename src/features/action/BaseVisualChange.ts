@@ -2,6 +2,7 @@ import {
   AdbClientFactory,
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { MissingViewHierarchyError } from "./MissingViewHierarchyError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -404,9 +405,7 @@ export class BaseVisualChange {
         });
       } catch (error) {
         if (knownWrongWindow && options.usesObservationForResolution !== false) {
-          throw new ActionableError("Cannot perform action without view hierarchy", {
-            cause: error,
-          });
+          throw new MissingViewHierarchyError({ cause: error });
         }
         logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
@@ -430,7 +429,7 @@ export class BaseVisualChange {
           (!previousObserveResult.viewHierarchy ||
             previousObserveResult.viewHierarchy.hierarchy.error))
       ) {
-        throw new ActionableError("Cannot perform action without view hierarchy");
+        throw new MissingViewHierarchyError();
       }
       if (resolutionGeneration !== undefined && !hasWrongWindowEvidence(previousObserveResult)) {
         completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);

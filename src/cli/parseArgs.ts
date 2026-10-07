@@ -8,7 +8,10 @@ import {
   hasEventAllMarkersCliOverride,
   parseEventAllMarkersConfig,
 } from "../utils/eventAllMarkers";
-import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  parseOutputReductionFlags,
+} from "../utils/outputReductionFlags";
 import {
   parseToolOutputsDirConfig,
   TOOL_OUTPUTS_DIR_FLAG,
@@ -110,7 +113,8 @@ export function parseArgs(
   const noDaemon = hasFlag("no-daemon");
   const daemonCommandIndex = args.indexOf("--daemon");
   const daemonRequested = daemonCommandIndex >= 0;
-  const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
+  const daemonCommand =
+    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
   const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
   const debugPerf =
     hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
@@ -366,7 +370,7 @@ function parseValueOptions(
   };
   const daemonIndex = args.indexOf("--daemon");
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--cli") {
+    if (["--cli", "--boot-device", "--"].includes(args[i])) {
       break;
     }
     const connection = parseConnectionOption(args, i, log, options);
@@ -416,13 +420,39 @@ function inspectInvocationToken(
   if (daemonIndex >= 0 && i >= daemonIndex) {
     return i;
   }
-  if (args[i].startsWith("--cli=")) {
-    options.invalidInvocation ??=
-      "Invalid CLI invocation. Use --cli <tool> instead of --cli=<tool>.";
-  } else if (!args[i].startsWith("-")) {
+  const malformed = malformedModeInvocation(args[i]);
+  if (malformed) {
+    options.invalidInvocation ??= malformed;
+  } else if (args[i] !== "" && !args[i].startsWith("-")) {
     options.invalidInvocation ??= `Unexpected argument: ${args[i]}; did you mean --cli ${args[i]}?`;
   }
-  return i;
+  return unknownLaunchOptionTakesValue(args[i]) ? optionValueEnd(args, i) : i;
+}
+
+/** Mode syntax belongs to this scalar walk only before a command's argv boundary. */
+function malformedModeInvocation(arg: string): string | undefined {
+  if (arg.startsWith("--cli=")) {
+    return "Invalid CLI invocation. Use --cli <tool> instead of --cli=<tool>.";
+  }
+  if (arg.startsWith("--daemon=") || arg.startsWith("--boot-device=")) {
+    const [flag, ...value] = arg.split("=");
+    const form =
+      flag === "--boot-device"
+        ? "--boot-device --platform <android|ios>"
+        : `${flag} ${value.join("=")}`;
+    return `Invalid invocation. Use ${form} instead of ${arg}.`;
+  }
+  return undefined;
+}
+
+/** Preserve forward-compatible launcher values; known booleans consume no word. */
+function unknownLaunchOptionTakesValue(arg: string): boolean {
+  return (
+    arg.startsWith("-") &&
+    !arg.includes("=") &&
+    !Object.hasOwn(cliOptions, arg.replace(/^-+/, "")) &&
+    !OUTPUT_REDUCTION_FLAG_SPECS.some((spec) => spec.cli === arg || spec.disableCli === arg)
+  );
 }
 
 function parseConnectionOption(

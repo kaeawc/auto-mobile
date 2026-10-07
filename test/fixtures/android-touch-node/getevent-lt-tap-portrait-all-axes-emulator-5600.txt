@@ -1,0 +1,9 @@
+# one tap, mCurrentRotation=ROTATION_0, natural (300,900) on 1080x2400 -> raw (9102,12287)
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1   (events injected with sendevent; every axis value differs from the previous contact so all axes are reported)
+[  190136.507537] EV_ABS       ABS_MT_TRACKING_ID   00000065            
+[  190136.507537] EV_ABS       ABS_MT_POSITION_X    0000238d            
+[  190136.507537] EV_ABS       ABS_MT_PRESSURE      00000258            
+[  190136.507537] EV_ABS       ABS_MT_TOUCH_MAJOR   00000007            
+[  190136.507537] EV_SYN       SYN_REPORT           00000000            
+[  190136.659662] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190136.659662] EV_SYN       SYN_REPORT           00000000            

@@ -1,0 +1,24 @@
+# one swipe up (finger moves from natural (540,1500) to (540,900)), mCurrentRotation=ROTATION_0
+# NOTE: events were injected with sendevent; the kernel drops axes whose value did not change since the previous contact (here ABS_MT_SLOT, ABS_MT_POSITION_X, ABS_MT_PRESSURE, ABS_MT_TOUCH_MAJOR), and this node has no BTN_TOUCH key, so EV_KEY BTN_TOUCH is never reported.
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1
+[  190100.533831] EV_ABS       ABS_MT_TRACKING_ID   0000005c            
+[  190100.533831] EV_ABS       ABS_MT_POSITION_Y    00004fff            
+[  190100.533831] EV_SYN       SYN_REPORT           00000000            
+[  190100.634042] EV_ABS       ABS_MT_POSITION_Y    00004bff            
+[  190100.634042] EV_SYN       SYN_REPORT           00000000            
+[  190100.744178] EV_ABS       ABS_MT_POSITION_Y    000047ff            
+[  190100.744178] EV_SYN       SYN_REPORT           00000000            
+[  190100.852306] EV_ABS       ABS_MT_POSITION_Y    000043ff            
+[  190100.852306] EV_SYN       SYN_REPORT           00000000            
+[  190100.960516] EV_ABS       ABS_MT_POSITION_Y    00003fff            
+[  190100.960516] EV_SYN       SYN_REPORT           00000000            
+[  190101.069663] EV_ABS       ABS_MT_POSITION_Y    00003bff            
+[  190101.069663] EV_SYN       SYN_REPORT           00000000            
+[  190101.176572] EV_ABS       ABS_MT_POSITION_Y    000037ff            
+[  190101.176572] EV_SYN       SYN_REPORT           00000000            
+[  190101.281207] EV_ABS       ABS_MT_POSITION_Y    000033ff            
+[  190101.281207] EV_SYN       SYN_REPORT           00000000            
+[  190101.387655] EV_ABS       ABS_MT_POSITION_Y    00002fff            
+[  190101.387655] EV_SYN       SYN_REPORT           00000000            
+[  190101.516580] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190101.516580] EV_SYN       SYN_REPORT           00000000            

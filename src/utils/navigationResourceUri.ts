@@ -1,3 +1,4 @@
+import { encodeUriSegment } from "./encodeUriSegment";
 /**
  * Single source of truth for the navigation node-screenshot resource URI shape.
  *
@@ -11,5 +12,5 @@
  */
 export function buildNavigationNodeScreenshotUri(nodeId: number, appId?: string | null): string {
   const base = `automobile:navigation/nodes/${nodeId}/screenshot`;
-  return appId ? `${base}?appId=${encodeURIComponent(appId)}` : base;
+  return appId ? `${base}?appId=${encodeUriSegment(appId)}` : base;
 }

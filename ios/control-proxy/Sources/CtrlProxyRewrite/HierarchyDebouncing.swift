@@ -12,6 +12,10 @@ public protocol HierarchyDebouncing: Sendable {
     /// backoff to the new base and, if running, reschedules the pending poll.
     func updatePollIntervalMs(_ pollIntervalMs: Int64)
 
+    /// Read the raw filtered capture and its epoch-millisecond `updatedAt` together.
+    /// Main-actor isolation matches the debouncer's capture and cache writes.
+    func getLastHierarchy() -> ViewHierarchy?
+
     /// Reserve an ordering token immediately before extraction, on the same actor turn.
     /// Shared by polls and commands; independent of the hierarchy's wire timestamp.
     func beginCapture() -> UInt64

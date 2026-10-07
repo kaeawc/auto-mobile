@@ -46,6 +46,13 @@ export interface GestureEvent {
   /** Raw axes unknown during this contact; screen coordinates must not be inferred. */
   unknownAxes?: ("x" | "y")[];
 
+  /**
+   * Host time of the DOWN frame the coordinates were mapped at. Set only when the
+   * classifier maps through a timeline, so the recorder can ask which display
+   * geometry was in force for the touch (#10174).
+   */
+  downAt?: number;
+
   // tap / doubleTap / longPress
   screenX?: number;
   screenY?: number;
@@ -103,6 +110,21 @@ export interface ReceivedInteraction extends Omit<InteractionEvent, "type" | "te
    * (it encodes defaults), and some platforms report `""` instead.
    */
   text?: string | null;
+}
+
+/** A display change pushed by CtrlProxy; the subset the recorder reads. */
+export interface DisplayChange {
+  change: string;
+  displayId: number;
+  /** Surface rotation 0-3; absent on APKs that predate the field. */
+  rotation?: number;
+  width?: number;
+  height?: number;
+}
+
+/** Subscription to CtrlProxy display changes (rotation, size, fold state). */
+export interface DisplayChangeSource {
+  onDisplayChange(listener: (change: DisplayChange) => void): () => void;
 }
 
 export interface A11ySource {

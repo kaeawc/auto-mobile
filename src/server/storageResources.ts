@@ -6,6 +6,7 @@ import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientF
 import { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
+import { safeDecodeSegment } from "./resourceUriSegments";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
 import {
   isIosSdkEntryRedacted,
@@ -27,6 +28,7 @@ import {
 } from "../features/preferences/resolveAndroidPreferencesUser";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 // Resource URI templates
 const STORAGE_RESOURCE_TEMPLATES = {
@@ -178,20 +180,6 @@ function getEntriesCacheKey(deviceId: string, packageName: string, fileName: str
   return `${deviceId}:${packageName}:${fileName}`;
 }
 
-// Decode a percent-encoded path segment, returning null when the encoding is
-// malformed. A host-defined package or file name may contain a literal `%`
-// that is not valid percent-encoding; letting decodeURIComponent's URIError
-// escape would bypass the JSON diagnostic envelope, exactly the failure mode
-// #5686 fixed for query params — here for path params (issue #5734).
-function safeDecodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch (error) {
-    logger.debug(`[StorageResources] Malformed URI segment '${value}': ${error}`);
-    return null;
-  }
-}
-
 // Structured diagnostic for a URI whose path segments are not valid
 // percent-encoding, served on the originally-requested URI so the client still
 // gets a typed JSON envelope rather than a raw MCP error.
@@ -211,14 +199,14 @@ function malformedUriContent(params: Record<string, string>): ResourceContent {
  * Build resource URI for storage files
  */
 function buildFilesUri(deviceId: string, packageName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/files`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/files`;
 }
 
 /**
  * Build resource URI for storage entries
  */
 function buildEntriesUri(deviceId: string, packageName: string, fileName: string): string {
-  return `automobile:devices/${deviceId}/storage/${encodeURIComponent(packageName)}/${encodeURIComponent(fileName)}/entries`;
+  return `automobile:devices/${deviceId}/storage/${encodeUriSegment(packageName)}/${encodeUriSegment(fileName)}/entries`;
 }
 
 /**

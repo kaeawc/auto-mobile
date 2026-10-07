@@ -13,6 +13,8 @@ import type {
   GestureEvent,
   ReceivedInteraction,
 } from "../../src/features/record/android/types";
+import { DisplayGeometryTracker } from "../../src/features/record/android/DisplayGeometryTracker";
+import { ScreenGeometryTimeline } from "../../src/features/record/android/ScreenGeometryTimeline";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 class Deferred<T> {
@@ -31,6 +33,8 @@ class FakeRecorder {
   stopGate: Deferred<{ steps: PlanStep[]; stepCount: number }> | null = null;
   stopError: Error | null = null;
   steps: PlanStep[] = [];
+  /** What the recorder can still hand over after a failed stop. */
+  capturedSteps: PlanStep[] | undefined;
 
   get stepCount(): number {
     return 0;
@@ -209,6 +213,37 @@ describe("testRecordingManager stopping reservation", () => {
     expect((await next).recordingId).not.toBe(started.recordingId);
     await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
+    );
+  });
+
+  test("a stop that times out still returns the steps already captured, with a warning", async () => {
+    const timer = new FakeTimer();
+    const hung = new FakeRecorder();
+    hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    hung.capturedSteps = [capturedStep];
+    const { result: started } = await start(timer, hung);
+
+    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+    const result = await stopping;
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("OK");
+    expect(result.error).toContain("Stopping the recorder did not finish");
+    expect(result.error).toContain("timed out after 10000 ms");
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test("a stop that fails with nothing captured still rejects", async () => {
+    const timer = new FakeTimer();
+    const failed = new FakeRecorder();
+    failed.stopError = new Error("device disconnected");
+    failed.capturedSteps = [];
+    const { result: started } = await start(timer, failed);
+
+    await expect(stopTestRecording(started.recordingId, undefined, timer)).rejects.toThrow(
+      "Failed to stop test recording: device disconnected",
     );
   });
 
@@ -391,5 +426,103 @@ describe("testRecordingManager touch-track health", () => {
         "platform",
       ].sort(),
     );
+  });
+});
+
+function geometryTracker(timer: FakeTimer, deviceRotation: number): DisplayGeometryTracker {
+  const timeline = new ScreenGeometryTimeline(
+    { xMin: 0, xMax: 32767, yMin: 0, yMax: 32767 },
+    { rotation: 0, display: { width: 1080, height: 2400 } },
+    timer.now(),
+  );
+  return new DisplayGeometryTracker(
+    timeline,
+    {
+      readRotation: async () => deviceRotation,
+      readPhysicalSize: async () => ({ width: 1080, height: 2400 }),
+    },
+    timer,
+  );
+}
+
+describe("testRecordingManager display geometry (#10174)", () => {
+  test("a rotation that was never pushed warns on the stop result", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 1);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 918,
+      screenY: 1184,
+      downAt: timer.now() - 100,
+    });
+    // The device reads rotation 1 although none was pushed; the stop-time check notices.
+    const result = await stopTestRecording(undefined, "rotated", timer);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.error).toStartWith(
+      "Warning: Display geometry changed or was unreadable during recording:",
+    );
+    expect(result.error).toContain("display rotation at stop (1) differs");
+  });
+
+  test("a labelled step survives plan validation and the result warns", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 1);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry-label"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    tracker.handleTransition({ change: "changed", displayId: 0, rotation: 1 });
+    timer.advanceTime(100);
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 1184,
+      screenY: 162,
+      downAt: timer.now() - 50,
+    });
+    const result = await stopTestRecording(undefined, "labelled", timer);
+
+    expect(result.stepCount).toBe(1);
+    expect(result.planContent).toContain("label: 'Warning: display rotation/size changed within");
+    expect(result.error).toContain("Steps labelled");
+  });
+
+  test("a recording whose geometry never changed has no warning and no labels", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(10_000);
+    const gestures = new RecordingGestures();
+    const tracker = geometryTracker(timer, 0);
+    await startTestRecording(
+      device,
+      timer,
+      new CountingIdGenerator("geometry-clean"),
+      () => new DualTrackRecorder(device, gestures, new RecordingA11y(), timer, tracker),
+    );
+    timer.advanceTime(5_000);
+    gestures.onGesture?.({
+      type: "tap",
+      arrivedAt: timer.now(),
+      screenX: 918,
+      screenY: 1184,
+      downAt: timer.now() - 100,
+    });
+    const result = await stopTestRecording(undefined, "steady", timer);
+
+    expect(result.error).toBeUndefined();
+    expect(result.planContent).not.toContain("label");
   });
 });

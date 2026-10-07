@@ -101,7 +101,7 @@ import {
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../features/utility/ElementGeometry";
@@ -1105,9 +1105,7 @@ function isWaitSourceVisible(
   screenSize: ScreenSize | undefined,
   negative: boolean,
 ): boolean {
-  return (
-    element !== undefined && (negative || !isElementCenterOffScreen(element.bounds, screenSize))
-  );
+  return element !== undefined && (negative || hasVisibleScreenPart(element.bounds, screenSize));
 }
 
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {

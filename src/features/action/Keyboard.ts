@@ -13,7 +13,7 @@ import {
 } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { FocusedInputQuery } from "../../utils/interfaces/ElementTraitQueries";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultElementFinder } from "../utility/ElementFinder";
@@ -164,7 +164,7 @@ export class Keyboard {
   private hierarchyProvider: KeyboardHierarchyProvider;
   private parser: ElementParser;
   private geometry: ElementGeometry;
-  private finder: ElementFinder;
+  private finder: FocusedInputQuery;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
   private openClient: KeyboardOpenClient | undefined;
@@ -176,7 +176,7 @@ export class Keyboard {
     timer: Timer = defaultTimer,
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: ElementFinder = new DefaultElementFinder(),
+    finder: FocusedInputQuery = new DefaultElementFinder(),
     openClient?: KeyboardOpenClient,
   ) {
     this.device = device;

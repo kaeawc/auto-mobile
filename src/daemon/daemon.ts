@@ -619,6 +619,18 @@ export class Daemon {
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
           deferFailureFallback: true,
         }),
+      ownerDisconnect: {
+        release: async (session, reason) => {
+          // Like the heartbeat monitor, leave a session with work in flight to its lease.
+          if (this.hasActiveSessionExecution(session.sessionId)) {
+            logger.info(
+              `[Daemon] Kept session ${session.sessionId} after its owner disconnected: executions are still active`,
+            );
+            return;
+          }
+          await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
+        },
+      },
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryPolicy,
       onDeviceFramesInvalidated: (deviceId) => {

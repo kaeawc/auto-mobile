@@ -69,6 +69,19 @@ export function livenessBudgetMs(leaseMs: number): number {
 }
 
 /**
+ * The longest a tool call or resource read waits for liveness recovery before it goes ahead (#10508).
+ *
+ * Recovery spreads its attempts over the whole lease-plus-grace budget, which is right for the
+ * session but not for a caller: with a long lease (fault injection sets an hour) one slot alone
+ * would outlast any MCP client's request timeout, and the call that would let the daemon resume
+ * the session never reaches it. A caller waits for the budget, but never longer than it takes
+ * every attempt to get one heartbeat request's answer and one more request's spacing.
+ */
+export function livenessRecoveryCallWaitMs(leaseMs: number, requestTimeoutMs: number): number {
+  return Math.min(livenessBudgetMs(leaseMs), LIVENESS_RECOVERY_ATTEMPTS * 2 * requestTimeoutMs);
+}
+
+/**
  * How long a proxy keeps retrying a claim another owner refuses (#10050). The other owner's
  * session can stay refused for its whole lease plus the suspect grace window, and the retry that
  * wins lands one heartbeat cadence after the daemon lets go, so all three are covered.
@@ -263,8 +276,18 @@ export class LivenessRecovery {
   private readonly stopSignal = new AbortController();
   private socketResetClaimed = false;
   private stopped = false;
+  private busyGeneration = 0;
 
   constructor(private readonly deps: LivenessRecoveryDeps) {}
+
+  /**
+   * Identifies the current stretch of recovery: it changes each time recovery starts while none
+   * was running, and stays the same for every session that joins before all of them settle. Lets a
+   * caller bound its wait once per stretch rather than once per call (#10508).
+   */
+  busyEpisode(): number {
+    return this.busyGeneration;
+  }
 
   /** Whether the session is being recovered, or failed and awaits its episode's handover. */
   isRecovering(sessionUuid: string): boolean {
@@ -285,6 +308,9 @@ export class LivenessRecovery {
       this.episodes.set(code, episode);
     }
     episode.pending += 1;
+    if (this.recovering.size === 0) {
+      this.busyGeneration += 1;
+    }
     const run = this.run(sessionUuid, code, episode).finally(() => {
       this.recovering.delete(sessionUuid);
       this.finishEpisodeMember(code, episode);

@@ -93,10 +93,13 @@ for (const criteria of [false, true]) {
 
       expect(second.isSettled()).toBe(true);
       const outcome = String(await second.result);
-      expect(outcome).toContain("deadlocked with another waiting multi-device request");
+      expect(outcome).toContain("deadlocked with other waiting multi-device requests");
       expect(outcome).toContain("This request's sessions hold 'd2' (session 's2')");
       expect(outcome).toContain(
-        "Session 's2:B' (platform=android) can only use 'd1' (session 's1')",
+        "Session 's2:B' (platform=android) is waiting for 'd1' (session 's1')",
+      );
+      expect(outcome).toContain(
+        "The waiting request for sessions 's1', 's1:B' holds 'd1' (session 's1') and is waiting for 'd2' (session 's2')",
       );
       expect(outcome).not.toContain("Timed out");
       expect(timer.now()).toBe(0);
@@ -151,6 +154,117 @@ for (const criteria of [false, true]) {
       await release("s1", "d1");
       const secondAllocated = (await settle(second.result)) as Map<string, string>;
       expect(secondAllocated.get("s2:B")).toBe("d1");
+    });
+
+    test("claims of one plan counting on a single idle device deadlock with a plan queued behind it", async () => {
+      await setUp(["d1", "d2", "d3"]);
+      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+
+      // The first plan needs two of d2/d3 but only d3 is idle; the second is
+      // queued behind it while holding d2.
+      const first = observe(["s1", "s1:B", "s1:C"]);
+      await drainUntilQuiescent(timer);
+      expect(first.isSettled()).toBe(false);
+      const second = observe(["s2", "s2:B"]);
+      await drainUntilQuiescent(timer);
+
+      expect(second.isSettled()).toBe(true);
+      const outcome = String(await second.result);
+      expect(outcome).toContain("This request's sessions hold 'd2' (session 's2')");
+      expect(outcome).toContain(
+        "It is queued behind the earlier waiting request for sessions 's1', 's1:B', 's1:C'.",
+      );
+      expect(outcome).toContain(
+        "The waiting request for sessions 's1', 's1:B', 's1:C' holds 'd1' (session 's1') and is waiting for 'd2' (session 's2').",
+      );
+      expect(outcome).not.toContain("'d3'");
+      expect(timer.now()).toBe(0);
+      expect(first.isSettled()).toBe(false);
+      await release("s2", "d2");
+      const allocated = (await settle(first.result)) as Map<string, string>;
+      expect(new Set([allocated.get("s1:B"), allocated.get("s1:C")])).toEqual(
+        new Set(["d2", "d3"]),
+      );
+    });
+
+    test("a session with two waiting plans pins its device for both, naming each in the cycle", async () => {
+      await setUp(["d1", "d2"]);
+      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+
+      const first = observe(["s1", "s1:B"]);
+      await drainUntilQuiescent(timer);
+      const again = observe(["s1", "s1:C"]);
+      await drainUntilQuiescent(timer);
+      const second = observe(["s2", "s2:B"]);
+      await drainUntilQuiescent(timer);
+
+      expect(second.isSettled()).toBe(true);
+      const outcome = String(await second.result);
+      expect(outcome).toContain("The waiting request for sessions 's1', 's1:B' holds 'd1'");
+      expect(outcome).toContain("The waiting request for sessions 's1', 's1:C' holds 'd1'");
+      expect(first.isSettled()).toBe(false);
+      expect(again.isSettled()).toBe(false);
+      await release("s2", "d2");
+      const allocated = (await settle(first.result)) as Map<string, string>;
+      expect(allocated.get("s1:B")).toBe("d2");
+    });
+
+    test("a cycle across three sessions fails only its most recently queued plan", async () => {
+      await setUp(["d1", "d2", "d3"]);
+      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+      await pool.bindOrReuseDeviceSession("s3", "d3", "android");
+
+      const first = observe(["s1", "s1:B"]);
+      await drainUntilQuiescent(timer);
+      const second = observe(["s2", "s2:B"]);
+      await drainUntilQuiescent(timer);
+      // Until the third plan queues, s3's device may still be released.
+      expect(first.isSettled()).toBe(false);
+      expect(second.isSettled()).toBe(false);
+      const third = observe(["s3", "s3:B"]);
+      await drainUntilQuiescent(timer);
+
+      expect(third.isSettled()).toBe(true);
+      const outcome = String(await third.result);
+      expect(outcome).toContain("This request's sessions hold 'd3' (session 's3')");
+      expect(outcome).toContain(
+        "Session 's3:B' (platform=android) is waiting for 'd1' (session 's1'), 'd2' (session 's2')",
+      );
+      expect(outcome).toContain("The waiting request for sessions 's1', 's1:B' holds 'd1'");
+      expect(outcome).toContain("The waiting request for sessions 's2', 's2:B' holds 'd2'");
+      expect(timer.now()).toBe(0);
+      expect(first.isSettled()).toBe(false);
+      expect(second.isSettled()).toBe(false);
+      await release("s3", "d3");
+      const allocated = (await settle(first.result)) as Map<string, string>;
+      expect(allocated.get("s1:B")).toBe("d3");
+      expect(second.isSettled()).toBe(false);
+    });
+
+    test("a claim whose only candidate is pinned deadlocks despite an idle device of another platform", async () => {
+      await setUp(["d1", "d2", "ios-1"], ["ios-1"]);
+      await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+      await pool.bindOrReuseDeviceSession("s2", "d2", "android");
+
+      const first = observe(["s1", "s1:B"]);
+      await drainUntilQuiescent(timer);
+      const second = observe(["s2", "s2:B"]);
+      await drainUntilQuiescent(timer);
+
+      expect(second.isSettled()).toBe(true);
+      const outcome = String(await second.result);
+      expect(outcome).toContain(
+        "Session 's2:B' (platform=android) is waiting for 'd1' (session 's1')",
+      );
+      expect(outcome).not.toContain("ios-1");
+      expect(timer.now()).toBe(0);
+      expect(first.isSettled()).toBe(false);
+      await release("s2", "d2");
+      const allocated = (await settle(first.result)) as Map<string, string>;
+      expect(allocated.get("s1:B")).toBe("d2");
     });
   });
 }

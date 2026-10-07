@@ -310,6 +310,11 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
     mapOf(
       "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
       "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
+      "weight" to style.weight,
+      "minWidth" to style.minWidth,
+      "maxWidth" to style.maxWidth,
+      "minHeight" to style.minHeight,
+      "maxHeight" to style.maxHeight,
       "padding.top" to style.padding?.top,
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,

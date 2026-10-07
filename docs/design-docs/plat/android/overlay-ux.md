@@ -163,22 +163,24 @@ including text size. Negative offsets/positions are allowed; sizes are
 nonnegative, except text size and sheet height/detent height which must be
 positive. Positive values use a minimum of 0.000001 dp.
 
-| Property              | Accepted value                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `width`, `height`     | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                             |
-| `padding`             | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                 |
-| `background`, `color` | Strict hex color.                                                                                                    |
-| `cornerRadius`        | Nonnegative dp.                                                                                                      |
-| `border`              | `{width, color}`; nonnegative dp width.                                                                              |
-| `alpha`               | Finite number 0–1; default 1. Multiplies window opacity.                                                             |
-| `alignment`           | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`. |
-| `arrangement`         | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                              |
-| `spacing`             | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.            |
-| `textSize`            | Positive dp.                                                                                                         |
-| `fontWeight`          | Integer 100–900.                                                                                                     |
-| `textAlign`           | `start`, `center`, `end`, `justify`.                                                                                 |
-| `maxLines`            | Integer 1–2147483647.                                                                                                |
-| `fontFamily`          | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                     |
+| Property                                         | Accepted value                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                     |
+| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
+| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
+| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
+| `background`, `color`                            | Strict hex color.                                                                                                            |
+| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
+| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
+| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
+| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
+| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                    |
+| `textSize`                                       | Positive dp.                                                                                                                 |
+| `fontWeight`                                     | Integer 100–900.                                                                                                             |
+| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
+| `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
+| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
 Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
 No short hex, named colors, CSS functions, or separate color opacity. Style

@@ -71,6 +71,11 @@ data class OverlayBorder(
 data class OverlayStyle(
   val width: OverlayDimension? = null,
   val height: OverlayDimension? = null,
+  val weight: Double? = null,
+  val minWidth: Double? = null,
+  val maxWidth: Double? = null,
+  val minHeight: Double? = null,
+  val maxHeight: Double? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
   val cornerRadius: Double? = null,

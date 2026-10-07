@@ -276,6 +276,46 @@
           },
           "optional": true
         },
+        "weight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6
+          },
+          "optional": true
+        },
+        "minWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxWidth": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "minHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
         "padding": {
           "rule": {
             "kind": "ref",

@@ -14785,6 +14785,26 @@
                         "height": {
                           "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/width"
                         },
+                        "weight": {
+                          "type": "number",
+                          "minimum": 0.000001
+                        },
+                        "minWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "minHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
                         "padding": {
                           "type": "object",
                           "properties": {
@@ -15835,6 +15855,26 @@
                           },
                           "height": {
                             "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/width"
+                          },
+                          "weight": {
+                            "type": "number",
+                            "minimum": 0.000001
+                          },
+                          "minWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "minHeight": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxHeight": {
+                            "type": "number",
+                            "minimum": 0
                           },
                           "padding": {
                             "type": "object",

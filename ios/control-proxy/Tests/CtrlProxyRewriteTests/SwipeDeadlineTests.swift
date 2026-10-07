@@ -320,6 +320,7 @@ final class SwipeDeadlineTests: XCTestCase {
             timeout["error"] as? String,
             "Command request_swipe exceeded deadline at 5000ms (gesture was not started)"
         )
+        XCTAssertEqual(timeout["errorCode"] as? String, "deadline_not_started")
 
         clock.advance(by: 4000)
         server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"next"}"#.utf8), responder: next)
@@ -362,6 +363,7 @@ final class SwipeDeadlineTests: XCTestCase {
             try response(swipeResponder)["error"] as? String,
             "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)"
         )
+        XCTAssertEqual(try response(swipeResponder)["errorCode"] as? String, "deadline_completed_late")
 
         server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"next"}"#.utf8), responder: next)
         await fulfillment(of: [nextDone], timeout: 2)

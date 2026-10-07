@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { isMutationQuery, stripLeadingSqlNoise } from "../../src/server/databaseTools";
+import {
+  isMutationQuery,
+  isReadOnlySqlQuery,
+  stripLeadingSqlNoise,
+} from "../../src/server/databaseTools";
 
 describe("isMutationQuery", () => {
   test("classifies plain mutations", () => {
@@ -48,6 +52,23 @@ describe("isMutationQuery", () => {
 
   test("still treats a commented-out read as a non-mutation", () => {
     expect(isMutationQuery("/* just looking */ SELECT * FROM t")).toBe(false);
+  });
+});
+
+describe("isReadOnlySqlQuery", () => {
+  test("accepts a single read and trailing semicolons", () => {
+    expect(isReadOnlySqlQuery("SELECT * FROM t")).toBe(true);
+    expect(isReadOnlySqlQuery("  select 1;; \n")).toBe(true);
+    expect(isReadOnlySqlQuery("WITH c AS (SELECT 1) SELECT * FROM c")).toBe(true);
+    expect(isReadOnlySqlQuery("PRAGMA user_version")).toBe(true);
+  });
+
+  test("rejects mutations, unknown statements, and anything after a semicolon", () => {
+    expect(isReadOnlySqlQuery("DELETE FROM t")).toBe(false);
+    expect(isReadOnlySqlQuery("PRAGMA user_version = 1")).toBe(false);
+    expect(isReadOnlySqlQuery("BEGIN")).toBe(false);
+    expect(isReadOnlySqlQuery("SELECT 1; DELETE FROM t")).toBe(false);
+    expect(isReadOnlySqlQuery("SELECT ';'")).toBe(false);
   });
 });
 

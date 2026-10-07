@@ -29,7 +29,7 @@ fi
 bun scripts/release/pin-runtime-deps.ts --check
 
 # 3. Pack the artifact exactly as `npm publish` would.
-pack_json="$(npm pack --json)"
+pack_json="$(AUTOMOBILE_TRIM_BUNDLED_DEPS=true npm pack --json)"
 tarball="$(printf '%s' "$pack_json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')"
 if [ -z "$tarball" ] || [ ! -f "$tarball" ]; then
   echo "npm pack did not produce a tarball" >&2
@@ -68,5 +68,8 @@ package_root="$consumer_dir/node_modules/@kaeawc/auto-mobile"
 consumer_nm="$consumer_dir/node_modules"
 
 bun "$REPO_ROOT/scripts/ci/assert-installed-runtime-graph.ts" "$package_root" "$consumer_nm"
+
+# 6. Load every importable bundled package from the trimmed installed copy.
+bun "$REPO_ROOT/scripts/ci/smoke-installed-bundled-deps.ts" "$package_root"
 
 echo "Pinned runtime graph clean-room verification passed."

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { migratePlan, migratePlanStep } from "../../../src/utils/plan/PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../../../src/utils/mcpVersion";
+import { importPlanFromYaml } from "../../../src/utils/planUtils";
 
 describe("PlanMigrator", () => {
   test.each([
@@ -531,6 +532,89 @@ describe("PlanMigrator", () => {
           { action: "type", text: "tail", operation: "replace" },
         ]);
       });
+
+      test("uses the supplied platform fallback for legacy inputText", () => {
+        const { plan } = migratePlan(
+          { name: "Plan", steps: [{ tool: "inputText", params: { text: "tail" } }] },
+          { platform: "ios" },
+        );
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("uses the supplied platform fallback for a string device label", () => {
+        const { plan } = migratePlan(
+          {
+            name: "Plan",
+            devices: ["a"],
+            steps: [{ tool: "inputText", params: { device: "a", text: "tail" } }],
+          },
+          { platform: "ios" },
+        );
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "insert" },
+        ]);
+      });
+
+      test("importPlanFromYaml uses the supplied platform fallback", () => {
+        const plan = importPlanFromYaml(
+          'name: Plan\nsteps:\n  - tool: inputText\n    params:\n      text: " — follow up"\n',
+          { platform: "ios" },
+        );
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: " — follow up", operation: "insert" },
+        ]);
+      });
+
+      test("YAML platform signals take precedence over the supplied fallback", () => {
+        const { plan } = migratePlan(
+          {
+            name: "Plan",
+            platform: "android",
+            steps: [{ tool: "inputText", params: { text: "tail" } }],
+          },
+          { platform: "ios" },
+        );
+
+        expect(plan.steps[0].params.commands).toEqual([
+          { action: "type", text: "tail", operation: "replace" },
+        ]);
+      });
+
+      test.each([
+        {
+          params: { platform: "ios", text: "tail" },
+          devices: [{ label: "a", platform: "android" }],
+        },
+        {
+          params: { device: "a", text: "tail" },
+          devices: [{ label: "a", platform: "android" }],
+        },
+      ])(
+        "step and device YAML platform hints win over the request fallback: %j",
+        ({ params, devices }) => {
+          const { plan } = migratePlan(
+            {
+              name: "Plan",
+              devices,
+              steps: [{ tool: "inputText", params }],
+            },
+            { platform: "ios" },
+          );
+
+          expect(plan.steps[0].params.commands).toEqual([
+            {
+              action: "type",
+              text: "tail",
+              operation: params.platform === "ios" ? "insert" : "replace",
+            },
+          ]);
+        },
+      );
 
       test("falls through a plain-string device label to the top-level platform hint", () => {
         const { plan } = migratePlan({

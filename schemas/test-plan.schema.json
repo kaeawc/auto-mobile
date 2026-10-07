@@ -162,11 +162,43 @@
         }
       }
     },
+    "tapAtGeometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "deviceWidth", "deviceHeight", "orientation", "x", "y"],
+      "properties": {
+        "platform": {
+          "enum": ["android", "ios"]
+        },
+        "deviceWidth": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "deviceHeight": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "orientation": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "x": {
+          "type": "number",
+          "minimum": 0
+        },
+        "y": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
     "planStep": {
       "type": "object",
       "required": ["tool"],
       "additionalProperties": true,
       "properties": {
+        "geometry": { "$ref": "#/$defs/tapAtGeometry" },
         "tool": {
           "type": "string",
           "description": "Name of the MCP tool to execute",

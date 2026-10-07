@@ -144,6 +144,39 @@ describe("Plan execution lock", () => {
       tracker.endExecution(execution.id);
     }
   });
+
+  test.each(["session", "global"] as const)(
+    "allows only read-only observation during a plan in %s scope",
+    (scope) => {
+      const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+      const lock = new ExecutionTrackerPlanExecutionLock(
+        tracker,
+        new FakePlanExecutionLockScopeProvider(scope),
+      );
+      const execution = tracker.startExecution("executePlan", undefined, "session-a:phone");
+      try {
+        expect(lock.evaluate({ toolName: "observe", sessionUuid: "session-a:phone" })).toEqual({
+          blocked: false,
+          scope,
+        });
+        for (const toolName of ["tapOn", "executePlan", "startTestRecording", "recordSteps"]) {
+          expect(lock.evaluate({ toolName, sessionUuid: "session-a:phone" })).toEqual({
+            blocked: true,
+            scope,
+            reason: "plan execution in progress",
+          });
+        }
+        expect(lock.evaluate({ toolName: "tapOn", sessionUuid: "unrelated-session" }).blocked).toBe(
+          scope === "global",
+        );
+      } finally {
+        tracker.endExecution(execution.id);
+      }
+      expect(lock.evaluate({ toolName: "tapOn", sessionUuid: "session-a:phone" }).blocked).toBe(
+        false,
+      );
+    },
+  );
 });
 
 describe("Plan execution lock through session routing", () => {

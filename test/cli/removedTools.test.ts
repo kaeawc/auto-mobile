@@ -9,6 +9,11 @@ describe("removed tool registry", () => {
     expect(formatDaemonToolError("debugSearch", 'Unknown tool "debugSearch".')).toBe(
       "debugSearch was removed; use observe to see elements, and the diagnostics returned by tapOn/waitFor failures",
     );
+    for (const toolName of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
+      expect(formatDaemonToolError(toolName, `Unknown tool "${toolName}".`)).toBe(
+        `${toolName} was removed; use putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)`,
+      );
+    }
   });
 
   test("keeps one period and a restart hint for unknown tools", () => {

@@ -14,6 +14,8 @@ export interface DeviceReadOptions {
 }
 
 export interface ObserveScreenExecuteOptions {
+  /** Internal focused-field read: capture hierarchy and derive focus, without device state or audits. */
+  hierarchyOnly?: boolean;
   /** A session-free read: collect the normal result without advancing owner-visible state. */
   observerMode?: boolean;
   queryOptions?: ViewHierarchyQueryOptions;

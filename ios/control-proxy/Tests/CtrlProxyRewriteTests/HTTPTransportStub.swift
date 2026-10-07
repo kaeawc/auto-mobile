@@ -12,6 +12,10 @@ enum StubOutcome: Sendable {
     case respond(status: Int, body: Data)
     /// Simulate a transport failure (server absent, connection refused, …).
     case transportError
+    /// Simulate a request that was sent and never answered within the request timeout.
+    case timedOut
+    /// Simulate a connection dropped after the request was sent.
+    case connectionLost
     /// Simulate a completion that is not an `HTTPURLResponse`.
     case nonHTTPResponse
 }
@@ -47,6 +51,10 @@ final class StubHTTPTransport: HTTPRequesting {
             return (body, response)
         case .transportError:
             throw URLError(.cannotConnectToHost)
+        case .timedOut:
+            throw URLError(.timedOut)
+        case .connectionLost:
+            throw URLError(.networkConnectionLost)
         case .nonHTTPResponse:
             return (Data(), URLResponse(url: url, mimeType: nil, expectedContentLength: 0, textEncodingName: nil))
         }

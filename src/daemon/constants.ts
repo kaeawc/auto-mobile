@@ -439,6 +439,8 @@ export const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
  * a second device) can starve the heartbeat past the session's
  * heartbeat-timeout and get it reaped (issue #6135).
  */
+export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessOwnership";
+
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**

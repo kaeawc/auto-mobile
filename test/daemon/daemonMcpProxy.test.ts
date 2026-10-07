@@ -6542,6 +6542,29 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("reports the migration for removed shared-storage tools", async () => {
+      for (const toolName of ["stageSharedStorage", "stageSharedStorageFixtures"]) {
+        const client = new ScriptedDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolError: new Error(`MCP error -32603: Unknown tool: ${toolName}`),
+        });
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: matchingDaemonManager(),
+          autoStartDaemon: false,
+        });
+        try {
+          await expect(proxy.callTool(toolName, {})).rejects.toThrow(
+            `Unknown tool "${toolName}". ${toolName} was removed; use putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)`,
+          );
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      }
+    });
+
     test("reports removed unregistered tools without blaming build skew", async () => {
       const clients = [0, 1].map(
         () =>

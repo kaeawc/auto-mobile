@@ -2,6 +2,8 @@ import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 import {
   SHARED_STORAGE_RESOURCE_TEMPLATES,
   CANONICAL_USER_FILES_RESOURCE_TEMPLATES,
+  CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES,
+  buildCanonicalMediaLibraryResourceUri,
   buildSharedStorageResourceUri,
   buildCanonicalUserFilesResourceUri,
   parseSharedStorageResourceParams,
@@ -18,6 +20,7 @@ async function getDefaultSharedStorageReadService(): Promise<SharedStorageReadSe
 function createListNamespaceResource(
   service: SharedStorageReadServiceResolver,
   buildUri: typeof buildSharedStorageResourceUri = buildSharedStorageResourceUri,
+  domain: "user_files" | "media_library" = "user_files",
 ) {
   return async (params: Record<string, string>): Promise<ResourceContent> => {
     const parts = parseSharedStorageResourceParams(params);
@@ -26,11 +29,26 @@ function createListNamespaceResource(
     ).list({
       deviceId: parts.deviceId,
       namespace: parts.namespace,
+      domain,
     });
     return {
       uri: buildUri({ deviceId: parts.deviceId, namespace: parts.namespace }),
       mimeType: "application/json",
-      text: JSON.stringify(listing, null, 2),
+      text: JSON.stringify(
+        {
+          ...listing,
+          files: listing.files.map((entry) => ({
+            ...entry,
+            resourceUri: buildUri({
+              deviceId: parts.deviceId,
+              namespace: parts.namespace,
+              path: entry.path,
+            }),
+          })),
+        },
+        null,
+        2,
+      ),
     };
   };
 }
@@ -38,6 +56,7 @@ function createListNamespaceResource(
 function createReadFileResource(
   service: SharedStorageReadServiceResolver,
   buildUri: typeof buildSharedStorageResourceUri = buildSharedStorageResourceUri,
+  domain: "user_files" | "media_library" = "user_files",
 ) {
   return async (params: Record<string, string>): Promise<ResourceContent> => {
     const parts = parseSharedStorageResourceParams(params);
@@ -50,6 +69,7 @@ function createReadFileResource(
     ).read({
       deviceId: parts.deviceId,
       namespace: parts.namespace,
+      domain,
       path: parts.path,
     });
     const uri = buildUri({
@@ -62,7 +82,11 @@ function createReadFileResource(
     // observation (missing/unavailable/unsupported) is a typed JSON envelope so
     // the client can distinguish "no such file" from an empty file.
     if (result.observation !== "complete") {
-      return { uri, mimeType: "application/json", text: JSON.stringify(result, null, 2) };
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({ ...result, resourceUri: uri }, null, 2),
+      };
     }
     return {
       uri,
@@ -77,26 +101,31 @@ export function registerSharedStorageResources(service?: SharedStorageReadServic
     ? async () => service
     : getDefaultSharedStorageReadService;
 
-  for (const [templates, buildUri] of [
-    [CANONICAL_USER_FILES_RESOURCE_TEMPLATES, buildCanonicalUserFilesResourceUri],
-    [SHARED_STORAGE_RESOURCE_TEMPLATES, buildSharedStorageResourceUri],
+  for (const [templates, buildUri, domain] of [
+    [CANONICAL_USER_FILES_RESOURCE_TEMPLATES, buildCanonicalUserFilesResourceUri, "user_files"],
+    [
+      CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES,
+      buildCanonicalMediaLibraryResourceUri,
+      "media_library",
+    ],
+    [SHARED_STORAGE_RESOURCE_TEMPLATES, buildSharedStorageResourceUri, "user_files"],
   ] as const) {
     ResourceRegistry.registerTemplate(
       templates.NAMESPACE,
-      "Downloads Namespace Files",
-      "List files staged into one bounded, user-visible Android Downloads namespace, " +
+      domain === "media_library" ? "Media Library Namespace Files" : "Downloads Namespace Files",
+      "List files staged by putAppFile into one bounded storage-domain namespace, " +
         "with normalized relative paths, byte counts, MIME types, and SHA-256 verification hashes.",
       "application/json",
-      createListNamespaceResource(resolver, buildUri),
+      createListNamespaceResource(resolver, buildUri, domain),
     );
 
     ResourceRegistry.registerTemplate(
       templates.FILE,
-      "Downloads Namespace File",
-      "Read one file from a bounded Android Downloads namespace. UTF-8 content is returned " +
+      domain === "media_library" ? "Media Library Namespace File" : "Downloads Namespace File",
+      "Read one file staged by putAppFile in a bounded storage-domain namespace. UTF-8 content is returned " +
         "as text; binary content is returned as a base64 MCP blob.",
       "application/octet-stream",
-      createReadFileResource(resolver, buildUri),
+      createReadFileResource(resolver, buildUri, domain),
     );
   }
 }

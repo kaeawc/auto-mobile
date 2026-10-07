@@ -110,6 +110,90 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
 }
 
 describe("AvdManagerClient", () => {
+  const validAvdOutput = `Available Android Virtual Devices:
+    Name: Pixel_9
+  Device: pixel_9 (Google)
+    Path: /test/.android/avd/Pixel_9.avd
+  Target: Google APIs (Google Inc.)
+          Based on: Android API 35 Tag/ABI: google_apis/arm64-v8a
+---------`;
+  const mixedAvdOutput = `${validAvdOutput}
+The following Android Virtual Devices could not be loaded:
+    Name: Broken_Pixel
+    Path: /test/.android/avd/Broken_Pixel.avd
+   Error: Missing system image for Google APIs arm64-v8a Pixel.
+---------`;
+  const validAvd = {
+    name: "Pixel_9",
+    path: "/test/.android/avd/Pixel_9.avd",
+    target: "Google APIs (Google Inc.)",
+    basedOn: "Android API 35 Tag/ABI: google_apis/arm64-v8a",
+  };
+
+  test("excludes unloadable AVDs from the valid image list", async () => {
+    const { client, child } = createClient();
+    const pending = client.listDeviceImages();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(mixedAvdOutput);
+    child.close(0);
+    expect(await pending).toEqual([validAvd]);
+  });
+
+  test("separates valid and unloadable AVD details at the section header", async () => {
+    const { client, child } = createClient();
+    const pending = client.listAvdInventory();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(mixedAvdOutput);
+    child.close(0);
+    expect(await pending).toEqual({
+      valid: [validAvd],
+      unloadable: [
+        {
+          name: "Broken_Pixel",
+          path: "/test/.android/avd/Broken_Pixel.avd",
+          error: "Missing system image for Google APIs arm64-v8a Pixel.",
+        },
+      ],
+    });
+  });
+
+  test("preserves valid-only AVD parsing", async () => {
+    const { client, child } = createClient();
+    const pending = client.listDeviceImages();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(validAvdOutput);
+    child.close(0);
+    expect(await pending).toEqual([validAvd]);
+  });
+
+  test("handles an unloadable-only section with multiple dashed entries", async () => {
+    const { client, child } = createClient();
+    const pending = client.listAvdInventory();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(`Available Android Virtual Devices:
+The following Android Virtual Devices could not be loaded:
+    Name: Broken_One
+    Path: /test/.android/avd/Broken_One.avd
+   Error: Missing system image.
+---------
+    Name: Broken_Two
+    Path: /test/.android/avd/Broken_Two.avd
+   Error: Invalid target.
+---------`);
+    child.close(0);
+    expect(await pending).toEqual({
+      valid: [],
+      unloadable: [
+        {
+          name: "Broken_One",
+          path: "/test/.android/avd/Broken_One.avd",
+          error: "Missing system image.",
+        },
+        { name: "Broken_Two", path: "/test/.android/avd/Broken_Two.avd", error: "Invalid target." },
+      ],
+    });
+  });
+
   for (const operation of ["listDeviceImages", "listDevices", "createAvd", "deleteAvd"] as const) {
     test(`${operation} honours a custom 1000ms timeout`, async () => {
       const { client, child, timer } = createClient();

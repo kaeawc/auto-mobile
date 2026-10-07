@@ -962,7 +962,9 @@ export class SetUIState extends BaseVisualChange {
           selector: fields[i].selector,
           success: false,
           attempts: 0,
-          error: `Element not found: ${this.describeSelector(fields[i].selector)}`,
+          error: fields[i].selector.elementId?.startsWith("s2-")
+            ? `Element id '${fields[i].selector.elementId}' is stale; re-observe and use the id from the new observation.`
+            : `Element not found: ${this.describeSelector(fields[i].selector)}`,
         });
       }
     }

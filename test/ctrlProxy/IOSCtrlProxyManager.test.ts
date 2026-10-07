@@ -1990,6 +1990,82 @@ describe("IOSCtrlProxyManager", function () {
     });
   });
 
+  describe("cleanup uninstall backend routing", () => {
+    for (const [deviceId, simulator] of [
+      ["A1B2C3D4-E5F6-7890-ABCD-EF1234567890", true],
+      ["00008030-001C2D3E1234567A", false],
+    ] as const) {
+      for (const [method, bundleId] of [
+        ["uninstallLegacyAppIfPresent", "dev.jasonpearson.automobile.XCTestServiceApp"],
+        ["verifyInstalledAppBundle", IOSCtrlProxyManager.APP_BUNDLE_ID],
+      ] as const) {
+        for (const fails of [false, true]) {
+          test(`${method} on ${simulator ? "simulator" : "physical"} skips termination${fails ? " and swallows uninstall failure" : ""}`, async () => {
+            const executor = new FakeProcessExecutor();
+            const uninstalls: unknown[][] = [];
+            const lookups: unknown[][] = [];
+            const failure = new Error("uninstall failed");
+            const appManager = {
+              getInstalledAppBundleHash: async (...args: unknown[]) => {
+                lookups.push(args);
+                return "installed-hash";
+              },
+              uninstallApp: async (...args: unknown[]) => {
+                uninstalls.push(args);
+                if (fails) {
+                  throw failure;
+                }
+              },
+            } as unknown as DeviceAppManager;
+            const builder = createFakeBuilder();
+            builder.getExpectedAppHash = () => "expected-hash";
+            const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+              { ...testDevice, deviceId },
+              fakeTimer,
+              builder,
+              executor,
+              undefined,
+              appManager,
+            );
+            const internal = manager as unknown as {
+              uninstallLegacyAppIfPresent(): Promise<void>;
+              verifyInstalledAppBundle(): Promise<void>;
+            };
+            const previousSkip = process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+            delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+            const warn = spyOn(logger, "warn").mockImplementation(() => {});
+            try {
+              await internal[method]();
+              expect(uninstalls).toHaveLength(1);
+              expect(uninstalls[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+              expect(uninstalls[0][3]).toBeUndefined();
+              expect(lookups[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+              expect(executor.getExecutedCommands()).toEqual([]);
+              expect(executor.getSpawnedProcesses()).toEqual([]);
+              if (fails) {
+                expect(
+                  warn.mock.calls.some(([message]) => String(message).includes("uninstall failed")),
+                ).toBe(true);
+              }
+              if (method === "uninstallLegacyAppIfPresent") {
+                await internal[method]();
+                expect(lookups).toHaveLength(1);
+                expect(lookups[0][3]).toEqual({ throwOnLookupTimeout: true });
+              }
+            } finally {
+              warn.mockRestore();
+              if (previousSkip === undefined) {
+                delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+              } else {
+                process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH = previousSkip;
+              }
+            }
+          });
+        }
+      }
+    }
+  });
+
   // #6575: the legacy-app uninstall probe used to run on every setup() call,
   // including the attemptedSetup fast path that exists to make repeat calls
   // cheap. It should fire at most once per manager instance.

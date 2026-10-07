@@ -42,6 +42,7 @@ data class OverlayRenderModel(
   val opacityPercent: Int,
   val root: OverlayRenderNode,
   val hasTextField: Boolean = false,
+  val theme: OverlaySpecTheme? = null,
 ) {
   fun request() =
     InteractiveOverlayRequest(
@@ -49,7 +50,7 @@ data class OverlayRenderModel(
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
     ) {
-      OverlaySpecContent(root)
+      OverlaySpecContent(root, theme = theme)
     }
 }
 
@@ -88,6 +89,7 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
+    spec.theme,
   )
 }
 

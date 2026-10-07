@@ -14555,7 +14555,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\"), optional state, root. window.opacity is 0-100, default 100.",
           "type": "object",
           "properties": {
             "id": {
@@ -14649,6 +14649,30 @@
                 }
               },
               "required": ["placement"],
+              "additionalProperties": false
+            },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["light", "dark", "system"]
+                },
+                "colors": {
+                  "type": "object",
+                  "properties": {
+                    "seed": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": ["device"]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
               "additionalProperties": false
             },
             "state": {},

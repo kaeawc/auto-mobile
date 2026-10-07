@@ -186,7 +186,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          'Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device"), optional state, root. window.opacity is 0-100, default 100.',
         ),
       display: z
         .string()

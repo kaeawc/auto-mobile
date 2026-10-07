@@ -55,7 +55,10 @@ internal fun OverlayRuntimeContent(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
       ) {
-        OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
+        OverlaySpecContent(
+          mapOverlaySpec(snapshot.spec, snapshot.pages).root,
+          snapshot.spec.theme,
+        ) { interaction ->
           queue.trySend(interaction)
         }
       }
@@ -65,8 +68,12 @@ internal fun OverlayRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  OverlayTheme(root) {
+fun OverlaySpecContent(
+  root: OverlayRenderNode,
+  theme: OverlaySpecTheme? = null,
+  interact: (OverlayInteraction) -> Unit = {},
+) {
+  OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact)
       modalOverlaySheets(root).forEach { node ->

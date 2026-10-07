@@ -193,6 +193,7 @@ class WebSocketServer(
         is SetTextResult -> response.requestId
         is CommitTextResult -> response.requestId
         is SetKeyboardProfileResult -> response.requestId
+        is SetNetworkMockRulesResult -> response.requestId
         is KeyboardProfileCatalogResult -> response.requestId
         is ImeActionResult -> response.requestId
         is SelectAllResult -> response.requestId
@@ -314,6 +315,10 @@ class WebSocketServer(
     // The IME commits and clears password fields; older APKs refuse them.
     add("ime_password_commit_v1")
     add("tap_double_v1")
+    // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
+    // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
+    // reply when this flag is present, so an older runner never costs them a timeout.
+    add("network_mock_rules_report_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the overlay would silently land on the default display.
@@ -974,10 +979,12 @@ class WebSocketServer(
    */
   internal fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
+      // Replies only when asked to (issue #10101): a requestId means the host awaits the report
+      // of rejected rules; without one it is the fire-and-forget push and no owner may leak.
+      is SetNetworkMockRules -> request.requestId != null
       is SetHierarchyInterval,
       is SetRecompositionTracking,
       is SetAccessibilityFlags,
-      is SetNetworkMockRules,
       is SetNetworkErrorSimulation,
       is StartRecording,
       is StopRecording -> false

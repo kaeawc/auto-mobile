@@ -386,6 +386,9 @@
         },
         "confirmed": {
           "type": "boolean"
+        },
+        "alreadySatisfied": {
+          "type": "boolean"
         }
       },
       "required": ["success"],

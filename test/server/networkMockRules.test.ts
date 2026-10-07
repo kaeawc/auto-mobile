@@ -63,7 +63,7 @@ describe("buildNetworkMockRules", function () {
 
   test("maps every mock field onto the wire shape", function () {
     const mock = state.addMock(DEVICE, {
-      host: "api\\.example\\.com",
+      host: "^api\\.example\\.com$",
       path: "/v1/items",
       method: "GET",
       limit: 3,
@@ -76,7 +76,7 @@ describe("buildNetworkMockRules", function () {
     expect(buildNetworkMockRules(state, DEVICE)).toEqual([
       {
         mockId: mock.mockId,
-        host: "api\\.example\\.com",
+        host: "^api\\.example\\.com$",
         path: "/v1/items",
         method: "GET",
         limit: 3,
@@ -194,7 +194,7 @@ describe("describeInvalidMockPattern", function () {
   });
 
   test("accepts leading inline flags that JavaScript cannot compile", function () {
-    for (const pattern of ["(?i)api\\.example\\.com", "(?is)a.b", "(?i)(?-s)x", "(?x) a {b "]) {
+    for (const pattern of ["(?i)^api\\.example\\.com$", "(?is)a.b", "(?i)(?-s)x", "(?x) a {b "]) {
       expect(describeInvalidMockPattern(pattern)).toBeNull();
     }
   });

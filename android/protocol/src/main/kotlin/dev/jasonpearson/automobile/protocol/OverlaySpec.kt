@@ -68,6 +68,25 @@ data class OverlayBorder(
 )
 
 @Serializable
+data class OverlayGradientStop(
+  val color: String,
+  val position: Double? = null,
+)
+
+@Serializable sealed class OverlayGradient
+
+@SerialName("linear")
+@Serializable
+data class OverlayLinearGradient(
+  val angle: Double,
+  val stops: List<OverlayGradientStop>,
+) : OverlayGradient()
+
+@SerialName("radial")
+@Serializable
+data class OverlayRadialGradient(val stops: List<OverlayGradientStop>) : OverlayGradient()
+
+@Serializable
 data class OverlayStyle(
   val width: OverlayDimension? = null,
   val height: OverlayDimension? = null,
@@ -80,6 +99,9 @@ data class OverlayStyle(
   val background: String? = null,
   val cornerRadius: Double? = null,
   val border: OverlayBorder? = null,
+  val elevation: Double? = null,
+  val gradient: OverlayGradient? = null,
+  val aspectRatio: Double? = null,
   val alpha: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,

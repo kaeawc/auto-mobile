@@ -1,11 +1,15 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import dev.jasonpearson.automobile.protocol.*
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 data class OverlayRenderStyle(
@@ -303,6 +307,28 @@ private fun overlayVerticalAlignment(value: String?): Alignment.Vertical =
     else -> Alignment.Top
   }
 
+/**
+ * Start and end points of a linear gradient line for a [width] x [height] px box. Angle is degrees
+ * clockwise from "toward the end edge": 0 runs left to right, 90 top to bottom. The line passes
+ * through the center and is long enough that the corners take the first and last stop colors.
+ */
+fun overlayLinearGradientLine(angle: Double, width: Float, height: Float): Pair<Offset, Offset> {
+  val radians = Math.toRadians(angle)
+  val dx = cos(radians).toFloat()
+  val dy = sin(radians).toFloat()
+  val half = (abs(width * dx) + abs(height * dy)) / 2f
+  val center = Offset(width / 2f, height / 2f)
+  return Offset(center.x - dx * half, center.y - dy * half) to
+    Offset(center.x + dx * half, center.y + dy * half)
+}
+
+/** Stop colors and, only when every stop authors a position, their explicit positions. */
+fun overlayGradientStops(stops: List<OverlayGradientStop>): Pair<List<Color>, List<Float>?> {
+  val colors = stops.map { overlayColor(it.color) }
+  val positions = stops.map { it.position?.toFloat() }
+  return colors to if (positions.all { it != null }) positions.map { checkNotNull(it) } else null
+}
+
 /** Compose uses Float dp; reject unrepresentable values before installing a content lambda. */
 private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
   if (style == null) return
@@ -311,6 +337,9 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
       "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
       "weight" to style.weight,
+      "elevation" to style.elevation,
+      "aspectRatio" to style.aspectRatio,
+      "gradient.angle" to (style.gradient as? OverlayLinearGradient)?.angle,
       "minWidth" to style.minWidth,
       "maxWidth" to style.maxWidth,
       "minHeight" to style.minHeight,

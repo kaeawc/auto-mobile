@@ -20,9 +20,17 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.LinearGradientShader
+import androidx.compose.ui.graphics.RadialGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -31,6 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
+import kotlin.math.hypot
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -360,9 +369,13 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
   modifier = sizeConstraintModifier(modifier, style)
+  style.aspectRatio?.let { modifier = modifier.aspectRatio(it.toFloat()) }
   val shape = RoundedCornerShape((style.cornerRadius ?: 0.0).toFloat().dp)
+  // Before clip/background/border so the shadow is drawn outside the clipped content.
+  style.elevation?.let { modifier = modifier.shadow(it.toFloat().dp, shape) }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   node.style.background?.let { modifier = modifier.background(it, shape) }
+  style.gradient?.let { modifier = modifier.background(overlayGradientBrush(it), shape) }
   style.border?.let {
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
   }
@@ -485,3 +498,25 @@ private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Mod
       maxWidth = style.maxWidth?.toFloat()?.dp ?: Dp.Unspecified,
       maxHeight = style.maxHeight?.toFloat()?.dp ?: Dp.Unspecified,
     )
+
+/** A shader brush so the gradient line is computed from the node's measured size. */
+private fun overlayGradientBrush(gradient: OverlayGradient): Brush =
+  object : ShaderBrush() {
+    override fun createShader(size: Size): Shader =
+      when (gradient) {
+        is OverlayLinearGradient -> {
+          val (colors, positions) = overlayGradientStops(gradient.stops)
+          val (from, to) = overlayLinearGradientLine(gradient.angle, size.width, size.height)
+          LinearGradientShader(from, to, colors, positions)
+        }
+        is OverlayRadialGradient -> {
+          val (colors, positions) = overlayGradientStops(gradient.stops)
+          RadialGradientShader(
+            size.center,
+            hypot(size.width, size.height) / 2f,
+            colors,
+            positions,
+          )
+        }
+      }
+  }

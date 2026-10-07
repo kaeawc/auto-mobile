@@ -102,6 +102,4 @@ export interface ElementFinder
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
   ): Element[];
-
-  isElementKeyboardFocused(element: any): boolean;
 }

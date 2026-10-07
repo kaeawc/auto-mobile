@@ -507,7 +507,8 @@ final class CrashesTests: XCTestCase {
     func testReplacingProviderReleasesOldClosureWithoutDeadlock() {
         let crashes = AutoMobileCrashes.makeTestInstance()
 
-        final class ReentrantSentinel {
+        // Single-threaded: the sentinel is created, captured and released on the test thread.
+        final class ReentrantSentinel: @unchecked Sendable {
             let crashes: AutoMobileCrashes
             let onDeinit: () -> Void
             init(_ crashes: AutoMobileCrashes, onDeinit: @escaping () -> Void) {

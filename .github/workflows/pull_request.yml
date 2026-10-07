@@ -894,7 +894,7 @@ jobs:
         shell: bash
         background: true
         id: install-fast-validation-deps
-        timeout-minutes: 13
+        timeout-minutes: 15
         run: scripts/ci/install-fast-validation-deps.sh
 
       # Pin the JDK so the ktfmt check formats deterministically (project targets

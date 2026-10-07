@@ -2,7 +2,7 @@
     import Foundation
     import os
     #if canImport(UserNotifications)
-        import UserNotifications
+        @preconcurrency import UserNotifications
     #endif
     #if canImport(CallKit) && os(iOS)
         import CallKit

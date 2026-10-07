@@ -120,7 +120,7 @@ import { checkAndroidTapHierarchyChange, PRE_RETRY_DELAY_MS } from "./androidGho
 import {
   assertAppGestureNotUnderOverlay,
   scopeHierarchyForSelector,
-} from "../observe/hierarchyTarget";
+} from "../observe/hierarchyLayer";
 import {
   DefaultTalkBackNavigationDriverFactory,
   type TalkBackNavigationDriverFactory,
@@ -967,7 +967,7 @@ export class TapAnyElement extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
     sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
   ): { element: Element | null; containerFound: boolean } {
-    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.target);
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const screenSizeOptions = {
       ...sizeOptions,
@@ -1714,7 +1714,7 @@ export class TapAnyElement extends BaseVisualChange {
     };
     const tapPoint = this.resolveTapPoint(target);
     // The element resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-    assertAppGestureNotUnderOverlay(target.capture.hierarchy, options.target, tapPoint, "tap");
+    assertAppGestureNotUnderOverlay(target.capture.hierarchy, options.layer, tapPoint, "tap");
     const action = options.action;
     await this.dispatchTapTarget({
       options,

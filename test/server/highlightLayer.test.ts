@@ -16,7 +16,7 @@ async function highlight(hierarchy: ViewHierarchyResult, args: Record<string, un
   const shapes: HighlightShape[] = [];
   registerHighlightTools({
     hierarchyCaptureFactory: () => new FakeHierarchyCapture(() => hierarchy),
-    generateHighlightId: () => "target",
+    generateHighlightId: () => "layer",
     highlightClientFactory: () =>
       Object.assign(new VisualHighlightClient(), {
         addHighlight: async (_id: string, shape: HighlightShape) => {
@@ -37,13 +37,13 @@ function overlayTop(hierarchy: ViewHierarchyResult): number {
     .top;
 }
 
-describe("highlight target (#9305)", () => {
+describe("highlight layer (#9305)", () => {
   afterEach(() => ToolRegistry.clearTools());
 
   test("text in both windows highlights the overlay by default and the app for app", async () => {
     const hierarchy = capturedOverlayHierarchy();
     const byDefault = await highlight(hierarchy, { text: "Settings" });
-    const forApp = await highlight(hierarchy, { text: "Settings", target: "app" });
+    const forApp = await highlight(hierarchy, { text: "Settings", layer: "app" });
 
     expect(byDefault.response.success).toBe(true);
     expect(forApp.response.success).toBe(true);
@@ -54,7 +54,7 @@ describe("highlight target (#9305)", () => {
   test('"overlay" with no overlay showing fails without drawing', async () => {
     const { response, shapes } = await highlight(capturedTwoWindowHierarchy(), {
       text: "Settings",
-      target: "overlay",
+      layer: "overlay",
     });
 
     expect(response.success).toBe(false);
@@ -62,11 +62,11 @@ describe("highlight target (#9305)", () => {
     expect(shapes).toEqual([]);
   });
 
-  test("target requires a selector", () => {
+  test("layer requires a selector", () => {
     const parsed = highlightSchema.safeParse({
       platform: "android",
       shape: { type: "circle", bounds: { x: 0, y: 0, width: 10, height: 10 } },
-      target: "app",
+      layer: "app",
     });
     expect(parsed.success).toBe(false);
   });

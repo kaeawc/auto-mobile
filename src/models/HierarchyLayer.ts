@@ -6,6 +6,6 @@
  * - `app`: the overlay's windows and nodes are excluded.
  * - `overlay`: only the overlay's windows and nodes are considered.
  */
-export const HIERARCHY_TARGETS = ["app", "overlay"] as const;
+export const HIERARCHY_LAYERS = ["app", "overlay"] as const;
 
-export type HierarchyTarget = (typeof HIERARCHY_TARGETS)[number];
+export type HierarchyLayer = (typeof HIERARCHY_LAYERS)[number];

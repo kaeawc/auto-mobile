@@ -24,12 +24,12 @@ import {
   type ElementResolution,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
-import { scopeHierarchyForSelector } from "../features/observe/hierarchyTarget";
+import { scopeHierarchyForSelector } from "../features/observe/hierarchyLayer";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
-  hierarchyTargetSchema,
+  hierarchyLayerSchema,
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
   validateElementIdTextSelector,
@@ -64,7 +64,7 @@ const highlightBaseSchema = z
     selectionStrategy: resolverSelectionStrategySchema
       .optional()
       .describe("Selection strategy when multiple match (default: first)"),
-    target: hierarchyTargetSchema.optional(),
+    layer: hierarchyLayerSchema.optional(),
   })
   .strict();
 
@@ -101,10 +101,10 @@ export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).s
           message: "selectionStrategy can only be used with selector",
         });
       }
-      if (value.target) {
+      if (value.layer) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "target can only be used with selector",
+          message: "layer can only be used with selector",
         });
       }
     }
@@ -169,14 +169,14 @@ const captureHighlightHierarchy = (
 };
 
 /** Resolve the highlight selector in the app or the AutoMobile overlay only (issue #9305). */
-const targetScopedSnapshot = (
+const layerScopedSnapshot = (
   snapshot: HierarchySnapshot,
-  target: HighlightArgs["target"],
+  layer: HighlightArgs["layer"],
 ): HierarchySnapshot => {
-  if (target === undefined) {
+  if (layer === undefined) {
     return snapshot;
   }
-  const hierarchy = scopeHierarchyForSelector(snapshot.hierarchy, target);
+  const hierarchy = scopeHierarchyForSelector(snapshot.hierarchy, layer);
   return hierarchy === snapshot.hierarchy
     ? snapshot
     : { ...snapshot, hierarchy, nodes: new SearchableHierarchy().project(hierarchy) };
@@ -213,9 +213,9 @@ const resolveHighlightShapeFromSelector = async (
   args: HighlightArgs,
   dependencies: HighlightToolDependencies = {},
 ): Promise<HighlightShape> => {
-  const snapshot = targetScopedSnapshot(
+  const snapshot = layerScopedSnapshot(
     await captureHighlightHierarchy(device, args, dependencies),
-    args.target,
+    args.layer,
   );
   const viewHierarchy = snapshot.hierarchy;
   const resolution = new ElementResolver().resolve(

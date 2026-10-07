@@ -43,14 +43,14 @@ afterEach(() => {
   mock.restore();
 });
 
-describe("tapAny target (#9305)", () => {
+describe("tapAny layer (#9305)", () => {
   test("picks a clickable in the overlay by default and in the app for app", async () => {
     const hierarchy = capturedOverlayHierarchy();
     const byDefault = createCommand(hierarchy);
     const forApp = createCommand(capturedOverlayHierarchy());
 
     expect((await byDefault.command.execute({ action: "tap" })).success).toBe(true);
-    expect((await forApp.command.execute({ action: "tap", target: "app" })).success).toBe(true);
+    expect((await forApp.command.execute({ action: "tap", layer: "app" })).success).toBe(true);
 
     const top = overlayBounds(hierarchy).top;
     expect(byDefault.service.getTapHistory()[0].y).toBeGreaterThanOrEqual(top);
@@ -59,7 +59,7 @@ describe("tapAny target (#9305)", () => {
 
   test('"app" refuses before dispatch when a full-screen overlay covers the pick', async () => {
     const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
-    const result = await command.execute({ action: "tap", target: "app" });
+    const result = await command.execute({ action: "tap", layer: "app" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("an AutoMobile overlay window covers that point");
@@ -68,7 +68,7 @@ describe("tapAny target (#9305)", () => {
 
   test('"overlay" with no overlay showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
-    const result = await command.execute({ action: "tap", target: "overlay" });
+    const result = await command.execute({ action: "tap", layer: "overlay" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no AutoMobile overlay is showing");

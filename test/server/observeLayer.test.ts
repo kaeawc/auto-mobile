@@ -38,7 +38,7 @@ async function observe(result: ObserveResult, args: Record<string, unknown>) {
     });
     const tool = ToolRegistry.getTool("observe")!;
     return await tool.deviceAwareHandler!(
-      { deviceId: "observe-target", name: "Fake", platform: "android" },
+      { deviceId: "observe-layer", name: "Fake", platform: "android" },
       tool.schema.parse({ screenshot: "none", ...args }),
     );
   } finally {
@@ -47,21 +47,21 @@ async function observe(result: ObserveResult, args: Record<string, unknown>) {
   }
 }
 
-describe("observe target (#9305)", () => {
+describe("observe layer (#9305)", () => {
   test("the schema accepts app and overlay only", () => {
-    expect(observeSchema.safeParse({ platform: "android", target: "app" }).success).toBe(true);
-    expect(observeSchema.safeParse({ platform: "android", target: "overlay" }).success).toBe(true);
-    expect(observeSchema.safeParse({ platform: "android", target: "both" }).success).toBe(false);
+    expect(observeSchema.safeParse({ platform: "android", layer: "app" }).success).toBe(true);
+    expect(observeSchema.safeParse({ platform: "android", layer: "overlay" }).success).toBe(true);
+    expect(observeSchema.safeParse({ platform: "android", layer: "both" }).success).toBe(false);
   });
 
-  test("omitted target serves overlay and app nodes", async () => {
+  test("omitted layer serves overlay and app nodes", async () => {
     const response = await observe(observationOf(capturedOverlayHierarchy()), {});
     expect(JSON.stringify(response)).toContain("YouTube");
   });
 
   test('"app" serves the app without overlay nodes and leaves the observation intact', async () => {
     const result = observationOf(capturedOverlayHierarchy());
-    const response = await observe(result, { target: "app" });
+    const response = await observe(result, { layer: "app" });
 
     expect(JSON.stringify(response)).not.toContain("YouTube");
     expect(JSON.stringify(response)).toContain("Screenshot");
@@ -70,13 +70,13 @@ describe("observe target (#9305)", () => {
 
   test('"overlay" with no overlay showing is an actionable error', async () => {
     await expect(
-      observe(observationOf(capturedTwoWindowHierarchy()), { target: "overlay" }),
+      observe(observationOf(capturedTwoWindowHierarchy()), { layer: "overlay" }),
     ).rejects.toThrow("no AutoMobile overlay is showing");
   });
 });
 
-describe("observe waitFor with target (#9305)", () => {
-  const waitFor = async (target: WaitForWithSettled["target"]) => {
+describe("observe waitFor with layer (#9305)", () => {
+  const waitFor = async (layer: WaitForWithSettled["layer"]) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
@@ -87,7 +87,7 @@ describe("observe waitFor with target (#9305)", () => {
     });
     return waitForObservation(
       screen,
-      { text: "YouTube", timeout: 300, target } satisfies WaitForWithSettled,
+      { text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,
@@ -109,7 +109,7 @@ describe("observe waitFor with target (#9305)", () => {
     [undefined, true],
     ["overlay", true],
     ["app", false],
-  ] as const)("the DSL appear predicate with target %p matches=%p", async (target, matched) => {
+  ] as const)("the DSL appear predicate with layer %p matches=%p", async (layer, matched) => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
@@ -120,7 +120,7 @@ describe("observe waitFor with target (#9305)", () => {
     });
     const outcome = await waitForObservation(
       screen,
-      { for: "appear", text: "YouTube", timeout: 300, target } satisfies WaitForWithSettled,
+      { for: "appear", text: "YouTube", timeout: 300, layer } satisfies WaitForWithSettled,
       undefined,
       false,
       timer,

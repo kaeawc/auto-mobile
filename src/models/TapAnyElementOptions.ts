@@ -1,6 +1,6 @@
 import type { ElementContainerSelector } from "./PinchOnOptions";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
-import type { HierarchyTarget } from "./HierarchyTarget";
+import type { HierarchyLayer } from "./HierarchyLayer";
 
 export interface TapAnyElementOptions {
   display?: string;
@@ -19,5 +19,5 @@ export interface TapAnyElementOptions {
   scrollableContainer?: boolean;
 
   /** Pick the clickable element from the app or the AutoMobile overlay only (issue #9305). */
-  target?: HierarchyTarget;
+  layer?: HierarchyLayer;
 }

@@ -48,7 +48,7 @@ afterEach(() => {
   mock.restore();
 });
 
-describe("tapOn target (#9305)", () => {
+describe("tapOn layer (#9305)", () => {
   test("text in both windows taps the overlay by default", async () => {
     const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
     const result = await command.execute({ action: "tap", text: "Settings" });
@@ -58,60 +58,60 @@ describe("tapOn target (#9305)", () => {
     expect(tap.y).toBeGreaterThanOrEqual(overlayBounds(viewHierarchy).top);
   });
 
-  test('target "overlay" taps the overlay\'s match', async () => {
+  test('layer "overlay" taps the overlay\'s match', async () => {
     const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
-    const result = await command.execute({ action: "tap", text: "Settings", target: "overlay" });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "overlay" });
 
     expect(result.success).toBe(true);
     const [tap] = service.getTapHistory();
     expect(tap.y).toBeGreaterThanOrEqual(overlayBounds(viewHierarchy).top);
   });
 
-  test('target "app" taps the app\'s match outside the overlay window', async () => {
+  test('layer "app" taps the app\'s match outside the overlay window', async () => {
     const { command, service, viewHierarchy } = createCommand(capturedOverlayHierarchy());
-    const result = await command.execute({ action: "tap", text: "Settings", target: "app" });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "app" });
 
     expect(result.success).toBe(true);
     const [tap] = service.getTapHistory();
     expect(tap.y).toBeLessThan(overlayBounds(viewHierarchy).top);
   });
 
-  test('target "app" refuses before dispatch when a full-screen overlay covers the match', async () => {
+  test('layer "app" refuses before dispatch when a full-screen overlay covers the match', async () => {
     const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
-    const result = await command.execute({ action: "tap", text: "Settings", target: "app" });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "app" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("an AutoMobile overlay window covers that point");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test('target "app" cannot reach an overlay-only element', async () => {
+  test('layer "app" cannot reach an overlay-only element', async () => {
     const { command, service } = createCommand(capturedOverlayHierarchy());
-    const result = await command.execute({ action: "tap", text: "YouTube", target: "app" });
+    const result = await command.execute({ action: "tap", text: "YouTube", layer: "app" });
 
     expect(result.success).toBe(false);
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test('target "overlay" with no overlay showing is an actionable error', async () => {
+  test('layer "overlay" with no overlay showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
-    const result = await command.execute({ action: "tap", text: "Settings", target: "overlay" });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "overlay" });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no AutoMobile overlay is showing");
     expect(service.getTapHistory()).toEqual([]);
   });
 
-  test("target cannot be combined with a device-resolved semantic link", async () => {
+  test("layer cannot be combined with a device-resolved semantic link", async () => {
     const { command, service } = createCommand(capturedOverlayHierarchy());
     const result = await command.execute({
       action: "tap",
       accessibilityLink: "Settings",
-      target: "app",
+      layer: "app",
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("target cannot be used with accessibilityLink or subtext");
+    expect(result.error).toContain("layer cannot be used with accessibilityLink or subtext");
     expect(service.getTapHistory()).toEqual([]);
   });
 });

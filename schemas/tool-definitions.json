@@ -1356,6 +1356,11 @@
             }
           ]
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "pressDurationMs": {
           "description": "Press duration ms (min: 600, max: 3000, default: 600)",
           "type": "number",
@@ -3250,7 +3255,7 @@
           "type": "string",
           "enum": ["first", "random", "unique"]
         },
-        "target": {
+        "layer": {
           "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "overlay"]
@@ -9125,7 +9130,7 @@
           },
           "additionalProperties": false
         },
-        "target": {
+        "layer": {
           "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "overlay"]
@@ -25609,7 +25614,7 @@
           "type": "string",
           "enum": ["first", "random", "unique"]
         },
-        "target": {
+        "layer": {
           "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "overlay"]
@@ -25756,7 +25761,7 @@
       "dependentRequired": {
         "container": ["selector"],
         "selectionStrategy": ["selector"],
-        "target": ["selector"]
+        "layer": ["selector"]
       },
       "$defs": {
         "__schema0": {
@@ -28704,7 +28709,7 @@
           "description": "Search only scrollable containers/lists",
           "type": "boolean"
         },
-        "target": {
+        "layer": {
           "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "overlay"]
@@ -29217,7 +29222,7 @@
           "description": "Target panel key, role, or active",
           "type": "string"
         },
-        "target": {
+        "layer": {
           "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
           "type": "string",
           "enum": ["app", "overlay"]

@@ -1,7 +1,7 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
-import type { HierarchyTarget } from "../../models/HierarchyTarget";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import type { ObserveResult } from "../../models/ObserveResult";
 import {
   nodeAttributes,
@@ -19,7 +19,7 @@ const ACCESSIBILITY_WINDOW_TYPE_APPLICATION = 1;
 
 const scopedCache = new WeakMap<
   ViewHierarchyResult,
-  Partial<Record<HierarchyTarget, ViewHierarchyResult>>
+  Partial<Record<HierarchyLayer, ViewHierarchyResult>>
 >();
 
 /** Whether the capture contains one of AutoMobile's own overlay windows. */
@@ -100,10 +100,10 @@ function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolea
 
 function scopeTree(
   root: ViewHierarchyNode,
-  target: HierarchyTarget,
+  layer: HierarchyLayer,
   overlayIds: ReadonlySet<number>,
 ): ViewHierarchyNode {
-  if (target === "app") {
+  if (layer === "app") {
     return pruneWindowRoots(root, overlayIds) ?? {};
   }
   const roots = collectWindowRoots(root, overlayIds);
@@ -132,22 +132,21 @@ function appPackageName(
 
 function scopeSingleHierarchy(
   hierarchy: ViewHierarchyResult,
-  target: HierarchyTarget,
+  layer: HierarchyLayer,
 ): ViewHierarchyResult {
   const overlayIds = overlayWindowIds(hierarchy);
   const overlayWindowSet = new Set(ownOverlayWindows(hierarchy));
   const keepWindow = (window: ViewHierarchyWindowInfo) =>
-    target === "overlay" ? overlayWindowSet.has(window) : !overlayWindowSet.has(window);
+    layer === "overlay" ? overlayWindowSet.has(window) : !overlayWindowSet.has(window);
   const windows = hierarchy.windows?.filter(keepWindow);
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
-  const scopedTree =
-    tree && !hierarchy.hierarchy.error ? scopeTree(tree, target, overlayIds) : tree;
+  const scopedTree = tree && !hierarchy.hierarchy.error ? scopeTree(tree, layer, overlayIds) : tree;
   const scoped: ViewHierarchyResult = {
     ...hierarchy,
     hierarchy: (scopedTree ?? hierarchy.hierarchy) as ViewHierarchyResult["hierarchy"],
     ...(windows ? { windows } : {}),
   };
-  if (target === "app") {
+  if (layer === "app") {
     const packageName = appPackageName(hierarchy, windows);
     if (packageName !== undefined) {
       scoped.packageName = packageName;
@@ -171,28 +170,28 @@ function scopeSingleHierarchy(
  * is returned unchanged for `app` and scoped to nothing for `overlay`. The
  * input is never mutated, and the attached raw capture is scoped the same way.
  */
-export function scopeHierarchyToTarget(
+export function scopeHierarchyToLayer(
   hierarchy: ViewHierarchyResult,
-  target: HierarchyTarget | undefined,
+  layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
-  if (target === undefined) {
+  if (layer === undefined) {
     return hierarchy;
   }
-  if (target === "app" && !hasOwnOverlay(hierarchy)) {
+  if (layer === "app" && !hasOwnOverlay(hierarchy)) {
     return hierarchy;
   }
-  const cached = scopedCache.get(hierarchy)?.[target];
+  const cached = scopedCache.get(hierarchy)?.[layer];
   if (cached) {
     return cached;
   }
-  const scoped = scopeSingleHierarchy(hierarchy, target);
+  const scoped = scopeSingleHierarchy(hierarchy, layer);
   const raw = getRawViewHierarchy(hierarchy);
   if (raw && raw !== hierarchy) {
-    attachRawViewHierarchy(scoped, scopeHierarchyToTarget(raw, target));
+    attachRawViewHierarchy(scoped, scopeHierarchyToLayer(raw, layer));
   }
-  scopedCache.set(hierarchy, { ...scopedCache.get(hierarchy), [target]: scoped });
+  scopedCache.set(hierarchy, { ...scopedCache.get(hierarchy), [layer]: scoped });
   // Scoping an already-scoped capture again is a no-op.
-  scopedCache.set(scoped, { [target]: scoped });
+  scopedCache.set(scoped, { [layer]: scoped });
   return scoped;
 }
 
@@ -202,15 +201,15 @@ export function scopeHierarchyToTarget(
  */
 export function scopeHierarchyForSelector(
   hierarchy: ViewHierarchyResult,
-  target: HierarchyTarget | undefined,
+  layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
-  if (target === "overlay" && !hasOwnOverlay(hierarchy)) {
+  if (layer === "overlay" && !hasOwnOverlay(hierarchy)) {
     throw new ActionableError(
-      'target "overlay" was requested, but no AutoMobile overlay is showing. ' +
-        "Show the overlay first, or omit target to search the whole screen.",
+      'layer "overlay" was requested, but no AutoMobile overlay is showing. ' +
+        "Show the overlay first, or omit layer to search the whole screen.",
     );
   }
-  return scopeHierarchyToTarget(hierarchy, target);
+  return scopeHierarchyToLayer(hierarchy, layer);
 }
 
 function pointInBounds(
@@ -235,23 +234,23 @@ export function ownOverlayCoversPoint(
 }
 
 /**
- * With `target: "app"`, refuse a coordinate gesture whose point lies inside one
+ * With `layer: "app"`, refuse a coordinate gesture whose point lies inside one
  * of AutoMobile's own overlay windows: the touch would reach the overlay, not
  * the app element behind it (issue #9305 proposal (c)). The check runs against
  * the unscoped capture, before any dispatch.
  */
 export function assertAppGestureNotUnderOverlay(
   hierarchy: ViewHierarchyResult | undefined,
-  target: HierarchyTarget | undefined,
+  layer: HierarchyLayer | undefined,
   point: { x: number; y: number },
   action: string,
 ): void {
-  if (target !== "app" || !hierarchy) {
+  if (layer !== "app" || !hierarchy) {
     return;
   }
   if (ownOverlayCoversPoint(hierarchy, point)) {
     throw new ActionableError(
-      `Cannot ${action} at (${point.x}, ${point.y}) with target "app": an AutoMobile overlay window covers that point, ` +
+      `Cannot ${action} at (${point.x}, ${point.y}) with layer "app": an AutoMobile overlay window covers that point, ` +
         "so the touch would reach the overlay instead of the app. Hide or move the overlay, then retry.",
     );
   }
@@ -283,9 +282,9 @@ function findFlaggedElement(
 
 function scopedActiveWindow(
   activeWindow: ObserveResult["activeWindow"],
-  target: HierarchyTarget,
+  layer: HierarchyLayer,
 ): ObserveResult["activeWindow"] {
-  if (target !== "app" || activeWindow?.type !== INTERACTIVE_OVERLAY_WINDOW_TYPE) {
+  if (layer !== "app" || activeWindow?.type !== INTERACTIVE_OVERLAY_WINDOW_TYPE) {
     return activeWindow;
   }
   // `appId` already names the app behind the overlay (#10000); only the overlay marker goes.
@@ -297,17 +296,17 @@ function scopedActiveWindow(
 /**
  * Project an observation onto the app or the overlay for the `observe` response
  * (issue #9305). Returns a copy; the cached observation keeps every window so a
- * later call without `target` still sees the whole screen.
+ * later call without `layer` still sees the whole screen.
  */
-export function scopeObserveResultToTarget(
+export function scopeObserveResultToLayer(
   result: ObserveResult,
-  target: HierarchyTarget | undefined,
+  layer: HierarchyLayer | undefined,
   platform: "android" | "ios",
 ): ObserveResult {
-  if (target === undefined || !result.viewHierarchy) {
+  if (layer === undefined || !result.viewHierarchy) {
     return result;
   }
-  const viewHierarchy = scopeHierarchyToTarget(result.viewHierarchy, target);
+  const viewHierarchy = scopeHierarchyToLayer(result.viewHierarchy, layer);
   if (viewHierarchy === result.viewHierarchy) {
     return result;
   }
@@ -317,6 +316,6 @@ export function scopeObserveResultToTarget(
     elements: new ObserveElementsBuilder().build(viewHierarchy, platform),
     focusedElement: findFlaggedElement(viewHierarchy, "focused"),
     accessibilityFocusedElement: findFlaggedElement(viewHierarchy, "accessibility-focused"),
-    activeWindow: scopedActiveWindow(result.activeWindow, target),
+    activeWindow: scopedActiveWindow(result.activeWindow, layer),
   };
 }

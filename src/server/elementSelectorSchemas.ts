@@ -4,7 +4,7 @@ import {
   type ElementSelectionStrategy,
 } from "../models/ElementSelectionStrategy";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
-import { HIERARCHY_TARGETS } from "../models/HierarchyTarget";
+import { HIERARCHY_LAYERS } from "../models/HierarchyLayer";
 
 type ElementIdTextDescriptions = {
   elementId: string;
@@ -33,11 +33,11 @@ export const elementContainerSchema = createElementIdTextSelectorSchema({
 export const resolverSelectionStrategySchema = z.enum(ELEMENT_SELECTION_STRATEGIES);
 
 /**
- * Shared `target` argument (issue #9305): one definition for observe and every
+ * Shared `layer` argument (issue #9305): one definition for observe and every
  * selector-based action tool.
  */
-export const hierarchyTargetSchema = z
-  .enum(HIERARCHY_TARGETS)
+export const hierarchyLayerSchema = z
+  .enum(HIERARCHY_LAYERS)
   .describe(
     "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
   );

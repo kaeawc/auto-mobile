@@ -5,9 +5,9 @@ import {
   hasOwnOverlay,
   ownOverlayCoversPoint,
   scopeHierarchyForSelector,
-  scopeHierarchyToTarget,
-  scopeObserveResultToTarget,
-} from "../../../src/features/observe/hierarchyTarget";
+  scopeHierarchyToLayer,
+  scopeObserveResultToLayer,
+} from "../../../src/features/observe/hierarchyLayer";
 import { INTERACTIVE_OVERLAY_WINDOW_TYPE } from "../../../src/features/observe/ownOverlayFocus";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -57,22 +57,22 @@ function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
   return selection.element?.bounds.top;
 }
 
-describe("scopeHierarchyToTarget (#9305)", () => {
+describe("scopeHierarchyToLayer (#9305)", () => {
   test("the relabelled capture is recognized as having the overlay", () => {
     expect(hasOwnOverlay(captureWithOverlay())).toBe(true);
     expect(hasOwnOverlay(convertedCapture())).toBe(false);
   });
 
-  test("omitted target returns the capture unchanged, overlay included", () => {
+  test("omitted layer returns the capture unchanged, overlay included", () => {
     const hierarchy = captureWithOverlay();
-    expect(scopeHierarchyToTarget(hierarchy, undefined)).toBe(hierarchy);
+    expect(scopeHierarchyToLayer(hierarchy, undefined)).toBe(hierarchy);
     expect(rootWindowIds(hierarchy)).toContain(OVERLAY_WINDOW_ID);
   });
 
   test('"app" removes the overlay window and its nodes and leaves the input untouched', () => {
     const hierarchy = captureWithOverlay();
     const before = structuredClone(hierarchy);
-    const scoped = scopeHierarchyToTarget(hierarchy, "app");
+    const scoped = scopeHierarchyToLayer(hierarchy, "app");
 
     expect(rootWindowIds(scoped)).not.toContain(OVERLAY_WINDOW_ID);
     expect(rootWindowIds(scoped)).toContain(APP_WINDOW_ID);
@@ -83,7 +83,7 @@ describe("scopeHierarchyToTarget (#9305)", () => {
 
   test('"app" keeps app node identity so node-identity checks still hold', () => {
     const hierarchy = captureWithOverlay();
-    const scopedRoots = windowRoots(scopeHierarchyToTarget(hierarchy, "app"));
+    const scopedRoots = windowRoots(scopeHierarchyToLayer(hierarchy, "app"));
     expect(scopedRoots).toContain(windowRoot(hierarchy, APP_WINDOW_ID));
   });
 
@@ -96,28 +96,28 @@ describe("scopeHierarchyToTarget (#9305)", () => {
       isFocused: window.id === OVERLAY_WINDOW_ID,
       ...(window.id === APP_WINDOW_ID ? { packageName: LAUNCHER_PACKAGE } : {}),
     }));
-    const scoped = scopeHierarchyToTarget(hierarchy, "app");
+    const scoped = scopeHierarchyToLayer(hierarchy, "app");
     expect(scoped.windows!.some((window) => window.isActive || window.isFocused)).toBe(false);
     expect(scoped.packageName).toBe(LAUNCHER_PACKAGE);
   });
 
   test('"overlay" keeps only the overlay window and its nodes', () => {
-    const scoped = scopeHierarchyToTarget(captureWithOverlay(), "overlay");
+    const scoped = scopeHierarchyToLayer(captureWithOverlay(), "overlay");
     expect(rootWindowIds(scoped)).toEqual([OVERLAY_WINDOW_ID]);
     expect(scoped.windows!.map((window) => window.id)).toEqual([OVERLAY_WINDOW_ID]);
   });
 
   test("a capture without the overlay is unchanged for app and empty for overlay", () => {
     const hierarchy = convertedCapture();
-    expect(scopeHierarchyToTarget(hierarchy, "app")).toBe(hierarchy);
-    expect(rootWindowIds(scopeHierarchyToTarget(hierarchy, "overlay"))).toEqual([]);
+    expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
+    expect(rootWindowIds(scopeHierarchyToLayer(hierarchy, "overlay"))).toEqual([]);
   });
 
   test("an attached raw capture is scoped the same way", () => {
     const projected = captureWithOverlay();
     const raw = captureWithOverlay();
     attachRawViewHierarchy(projected, raw);
-    const scoped = scopeHierarchyToTarget(projected, "app");
+    const scoped = scopeHierarchyToLayer(projected, "app");
     const scopedRaw = getRawViewHierarchy(scoped)!;
     expect(scopedRaw).not.toBe(raw);
     expect(rootWindowIds(scopedRaw)).not.toContain(OVERLAY_WINDOW_ID);
@@ -125,11 +125,11 @@ describe("scopeHierarchyToTarget (#9305)", () => {
 
   test("repeated scoping of one capture returns the same object", () => {
     const hierarchy = captureWithOverlay();
-    expect(scopeHierarchyToTarget(hierarchy, "app")).toBe(scopeHierarchyToTarget(hierarchy, "app"));
+    expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(scopeHierarchyToLayer(hierarchy, "app"));
   });
 });
 
-describe("selector resolution with target (#9305)", () => {
+describe("selector resolution with layer (#9305)", () => {
   test("text in both windows resolves to the overlay by default and to the app for app", () => {
     const hierarchy = captureWithOverlay();
     const overlayTop = windowRoot(hierarchy, OVERLAY_WINDOW_ID).bounds!.top;
@@ -171,7 +171,7 @@ describe("assertAppGestureNotUnderOverlay (#9305)", () => {
     expect(ownOverlayCoversPoint(capturedTwoWindowHierarchy(), { x: 130, y: 578 })).toBe(false);
   });
 
-  test("default and overlay targets never refuse", () => {
+  test("default and overlay layers never refuse", () => {
     const hierarchy = captureWithOverlay();
     const point = { x: 540, y: 2000 };
     expect(() => assertAppGestureNotUnderOverlay(hierarchy, undefined, point, "tap")).not.toThrow();
@@ -179,7 +179,7 @@ describe("assertAppGestureNotUnderOverlay (#9305)", () => {
   });
 });
 
-describe("scopeObserveResultToTarget (#9305)", () => {
+describe("scopeObserveResultToLayer (#9305)", () => {
   const observation = (viewHierarchy: ViewHierarchyResult): ObserveResult => ({
     ...observationOf(viewHierarchy),
     activeWindow: {
@@ -190,14 +190,14 @@ describe("scopeObserveResultToTarget (#9305)", () => {
     },
   });
 
-  test("omitted target returns the observation itself", () => {
+  test("omitted layer returns the observation itself", () => {
     const result = observation(captureWithOverlay());
-    expect(scopeObserveResultToTarget(result, undefined, "android")).toBe(result);
+    expect(scopeObserveResultToLayer(result, undefined, "android")).toBe(result);
   });
 
   test('"app" rebuilds elements without overlay nodes and drops the overlay window type', () => {
     const result = observation(captureWithOverlay());
-    const scoped = scopeObserveResultToTarget(result, "app", "android");
+    const scoped = scopeObserveResultToLayer(result, "app", "android");
     const labels = (elements: ObserveResult["elements"]) =>
       (elements?.clickable ?? []).map((element) => element.text ?? element["content-desc"]);
 
@@ -207,7 +207,7 @@ describe("scopeObserveResultToTarget (#9305)", () => {
     expect(labels(result.elements)).toEqual(expect.arrayContaining(["YouTube", "Screenshot"]));
     expect(labels(scoped.elements)).not.toContain("YouTube");
     expect(labels(scoped.elements)).toContain("Screenshot");
-    const overlayOnly = labels(scopeObserveResultToTarget(result, "overlay", "android").elements);
+    const overlayOnly = labels(scopeObserveResultToLayer(result, "overlay", "android").elements);
     expect(overlayOnly).toContain("YouTube");
     expect(overlayOnly).not.toContain("Screenshot");
     expect(result.viewHierarchy).toEqual(captureWithOverlay());

@@ -867,6 +867,54 @@ class StorageSubscriptionManagerTest {
     }
 
   @Test
+  fun `a second restart during the re-arm drops the dead process reply instead of advancing the cursor`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      drainingAppProcess("process-a", mutableListOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(3).toList() }
+
+      // The cursor read is answered by process-b (sequences 7, 8) but the app restarts again before
+      // the re-arm, which reaches process-c, whose counter is back at 1.
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-c")
+      requestedSince.clear()
+      every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+        {
+          val since = arg<Bundle>(3).getLong("sinceSequence", 0L)
+          requestedSince.add(since)
+          if (since == 0L) tokenChangesBundle("process-c", listOf(1L, 2L))
+          else tokenChangesBundle("process-b", listOf(7L, 8L))
+        }
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(3L, 0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L),
+        withTimeout(1_000) { manager.changeEvents.take(2).toList() }.map { it.sequenceNumber },
+      )
+
+      // The cursor sits at 2, not 8, so process-c's next change is heard.
+      requestedSince.clear()
+      drainingAppProcess("process-c", mutableListOf(3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(2L), requestedSince)
+      assertEquals(
+        listOf(3L),
+        withTimeout(1_000) { manager.changeEvents.take(1).toList() }.map { it.sequenceNumber },
+      )
+    }
+
+  @Test
   fun `a failed re-read after a restart keeps the cursor at zero so the rest is read next poll`() =
     runTest(dispatcher) {
       val observerSlot = slot<ContentObserver>()

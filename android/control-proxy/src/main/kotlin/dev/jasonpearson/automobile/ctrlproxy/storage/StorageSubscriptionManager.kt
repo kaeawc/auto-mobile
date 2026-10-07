@@ -982,11 +982,13 @@ class StorageSubscriptionManager(
     } else if (knownToken == null) {
       subState.processToken = reportedToken
     }
-    if (subState.needsRearm) rearmListener(packageName, fileName, uri, subState)
+    // True when the app restarted again between the read and the re-arm: firstReply then belongs to
+    // a dead process, and its sequence numbers must neither be delivered nor advance the cursor.
+    val restartedAgain = subState.needsRearm && rearmListener(packageName, fileName, uri, subState)
 
-    var pending = firstReply.changes
+    var pending = if (restartedAgain) emptyList() else firstReply.changes
     var advanceCursor = true
-    if (restarted) {
+    if (restarted || restartedAgain) {
       // The SDK removes the changes it returns, so the first reply (filtered by the stale cursor)
       // already holds new-process changes that a re-read will never return again. Keep them and
       // merge with the read from 0, de-duplicated by sequence number. If the re-read failed, its
@@ -1020,29 +1022,31 @@ class StorageSubscriptionManager(
   /**
    * Re-registers the app-side listener in the new process. Leaves [SubscriptionState.needsRearm]
    * set when the call fails so the next signal retries; a retry happens only when a signal arrives,
-   * never on a timer.
+   * never on a timer. Returns true when the re-arm showed the app process changed again.
    */
   private suspend fun rearmListener(
     packageName: String,
     fileName: String,
     uri: Uri,
     subState: SubscriptionState,
-  ) {
+  ): Boolean {
     val extras = Bundle().apply { putString("fileName", fileName) }
     val result = backgroundCalls.call(uri, "subscribeToFile", extras)
     coroutineContext.ensureActive()
     if (result == null || !result.getBoolean("success", false)) {
       Log.w(TAG, "Could not re-arm storage subscription $packageName:$fileName; will retry")
-      return
+      return false
     }
     val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
     val token = (response as? StorageResponse.SubscriptionResult)?.processToken
-    if (token != null && token != subState.processToken) {
+    val changed = token != null && token != subState.processToken
+    if (changed) {
       // The app restarted again between the read and the re-arm.
       subState.processToken = token
       subState.lastSequence = 0
     }
     subState.needsRearm = false
+    return changed
   }
 
   private fun deliverChanges(

@@ -174,8 +174,11 @@ final class InnerChallengeSender: NSObject, URLAuthenticationChallengeSender, @u
         resolveIfPending(.useCredential, credential)
     }
 
-    func continueWithoutCredential(for _: URLAuthenticationChallenge) {
-        resolveIfPending(.useCredential, nil)
+    func continueWithoutCredential(for challenge: URLAuthenticationChallenge) {
+        // `.useCredential` with nil is not default trust evaluation, so server-trust challenges
+        // take the documented default path instead.
+        let isServerTrust = challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust
+        resolveIfPending(isServerTrust ? .performDefaultHandling : .useCredential, nil)
     }
 
     func cancel(_: URLAuthenticationChallenge) {

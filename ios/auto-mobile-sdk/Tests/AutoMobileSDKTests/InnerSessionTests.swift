@@ -496,7 +496,7 @@ final class InnerSessionTests: XCTestCase {
             sender: ForwardingRecordingClient.InertSender()
         )
         let cases: [(String, (InnerChallengeSender) -> Void, URLSession.AuthChallengeDisposition)] = [
-            ("without credential", { $0.continueWithoutCredential(for: challenge) }, .useCredential),
+            ("without credential", { $0.continueWithoutCredential(for: challenge) }, .performDefaultHandling),
             ("cancel", { $0.cancel(challenge) }, .cancelAuthenticationChallenge),
             ("default", { $0.performDefaultHandling(for: challenge) }, .performDefaultHandling),
             ("reject", { $0.rejectProtectionSpaceAndContinue(with: challenge) }, .rejectProtectionSpace),

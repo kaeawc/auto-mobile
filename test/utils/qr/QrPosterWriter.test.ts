@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { RawImage } from "../../../src/utils/image/backend/ImageBackend";
 import type { QrPngEncoder } from "../../../src/utils/qr/QrPngRenderer";
@@ -26,7 +27,7 @@ class RecordingFileSystem {
     this.mtimes.set(filePath, this.mtimes.size + 1);
   }
   async readdir(): Promise<string[]> {
-    return [...this.files.keys()].map((file) => file.split("/").pop() ?? file);
+    return [...this.files.keys()].map((file) => path.basename(file));
   }
   async stat(filePath: string): Promise<{ size: number; mtimeMs: number }> {
     return { size: 1, mtimeMs: this.mtimes.get(filePath) ?? 0 };
@@ -50,10 +51,12 @@ function makeWriter() {
 describe("FileQrPosterWriter", () => {
   test("renders the encoded matrix and writes it to a payload-derived png path", async () => {
     const { fileSystem, pngEncoder, writer } = makeWriter();
-    const path = await writer.writePoster("01234567");
-    expect(path).toMatch(/^\/data\/camera-posters\/qr-[0-9a-f]{16}\.png$/);
+    const posterPath = await writer.writePoster("01234567");
+    // path.join emits the host separator (backslash on Windows), so compare via path helpers.
+    expect(path.dirname(posterPath)).toBe(path.join("/data", "camera-posters"));
+    expect(path.basename(posterPath)).toMatch(/^qr-[0-9a-f]{16}\.png$/);
     expect(fileSystem.dirs).toEqual(["/data/camera-posters"]);
-    expect(fileSystem.files.get(path)?.toString()).toBe("png-bytes");
+    expect(fileSystem.files.get(posterPath)?.toString()).toBe("png-bytes");
     expect(pngEncoder.images[0]).toEqual(rasterizeQr(encodeQr("01234567")));
   });
 

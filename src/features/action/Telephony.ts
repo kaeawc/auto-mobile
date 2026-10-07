@@ -6,6 +6,7 @@ import {
   FileEmulatorConsoleAuthTokenReader,
   NetEmulatorConsoleTransport,
   consolePortFromSerial,
+  validateSmsMessage,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
   AdbClientFactory,
@@ -227,6 +228,12 @@ export class Telephony {
   /** iOS: the app's in-app SDK posts an SMS-style local notification (`messages` module). */
   private async sendSmsIos(options: SendSmsOptions): Promise<SendSmsResult> {
     const base = { phoneNumber: options.phoneNumber, messageLength: options.message.length };
+    try {
+      // Same body constraints as the Android console path, so both platforms reject the same input.
+      validateSmsMessage(options.message);
+    } catch (error) {
+      return { ...base, success: false, supported: true, error: errorMessage(error) };
+    }
     const request = {
       module: IOS_MESSAGES_MODULE,
       trigger: "sms",

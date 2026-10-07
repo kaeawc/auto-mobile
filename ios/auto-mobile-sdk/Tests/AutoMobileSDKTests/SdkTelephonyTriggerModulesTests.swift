@@ -135,7 +135,10 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
 
     func testSmsPostsANotificationTitledWithTheSender() {
         let posted = OSAllocatedUnfairLock<[String]>(initialState: [])
-        let messages = SdkMessagesTriggerModule { title, body in posted.withLock { $0.append("\(title)|\(body)") } }
+        let messages = SdkMessagesTriggerModule { title, body in
+            posted.withLock { $0.append("\(title)|\(body)") }
+            return nil
+        }
 
         XCTAssertEqual(
             messages.handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi\nthere"]),
@@ -148,7 +151,10 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
 
     func testSmsRejectsBadPayloadsWithoutPosting() {
         let posted = OSAllocatedUnfairLock(initialState: 0)
-        let messages = SdkMessagesTriggerModule { _, _ in posted.withLock { $0 += 1 } }
+        let messages = SdkMessagesTriggerModule { _, _ in
+            posted.withLock { $0 += 1 }
+            return nil
+        }
 
         XCTAssertEqual(
             messages.handle(trigger: "sms", payload: ["message": "hi"]),
@@ -164,6 +170,15 @@ final class SdkTelephonyTriggerModulesTests: XCTestCase {
         )
 
         XCTAssertEqual(posted.withLock { $0 }, 0)
+    }
+
+    func testSmsReportsNotificationSchedulingFailure() {
+        let messages = SdkMessagesTriggerModule { _, _ in "notification_not_scheduled" }
+
+        XCTAssertEqual(
+            messages.handle(trigger: "sms", payload: ["phoneNumber": "555", "message": "hi"]),
+            .failed("notification_not_scheduled")
+        )
     }
 
     func testDefaultRegistryRegistersMessages() {

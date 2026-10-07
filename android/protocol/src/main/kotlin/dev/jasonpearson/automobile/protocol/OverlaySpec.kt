@@ -349,6 +349,17 @@ data class OverlayBottomSheetNode(
 data class OverlayWindow(
   val placement: OverlayPlacement,
   val opacity: Int = 100,
+  /**
+   * `system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks
+   * just above apps, below the shade, keyboard and screenshot preview, and needs
+   * SYSTEM_ALERT_WINDOW.
+   */
+  val layer: String? = null,
+  /**
+   * `session` (default when absent) ends the overlay with its host session; `device` keeps it
+   * interactive after the last client disconnects and disables the idle timeout.
+   */
+  val persistence: String? = null,
 )
 
 @Serializable

@@ -1730,6 +1730,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             clearAssets = { overlayAssets.clear() },
             hasAsset = { overlayAssets.lookup(it) != null },
             images = overlayImages,
+            // The host grants this appop before showing a window.layer "app" overlay.
+            appLayerPermitted = {
+              Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)
+            },
+            packageName = packageName,
           )
         // Service start: drop anything a previous process left in the cache directory.
         overlayAssets.purgeLeftovers()

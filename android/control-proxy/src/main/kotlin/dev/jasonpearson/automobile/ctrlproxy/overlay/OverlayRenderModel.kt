@@ -42,12 +42,16 @@ data class OverlayRenderModel(
   val opacityPercent: Int,
   val root: OverlayRenderNode,
   val hasTextField: Boolean = false,
+  val layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
+  val persistent: Boolean = false,
 ) {
   fun request() =
     InteractiveOverlayRequest(
       placement = placement,
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
+      layer = layer,
+      persistent = persistent,
     ) {
       OverlaySpecContent(root)
     }
@@ -88,6 +92,8 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
+    OverlayWindowLayer.fromWire(spec.window.layer),
+    isDevicePersistent(spec),
   )
 }
 

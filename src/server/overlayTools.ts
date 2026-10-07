@@ -20,7 +20,10 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { overlayDisplayUnsupportedMessage } from "../features/observe/android/CtrlProxyOverlays";
-import { OVERLAY_DISPLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
+import {
+  OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
+} from "../features/observe/android/ctrlProxyProtocol";
 import type {
   OverlayDismiss,
   OverlayResult,
@@ -39,6 +42,11 @@ import {
   MAX_VARIANT_LABEL_LENGTH,
 } from "../features/overlay/overlayVariants";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
+import {
+  grantOverlayAppLayer,
+  overlayWindowOptionsUnsupportedMessage,
+  requestedOverlayWindowOptions,
+} from "../features/overlay/overlayWindowOptions";
 import {
   resolveOverlayDisplayId,
   type OverlayDisplayDependencies,
@@ -186,7 +194,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          'Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100. window.layer "app" and window.persistence "device" need a CtrlProxy advertising overlay_window_options_v1.',
         ),
       display: z
         .string()
@@ -217,6 +225,18 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .max(100)
         .optional()
         .describe("showVariants only: window opacity percentage; omitted uses the spec default"),
+      layer: z
+        .enum(["app", "system"])
+        .optional()
+        .describe(
+          "showVariants only: window.layer for the carousel; omitted uses the system layer",
+        ),
+      persistence: z
+        .enum(["session", "device"])
+        .optional()
+        .describe(
+          "showVariants only: window.persistence for the carousel; omitted is session-scoped",
+        ),
       gravity: z
         .enum(placementSchema.options[2].shape.gravity.options)
         .optional()
@@ -277,6 +297,8 @@ export const overlaySchema = addDeviceTargetingToSchema(
     "variants",
     "presentation",
     "opacity",
+    "layer",
+    "persistence",
     "gravity",
     "offset",
     "waitForSelection",
@@ -290,6 +312,8 @@ export const overlaySchema = addDeviceTargetingToSchema(
       "variants",
       "presentation",
       "opacity",
+      "layer",
+      "persistence",
       "gravity",
       "offset",
       "waitForSelection",
@@ -593,6 +617,40 @@ async function showDisplayId(
   return displayId;
 }
 
+/**
+ * Refuses, before anything is sent, a spec whose window options the device would silently ignore,
+ * and grants CtrlProxy SYSTEM_ALERT_WINDOW for an app-layer window (the device re-checks it and
+ * fails with the appop command when the grant did not take).
+ */
+async function prepareWindowOptions(
+  client: OverlayClient,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory">,
+  signal: AbortSignal | undefined,
+): Promise<OverlayResult | undefined> {
+  if ((args.action !== "show" && args.action !== "update") || args.spec === undefined) {
+    return undefined;
+  }
+  const options = requestedOverlayWindowOptions(args.spec as OverlaySpec);
+  if (!options.appLayer && !options.devicePersistence) {
+    return undefined;
+  }
+  if (!(await client.supportsCommand(OVERLAY_WINDOW_OPTIONS_CAPABILITY))) {
+    return {
+      success: false,
+      error: new ActionableError(overlayWindowOptionsUnsupportedMessage(options)).message,
+    };
+  }
+  if (options.appLayer) {
+    await grantOverlayAppLayer(
+      (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+      signal,
+    );
+  }
+  return undefined;
+}
+
 interface AssetStage {
   uploaded: UploadedOverlayAsset[];
   /** The validated uploads, kept so a missing asset can be re-sent without re-reading its source. */
@@ -745,6 +803,22 @@ async function resolveShowDisplay(
   }
 }
 
+/** Display resolution, then window-option support: either refusal ends the call unsent. */
+async function preflightMutation(
+  client: OverlayClient,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  signal: AbortSignal | undefined,
+): Promise<{ displayId?: number; failure?: OverlayResult }> {
+  const resolved = await resolveShowDisplay(client, device, args, dependencies);
+  if (resolved.failure) {
+    return resolved;
+  }
+  const failure = await prepareWindowOptions(client, device, args, dependencies, signal);
+  return failure ? { displayId: resolved.displayId, failure } : resolved;
+}
+
 function clearMutationEvents(
   events: OverlayEventCoordinator,
   scope: OverlayScope,
@@ -797,10 +871,15 @@ async function performMutation(
   if (args.action === "show") {
     events.show(scope, target.id!, client);
   }
-  const resolved = await resolveShowDisplay(client, device, args, dependencies);
-  const { displayId } = resolved;
-  const stage: AssetStage = resolved.failure
-    ? { uploaded: [], prepared: [], failure: resolved.failure }
+  const { displayId, failure } = await preflightMutation(
+    client,
+    device,
+    args,
+    dependencies,
+    signal,
+  );
+  const stage: AssetStage = failure
+    ? { uploaded: [], prepared: [], failure }
     : await stageAssets(client, args, assetReaders, signal);
   const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
@@ -888,7 +967,7 @@ async function showVariants(
 ): Promise<OverlayOutput> {
   let spec: OverlaySpec;
   try {
-    spec = composeVariantCarousel({
+    const composed = composeVariantCarousel({
       id: args.id,
       variants: args.variants,
       presentation: args.presentation,
@@ -896,6 +975,15 @@ async function showVariants(
       gravity: args.gravity,
       offset: args.offset,
     });
+    // Window options are not part of the carousel's content: set them on the composed window.
+    spec = {
+      ...composed,
+      window: {
+        ...composed.window,
+        ...(args.layer !== undefined ? { layer: args.layer } : {}),
+        ...(args.persistence !== undefined ? { persistence: args.persistence } : {}),
+      },
+    };
   } catch (error) {
     logger.warn("[overlay] showVariants input rejected", error);
     return {
@@ -1055,7 +1143,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     "overlay",
-    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
+    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both need a CtrlProxy advertising overlay_window_options_v1.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

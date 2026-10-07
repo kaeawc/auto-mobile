@@ -128,6 +128,7 @@ import {
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -6811,7 +6812,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (
       messageType === "gesture_display_id_v1" ||
       messageType === "tap_double_v1" ||
-      messageType === OVERLAY_DISPLAY_CAPABILITY
+      messageType === OVERLAY_DISPLAY_CAPABILITY ||
+      messageType === OVERLAY_WINDOW_OPTIONS_CAPABILITY
     ) {
       return this.supportedCommands?.has(messageType) === true;
     }

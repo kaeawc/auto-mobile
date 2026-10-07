@@ -56,6 +56,13 @@ data class InteractiveOverlayRequest(
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
   val displayId: Int = Display.DEFAULT_DISPLAY,
+  /** The window type; changing it on a shown overlay adds a new window rather than relayouting. */
+  val layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
+  /**
+   * The overlay outlives its host session (#10494), so host chrome always shows a close control
+   * that a person holding the device can use, whatever the placement.
+   */
+  val persistent: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { InteractiveOverlayTestContent() },
 ) {
@@ -159,7 +166,7 @@ class DefaultInteractiveOverlayHost(
   private val onWindowAttached: () -> Unit = {},
   private val onWindowLost: () -> Unit = {},
   private val isBlocked: () -> Boolean = { false },
-  private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { null },
+  private val displayWindows: OverlayDisplayWindows = OverlayDisplayWindows { _, _ -> null },
   private val backScope: CoroutineScope =
     CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
   private val backRegistrarFactory: (View) -> OverlayBackCallbackRegistrar = { view ->
@@ -198,7 +205,7 @@ class DefaultInteractiveOverlayHost(
 
   override suspend fun replace(request: InteractiveOverlayRequest): Boolean = show(request)
 
-  private fun windowFor(displayId: Int): OverlayDisplayWindow =
+  private fun windowFor(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow =
     if (displayId == Display.DEFAULT_DISPLAY) {
       OverlayDisplayWindow(
         context,
@@ -207,7 +214,7 @@ class DefaultInteractiveOverlayHost(
         density = densityProvider,
       )
     } else {
-      requireNotNull(displayWindows.open(displayId)) {
+      requireNotNull(displayWindows.open(displayId, layer)) {
         "Unknown or disconnected display: $displayId"
       }
     }
@@ -216,15 +223,19 @@ class DefaultInteractiveOverlayHost(
     if (destroyed || isBlocked()) return false
     val current = window
     // An in-place update keeps the window's own display target; a fresh context per update would
-    // be created on every non-default-display request only to be discarded.
-    val inPlace = current?.takeIf { it.displayId == request.displayId }
-    val target = inPlace?.target ?: windowFor(request.displayId)
+    // be created on every non-default-display request only to be discarded. A window's type cannot
+    // change after it is added, so a layer change attaches a new window like a display change.
+    val inPlace = current?.takeIf {
+      it.displayId == request.displayId && it.request.layer == request.layer
+    }
+    val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
     val params =
       interactiveOverlayLayoutParams(
         request.placement,
         request.hasTextField,
         target.density(),
         sdkInt,
+        request.layer,
       )
     if (touchThroughToken != null) {
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -330,6 +341,7 @@ class DefaultInteractiveOverlayHost(
         current.request.hasTextField,
         current.target.density(),
         sdkInt,
+        current.request.layer,
       )
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -548,20 +560,30 @@ fun InteractiveOverlayTestContent() {
   Box(Modifier.padding(16.dp)) { Text("CtrlProxy interactive overlay") }
 }
 
-/** Host chrome is computed from placement only, outside the author-controlled render tree. */
+/**
+ * Host chrome is computed from placement and persistence only, outside the author-controlled render
+ * tree. [closeVisible] is the compact close control a persistent non-fullscreen overlay carries
+ * (fullscreen already has the dismiss row), so nobody holding the device is left without a way to
+ * remove an overlay that outlived its session.
+ */
 data class OverlayHostChrome(
   val dismissVisible: Boolean,
   val windowAlpha: Float,
   val contentAlpha: Float,
+  val closeVisible: Boolean = false,
 )
 
 fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
   val fullscreen = request.placement is OverlayPlacement.Fullscreen
+  val close = request.persistent && !fullscreen
+  // Host controls never inherit spec opacity: only the authored content fades.
+  val opaqueWindow = fullscreen || close
   val opacity = request.opacityPercent / 100f
   return OverlayHostChrome(
     fullscreen,
-    if (fullscreen) 1f else opacity,
-    if (fullscreen) opacity else 1f,
+    if (opaqueWindow) 1f else opacity,
+    if (opaqueWindow) opacity else 1f,
+    closeVisible = close,
   )
 }
 
@@ -604,6 +626,20 @@ private fun InteractiveOverlayWindowContent(
           .background(fullscreen?.scrim ?: Color.Transparent)
       ) {
         CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
+      }
+    }
+  } else if (chrome.closeVisible) {
+    Box {
+      Box(Modifier.alpha(chrome.contentAlpha)) {
+        CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
+      }
+      // Drawn after the content so authored nodes cannot cover it.
+      TextButton(
+        onClick = { scope.launch { request.onHostDismiss() } },
+        modifier = Modifier.align(Alignment.TopEnd).background(Color.White),
+        colors = ButtonDefaults.textButtonColors(contentColor = Color.Black),
+      ) {
+        Text("Close")
       }
     }
   } else

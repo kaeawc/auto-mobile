@@ -12,6 +12,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/** The CtrlProxy application id, named in errors that tell the host which package to grant. */
+const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+
 fun interface OverlayResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
@@ -54,6 +57,12 @@ class OverlayController(
   private val hasAsset: (String) -> Boolean = { true },
   /** Decoded-image cache the rendered overlay draws `image` nodes from. */
   private val images: OverlayImageCache? = null,
+  /**
+   * Whether this package may add `window.layer: "app"` windows (SYSTEM_ALERT_WINDOW); a request for
+   * that layer without it fails before anything is replaced, naming the appop to grant.
+   */
+  private val appLayerPermitted: () -> Boolean = { true },
+  private val packageName: String = DEFAULT_CTRL_PROXY_PACKAGE,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -161,6 +170,7 @@ class OverlayController(
     val validated = validate(spec)
     val request = render(validated).copy(displayId = displayId)
     requireDisplayAvailable(displayId)
+    requireLayerPermitted(request.layer)
     val previous = activeRuntime
     val observerSession = lifecycle.observerSession()
     val runtime =
@@ -199,8 +209,19 @@ class OverlayController(
     disconnectPending = false
     armIdle(runtime)
     // The session's last client can leave before this queued show runs; nothing would remove it.
-    if (lifecycle.clientCount() == 0) dismissForDisconnect(runtime)
+    // A device-persistent overlay is meant to outlive its clients, so it stays.
+    if (lifecycle.clientCount() == 0 && !runtime.persistent) dismissForDisconnect(runtime)
   }
+
+  private val OverlayRuntime.persistent: Boolean
+    get() = isDevicePersistent(current.spec)
+
+  private fun requireLayerPermitted(layer: OverlayWindowLayer) =
+    require(layer != OverlayWindowLayer.APP || appLayerPermitted()) {
+      "window.layer: app needs Android 8.0+ and SYSTEM_ALERT_WINDOW for $packageName, which is " +
+        "not granted. Grant it with `adb shell appops set $packageName SYSTEM_ALERT_WINDOW " +
+        "allow`, or omit window.layer to use the system layer."
+    }
 
   /** Shared by dismiss_overlay and the dismiss action, under the controller mutex. */
   private suspend fun removeActive(): Boolean {
@@ -275,6 +296,11 @@ class OverlayController(
     delayMillis: Long = lifecycle.ttlMillis,
     retriesLeft: Int = OVERLAY_DISMISS_MAX_RETRIES,
   ) {
+    // A device-persistent overlay is a standalone mock with nobody to re-show it: never idle out.
+    if (runtime.persistent) {
+      lifecycle.cancel()
+      return
+    }
     lifecycle.arm(delayMillis) { token ->
       signal {
         if (runtime === activeRuntime && lifecycle.isCurrent(token)) {
@@ -315,6 +341,8 @@ class OverlayController(
   suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) =
     signal(retryDisconnect = false) {
       require(count >= 0) { "Client count must be nonnegative" }
+      // A device-persistent overlay keeps running offline, and keeps the assets it draws.
+      if (activeRuntime?.persistent == true) return@signal
       // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
       if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
         activeRuntime?.let { dismissForDisconnect(it) }

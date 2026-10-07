@@ -415,6 +415,18 @@ const windowSchema = z
   .object({
     placement: placementSchema,
     opacity: z.number().finite().int().min(0).max(100).default(100),
+    layer: z
+      .enum(["app", "system"])
+      .optional()
+      .describe(
+        "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time",
+      ),
+    persistence: z
+      .enum(["session", "device"])
+      .optional()
+      .describe(
+        "session (default): dismissed when the last host client disconnects or after the idle timeout. device: stays interactive after USB/adb disconnect and session end, with no idle timeout, until its close control, an explicit dismiss, a replacing show, or the CtrlProxy service stops",
+      ),
   })
   .strict();
 const specSchema = z

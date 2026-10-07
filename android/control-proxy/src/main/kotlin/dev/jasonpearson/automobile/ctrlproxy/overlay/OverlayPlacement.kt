@@ -36,11 +36,34 @@ sealed interface OverlayPlacement {
 }
 
 /**
+ * The window layer an overlay is stacked on (#10496). [SYSTEM] is an accessibility overlay above
+ * system UI, including the shade, keyboard and SystemUI's screenshot flash and preview. [APP] is an
+ * application overlay just above apps, so all of those draw over it the way they do over a real
+ * app; it needs SYSTEM_ALERT_WINDOW, which the controller checks before showing.
+ */
+@SuppressLint("InlinedApi") // APP is only requested on API 26+; the controller refuses it below.
+enum class OverlayWindowLayer(val windowType: Int) {
+  SYSTEM(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY),
+  APP(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+
+  companion object {
+    /** Absent means [SYSTEM], the behaviour before layers existed. */
+    fun fromWire(value: String?): OverlayWindowLayer =
+      when (value) {
+        null,
+        "system" -> SYSTEM
+        "app" -> APP
+        else -> error("window.layer: Unknown layer")
+      }
+  }
+}
+
+/**
  * Edge-to-edge window bounds deliberately ignore safe areas; node-level insets are a renderer
  * concern. The highlight overlay's API-guarded cutout policy keeps offsets in true screen
  * coordinates, including cutouts (#9154). Density is supplied by the host's display context.
  * Accessibility overlays are trusted for touch pass-through on Android 12+, unlike application
- * overlays. This builder never consults SYSTEM_ALERT_WINDOW.
+ * overlays ([OverlayWindowLayer.APP]). This builder never consults SYSTEM_ALERT_WINDOW.
  */
 @SuppressLint("NewApi")
 fun interactiveOverlayLayoutParams(
@@ -48,6 +71,7 @@ fun interactiveOverlayLayoutParams(
   hasTextField: Boolean,
   density: Float,
   sdkInt: Int,
+  layer: OverlayWindowLayer = OverlayWindowLayer.SYSTEM,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -55,7 +79,7 @@ fun interactiveOverlayLayoutParams(
   return WindowManager.LayoutParams(
       wrap,
       wrap,
-      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      layer.windowType,
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
         if (hasTextField) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,

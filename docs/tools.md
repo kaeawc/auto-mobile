@@ -576,6 +576,26 @@ or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; use a replacement spec to change it.
 
+Two optional window fields need a CtrlProxy advertising
+`overlay_window_options_v1`; an older one is refused before anything is sent.
+`spec.window.layer` is `system` (default; an accessibility overlay above system
+UI) or `app` (an application overlay just above apps, so the notification shade,
+keyboard, toasts and the screenshot flash and preview draw over the prototype,
+and the status and navigation bars draw over a fullscreen one). Before an `app`
+show the daemon runs
+`adb shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow`;
+if the permission is still missing the device fails the show with that command.
+`spec.window.persistence` is `session` (default) or `device`: the overlay stays
+interactive after the last host client disconnects (USB unplugged, adb or the
+daemon gone) and after session end, has no idle timeout, and keeps its uploaded
+assets. `setPage`, `setState`, text fields and the `dismiss` action keep working
+offline. It goes away only through its own close control (the fullscreen dismiss
+row, or a Close button on sheet and floating windows), an explicit `dismiss`, a
+replacing `show`, or the CtrlProxy service stopping. Host-side status and event
+buffers are still cleared on session release, and events emitted while no host
+is connected are not replayed. `showVariants` accepts top-level `layer` and
+`persistence` for the carousel window.
+
 `showVariants` requires `id` and a nonempty `variants` array (maximum 12).
 Each variant is `{ label?, image: { asset, contentScale? } }` or
 `{ label?, spec: OverlayNode }`, with exactly one content field. Labels are

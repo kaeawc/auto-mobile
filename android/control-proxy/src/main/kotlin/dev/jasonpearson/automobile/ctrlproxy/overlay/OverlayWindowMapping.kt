@@ -5,6 +5,19 @@ import dev.jasonpearson.automobile.protocol.OverlayFloatingPlacement
 import dev.jasonpearson.automobile.protocol.OverlayFullscreenPlacement
 import dev.jasonpearson.automobile.protocol.OverlayPlacement as SpecPlacement
 import dev.jasonpearson.automobile.protocol.OverlaySheetPlacement
+import dev.jasonpearson.automobile.protocol.OverlaySpec
+
+/**
+ * `window.persistence: "device"` (#10494): the overlay survives the last client disconnecting and
+ * the idle timeout. Absent or `session` keeps the session-scoped behaviour.
+ */
+fun isDevicePersistent(spec: OverlaySpec): Boolean =
+  when (spec.window.persistence) {
+    null,
+    "session" -> false
+    "device" -> true
+    else -> error("window.persistence: Unknown persistence")
+  }
 
 fun mapOverlayPlacement(placement: SpecPlacement): OverlayPlacement =
   when (placement) {

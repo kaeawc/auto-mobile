@@ -848,6 +848,12 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
  */
 export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
 
+/**
+ * Advertised only by a CtrlProxy that honours spec `window.layer` and `window.persistence`. An older
+ * device decodes the spec leniently and would silently show a session-scoped system-layer overlay.
+ */
+export const OVERLAY_WINDOW_OPTIONS_CAPABILITY = "overlay_window_options_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -857,6 +863,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "gesture_display_id_v1",
   "tap_double_v1",
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */

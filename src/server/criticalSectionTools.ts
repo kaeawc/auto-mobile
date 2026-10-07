@@ -88,6 +88,27 @@ function criticalSectionSuccess(
   });
 }
 
+/**
+ * A timed-out `waitFor` sub-step's bounded diagnostics, as a section warning so they reach the
+ * plan's `warnings` through CriticalSectionStepError (#10024 parity with a top-level step). The
+ * duration alone is already in the error text; only add a line that says more.
+ */
+function waitForTimeoutWarning(
+  stepNumber: number,
+  tool: string,
+  result: StepExecutionResult,
+): string[] {
+  const diagnostics = result.details.waitForTimeout;
+  if (
+    !diagnostics ||
+    typeof diagnostics !== "object" ||
+    !Object.keys(diagnostics).some((key) => key !== "awaitDuration")
+  ) {
+    return [];
+  }
+  return [`step ${stepNumber} (${tool}): waitFor timeout: ${JSON.stringify(diagnostics)}`];
+}
+
 function legacyStepError(result: StepExecutionResult): string {
   // Keep the existing section message for thrown Errors and missing tools. The
   // new failedStep.error carries the exact shared executor error for consumers.
@@ -159,6 +180,8 @@ async function executeCriticalSectionSteps(
     if (result.status === "completed") {
       continue;
     }
+    // Pushed before the skip/failure line, as main's inline sub-step check did (#10024 parity).
+    warnings.push(...waitForTimeoutWarning(stepNumber, step.tool, result));
 
     const errorMsg = legacyStepError(result);
     if (result.status === "skipped") {

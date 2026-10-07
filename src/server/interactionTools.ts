@@ -79,7 +79,10 @@ import {
   KEYBOARD_PROFILE_IDS,
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
-import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import {
+  AndroidImeCatalog,
+  createForegroundUserSource,
+} from "../features/action/AndroidImeCatalog";
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -2763,7 +2766,8 @@ async function handleInstalledImeAction(
       await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
     );
   }
-  const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
+  const adb = defaultAdbClientFactory.create(device);
+  const catalog = new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb));
   if (args.action === "listImes") {
     return createStructuredToolResponse(await catalog.list(signal));
   }

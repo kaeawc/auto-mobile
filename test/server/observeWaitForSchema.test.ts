@@ -6,8 +6,6 @@ import {
   shouldSkipObserveWaitForScreenshot,
 } from "../../src/features/observe/automaticScreenshotPolicy";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import { DefaultElementSelector } from "../../src/features/utility/DefaultElementSelector";
-import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import {
   hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
@@ -40,7 +38,6 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeElementFinder } from "../fakes/FakeElementFinder";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -787,7 +784,7 @@ describe("element visible-part consistency", () => {
   ];
 
   test.each(cases)(
-    "shared geometry and four consumers agree: $name",
+    "shared geometry and three consumers agree: $name",
     ({ bounds: elementBounds, screen: size, offScreen }) => {
       const element: Element = {
         text: "Match",
@@ -812,12 +809,6 @@ describe("element visible-part consistency", () => {
 
       // Real parsers discard boundless Elements. Supply one at the existing injected
       // boundaries to exercise the consumers' visible-part policy rather than parsing.
-      const fakeFinder = new FakeElementFinder();
-      fakeFinder.nextElementsByText = [element];
-      const selector = new DefaultElementSelector(
-        elementBounds ? new DefaultElementFinder() : fakeFinder,
-        () => 0,
-      );
       const waitResolver: ConditionResolver = elementBounds
         ? resolver
         : {
@@ -850,7 +841,6 @@ describe("element visible-part consistency", () => {
         !sharedOffScreen,
       );
       expect(sharedOffScreen).toBe(offScreen);
-      expect(selector.selectByText(hierarchy, "Match").element !== null).toBe(!sharedOffScreen);
       expect(
         findWaitForElement(waitResolver, { text: "Match", textMatch: "exact" }, hierarchy) !== null,
       ).toBe(!sharedOffScreen);

@@ -15,13 +15,19 @@ import { isDebugModeEnabled } from "../debug";
 import {
   ExecutePlanStepDebugInfo,
   type PlanExecutionOptions,
+  type PlanStepToolResult,
   type PlanStepWarnings,
   type PlanSkippedStep,
   type PlanDeviceFailure,
 } from "../../models/ExecutePlanResult";
 import { throwIfAborted } from "../toolUtils";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
-import { computeSafeBarrierResumeStep } from "./BarrierResumeGuard";
+import { getPlanDevicePlatform } from "./PlanDevices";
+import { computeSafeBarrierResumeStep, isCoordinationTool } from "./BarrierResumeGuard";
+import {
+  ParticipantFailureTracker,
+  type ParticipantFailedError,
+} from "./ParticipantFailureTracker";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
@@ -36,7 +42,20 @@ import {
   type StepExecutionResult,
 } from "./PlanStepExecutor";
 
+import { PlanToolResultsBudget, StepToolResultCollector } from "./stepToolResults";
+
 export { UNEVALUATED_EXPECTATIONS_WARNING } from "./planStepParams";
+
+/** Every device track's `toolResults`, ordered by plan step index, or nothing when none ran. */
+function mergedToolResultsField(
+  tracks: { toolResults: PlanStepToolResult[] }[],
+  budget: PlanToolResultsBudget,
+): ReturnType<StepToolResultCollector["asField"]> {
+  const toolResults = tracks
+    .flatMap((track) => track.toolResults)
+    .sort((a, b) => a.stepIndex - b.stepIndex);
+  return { ...(toolResults.length > 0 ? { toolResults } : {}), ...budget.asField() };
+}
 
 interface ParallelTrackFailure {
   failedStep: NonNullable<PlanExecutionResult["failedStep"]>;
@@ -276,6 +295,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // (#6887 review).
     const warnings: PlanStepWarnings[] = [];
     const skippedSteps: PlanSkippedStep[] = [];
+    const toolResults = new StepToolResultCollector();
 
     try {
       // Validate and normalize startStep
@@ -329,6 +349,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
         if (stepResult.warnings) {
           warnings.push({ stepIndex: i, tool: step.tool, warnings: stepResult.warnings });
         }
+        if (stepResult.status === "completed") {
+          toolResults.add(i, step.tool, stepResult.toolPayload);
+        }
 
         if (stepResult.status === "skipped") {
           this.recordSkippedOptionalStep(
@@ -370,6 +393,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             // ran inside the failing step.
             ...(warnings.length > 0 ? { warnings } : {}),
             ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+            ...toolResults.asField(),
           };
         }
 
@@ -398,6 +422,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         ...(warnings.length > 0 ? { warnings } : {}),
         ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+        ...toolResults.asField(),
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -429,6 +454,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         ...(warnings.length > 0 ? { warnings } : {}),
         ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+        ...toolResults.asField(),
       };
     }
   }
@@ -525,6 +551,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
     // Track per-device results
     const perDeviceResults = new Map<string, DeviceExecutionResult>();
     const failures: ParallelTrackFailure[] = [];
+    // Tells survivors that a barrier/criticalSection can no longer be satisfied (#10025).
+    const participants = new ParticipantFailureTracker(plan);
+    // One toolResults budget for the whole plan, not one per device track.
+    const toolResultsBudget = new PlanToolResultsBudget();
 
     // Execute each device track in parallel
     const devicePromises = partitionedPlan.devices.map(async (device, deviceOrder) => {
@@ -538,16 +568,23 @@ export class DefaultPlanExecutor implements PlanExecutor {
           device,
           track,
           startStep,
-          platform,
+          // A mixed-platform plan runs each label's steps with that label's declared
+          // platform; the request platform only covers labels that declare none (#10023).
+          getPlanDevicePlatform(plan.devices, device) ?? platform,
           deviceId,
           sessionUuid,
           combinedSignal,
           executionOptions,
+          participants,
+          toolResultsBudget,
         );
         // An ordinary failing callback aborts synchronously below. Failures
         // observed after that abort may be cancelled siblings, even at a lower
         // real plan index. Keep them in perDeviceResults but prefer the cause.
-        const abortConsequence = internalAbortController.signal.aborted;
+        // A coordination step that failed only because a participant track had
+        // already failed is the same kind of symptom (#10025).
+        const abortConsequence =
+          internalAbortController.signal.aborted || result.failedStep?.participantFailed === true;
 
         const deviceResult: DeviceExecutionResult = {
           device,
@@ -595,7 +632,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
             );
             internalAbortController.abort();
           }
-          // For "finish-current-step", we just let other devices finish naturally
+          // For "finish-current-step", other devices finish naturally, except that a
+          // barrier/criticalSection the failed track will never reach fails promptly.
+          if (abortStrategy === "finish-current-step" && result.failedStep) {
+            participants.trackFailed(device, result.failedStep);
+          }
         }
 
         return result;
@@ -656,6 +697,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           },
           skippedSteps: [],
           warnings: [],
+          toolResults: [],
         };
       }
     });
@@ -715,6 +757,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       perDeviceResults,
       ...(warnings.length > 0 ? { warnings } : {}),
       ...(skippedSteps.length > 0 ? { skippedSteps } : {}),
+      ...mergedToolResultsField(results, toolResultsBudget),
     };
   }
 
@@ -750,6 +793,44 @@ export class DefaultPlanExecutor implements PlanExecutor {
   }
 
   /**
+   * Run one step of a device track. A coordination step that a failed participant track can no
+   * longer satisfy (#10025) is not run at all: it resolves immediately with that participant's
+   * failure, as does a barrier wait that becomes unsatisfiable while the step is parked in it.
+   */
+  private async executeTrackStep(
+    device: string,
+    step: PlanStep,
+    planIndex: number,
+    context: StepExecutionContext,
+    allParticipants: ParticipantFailureTracker | undefined,
+  ): Promise<{ result: StepExecutionResult; participantFailure?: ParticipantFailedError }> {
+    // Only coordination steps can wait on another track, so every other step keeps the plan's
+    // own signal untouched.
+    const participants = isCoordinationTool(step.tool) ? allParticipants : undefined;
+    const begun = participants?.beginStep(device, planIndex, context.signal);
+    if (begun && "failure" in begun) {
+      const error = begun.failure.message;
+      return {
+        participantFailure: begun.failure,
+        result: {
+          status: step.optional ? "skipped" : "failed",
+          error,
+          details: { params: step.params, error, ...(step.optional ? { optional: true } : {}) },
+        },
+      };
+    }
+    const result = await this.executeStep(step, {
+      ...context,
+      signal: begun ? begun.signal : context.signal,
+    });
+    participants?.endStep(device);
+    return {
+      result,
+      participantFailure: participants?.interruptionAt(device, planIndex),
+    };
+  }
+
+  /**
    * Execute a single device track.
    */
   private async executeDeviceTrack(
@@ -761,6 +842,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     sessionUuid?: string,
     signal?: AbortSignal,
     executionOptions?: PlanExecutionOptions,
+    participants?: ParticipantFailureTracker,
+    toolResultsBudget?: PlanToolResultsBudget,
   ): Promise<{
     success: boolean;
     executedSteps: number;
@@ -771,13 +854,17 @@ export class DefaultPlanExecutor implements PlanExecutor {
       tool: string;
       error: string;
       failureObservation?: FailureObservationSummary;
+      /** The step failed only because a participant track had already failed (#10025). */
+      participantFailed?: boolean;
     };
     skippedSteps: DeviceSkippedStepResult[];
     warnings: PlanStepWarnings[];
+    toolResults: PlanStepToolResult[];
   }> {
     let executedSteps = 0;
     const skippedSteps: DeviceSkippedStepResult[] = [];
     const warnings: PlanStepWarnings[] = [];
+    const toolResults = new StepToolResultCollector(toolResultsBudget);
 
     try {
       for (let trackIndex = 0; trackIndex < track.length; trackIndex++) {
@@ -800,14 +887,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
         );
 
         const stepStartTime = this.timer.now();
-        const stepResult = await this.executeStep(step, {
-          platform,
-          deviceId: this.resolveTrackDeviceId(device, sessionUuid),
-          sessionUuid,
-          signal,
-          logPrefix: `[PARALLEL_EXEC][${device}]`,
-          debugLog: true,
-        });
+        const { result: stepResult, participantFailure } = await this.executeTrackStep(
+          device,
+          step,
+          planIndex,
+          {
+            platform,
+            deviceId: this.resolveTrackDeviceId(device, sessionUuid),
+            sessionUuid,
+            signal,
+            logPrefix: `[PARALLEL_EXEC][${device}]`,
+            debugLog: true,
+          },
+          participants,
+        );
 
         if (stepResult.warnings) {
           warnings.push({
@@ -816,6 +909,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
             device,
             warnings: stepResult.warnings,
           });
+        }
+        if (stepResult.status === "completed") {
+          toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
         }
 
         if (stepResult.status === "skipped") {
@@ -843,13 +939,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
               stepIndex: planIndex,
               trackIndex,
               tool: step.tool,
-              error: stepResult.error ?? "Unknown error",
+              error: participantFailure?.message ?? stepResult.error ?? "Unknown error",
               ...(stepResult.failureObservation
                 ? { failureObservation: stepResult.failureObservation }
                 : {}),
+              ...(participantFailure ? { participantFailed: true } : {}),
             },
             skippedSteps,
             warnings,
+            toolResults: toolResults.toArray() ?? [],
           };
         }
 
@@ -869,6 +967,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         totalSteps: track.length,
         skippedSteps,
         warnings,
+        toolResults: toolResults.toArray() ?? [],
       };
     } catch (error) {
       if (isDeviceLostError(error)) {
@@ -889,6 +988,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         },
         skippedSteps,
         warnings,
+        toolResults: toolResults.toArray() ?? [],
       };
     }
   }

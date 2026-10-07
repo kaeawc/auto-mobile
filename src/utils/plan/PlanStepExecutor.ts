@@ -1,5 +1,5 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
-import { waitForTimeoutError } from "./waitForTimeout";
+import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout";
 import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
@@ -17,6 +17,7 @@ import type { FailureObservationSummary } from "../../models/FailureObservation"
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { redactTypedTextArguments } from "../redactTypedTextArguments";
 import { isDeviceLostError } from "../../models/DeviceLostError";
+import { isParticipantFailureAbort } from "./ParticipantFailureTracker";
 import {
   UNEVALUATED_EXPECTATIONS_WARNING,
   formatStepError,
@@ -110,6 +111,71 @@ export interface StepExecutionResult {
    * them out of the debug-only step trace (#6887 review).
    */
   warnings?: string[];
+  /**
+   * A completed step's unwrapped tool payload, bounded and promoted to the plan result's
+   * `toolResults` by the caller (#10090). Absent when the tool returned no object payload.
+   */
+  toolPayload?: unknown;
+}
+
+/**
+ * The structured payload of a completed step's tool response, or undefined when it carried none
+ * (an image-only success), so the raw envelope and its image data never reach `toolResults`.
+ */
+function completedStepPayload(
+  response: unknown,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  // An envelope with a hoisted top-level `success` classifies as its own payload, so read the
+  // structured payload off it first; only a bare (unwrapped) object is used as-is.
+  const structured = getStructuredPayload<Record<string, unknown>>(
+    response as { structuredContent?: unknown; content?: unknown } | null | undefined,
+  );
+  if (structured) {
+    return structured;
+  }
+  const interpretation = classifyToolResult(response, toolName, null);
+  if ("failure" in interpretation || interpretation.kind !== "payload") {
+    return undefined;
+  }
+  const { payload } = interpretation;
+  return "content" in payload || "structuredContent" in payload ? undefined : payload;
+}
+
+/** The optional-step skip record shared by every "tool answered but the step failed" branch. */
+function skippedOptionalResult(step: PlanStep, error: string): StepExecutionResult {
+  return {
+    status: "skipped",
+    error,
+    details: { params: step.params, error, optional: true },
+  };
+}
+
+/**
+ * An optional step whose tool answered but failed. A critical section keeps the sub-step's own
+ * warnings and timeout diagnostics next to its skip warning (#10024 parity); a top-level skip
+ * reports only the skip itself.
+ */
+function skippedAnsweredFailure(
+  step: PlanStep,
+  context: StepExecutionContext,
+  failure: {
+    toolResult: Record<string, unknown> | undefined;
+    error: string;
+    waitForTimeout?: Record<string, unknown>;
+  },
+): StepExecutionResult {
+  const skipped = skippedOptionalResult(step, failure.error);
+  if (!context.targetDevice) {
+    return skipped;
+  }
+  const { toolResult, waitForTimeout } = failure;
+  const warnings = toolResultWarnings(getStructuredPayload(toolResult) ?? toolResult);
+  return {
+    ...skipped,
+    details: { ...skipped.details, ...(waitForTimeout ? { waitForTimeout } : {}) },
+    ...(warnings ? { warnings } : {}),
+  };
 }
 
 /** Retain the plan-shaped failure and diagnostics without changing the legacy message. */
@@ -566,43 +632,45 @@ export class DefaultPlanStepExecutor<
       checkResult.success === false
     ) {
       const error = this.returnedFailureMessage(checkResult, context);
-      return this.resultFromToolFailure(step, context, response, toolResult, error);
+      return this.resultFromToolFailure(step, context, { response, toolResult, error });
     }
     const payload = getStructuredPayload(toolResult) ?? toolResult;
     const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
     if (error) {
-      if (this.shouldSkipReturnedFailure(step, context)) {
-        return {
-          status: "skipped",
-          error,
-          details: { params: step.params, error, optional: true },
-        };
-      }
-      return { status: "failed", error, details: { params: step.params, error } };
+      // A waitFor timeout or unsupported result is a failed step like any other: it gets the same
+      // failure observation and diagnostics as a `success: false` result, plus
+      // what the timeout itself reported (#10024).
+      return this.resultFromToolFailure(step, context, {
+        response,
+        toolResult,
+        error,
+        waitForTimeout: waitForTimeoutDiagnostics(payload),
+      });
     }
     return this.resultFromSuccess(step, context, response, toolResult);
   }
 
+  /**
+   * A tool answered but the step failed (`success: false`, a `waitFor` timeout or an
+   * unsupported result): capture the failure observation, copy the tool's diagnostics into the
+   * step details, and return the tool's warnings so the caller can promote them.
+   */
   private async resultFromToolFailure(
     step: PlanStep,
     context: StepExecutionContext,
-    response: unknown,
-    toolResult: Record<string, unknown> | undefined,
-    error: string,
+    failure: {
+      response: unknown;
+      toolResult: Record<string, unknown> | undefined;
+      error: string;
+      waitForTimeout?: Record<string, unknown>;
+    },
   ): Promise<StepExecutionResult> {
+    const { response, toolResult, error, waitForTimeout } = failure;
     const buildFailureObservationContext =
       context.buildFailureObservationContext ?? this.buildFailureObservationContext.bind(this);
     const deviceLabel = typeof step.params?.device === "string" ? step.params.device : undefined;
     if (this.shouldSkipReturnedFailure(step, context)) {
-      return {
-        status: "skipped",
-        error,
-        details: {
-          params: step.params,
-          error,
-          optional: true,
-        },
-      };
+      return skippedAnsweredFailure(step, context, failure);
     }
 
     const failureObservation = await buildFailureObservationContext(
@@ -619,14 +687,16 @@ export class DefaultPlanStepExecutor<
       ...(toolResult && typeof toolResult === "object" && "debug" in toolResult
         ? { toolDebug: toolResult.debug }
         : {}),
+      ...(waitForTimeout ? { waitForTimeout } : {}),
       ...(failureObservation ? { failureObservation } : {}),
     };
-    this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
+    const warnings = this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, details);
     return {
       status: "failed",
       error,
       details,
       failureObservation,
+      ...(warnings ? { warnings } : {}),
     };
   }
 
@@ -654,6 +724,7 @@ export class DefaultPlanStepExecutor<
     return {
       status: "completed",
       details,
+      toolPayload: completedStepPayload(response, step.tool),
       ...(warnings ? { warnings } : {}),
     };
   }
@@ -694,7 +765,11 @@ export class DefaultPlanStepExecutor<
       throw error;
     }
     const errorMsg = formatStepError(step.tool, error, step.params, tool.schema);
-    if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
+    // A wait cut short because a participant track failed (#10025) skips an optional step
+    // exactly like the barrier timeout it replaces; any other abort still fails it.
+    const abortedForOtherReason =
+      context.signal?.aborted && !isParticipantFailureAbort(context.signal);
+    if (step.optional && !abortedForOtherReason && !(error instanceof ZodError)) {
       this.logger.warn(
         `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
         error,

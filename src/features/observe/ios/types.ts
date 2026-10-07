@@ -144,6 +144,8 @@ export interface WebSocketMessage {
   bundleId?: string;
   capabilities?: string[];
   data?: XCTestHierarchy;
+  /** True when a hierarchy response contains a previous runner capture. */
+  servedFromCache?: boolean;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   rotation?: number;
@@ -155,6 +157,8 @@ export interface WebSocketMessage {
   method?: "escape" | "dismissKey" | "returnKey";
   totalTimeMs?: number;
   error?: string;
+  /** Additive typed companion to `error` (see `runnerErrorCodes.ts`); older runners omit it. */
+  errorCode?: string;
   /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
   blockingCommandType?: string;
   blockingElapsedMs?: number;
@@ -371,6 +375,8 @@ export interface CtrlProxyCachedHierarchy {
    * Host clock when this exact device capture was first seen. Unlike
    * `receivedAt`, this is retained when the runner re-delivers the same
    * `updatedAt`, so a repeated push cannot make old content look newly captured.
+   * An explicitly cached runner reply also bounds this by its real `updatedAt`
+   * and stays unverified (`fresh: false`), regardless of clock skew.
    */
   captureReceivedAt?: number;
   fresh: boolean;
@@ -393,6 +399,8 @@ export interface IosHierarchyAcquisition {
 /** A successful synchronous runner response; provenance stays on the host envelope. */
 export interface CtrlProxySyncedHierarchy extends IosHierarchyAcquisition {
   hierarchy: XCTestHierarchy;
+  /** False for a runner cache answer that has not re-verified the current screen. */
+  fresh?: boolean;
   perfTiming?: CtrlProxyPerfTiming;
   frameContext?: string;
 }

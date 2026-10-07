@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -27,14 +27,31 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
   let tempDir: string;
 
-  beforeEach(async () => {
-    backend = new PlatformVideoCaptureBackend();
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-test-"));
+  let rootDir: string;
+  let fixtureIndex = 0;
+  let testTimer: FakeTimer;
+
+  beforeAll(async () => {
+    rootDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "platform-video-test-"));
   });
 
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
+  beforeEach(() => {
+    testTimer = new FakeTimer();
+    testTimer.enableAutoAdvance();
+    backend = new PlatformVideoCaptureBackend(new FakeAdbClientFactory(), testTimer);
+    // Unique paths preserve each test's absent-file assertions without allocating
+    // a directory for configuration, process-control, or parser-only tests.
+    tempDir = path.join(rootDir, String(fixtureIndex++));
   });
+
+  afterAll(async () => {
+    await fsPromises.rm(rootDir, { recursive: true, force: true });
+  });
+
+  async function writeVideoFixture(outputPath: string, data: string | Buffer): Promise<void> {
+    await fsPromises.mkdir(path.dirname(outputPath), { recursive: true });
+    await fsPromises.writeFile(outputPath, data);
+  }
 
   describe("Interface Compliance", () => {
     test("implements VideoCaptureBackend interface", () => {
@@ -117,7 +134,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
   test("does not retain startup cancellation after an Android capture starts", async () => {
     const fakeFactory = new FakeAdbClientFactory();
-    const backend = new PlatformVideoCaptureBackend(fakeFactory);
+    const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
     const controller = new AbortController();
 
     await backend.start({
@@ -188,10 +205,10 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       display: "inner",
     };
 
-    await new PlatformVideoCaptureBackend(fakeFactory).start(config);
+    await new PlatformVideoCaptureBackend(fakeFactory, testTimer).start(config);
     expect(fakeFactory.getFakeClient().getSpawnCalls()[0]?.join(" ")).toContain("--display-id 22");
 
-    await new PlatformVideoCaptureBackend(fakeFactory).start({
+    await new PlatformVideoCaptureBackend(fakeFactory, testTimer).start({
       ...config,
       recordingId: "single-recording",
       device: { platform: "android", deviceId: "single", name: "Phone" },
@@ -216,7 +233,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         'Display id 0: DisplayInfo{uniqueId "local:11" type INTERNAL, real 100 x 200}\n' +
           'Display id 3: DisplayInfo{uniqueId "local:22" type INTERNAL, real 200 x 300}',
       );
-    const handle = await new PlatformVideoCaptureBackend(fakeFactory).start({
+    const handle = await new PlatformVideoCaptureBackend(fakeFactory, testTimer).start({
       recordingId: "unknown-api",
       outputDirectory: tempDir,
       outputPath: path.join(tempDir, "video.mp4"),
@@ -289,7 +306,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
         const outputPath = path.join(tempDir, "cleanup.mp4");
-        await fsPromises.writeFile(outputPath, "fake-video");
+        await writeVideoFixture(outputPath, "fake-video");
         const codecProbe = {
           async codec(filePath: string): Promise<string> {
             expect(filePath).toBe(outputPath);
@@ -362,7 +379,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
             },
           };
 
-          await fsPromises.writeFile(handle.outputPath, "fake-video");
+          await writeVideoFixture(handle.outputPath, "fake-video");
           const result = await new PlatformVideoCaptureBackend(factory, timer, probe).stop(handle);
 
           expect(result.codec).toBe("hevc");
@@ -422,8 +439,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
     test("forceStop sends SIGKILL to both the device recorder and host adb process", async () => {
       const fakeFactory = new FakeAdbClientFactory();
-      const fakeProcess = new FakeChildProcess();
-      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
       const signals = spyOnKill(fakeProcess);
 
@@ -440,8 +457,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
     test("forceStop with deviceWide:false runs no device-wide kill but reaps host adb and removes our temp file", async () => {
       const fakeFactory = new FakeAdbClientFactory();
-      const fakeProcess = new FakeChildProcess();
-      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
       const signals = spyOnKill(fakeProcess);
 
@@ -458,8 +475,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeFactory
         .getFakeClient()
         .setCommandError("shell rm -f /sdcard/auto-mobile-test.mp4", new Error("device offline"));
-      const fakeProcess = new FakeChildProcess();
-      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
 
       await expect(
         backend.forceStop(buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess)),
@@ -469,8 +486,8 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     test("forceStop kills host adb before a stalled device command can consume shutdown time", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       fakeFactory.getFakeClient().setHangingCommand("shell pkill -9 screenrecord");
-      const fakeProcess = new FakeChildProcess();
-      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const fakeProcess = new FakeChildProcess(testTimer);
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, testTimer);
       const signals = spyOnKill(fakeProcess);
 
       const pendingForceStop = backend.forceStop(
@@ -484,10 +501,10 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
     test("forceStop SIGKILLs a host adb process after graceful SIGINT was sent", async () => {
       const fakeFactory = new FakeAdbClientFactory();
-      const fakeProcess = new FakeChildProcess();
-      fakeProcess.killed = true;
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
+      fakeProcess.killed = true;
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
       const signals = spyOnKill(fakeProcess);
 
@@ -511,11 +528,11 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
-      await fsPromises.writeFile(handle.outputPath, "fake-video");
+      await writeVideoFixture(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       const commands = fakeClient.getAllCommands();
@@ -528,13 +545,13 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const killSignals = spyOnKill(fakeProcess);
 
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
-      await fsPromises.writeFile(handle.outputPath, "fake-video");
+      await writeVideoFixture(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       expect(killSignals).toEqual([]);
@@ -566,7 +583,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       };
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0; // host adb already exited
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
@@ -585,7 +602,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       // exitCode stays null → host adb still running when stop() begins
       const killSignals: Array<NodeJS.Signals | number | undefined> = [];
 
@@ -608,7 +625,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       (handle.backendHandle as any).exitPromise = exitPromise;
       (handle.backendHandle as any).exitState.exitCode = null;
 
-      await fsPromises.writeFile(handle.outputPath, "fake-video");
+      await writeVideoFixture(handle.outputPath, "fake-video");
       await backend.stop(handle);
 
       expect(killSignals).toContain("SIGINT");
@@ -622,12 +639,12 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
 
       // Simulate the pulled artifact so getFileSize returns a real byte count.
       const outputPath = path.join(tempDir, "out.mp4");
-      await fsPromises.writeFile(outputPath, Buffer.alloc(4096, 1));
+      await writeVideoFixture(outputPath, Buffer.alloc(4096, 1));
       const handle = buildAndroidStopHandle(outputPath, fakeProcess);
 
       const result = await backend.stop(handle);
@@ -657,11 +674,11 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         },
       };
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer, codecProbe);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
 
       const outputPath = path.join(tempDir, "probed.mp4");
-      await fsPromises.writeFile(outputPath, Buffer.alloc(64, 1));
+      await writeVideoFixture(outputPath, Buffer.alloc(64, 1));
       const handle = buildAndroidStopHandle(outputPath, fakeProcess);
 
       const result = await backend.stop(handle);
@@ -687,10 +704,10 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       ]);
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const outputPath = path.join(tempDir, "finalize.mp4");
-      await fsPromises.writeFile(outputPath, Buffer.alloc(512, 1));
+      await writeVideoFixture(outputPath, Buffer.alloc(512, 1));
       const handle = buildAndroidStopHandle(outputPath, fakeProcess);
 
       const result = await backend.stop(handle);
@@ -731,7 +748,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       ]);
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "unstable.mp4"), fakeProcess);
 
@@ -757,7 +774,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       ]);
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "empty.mp4"), fakeProcess);
 
@@ -874,7 +891,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         captureProcess.exitCode = 0;
         const outputPath = path.join(tempDir, "unusable.mp4");
         if (output === "empty") {
-          await fsPromises.writeFile(outputPath, "");
+          await writeVideoFixture(outputPath, "");
         }
         await expect(
           new PlatformVideoCaptureBackend(factory, timer).stop(
@@ -900,7 +917,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "fail.mp4"), fakeProcess);
 
@@ -926,7 +943,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 
@@ -945,7 +962,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       fakeTimer.enableAutoAdvance();
 
       const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
-      const fakeProcess = new FakeChildProcess();
+      const fakeProcess = new FakeChildProcess(fakeTimer);
       fakeProcess.exitCode = 0;
       const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
 

@@ -134,6 +134,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "serializeRequest",
         "timer",
         "unsupportedCommandError",
+        "wireDeadlineParams",
       ]);
     });
 
@@ -175,6 +176,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "timer",
         "unmarkObserverHierarchyRequest",
         "unsupportedCommandError",
+        "wireDeadlineParams",
       ]);
     });
   });

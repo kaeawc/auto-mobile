@@ -4,7 +4,8 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { DefaultElementSelector } from "../utility/DefaultElementSelector";
+import type { ResolutionAction } from "../../models/ResolutionAction";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { nodeAttributes, type NodeAttributes } from "../../models/ViewHierarchyResult";
 import { ViewHierarchyParser } from "../../utils/ViewHierarchyParser";
 import {
@@ -204,27 +205,40 @@ function tapPropertiesFor(element: Element): NodeAttributes {
  * (list rows) onto the first row. Uniqueness and occurrence are measured through
  * the same {@link ElementSelector} tapOn uses, with tapOn's own options, so they
  * see exactly its matches: a bare Compose id matching a qualified one, and
- * off-screen matches dropped before `index` applies. Prefer a unique resource-id,
- * then unique text / content-desc / iOS label (all matched by the text selector),
- * and otherwise pin the occurrence with tapOn's on-screen `index`.
- * Returns null when the element has no selector at all.
+ * off-screen and actionless matches dropped before `index` applies, labels promoted
+ * to their actionable owner (#10268). A scrollable container is measured with the
+ * `inspect` intent swipeOn resolves `container` with, so repeated containers keep
+ * their occurrence index. Prefer a resource-id whose single match is this element,
+ * then text / content-desc / iOS label likewise (all matched by the text selector),
+ * then the first selector whose on-screen `index` pins this element. A selector with
+ * no match at all (an IME key's label, an off-screen element's own id) is kept
+ * unindexed since it cannot reach another control. Returns null when the element has
+ * no selector, or when every selector would only reach other controls.
  */
 export function tapSelectorFor(
   element: Element,
   viewHierarchy: ViewHierarchyResult,
-  selector: ElementSelector = new DefaultElementSelector(),
+  selector: ElementSelector = new ResolverElementSelector(),
 ): TapSelector | null {
   const properties = tapPropertiesFor(element);
   const id = asString(properties["resource-id"]);
   const text = asString(
     properties.text || properties["content-desc"] || properties["ios-accessibility-label"],
   );
+  // swipeOn resolves its `container` with the inspect intent; tapOn uses tap.
+  const intentAction: ResolutionAction | undefined = isTruthy(element.scrollable)
+    ? "inspect"
+    : undefined;
   const candidates: Array<{ selector: TapSelector; select: SelectOccurrence }> = [];
   if (id) {
     candidates.push({
       selector: { elementId: id },
       select: (index) =>
-        selector.selectByResourceId(viewHierarchy, id, { partialMatch: false, index }),
+        selector.selectByResourceId(viewHierarchy, id, {
+          partialMatch: false,
+          index,
+          intentAction,
+        }),
     });
   }
   if (text) {
@@ -235,38 +249,58 @@ export function tapSelectorFor(
           partialMatch: true,
           caseSensitive: false,
           index,
+          intentAction,
         }),
     });
   }
-  const unique = candidates.find((candidate) => candidate.select().totalMatches <= 1);
+  const isTarget = targetMatcher(element);
+  const unique = candidates.find((candidate) => {
+    const result = candidate.select();
+    return result.totalMatches === 1 && !!result.element && isTarget(result.element);
+  });
   if (unique) {
     return unique.selector;
   }
-  const [preferred] = candidates;
-  return preferred
-    ? { ...preferred.selector, ...occurrenceIndex(preferred.select, element) }
-    : null;
+  for (const candidate of candidates) {
+    const index = occurrenceIndex(candidate.select, isTarget);
+    if (index !== undefined) {
+      return { ...candidate.selector, index };
+    }
+  }
+  // A selector with no match cannot reach another control; one whose matches are
+  // all other controls would tap the wrong one.
+  return candidates.find((candidate) => candidate.select().totalMatches === 0)?.selector ?? null;
 }
 
-/** Match the control or its descendant label among tapOn's on-screen matches. */
-function occurrenceIndex(select: SelectOccurrence, element: Element): { index?: number } {
+/** A match is the element when it is the control, a descendant label, or shares its bounds. */
+function targetMatcher(element: Element): (match: Element) => boolean {
   const descendants = new Set<ViewHierarchyNode>();
   new ViewHierarchyParser().traverseNode(
     getHierarchyNodeSource(element) ?? element,
     (node: ViewHierarchyNode) => descendants.add(node),
   );
+  return (match) => {
+    const source = getHierarchyNodeSource(match);
+    return (!!source && descendants.has(source)) || boundsEqual(match.bounds, element.bounds);
+  };
+}
+
+/** The element's position among the selector's on-screen matches, if it is one of them. */
+function occurrenceIndex(
+  select: SelectOccurrence,
+  isTarget: (match: Element) => boolean,
+): number | undefined {
   const total = select(0).totalMatches;
   for (let index = 0; index < total; index++) {
     const match = select(index).element;
     if (!match) {
       break;
     }
-    const source = getHierarchyNodeSource(match);
-    if ((source && descendants.has(source)) || boundsEqual(match.bounds, element.bounds)) {
-      return { index };
+    if (isTarget(match)) {
+      return index;
     }
   }
-  return {};
+  return undefined;
 }
 
 /** Existing tapAt path accepts the centre of finite, positive-area bounds. */

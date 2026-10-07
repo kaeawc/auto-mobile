@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
@@ -183,7 +182,6 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
   };
   const finder = new DefaultElementFinder();
   expect(finder.findElementsByText(hierarchy, target.text!)).toEqual([target]);
-  const selector = new DefaultElementSelector(finder, options);
   const device = selectionFixtureDevice(platform, 1);
   // The fake deliberately returns the target unfiltered, so tapAny's own check
   // must reject off-screen rows independently of the selector's filtering.
@@ -207,13 +205,11 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
         hierarchy,
         target.text!,
       ).element === null,
-    selector: selector.selectByText(hierarchy, target.text!).element === null,
     tapAny: tapAny["findClickableElement"]({ action: "tap" }, hierarchy, options).element === null,
     tapOn: tapOn["isElementTapTargetOffScreen"](selection, hierarchy, tapOnSize),
   };
   expect(verdicts).toEqual({
     resolver: row.offscreen,
-    selector: row.offscreen,
     tapAny: row.offscreen,
     tapOn: row.offscreen,
   });

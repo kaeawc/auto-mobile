@@ -5,6 +5,7 @@
  * getting current focus, traversal order, and setting/clearing focus.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -144,6 +145,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action '${action}' request failed after ${duration}ms: ${error}`);
       return {
@@ -219,6 +222,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Current focus request failed after ${duration}ms: ${error}`);
       return {
@@ -301,6 +306,8 @@ export class CtrlProxyFocus {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Traversal order request failed after ${duration}ms: ${error}`);
       return {

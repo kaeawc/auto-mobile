@@ -15,7 +15,7 @@
  */
 
 import WebSocket from "ws";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -39,9 +39,100 @@ import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigat
 export type WebSocketFactory = (url: string) => WebSocket;
 
 /**
- * Default WebSocket factory that creates real WebSocket instances.
+ * Env flag a unit test sets (`1`/`true`/`yes`) to opt into a real WebSocket from
+ * {@link defaultWebSocketFactory} under `bun test`. Prefer injecting a
+ * `WebSocketFactory` instead; this exists for suites that must exercise the
+ * default factory against a local fake server.
  */
-export const defaultWebSocketFactory: WebSocketFactory = (url: string) => new WebSocket(url);
+export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_PROXY_WEBSOCKET";
+
+function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
+  const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes";
+}
+
+/**
+ * Thrown by {@link assertUnitTestRealWebSocketAllowed}. It is a test-harness
+ * misconfiguration, not a connect failure: every catch on the connect path
+ * rethrows it before recording a failed attempt, so a leaking unit test fails
+ * loudly and never counts toward the platform clients' service recovery or
+ * restart (which would act on an attached device).
+ */
+export class RealCtrlProxyWebSocketInTestError extends ActionableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "RealCtrlProxyWebSocketInTestError";
+  }
+}
+
+/** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
+export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
+  if (error instanceof RealCtrlProxyWebSocketInTestError) {
+    throw error;
+  }
+}
+
+const TEST_FILE_ENTRYPOINT = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/** The running script: the current test file under `bun test`, `dist/src/index.js` (or the compiled binary) otherwise. */
+function currentEntrypoint(): string | undefined {
+  // src/ is type-checked without Bun's globals; read `Bun.main` structurally.
+  const bun = (globalThis as { Bun?: { main?: string } }).Bun;
+  return bun?.main ?? process.argv[1];
+}
+
+/**
+ * Whether this process is the `bun test` runner itself. `NODE_ENV=test` alone is
+ * not enough: it is inherited by every CLI/daemon child a real-device
+ * integration test spawns (`execFile`, `daemonProcessEnvironment`), and those
+ * children must dial the device. Under `bun test`, `Bun.main` is the test file
+ * being run; in a spawned child it is the child's own entrypoint, which no
+ * environment inheritance can turn into a test file.
+ */
+function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | undefined): boolean {
+  return (
+    env.NODE_ENV === "test" && entrypoint !== undefined && TEST_FILE_ENTRYPOINT.test(entrypoint)
+  );
+}
+
+/**
+ * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
+ * CtrlProxy socket. On a developer machine with an emulator or simulator running,
+ * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
+ * unstubbed client method sent real taps from a unit test (#10470). Like the
+ * real-DB guard (#3067) it needs Bun's test context signal (`NODE_ENV=test`),
+ * but it also requires this process to be the `bun test` runner itself (see
+ * {@link isBunTestRunnerProcess}), so CLI/daemon children of an on-device
+ * integration test are never armed. It fires only on the default path.
+ * Injecting a `WebSocketFactory` (or setting
+ * {@link REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}) opts out.
+ */
+export function assertUnitTestRealWebSocketAllowed(
+  url: string,
+  env: NodeJS.ProcessEnv = process.env,
+  entrypoint: string | undefined = currentEntrypoint(),
+): void {
+  if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
+    return;
+  }
+  throw new RealCtrlProxyWebSocketInTestError(
+    `Unit test tried to open a real CtrlProxy WebSocket to ${url}. With an ` +
+      "emulator or simulator running this reaches a live device (issue #10470). " +
+      "Stub the client method the code under test calls (e.g. " +
+      "AndroidCtrlProxyClient.prototype.requestTapCoordinates or the matching " +
+      "IOSCtrlProxyClient method), inject a fake WebSocketFactory, or, for a " +
+      `suite that runs its own local fake server, set ${REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV}=1.`,
+  );
+}
+
+/**
+ * Default WebSocket factory that creates real WebSocket instances. Guarded under
+ * `bun test`; see {@link assertUnitTestRealWebSocketAllowed}.
+ */
+export const defaultWebSocketFactory: WebSocketFactory = (url: string) => {
+  assertUnitTestRealWebSocketAllowed(url);
+  return new WebSocket(url);
+};
 
 /**
  * Configuration for connection behavior.
@@ -386,6 +477,7 @@ export abstract class DeviceServiceClient {
         maxAttempts,
         signal,
         delays: delayMs,
+        shouldRetry: (error) => !(error instanceof RealCtrlProxyWebSocketInTestError),
         onRetry: (_error, attempt) => {
           logger.debug(
             `[${this.logTag}] Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms`,
@@ -395,6 +487,9 @@ export abstract class DeviceServiceClient {
     );
     signal?.throwIfAborted();
 
+    if (result.error instanceof RealCtrlProxyWebSocketInTestError) {
+      throw result.error;
+    }
     if (!result.success) {
       logger.warn(
         `[${this.logTag}] WebSocket not ready after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`,
@@ -846,9 +941,7 @@ export abstract class DeviceServiceClient {
           }),
       );
     } catch (error) {
-      this.isConnecting = false;
-      this.recordFailedConnect(error, background);
-      return false;
+      return this.failConnectAttempt(error, background);
     }
   }
 
@@ -877,6 +970,22 @@ export abstract class DeviceServiceClient {
       this.connectionAttempts++;
       this.lastConnectionAttempt = this.timer.now();
     }
+  }
+
+  private failConnectAttempt(error: unknown, background: boolean): false {
+    this.isConnecting = false;
+    if (error instanceof RealCtrlProxyWebSocketInTestError) {
+      // A test-harness misconfiguration, not a connect failure: never let it
+      // count toward cooldown or the platform clients' service recovery.
+      // Refund the attempt too, or the third leak would enter cooldown and
+      // return false silently instead of failing the test.
+      if (!background) {
+        this.connectionAttempts = Math.max(0, this.connectionAttempts - 1);
+      }
+      throw error;
+    }
+    this.recordFailedConnect(error, background);
+    return false;
   }
 
   private recordFailedConnect(error: unknown, background: boolean): void {

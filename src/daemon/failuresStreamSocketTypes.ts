@@ -30,6 +30,8 @@ export type DateRangePreset = "1h" | "24h" | "3d" | "7d" | "30d";
  * Request to the failures stream socket
  */
 export interface FailuresStreamSocketRequest extends SocketRequest {
+  /** Live device or observer session UUID; required unless stream auth is disabled. */
+  sessionUuid?: string;
   command: FailuresStreamCommand;
 
   // Cursor-based pagination for polling

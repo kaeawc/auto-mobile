@@ -41,6 +41,7 @@ data class FailuresNotificationsRequest(
   val type: String? = null,
   val acknowledged: Boolean? = null,
   val limit: Int? = null,
+  val sessionUuid: String? = null,
 )
 
 /** Request for polling failure groups */
@@ -52,6 +53,7 @@ data class FailuresGroupsRequest(
   val dateRange: String? = null,
   val type: String? = null,
   val severity: String? = null,
+  val sessionUuid: String? = null,
 )
 
 /** Request for polling timeline data */
@@ -62,6 +64,7 @@ data class FailuresTimelineRequest(
   val endTime: Long? = null,
   val dateRange: String? = null,
   val aggregation: String? = null,
+  val sessionUuid: String? = null,
 )
 
 /** Request for acknowledging notifications */
@@ -69,6 +72,7 @@ data class FailuresTimelineRequest(
 data class AcknowledgeRequest(
   val command: String = "acknowledge",
   val notificationIds: List<Int>,
+  val sessionUuid: String? = null,
 )
 
 /** Notification entry from the stream */
@@ -348,22 +352,30 @@ internal constructor(
   private val json: Json = DaemonJson,
   private val requestTimeoutMs: Long = FAILURES_STREAM_REQUEST_TIMEOUT_MS,
   private val watchdog: SocketRequestWatchdog,
+  private val sessionUuidProvider: () -> String? = { null },
 ) : FailuresStreamClient {
   constructor(
     socketPathValue: String = FailuresStreamSocketPaths.socketPath(),
     json: Json = DaemonJson,
     requestTimeoutMs: Long = FAILURES_STREAM_REQUEST_TIMEOUT_MS,
+    sessionUuidProvider: () -> String? = { null },
   ) : this(
     socketPathValue,
     json,
     requestTimeoutMs,
     SharedSocketRequestWatchdog,
+    sessionUuidProvider,
   )
 
   override fun pollNotifications(
     request: FailuresNotificationsRequest
   ): FailuresNotificationsResponse {
-    val response = sendRequest<FailuresNotificationsResponse>(json.encodeToString(request))
+    val response =
+      sendRequest<FailuresNotificationsResponse>(
+        json.encodeToString(
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
+        )
+      )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures notifications poll failed")
     }
@@ -371,7 +383,12 @@ internal constructor(
   }
 
   override fun pollGroups(request: FailuresGroupsRequest): FailuresGroupsResponse {
-    val response = sendRequest<FailuresGroupsResponse>(json.encodeToString(request))
+    val response =
+      sendRequest<FailuresGroupsResponse>(
+        json.encodeToString(
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
+        )
+      )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures groups poll failed")
     }
@@ -379,7 +396,12 @@ internal constructor(
   }
 
   override fun pollTimeline(request: FailuresTimelineRequest): FailuresTimelineResponse {
-    val response = sendRequest<FailuresTimelineResponse>(json.encodeToString(request))
+    val response =
+      sendRequest<FailuresTimelineResponse>(
+        json.encodeToString(
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
+        )
+      )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures timeline poll failed")
     }
@@ -387,7 +409,8 @@ internal constructor(
   }
 
   override fun acknowledge(notificationIds: List<Int>): AcknowledgeResponse {
-    val request = AcknowledgeRequest(notificationIds = notificationIds)
+    val request =
+      AcknowledgeRequest(notificationIds = notificationIds, sessionUuid = sessionUuidProvider())
     val response = sendRequest<AcknowledgeResponse>(json.encodeToString(request))
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures acknowledge failed")

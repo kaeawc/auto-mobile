@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.design.system.components
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -87,6 +89,8 @@ fun AutoMobileExtendedFloatingActionButton(
   ) {
     if (icon != null) {
       Icon(imageVector = icon, contentDescription = contentDescription)
+      // Material spec: 8dp between the icon and label of an extended FAB.
+      Spacer(modifier = Modifier.width(AutoMobileDimensions.spacing2))
     }
     Text(text = text)
   }

@@ -115,6 +115,25 @@ export const sendKeysResultSchema = z
             pinnedDisplay: pinnedDisplaySchema.optional(),
             displayInventory: displayInventoryUnavailableSchema.optional(),
             staleDisplay: staleDisplaySchema.optional(),
+            imeFailure: z
+              .object({
+                stage: z.enum([
+                  "unsupportedCapability",
+                  "activationBinding",
+                  "commit",
+                  "verification",
+                  "transport",
+                  "restoration",
+                ]),
+                cause: z.string(),
+                expectedText: z.string(),
+                observedText: z.string().nullable(),
+                focusedFieldClass: z.string().nullable(),
+                textMayHaveBeenApplied: z.boolean(),
+                committedUnits: z.number().int().nonnegative().optional(),
+                verifiedGraphemes: z.number().int().nonnegative().optional(),
+              })
+              .optional(),
             backend: z.literal("autoMobileIme").optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),

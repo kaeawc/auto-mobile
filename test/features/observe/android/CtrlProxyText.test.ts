@@ -230,6 +230,7 @@ describe("Android CtrlProxyText", () => {
       success: false,
       partialApplication: true,
       sessionUnsafe: true,
+      transportFailure: true,
       error: expect.stringContaining("cancellation was not acknowledged"),
     });
   });
@@ -261,7 +262,11 @@ describe("Android CtrlProxyText", () => {
       targetRequestId: commit.requestId,
       partialApplication: true,
     });
-    expect(await resultPromise).toMatchObject({ success: false, partialApplication: true });
+    expect(await resultPromise).toMatchObject({
+      success: false,
+      partialApplication: true,
+      transportFailure: true,
+    });
     expect((await resultPromise).sessionUnsafe).toBeUndefined();
   });
 

@@ -1,5 +1,13 @@
+import { Daemon } from "../../../src/daemon/daemon";
+import type { DaemonOptions } from "../../../src/daemon/types";
 import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 import { FakeFeatureFlagRepository } from "../../fakes/FakeFeatureFlagRepository";
+import {
+  outputReductionFlagsToArgs,
+  parseOutputReductionFlags,
+  resolveActionsCompactMetadata,
+} from "../../../src/utils/outputReductionFlags";
+import { parseDaemonArgs } from "../../../src/daemon/cli/daemonArgs";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DefaultFeatureFlagApplier } from "../../../src/features/featureFlags/FeatureFlagApplier";
 import {
@@ -11,7 +19,7 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 /**
  * EC2: DefaultFeatureFlagApplier.apply routes each output-reduction key to the
  * matching serverConfig setter (the feature-flag pipeline).
- * EC4: FEATURE_FLAG_DEFINITIONS registers each key, compact metadata default true; other defaults false.
+ * EC4: FEATURE_FLAG_DEFINITIONS registers compact metadata default true and other keys false.
  */
 const CASES: Array<{ key: FeatureFlagKey; read: () => boolean }> = [
   {
@@ -56,19 +64,47 @@ describe("FEATURE_FLAG_DEFINITIONS output-reduction flags", () => {
   }
 });
 
-test("compact metadata feature-flag false restores full metadata", () => {
-  const applier = new DefaultFeatureFlagApplier();
-  const previous = serverConfig.isActionsCompactMetadataEnabled();
-  try {
-    const definition = FEATURE_FLAG_DEFINITIONS.find((d) => d.key === "actions-compact-metadata")!;
-    applier.apply(definition.key, definition.defaultValue);
-    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
-    applier.apply(definition.key, false);
-    expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(false);
-  } finally {
-    serverConfig.setActionsCompactMetadataEnabled(previous);
-  }
-});
+const localCases = [true, false, undefined].flatMap((persisted) =>
+  [true, false, undefined].map((explicit) => ({ persisted, explicit })),
+);
+
+test.each(localCases)(
+  "persisted=$persisted explicit=$explicit resolves local behavior without inferring a relay choice",
+  async ({ persisted, explicit }) => {
+    const previous = serverConfig.isActionsCompactMetadataEnabled();
+    const repository = new FakeFeatureFlagRepository();
+    if (persisted !== undefined) {
+      await repository.upsertFlag("actions-compact-metadata", persisted);
+    }
+    const service = new FeatureFlagService(repository, new DefaultFeatureFlagApplier());
+    const args =
+      explicit === undefined
+        ? []
+        : [explicit ? "--actions-compact-metadata" : "--no-actions-compact-metadata"];
+    const flags = parseOutputReductionFlags(args, {});
+    try {
+      await service.initialize();
+      if (flags.actionsCompactMetadata !== undefined) {
+        await service.setFlag("actions-compact-metadata", flags.actionsCompactMetadata);
+      }
+      const effective = resolveActionsCompactMetadata(
+        flags.actionsCompactMetadata,
+        service.isEnabled("actions-compact-metadata"),
+      );
+      serverConfig.setActionsCompactMetadataEnabled(effective);
+      expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(explicit ?? persisted ?? true);
+      expect(service.isEnabled("actions-compact-metadata")).toBe(explicit ?? persisted ?? true);
+      const relay = parseDaemonArgs(outputReductionFlagsToArgs(flags), {});
+      expect(relay.actionsCompactMetadata).toBe(explicit);
+      // Invoke only the pure config application method; no daemon is constructed or started.
+      const daemonState = { options: { ...relay } } satisfies { options: DaemonOptions };
+      Daemon.prototype["applyToolOutputOptions"].call(daemonState, relay);
+      expect(daemonState.options.actionsCompactMetadata).toBe(explicit ?? persisted ?? true);
+    } finally {
+      serverConfig.setActionsCompactMetadataEnabled(previous);
+    }
+  },
+);
 
 test("feature-flag initialization defaults compact metadata on and preserves saved false", async () => {
   const previous = serverConfig.isActionsCompactMetadataEnabled();

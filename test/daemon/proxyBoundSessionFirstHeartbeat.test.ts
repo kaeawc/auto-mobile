@@ -668,9 +668,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         [],
       );
       expect(
-        debug.mock.calls.filter(([message]) =>
-          String(message).includes("liveness ownership superseded"),
-        ),
+        warn.mock.calls.filter(([message]) => String(message).includes("liveness ownership lost")),
       ).toHaveLength(1);
       // A later stalled RPC is still inside the local retry window. Without
       // acknowledging superseded ticks locally, this would fence after 1ms.

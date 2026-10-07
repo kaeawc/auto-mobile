@@ -207,6 +207,7 @@ describe("storageCapabilityResources", () => {
       );
       context.providerCoverage = [];
       context.sharedStorageReadCoverage = { list: true, read: true };
+      context.mediaLibraryReadCoverage = { list: true, read: true };
       const expected = JSON.stringify(
         { deviceId: device.deviceId, ...computeStorageCapabilities(context) },
         null,
@@ -396,8 +397,8 @@ describe("storageCapabilityResources", () => {
       (domain: { domain: string }) => domain.domain === "user_files",
     );
     expect(userFiles.operations.map((op: { state: string }) => op.state)).toEqual([
-      "unavailable",
-      "unavailable",
+      "supported",
+      "supported",
       "partial",
       "partial",
       "unsupported",
@@ -406,7 +407,7 @@ describe("storageCapabilityResources", () => {
     expect(body.context.iosFilesFixtureInstalled).toBeUndefined();
   });
 
-  test("iOS Simulator user_files is unavailable with no registered write provider", async () => {
+  test("iOS Simulator reads remain registered independently of write providers", async () => {
     const simulator = { ...iosPhysical, deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
     setDevices([simulator], { appFileCoverage: { describeProviderCoverage: () => [] } });
     const body = JSON.parse(
@@ -417,8 +418,8 @@ describe("storageCapabilityResources", () => {
       (domain: { domain: string }) => domain.domain === "user_files",
     );
     expect(userFiles.operations.map((op: { state: string }) => op.state)).toEqual([
-      "unavailable",
-      "unavailable",
+      "supported",
+      "supported",
       "unavailable",
       "unavailable",
       "unsupported",
@@ -496,8 +497,8 @@ describe("storageCapabilityResources", () => {
           return [];
         },
       },
-      sharedStorageReadCoverage: (platform) => {
-        coverageCalls.push(platform);
+      sharedStorageReadCoverage: (platform, domain) => {
+        coverageCalls.push(`${platform}:${domain}`);
         return { list: true, read: false };
       },
     });
@@ -513,7 +514,7 @@ describe("storageCapabilityResources", () => {
       "unavailable",
       "unavailable",
     ]);
-    expect(coverageCalls).toEqual(["providers", "android"]);
+    expect(coverageCalls).toEqual(["providers", "android:user_files", "android:media_library"]);
     expect(userFiles.operations[1].reason).toContain("SharedStorageReadService read provider");
   });
 

@@ -1,5 +1,8 @@
-import { parseOutputReductionFlags } from "../../src/utils/outputReductionFlags";
 import { DefaultFeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
+import {
+  parseOutputReductionFlags,
+  resolveActionsCompactMetadata,
+} from "../../src/utils/outputReductionFlags";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
@@ -4780,13 +4783,16 @@ describe("actions-compact-metadata", () => {
     }
   }
 
-  test("explicit opt-out keeps finalized bytes identical; missing session/store are also unchanged", () => {
+  test("opt-out finalized bytes stay identical; missing session/store are also unchanged", () => {
     emit();
     const snapshot = structuredClone(records);
     const reads = spyOn(store, "getActionMetadata");
     const writes = spyOn(store, "setActionMetadata");
     serverConfig.setActionsCompactMetadataEnabled(false);
-    const expected = JSON.stringify(emit());
+    const full = emit();
+    expectFull(full);
+    expect(structuredPayload(full).element).toEqual(element);
+    const expected = JSON.stringify(full);
     expect(JSON.stringify(emit())).toBe(expected);
     emit(action().observation as Record<string, unknown>, { name: "observe" });
     emit({ ...action(), success: false });
@@ -4803,7 +4809,7 @@ describe("actions-compact-metadata", () => {
   });
   test("default configuration sends full first/new-session/device-switch blocks and compacts repeats", () => {
     serverConfig.setActionsCompactMetadataEnabled(
-      parseOutputReductionFlags([], {}).actionsCompactMetadata,
+      resolveActionsCompactMetadata(parseOutputReductionFlags([], {}).actionsCompactMetadata),
     );
     expectFull(emit());
     const repeated = observation(emit());
@@ -4819,9 +4825,11 @@ describe("actions-compact-metadata", () => {
     (source) => {
       if (source === "environment") {
         serverConfig.setActionsCompactMetadataEnabled(
-          parseOutputReductionFlags([], {
-            AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
-          }).actionsCompactMetadata,
+          resolveActionsCompactMetadata(
+            parseOutputReductionFlags([], {
+              AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
+            }).actionsCompactMetadata,
+          ),
         );
       } else {
         new DefaultFeatureFlagApplier().apply("actions-compact-metadata", false);
@@ -4852,7 +4860,10 @@ describe("actions-compact-metadata", () => {
     expectFull(emit(action(), { sessionUuid: "new-client", actionsCompactMetadata: true }));
     expect(serverConfig.isActionsCompactMetadataEnabled()).toBe(true);
   });
-  test("first full; identical second omits each block; changed block alone reappears", () => {
+  test("default compact: first full; identical second omits each block; changed block alone reappears", () => {
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(parseOutputReductionFlags([], {}).actionsCompactMetadata),
+    );
     expectFull(emit());
     const repeated = observation(emit());
     for (const key of Object.keys(metadata)) {

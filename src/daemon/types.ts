@@ -112,6 +112,10 @@ export function sanitizeDaemonRequestFailureCause(
 export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
+/** A token-bearing keeper tick reached an unowned session; only an explicit claim can adopt it. */
+export const DAEMON_LIVENESS_OWNER_UNOWNED_CODE = "liveness_owner_unowned";
+/** Release authorization failed: the supplied token is not the current owner. */
+export const DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE = "liveness_owner_not_owner";
 
 /**
  * A tool call reached a session whose owner's lease expired and that is held inside its suspect

@@ -192,6 +192,8 @@ final class FileEventPersistence: EventPersisting, Sendable {
             return try? decoder.decode(SdkHandledExceptionEvent.self, from: data)
         case .crash:
             return try? decoder.decode(SdkCrashEvent.self, from: data)
+        case .frameMetrics:
+            return try? decoder.decode(SdkFrameMetricsEvent.self, from: data)
         case .hang:
             return try? decoder.decode(SdkHangEvent.self, from: data)
         case .networkRequest:

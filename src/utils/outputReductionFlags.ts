@@ -3,10 +3,11 @@ import type { FeatureFlagKey } from "../models/FeatureFlagDefinitions";
 /**
  * Config plumbing for the MCP output-context reduction effort (issue #2756).
  *
- * Each flag parses from a CLI flag or an `AUTOMOBILE_*` env var. Positive CLI
- * flags take precedence over negative CLI flags and the environment.
- * Compact action metadata defaults on and accepts exact env "0" to opt out;
- * other flags default off and enable only on exact env "1".
+ * Each flag parses from CLI flags or an `AUTOMOBILE_*` env var. CLI overrides
+ * env; an explicit negative flag wins when both CLI forms are present.
+ * Other flags default off and enable only on exact `"1"`. Compact action
+ * metadata has a tri-state preference; only explicit CLI or exact `"0"`/`"1"`
+ * env values are relayed. Its effective fallback is persisted state, then on.
  *
  * Historical note: compact bounds tuples, the skeleton projection, compact
  * (non-pretty) JSON, and the focus/overview/region observe-scope gates were once
@@ -28,7 +29,7 @@ export interface OutputReductionFlags {
   toolResultsNoStructuredContent: boolean;
   actionsDiffObserve: boolean;
   actionsNoObserve: boolean;
-  actionsCompactMetadata: boolean;
+  actionsCompactMetadata?: boolean;
 }
 
 export type OutputReductionFlagField = keyof OutputReductionFlags;
@@ -38,10 +39,8 @@ export interface OutputReductionFlagSpec {
   field: OutputReductionFlagField;
   /** The CLI flag, e.g. `--observe-result-compact`. */
   cli: string;
-  /** Default-on flags support an explicit negative arg for the daemon relay. */
+  /** Explicit opt-out for a default-on flag. */
   disableCli?: string;
-  /** Defaults to false when absent. */
-  defaultValue?: boolean;
   /** The env var, e.g. `AUTOMOBILE_OBSERVE_RESULT_COMPACT`. */
   env: string;
   /** The feature-flag pipeline key this flag routes through. */
@@ -83,7 +82,6 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
     field: "actionsCompactMetadata",
     cli: "--actions-compact-metadata",
     disableCli: "--no-actions-compact-metadata",
-    defaultValue: true,
     env: "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
     featureFlagKey: "actions-compact-metadata",
     label: "--actions-compact-metadata",
@@ -91,50 +89,48 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
 ];
 
 /**
- * Resolve explicit overrides separately from defaults. Startup must not persist
- * the default-on value over a saved feature-flag false, or relay it as a request
- * to re-enable an already configured daemon.
+ * Resolve all output-reduction flags from CLI args and the process environment.
+ * CLI takes precedence over env; the negative CLI flag wins if both are supplied.
  */
-export function parseOutputReductionFlagOverrides(
-  args: string[],
-  env: Record<string, string | undefined>,
-): Partial<OutputReductionFlags> {
-  const overrides: Partial<OutputReductionFlags> = {};
-  for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
-    if (args.includes(spec.cli)) {
-      overrides[spec.field] = true;
-    } else if (spec.disableCli && args.includes(spec.disableCli)) {
-      overrides[spec.field] = false;
-    } else if (env[spec.env] === "1") {
-      overrides[spec.field] = true;
-    } else if (spec.defaultValue && env[spec.env] === "0") {
-      overrides[spec.field] = false;
-    }
-  }
-  return overrides;
-}
-
-/** Resolve flags with explicit CLI/env overrides taking precedence over defaults. */
 export function parseOutputReductionFlags(
   args: string[],
   env: Record<string, string | undefined>,
 ): OutputReductionFlags {
-  const overrides = parseOutputReductionFlagOverrides(args, env);
+  // Let each spec resolve its own field. Driving the
+  // result off the spec list (rather than positional SPECS[0..4] access) means
+  // reordering or extending the list can never silently mis-map a field.
   const flags: OutputReductionFlags = {
     observeResultIncludeElements: false,
     toolResultsNoStructuredContent: false,
     actionsDiffObserve: false,
     actionsNoObserve: false,
-    actionsCompactMetadata: true,
   };
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
-    flags[spec.field] = overrides[spec.field] ?? spec.defaultValue ?? false;
+    if (spec.field === "actionsCompactMetadata") {
+      if (spec.disableCli && args.includes(spec.disableCli)) {
+        flags.actionsCompactMetadata = false;
+      } else if (args.includes(spec.cli)) {
+        flags.actionsCompactMetadata = true;
+      } else if (env[spec.env] === "0" || env[spec.env] === "1") {
+        flags.actionsCompactMetadata = env[spec.env] === "1";
+      }
+    } else {
+      flags[spec.field] = args.includes(spec.cli) || env[spec.env] === "1";
+    }
   }
   return flags;
 }
 
+/** Resolve process-local behavior without converting the relay preference to a default. */
+export function resolveActionsCompactMetadata(
+  explicit: boolean | undefined,
+  persisted?: boolean,
+): boolean {
+  return explicit ?? persisted ?? true;
+}
+
 /**
- * Serialize explicit output-reduction values back to their CLI args for the
+ * Serialize enabled flags and explicit default-on opt-outs to CLI args for the
  * MCP-process -> daemon-process relay. This is the inverse of the daemon-side
  * parse in `parseDaemonArgs`; keeping both driven off the same specs (and
  * round-trip tested) prevents the two hand-written flag strings from drifting.
@@ -142,7 +138,7 @@ export function parseOutputReductionFlags(
 export function outputReductionFlagsToArgs(flags: Partial<OutputReductionFlags>): string[] {
   const args: string[] = [];
   for (const spec of OUTPUT_REDUCTION_FLAG_SPECS) {
-    if (flags[spec.field] === true) {
+    if (flags[spec.field]) {
       args.push(spec.cli);
     } else if (flags[spec.field] === false && spec.disableCli) {
       args.push(spec.disableCli);

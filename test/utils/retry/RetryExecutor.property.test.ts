@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
+import { propertyParams } from "../../helpers/fastCheckConfig";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { type BackoffInput, delayForAttempt } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -13,11 +14,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 //
 // A pinned seed keeps CI deterministic, matching the repo's reproducibility
 // conventions. On failure fast-check prints the seed and the shrunk counterexample.
-const RUN_OPTIONS = { seed: 0x5e7_3a1, numRuns: 150 } as const;
+const RUN_OPTIONS = propertyParams({ numRuns: 150 });
 // The onRetry-cadence property drives the FakeTimer through real sleeps (one
 // auto-advance dispatch per retry), so it runs fewer cases to stay well under the
 // 100ms-per-test budget while still sweeping the delay-shape space.
-const TIMED_RUN_OPTIONS = { seed: 0x5e7_3a1, numRuns: 60 } as const;
+const TIMED_RUN_OPTIONS = propertyParams({ numRuns: 60 });
 
 // `maxAttempts` across the realistic operating range (RetryExecutor's default is 3).
 const maxAttempts = fc.integer({ min: 1, max: 6 });

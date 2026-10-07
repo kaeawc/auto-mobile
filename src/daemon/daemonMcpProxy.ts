@@ -43,6 +43,7 @@ import {
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+  DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
@@ -94,11 +95,7 @@ import {
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import { isRecoverableDaemonReleaseReason } from "../db/deviceSessionRepository";
-import {
-  daemonProcessOptions,
-  daemonReuseOptions,
-  CONNECTION_PRESENTATION_OPTION_KEYS,
-} from "./daemonOptionScopes";
+import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
   LivenessRecovery,
@@ -279,13 +276,14 @@ function isLivenessOwnerConflictError(error: unknown): boolean {
   );
 }
 
-/** The daemon answered that another token owns this session's liveness now (#10050). */
-function isLivenessOwnerSupersededError(error: unknown): boolean {
+/** The daemon answered that this token no longer owns liveness (#10050, #10260). */
+function isLivenessOwnershipLostError(error: unknown): boolean {
   return (
     error !== null &&
     typeof error === "object" &&
     "code" in error &&
-    error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+    (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+      error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
   );
 }
 
@@ -691,7 +689,8 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "mcpRecording",
   "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-    (spec) => !CONNECTION_PRESENTATION_OPTION_KEYS.some((key) => key === spec.field),
+    (spec) =>
+      spec.field !== "toolResultsNoStructuredContent" && spec.field !== "actionsCompactMetadata",
   ).map((spec) => spec.field),
 ];
 
@@ -710,6 +709,7 @@ export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
   ...REUSE_CRITICAL_STRING_OPTION_KEYS,
   ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
   "accessibilityUseBaseline",
+  "actionsCompactMetadata",
   "eventAllMarkers",
 ];
 
@@ -772,15 +772,15 @@ function requestedOptionDeficits<T>(
  * #3846): a client that does not ask for a flag has no opinion on it, so a flag
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
- * Default-off booleans are compared strictly (`=== true`), so `undefined` and
- * `false` read as "no opinion".
- * Strings and marker arrays count only when the client
+ * Compact metadata compares explicit on/off; an unrecorded running value defaults on.
+ * Other booleans are compared strictly (`=== true`), so `undefined` and `false` both
+ * read as "no opinion"; strings and marker arrays count only when the client
  * supplies one that differs from the daemon's. Connection presentation options
  * are intentionally absent from this comparison.
  * Returns a human-readable list (empty when the daemon already satisfies every
  * requested flag) for logging and error messages.
  */
-function startupOptionDeficits(
+export function startupOptionDeficits(
   requested: DaemonOptions | undefined,
   running: DaemonOptions | undefined,
 ): string[] {
@@ -791,6 +791,13 @@ function startupOptionDeficits(
       running,
       (options, key) => (options?.[key] === true ? true : undefined),
       (options, key) => options?.[key] === true,
+    ),
+    ...requestedOptionDeficits(
+      ["actionsCompactMetadata"],
+      requested,
+      running,
+      (options) => options?.actionsCompactMetadata,
+      (options) => options?.actionsCompactMetadata ?? true,
     ),
     ...requestedOptionDeficits(
       REUSE_CRITICAL_STRING_OPTION_KEYS,
@@ -833,11 +840,12 @@ function startupOptionDeficits(
  * *running* daemon's existing options as the base and overlays the connecting
  * client's requested options, so a restart triggered for any reason can never
  * silently strip a flag the daemon was already launched with (issue #3846) —
- * it only ever adds flags the client explicitly asks for. Default-off boolean
- * CLI options are one-directional: `false` means the caller has no opinion, so
- * active values are preserved.
+ * it only ever adds flags the client explicitly asks for. Boolean CLI options
+ * are one-directional: `false` means the caller has no opinion, so every
+ * active boolean on the running daemon is force-preserved. Compact metadata
+ * instead preserves the running value only when the client has no preference.
  */
-function mergeDaemonOptions(
+export function mergeDaemonOptions(
   running: DaemonOptions | undefined,
   requested: DaemonOptions | undefined,
 ): DaemonOptions {
@@ -850,6 +858,8 @@ function mergeDaemonOptions(
       mergedRecord[key] = true;
     }
   }
+  merged.actionsCompactMetadata =
+    requestedOptions.actionsCompactMetadata ?? runningOptions.actionsCompactMetadata;
   if (requested?.accessibilityAudit === true) {
     merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }
@@ -4089,7 +4099,7 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       return "session-gone";
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Another token took the session over while this proxy could not heartbeat it.
       return "superseded";
     }
@@ -4220,7 +4230,7 @@ export class DaemonMcpProxy {
         typeof error === "object" &&
         "code" in error &&
         error.code === DAEMON_SESSION_NOT_FOUND_CODE) ||
-      isLivenessOwnerSupersededError(error) ||
+      isLivenessOwnershipLostError(error) ||
       isLivenessOwnerConflictError(error)
     );
   }
@@ -4399,7 +4409,7 @@ export class DaemonMcpProxy {
     if (isLivenessOwnerConflictError(error)) {
       return false;
     }
-    return !isLivenessOwnerSupersededError(error);
+    return !isLivenessOwnershipLostError(error);
   }
 
   private recordHeldSessionHeartbeatSuccess(
@@ -4425,7 +4435,7 @@ export class DaemonMcpProxy {
     if (this.closing) {
       return;
     }
-    if (isLivenessOwnerSupersededError(error)) {
+    if (isLivenessOwnershipLostError(error)) {
       // Same informational outcome as the latest binding: no fencing or re-claim.
       this.recordHeldSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership);
       return;
@@ -4595,13 +4605,17 @@ export class DaemonMcpProxy {
       error !== null &&
       typeof error === "object" &&
       "code" in error &&
-      error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE
+      (error.code === DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE ||
+        error.code === DAEMON_LIVENESS_OWNER_UNOWNED_CODE)
     ) {
-      // Another claimant owns liveness now. Preserve the old successful no-op's
-      // local acknowledgement without fencing, reconnecting or re-claiming.
+      // #10115: a refusal proves transport reachability, not ownership. Do not
+      // fence or re-claim: that would undo a deliberate handoff. Report the loss
+      // visibly once; the local acknowledgement only prevents transport recovery.
       if (!this.livenessSupersessionLogged) {
         this.livenessSupersessionLogged = true;
-        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} liveness ownership superseded`);
+        logger.warn(
+          `[DaemonMcpProxy] Session ${sessionUuid} liveness ownership lost; this proxy no longer protects its deadline. Stop its keeper or explicitly claim with a fresh token.`,
+        );
       }
       this.recordBoundSessionHeartbeatSuccess(sessionUuid, false, isCurrent);
       return true;

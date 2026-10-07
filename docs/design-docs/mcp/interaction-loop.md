@@ -61,8 +61,9 @@ Every action observation carries a `settled` boolean saying whether that
 capture passed the gate:
 
 - `settled: true` — two consecutive stable hierarchies; the screen is the
-  settled post-action screen and its `s2-…` ids match what the next `observe`
-  will emit.
+  settled post-action screen. Android synthetic `s2-…` element ids are valid
+  only for the observation that returned them. A sibling leaving the screen
+  can change an id's suffix; re-observe and use the new id if an old id is stale.
 - `settled: false` — the capture was not stability-checked. Either the action
   was not navigation-class, or the bound expired on a screen that never
   reaches structural stability (a ticking clock, a blinking caret). Re-observe
@@ -73,23 +74,20 @@ In diff mode (`--actions-diff-observe`) the flag rides on the diff alongside
 
 ## Default compact action metadata
 
-Compact action metadata is enabled by default. Set
-`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0` or the feature-flag key
-`actions-compact-metadata` to `false` to restore full metadata and duplicate
-matched elements. Precedence is `--actions-compact-metadata`, then
-`--no-actions-compact-metadata`, then exact env `1`/`0`, then the saved feature
-flag (default on). CLI/env overrides apply only to the launching process and
-its connection; they never write the shared DB. Only feature-flag changes
-persist. Without an override, a new launch uses the saved choice again.
-The proxy relays explicit preferences through its live connection profile,
-independent of device routing, and reapplies them after reconnect. Clients with
-opposing preferences share a daemon without restarting it; child startup args
-and inherited env exclude this presentation preference. With an external action call's `sessionUuid` and
-session store, compaction omits each unchanged `observation` block independently: `insets`,
+Compact action metadata defaults on. Opt out with
+`AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`, or
+feature-flag key `actions-compact-metadata` set to false. The existing
+`--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
+wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
+Without an explicit choice (unset or other env values), proxies relay no preference
+and preserve the shared daemon's effective setting without a reconciliation restart.
+With an external action call's `sessionUuid` and session store,
+this omits each unchanged `observation` block independently: `insets`,
 `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,
 `accessibilityState`, and `freshness`. Raw observations' `viewHierarchy.insets`
 and `viewHierarchy.systemInsets` copies follow the same rule independently.
-Values must be deeply equal; timestamps inside a block count as changes.
+Values must be deeply equal except `backStack.capturedAt`. Stale freshness,
+unstable gfx metrics, and partial back stacks remain inline even if unchanged.
 The first action response sends available blocks in full, changes resend the
 changed block, and a new session or any device switch sends available blocks
 in full again. `screenSize`, `display`, and observation/device join keys remain

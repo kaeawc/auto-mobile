@@ -1837,6 +1837,61 @@ describe("videoRecordingManager", () => {
       expect(statted).toEqual([newestPath]);
     });
 
+    test("reads only one page when the first page has a playable recording", async () => {
+      const newestPath = await seed("newest-page-only", "completed", 3_000, 1024);
+      await seed("older-page-only", "completed", 2_000, 1024);
+      await filesOnDisk({ [newestPath]: 1024 });
+      const originalList = fakeRepository.listRecordings.bind(fakeRepository);
+      let listCalls = 0;
+      fakeRepository.listRecordings = async (query = {}) => {
+        if (query.orderByStartedAt === "desc") {
+          listCalls++;
+        }
+        return originalList(query);
+      };
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("newest-page-only");
+      expect(listCalls).toBe(1);
+    });
+
+    test("checks shifted rows by ID after widening the latest lookup", async () => {
+      const playablePath = await seed("shifted-playable", "completed", 1_000, 1024);
+      for (let index = 0; index < 20; index++) {
+        await seed(`missing-${index}`, "completed", 2_000 + index, 0);
+      }
+      const originalList = fakeRepository.listRecordings.bind(fakeRepository);
+      fakeRepository.listRecordings = async (query = {}) => {
+        const records = await originalList(query);
+        if (query.limit !== undefined) {
+          return records;
+        }
+        const playable = records.find((record) => record.recordingId === "shifted-playable");
+        if (!playable) {
+          return records;
+        }
+        return [
+          ...records.slice(0, 19),
+          playable,
+          ...records.slice(19).filter((record) => record !== playable),
+        ];
+      };
+      await filesOnDisk({ [playablePath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("shifted-playable");
+    });
+
+    test("preserves newestWithoutFile when a widened lookup finds no playable recording", async () => {
+      for (let index = 0; index < 20; index++) {
+        await seed(`missing-full-${index}`, "completed", 2_000 + index, 0);
+      }
+      await filesOnDisk({});
+
+      expect(await lookupLatestVideoRecording()).toEqual({
+        recording: null,
+        newestWithoutFile: { recordingId: "missing-full-19", status: "completed" },
+      });
+    });
+
     test("still finds an older playable recording behind a full page of rows with no file", async () => {
       const olderPath = await seed("older", "completed", 1_000, 1024);
       for (let index = 0; index < 25; index++) {

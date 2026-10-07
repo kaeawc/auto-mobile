@@ -2,12 +2,16 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { ActionableError, BootedDevice, RecentAppsResult } from "../../models";
+import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
 import { PressButton } from "./PressButton";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { DefaultElementFinder } from "../utility/ElementFinder";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
+import { isForegroundLauncher } from "../observe/androidLauncherPackages";
+import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 
 /**
@@ -53,17 +57,76 @@ export class RecentApps extends BaseVisualChange {
       );
     }
 
-    return this.observedInteraction(
-      async () => perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal)),
-      {
-        usesObservationForResolution: false,
-        changeExpected: true,
-        foregroundAppMayChange: true,
-        timeoutMs: 3000,
-        progress,
+    const options = {
+      usesObservationForResolution: false,
+      changeExpected: true,
+      foregroundAppMayChange: true,
+      timeoutMs: 3000,
+      progress,
+      signal,
+      perf,
+    };
+    const result: RecentAppsResult = await this.observedInteraction(async () => {
+      // A cached overview could describe a screen the user has since left.
+      const current = await awaitWhileRequestIsLive(
+        this.observeScreen.execute({
+          freshness: "fresh",
+          requireFreshExtraction: true,
+          skipCache: true,
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
+          timeoutMs: options.timeoutMs,
+          signal,
+        }),
         signal,
-        perf,
-      },
+      );
+      if (await this.isAndroidOverview(current, signal)) {
+        options.changeExpected = false;
+        return { success: true, method: "hardware" };
+      }
+      return perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal));
+    }, options);
+    // Keep indeterminate delivery failures intact; never retry a toggle to verify it.
+    if (result.success && !(await this.isAndroidOverview(result.observation, signal))) {
+      result.success = false;
+      result.error = "Android recent apps overview could not be verified after navigation";
+    }
+    return result;
+  }
+
+  private async isAndroidOverview(
+    observation: ObserveResult | undefined,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const { viewHierarchy: hierarchy, freshness } = observation ?? {};
+    if (!hierarchy || hierarchy.hierarchy.error || hierarchy.ctrlProxyIncomplete) {
+      return false;
+    }
+    if (freshness && (!freshness.isFresh || freshness.verified === false)) {
+      return false;
+    }
+    const packageName = hierarchy.packageName;
+    if (!packageName) {
+      return false;
+    }
+    const finder = new DefaultElementFinder();
+    // Reuse the launcher surface vocabulary used by HomeScreen. Home and all-apps
+    // share the launcher window, so its package alone is insufficient evidence.
+    const overview = finder.findContainerNode(hierarchy, {
+      elementId: `${packageName}:id/overview_panel`,
+    });
+    if (!overview || nodeAttributes(overview)["visible-to-user"] !== true) {
+      return false;
+    }
+    return isForegroundLauncher(
+      packageName,
+      this.adb,
+      this.device.deviceId,
+      this.timer,
+      deviceIncarnationToken(this.device.deviceId),
+      signal,
+      3000,
     );
   }
 

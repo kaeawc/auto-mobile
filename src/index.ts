@@ -23,7 +23,7 @@ import { configureToolSelectionCliDefaults } from "./features/toolSelection/Sess
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import {
   OUTPUT_REDUCTION_FLAG_SPECS,
-  parseOutputReductionFlagOverrides,
+  resolveActionsCompactMetadata,
 } from "./utils/outputReductionFlags";
 import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
@@ -265,10 +265,6 @@ async function main() {
       enabledTools,
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
-    const outputReductionOverrides = parseOutputReductionFlagOverrides(
-      process.argv.slice(2),
-      process.env,
-    );
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs);
       await exitAfterSuccessfulDaemonCommand(logger, process);
@@ -291,6 +287,12 @@ async function main() {
     if (runnerReadinessTimeoutMs !== undefined) {
       serverConfig.setRunnerReadinessTimeoutMs(runnerReadinessTimeoutMs);
     }
+    serverConfig.setActionsCompactMetadataEnabled(
+      resolveActionsCompactMetadata(
+        outputReduction.actionsCompactMetadata,
+        serverConfig.isActionsCompactMetadataEnabled(),
+      ),
+    );
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setToolOutputsDir(toolOutputsDir);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
@@ -372,7 +374,7 @@ async function main() {
 
     type CliFeatureFlagOverride = [
       FeatureFlagKey,
-      boolean | undefined,
+      boolean,
       string,
       (Record<string, unknown> | null | undefined)?,
     ];
@@ -386,14 +388,14 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.filter((spec) => spec.field !== "actionsCompactMetadata").map(
-        (spec): CliFeatureFlagOverride => [
-          spec.featureFlagKey,
-          outputReductionOverrides[spec.field],
-          spec.label,
-          undefined,
-        ],
-      ),
+      ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
+        (spec) => !spec.disableCli || outputReduction[spec.field] !== undefined,
+      ).map((spec): CliFeatureFlagOverride => [
+        spec.featureFlagKey,
+        outputReduction[spec.field] === true,
+        spec.label,
+        undefined,
+      ]),
     ];
 
     // All DB-touching feature-flag startup work: migration-gated initialize()
@@ -407,20 +409,20 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (!enabled) {
+        if (!enabled && key !== "actions-compact-metadata") {
           continue;
         }
         await featureFlagService.setFlag(key, enabled, config);
         logger.info(`Feature flag ${enabled ? "enabled" : "disabled"} (${flagLabel})`);
       }
 
-      // Compact metadata is process/connection presentation, never a DB write.
-      // Apply after initialize() so the saved feature flag is only the fallback.
-      if (outputReductionOverrides.actionsCompactMetadata !== undefined) {
-        serverConfig.setActionsCompactMetadataEnabled(
-          outputReductionOverrides.actionsCompactMetadata,
-        );
-      }
+      // Resolve local behavior after persistence is loaded; keep the relay tri-state.
+      serverConfig.setActionsCompactMetadataEnabled(
+        resolveActionsCompactMetadata(
+          outputReduction.actionsCompactMetadata,
+          featureFlagService.isEnabled("actions-compact-metadata"),
+        ),
+      );
 
       if (!navigationScreenshots) {
         await featureFlagService.setFlag("navigation-screenshots", false);
@@ -555,7 +557,6 @@ async function main() {
         noOcclusion,
         // OutputReductionFlags field names match these DaemonOptions fields 1:1.
         ...outputReduction,
-        actionsCompactMetadata: outputReductionOverrides.actionsCompactMetadata,
       });
       return;
     }
@@ -634,7 +635,6 @@ async function main() {
       ...(noOcclusion ? { noOcclusion: true } : {}),
       // OutputReductionFlags field names match these DaemonOptions fields 1:1.
       ...outputReduction,
-      actionsCompactMetadata: outputReductionOverrides.actionsCompactMetadata,
       // The positive flag is an explicit connection preference. Its absence is
       // no preference, so the daemon's global fallback remains authoritative.
       toolResultsNoStructuredContent: outputReduction.toolResultsNoStructuredContent

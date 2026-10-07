@@ -17,6 +17,7 @@ import {
   TOOL_OUTPUT_DIR_FLAG_ALIAS,
 } from "../../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { parseOutputReductionFlags } from "../../utils/outputReductionFlags";
 import type { DaemonOptions } from "../types";
 
 const numericFlags: Partial<
@@ -215,6 +216,10 @@ export function parseDaemonArgs(
   const options: DaemonOptions = shouldSkipCtrlProxyDownload(args, env)
     ? { skipCtrlProxyDownload: true }
     : {};
+  const compactMetadata = parseOutputReductionFlags(args, env).actionsCompactMetadata;
+  if (compactMetadata !== undefined) {
+    options.actionsCompactMetadata = compactMetadata;
+  }
   options.toolOutputsDir = parseToolOutputsDirConfig(
     [],
     env,

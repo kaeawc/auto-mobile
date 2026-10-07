@@ -59,6 +59,8 @@ export interface VideoStreamSocketRequest {
   sessionUuid?: string;
   /** Device to mirror. Defaults to the sole connected device when omitted. */
   deviceId?: string;
+  /** Scope discovery to this platform; omission preserves discovery across both. */
+  platform?: "android" | "ios";
   /** Encoder bitrate hint, passed through to the capture source. */
   bitrateKbps?: number;
   /** Capture size hint. Decoders read true dimensions from the in-band SPS regardless. */

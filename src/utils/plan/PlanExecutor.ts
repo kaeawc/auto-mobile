@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutError } from "./waitForTimeout";
+import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -573,6 +574,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
       const parsedParams = parseStepParams(tool.schema, enhancedParams);
+      if (step.tool === "tapAt" && step.geometry) {
+        parsedParams.__tapAtPlanContext = { geometry: step.geometry };
+      }
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -648,7 +652,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         };
       }
 
-      const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);
+      const payload = getStructuredPayload(toolResult) ?? toolResult;
+      const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
       if (error) {
         if (step.optional) {
           return {

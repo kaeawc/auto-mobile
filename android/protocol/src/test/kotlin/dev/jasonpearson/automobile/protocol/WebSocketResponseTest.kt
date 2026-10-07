@@ -18,6 +18,24 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `IME action approximation is optional and round trips when present`() {
+    val exact = ImeActionResult(timestamp = 1L, success = true, action = "next", totalTimeMs = 0L)
+    val encoded = json.encodeToString(ImeActionResult.serializer(), exact)
+    assertFalse(encoded.contains("approximated"))
+    assertNull(json.decodeFromString(ImeActionResult.serializer(), encoded).approximated)
+    for (success in listOf(true, false)) {
+      val fallback = exact.copy(success = success, approximated = true)
+      assertEquals(
+        fallback,
+        json.decodeFromString(
+          ImeActionResult.serializer(),
+          json.encodeToString(ImeActionResult.serializer(), fallback),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `traversal truncation metadata is optional and omitted when null`() {
     val complete = TraversalOrderData(elements = emptyList(), focusedIndex = null, totalCount = 0)
     val encoded = json.encodeToString(TraversalOrderData.serializer(), complete)

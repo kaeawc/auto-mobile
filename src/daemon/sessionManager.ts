@@ -59,6 +59,7 @@ import {
   suspectGraceMsFor,
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
+import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
@@ -806,6 +807,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "heartbeat-timeout" ||
     releaseReason === "cli-idle-timeout" ||
     releaseReason === "rehydration-owner-timeout" ||
+    releaseReason === OWNER_DISCONNECTED_RELEASE_REASON ||
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||

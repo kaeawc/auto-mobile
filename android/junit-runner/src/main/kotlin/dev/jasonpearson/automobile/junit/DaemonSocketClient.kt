@@ -61,12 +61,20 @@ internal object DaemonSocketClientManager {
 
   // Decides when the daemon must be (re)started before a thread connects. A connect failure on an
   // already-ensured daemon (it died leaving its socket file behind) re-runs the ensure step once
-  // instead of surfacing a raw "Connection refused" for every remaining test (#10169).
+  // instead of surfacing a raw "Connection refused" for every remaining test (#10169). Only a
+  // dead-daemon failure whose PID-file process is gone triggers it; a local failure such as EMFILE
+  // surfaces as-is so a healthy shared daemon is never restarted.
   private val connectionProvider =
     DaemonConnectionProvider(
       socketExists = { File(DaemonSocketPaths.socketPath()).exists() },
       ensureDaemon = { ensureDaemonRunning() },
       connect = { DaemonSocketClient(DaemonSocketPaths.socketPath()) },
+      daemonProcessAlive = {
+        DaemonSocketPaths.isProcessAlive(
+          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath())
+        )
+      },
+      nowMs = System::currentTimeMillis,
     )
 
   private fun getOrCreateClient(): DaemonSocketClient {
@@ -438,9 +446,10 @@ internal object DaemonSocketPaths {
    * Whether a requested forced restart must actually stop the running daemon (#10170).
    *
    * The forced restart exists to replace a stale daemon left by an earlier job. A daemon that
-   * started after this runner JVM was started by another runner of the same run (a parallel Gradle
-   * fork), so restarting it again would stop that runner's in-flight plans. When either start time
-   * is unknown the restart is kept, as before. An unavailable daemon is always (re)started.
+   * started after this run began ([resolveRunnerStartedAtMs]) was started by another runner of the
+   * same run (a parallel Gradle fork), so restarting it again would stop that runner's in-flight
+   * plans. When either start time is unknown the restart is kept, as before. An unavailable daemon
+   * is always (re)started.
    */
   internal fun requiresForcedRestart(
     forceRestart: Boolean,
@@ -509,6 +518,35 @@ internal object DaemonSocketPaths {
    */
   internal fun readDaemonStartedAtMsFromPidFile(path: String): Long? =
     readPidFileString(path, "startedAt")?.let { it.toLongOrNull() ?: it.toDoubleOrNull()?.toLong() }
+
+  /** Read the daemon's process id from its PID file, or null if absent/unreadable. */
+  internal fun readDaemonPidFromPidFile(path: String): Long? =
+    readPidFileString(path, "pid")?.toLongOrNull()?.takeIf { it > 0 }
+
+  /**
+   * Whether [pid] names a live process. An unknown pid is reported as not alive, so a daemon that
+   * left no PID record can still be restarted.
+   */
+  internal fun isProcessAlive(
+    pid: Long?,
+    lookup: (Long) -> Boolean = { candidate ->
+      ProcessHandle.of(candidate).map { it.isAlive }.orElse(false)
+    },
+  ): Boolean = pid != null && lookup(pid)
+
+  /** System property carrying one start timestamp (epoch ms) shared by every fork of a build. */
+  const val RUN_STARTED_AT_PROPERTY = "automobile.junit.runStartedAtMs"
+
+  /**
+   * When this test run started (epoch ms), compared with the daemon's `startedAt` to decide whether
+   * a forced restart is still needed (#10170). A build-wide [RUN_STARTED_AT_PROPERTY] wins, so a
+   * fork started after a sibling restarted the daemon does not restart it again; without it this
+   * JVM's start time ([jvmStartedAtMs]) is used.
+   */
+  internal fun resolveRunnerStartedAtMs(
+    runStartedAtProperty: String?,
+    jvmStartedAtMs: () -> Long?,
+  ): Long? = runStartedAtProperty?.trim()?.toLongOrNull()?.takeIf { it > 0 } ?: jvmStartedAtMs()
 
   private fun readPidFileString(path: String, field: String): String? {
     return try {
@@ -1025,7 +1063,7 @@ internal class DaemonSocketClient(
 
   private fun connect(): SocketChannel {
     if (!Files.exists(File(socketPath).toPath())) {
-      throw DaemonUnavailableException("Daemon socket not found: $socketPath")
+      throw DaemonSocketMissingException(socketPath)
     }
 
     // A daemon that died without unlinking its socket leaves the file behind, and the connect then
@@ -1136,6 +1174,21 @@ internal class DaemonSocketClient(
         else -> DaemonUnavailableException("Daemon request failed: ${e.message}", e)
       }
 
+    /**
+     * Probe the daemon socket once, separating "no daemon is serving it" from a failure local to
+     * this runner (e.g. EMFILE "Too many open files"), which must not trigger a restart of a shared
+     * daemon that may be healthy (#10169).
+     */
+    internal fun probe(socketPath: String): DaemonProbe =
+      try {
+        DaemonSocketClient(socketPath).close()
+        DaemonProbe.Available
+      } catch (e: DaemonUnavailableException) {
+        DaemonProbe.fromConnectFailure(e)
+      } catch (e: IOException) {
+        DaemonProbe.fromConnectFailure(e)
+      }
+
     fun isAvailable(socketPath: String): Boolean {
       return try {
         val client = DaemonSocketClient(socketPath)
@@ -1193,8 +1246,12 @@ internal interface DaemonToolClient {
   var sessionUuid: String
 }
 
-internal class DaemonUnavailableException(message: String, cause: Throwable? = null) :
+internal open class DaemonUnavailableException(message: String, cause: Throwable? = null) :
   Exception(message, cause)
+
+/** The daemon socket file does not exist: no daemon is serving it. */
+internal class DaemonSocketMissingException(socketPath: String) :
+  DaemonUnavailableException("Daemon socket not found: $socketPath")
 
 /** Interface for checking daemon connectivity. Allows for easy testing with fakes. */
 internal interface DaemonConnectivityChecker {

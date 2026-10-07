@@ -14,19 +14,31 @@ import java.nio.file.StandardOpenOption
  *
  * The daemon is ensured once per JVM, and again whenever its socket file is gone. A daemon that
  * dies without unlinking its socket (SIGKILL, the OOM killer, a crash) leaves the file behind, so a
- * connect failure on an already-ensured daemon also re-runs [ensureDaemon] once and retries the
- * connect. A second failure surfaces as a [DaemonUnavailableException] so the plan executor's
- * existing retry and failure reporting apply instead of a raw "Connection refused" (#10169).
+ * connect failure on an already-ensured daemon re-runs [ensureDaemon] once and retries the connect
+ * (#10169) — but only when the failure says no daemon is serving the socket (connection refused,
+ * socket file missing) AND the PID-file process is gone ([daemonProcessAlive]). Any other failure,
+ * such as EMFILE "Too many open files" in this runner, surfaces without touching the shared daemon.
+ * Every failure surfaces as a [DaemonUnavailableException]; the plan executor's transient-error
+ * retry does not match these messages, so the test fails with this message rather than retrying.
+ *
+ * A failed ensure is remembered for [ensureFailureCooldownMs] (measured with [nowMs]): later opens
+ * in that window fail fast with the remembered error instead of each re-running the full restart
+ * and wait while holding the cross-process restart lock.
  */
 internal class DaemonConnectionProvider<C>(
   private val socketExists: () -> Boolean,
   private val ensureDaemon: () -> Unit,
   private val connect: () -> C,
+  private val daemonProcessAlive: () -> Boolean,
+  private val nowMs: () -> Long,
+  private val ensureFailureCooldownMs: Long = DEFAULT_ENSURE_FAILURE_COOLDOWN_MS,
 ) {
   private val lock = Any()
   private var daemonEnsured = false
   // Bumped on every successful ensure, so threads that saw the same dead daemon re-ensure it once.
   private var ensureGeneration = 0L
+  private var lastEnsureFailure: Exception? = null
+  private var lastEnsureFailureAtMs = 0L
 
   fun open(): C {
     val generation =
@@ -49,8 +61,22 @@ internal class DaemonConnectionProvider<C>(
   }
 
   private fun reconnect(failedGeneration: Long, firstFailure: Exception): C {
+    if (!DaemonConnectFailures.indicatesDeadDaemon(firstFailure)) {
+      throw asUnavailable(
+        firstFailure,
+        "AutoMobile daemon connect failed for a reason local to this runner; not restarting " +
+          "the shared daemon",
+      )
+    }
     synchronized(lock) {
       if (ensureGeneration == failedGeneration) {
+        if (daemonProcessAlive()) {
+          throw asUnavailable(
+            firstFailure,
+            "AutoMobile daemon refused the connection but its process is still alive; not " +
+              "restarting it",
+          )
+        }
         daemonEnsured = false
         ensureLocked()
       }
@@ -69,9 +95,84 @@ internal class DaemonConnectionProvider<C>(
   }
 
   private fun ensureLocked() {
-    ensureDaemon()
+    val now = nowMs()
+    val remembered = lastEnsureFailure
+    if (remembered != null && now - lastEnsureFailureAtMs < ensureFailureCooldownMs) {
+      throw DaemonUnavailableException(
+        "AutoMobile daemon (re)start failed ${now - lastEnsureFailureAtMs}ms ago; not retrying " +
+          "for ${ensureFailureCooldownMs}ms: ${remembered.message}",
+        remembered,
+      )
+    }
+    try {
+      ensureDaemon()
+    } catch (e: DaemonUnavailableException) {
+      throw rememberEnsureFailure(e, now)
+    } catch (e: RuntimeException) {
+      throw rememberEnsureFailure(e, now)
+    }
+    lastEnsureFailure = null
     daemonEnsured = true
     ensureGeneration++
+  }
+
+  private fun rememberEnsureFailure(e: Exception, atMs: Long): Exception {
+    lastEnsureFailure = e
+    lastEnsureFailureAtMs = atMs
+    return e
+  }
+
+  private fun asUnavailable(failure: Exception, context: String): DaemonUnavailableException =
+    if (failure is DaemonUnavailableException) {
+      failure
+    } else {
+      DaemonUnavailableException("$context: ${failure.message}", failure)
+    }
+
+  companion object {
+    /** Long enough to cover a burst of test starts, short enough to recover within a suite. */
+    const val DEFAULT_ENSURE_FAILURE_COOLDOWN_MS = 30_000L
+  }
+}
+
+/** Classifies daemon connect failures (#10169). */
+internal object DaemonConnectFailures {
+  private const val MAX_CAUSE_DEPTH = 8
+
+  /**
+   * True when [error] (or a cause) shows no daemon is serving the socket: the socket file is
+   * missing, or the connect was refused / found no such file. Anything else — EMFILE "Too many open
+   * files", permission errors, timeouts — is a failure local to this runner and not a reason to
+   * restart a shared daemon.
+   */
+  fun indicatesDeadDaemon(error: Throwable): Boolean =
+    generateSequence(error) { it.cause }.take(MAX_CAUSE_DEPTH).any(::isDeadDaemonSignal)
+
+  private fun isDeadDaemonSignal(t: Throwable): Boolean {
+    if (t is DaemonSocketMissingException) return true
+    if (t !is IOException) return false
+    val message = t.message.orEmpty().lowercase()
+    return "connection refused" in message ||
+      "no such file" in message ||
+      "econnrefused" in message ||
+      "enoent" in message
+  }
+}
+
+/** Result of probing the daemon socket once. */
+internal sealed interface DaemonProbe {
+  /** A daemon accepted the connection. */
+  data object Available : DaemonProbe
+
+  /** No daemon is serving the socket (refused, or the socket file is missing). */
+  data object NotRunning : DaemonProbe
+
+  /** The connect failed for a reason local to this runner; the daemon may be healthy. */
+  data class Unreachable(val error: Exception) : DaemonProbe
+
+  companion object {
+    fun fromConnectFailure(error: Exception): DaemonProbe =
+      if (DaemonConnectFailures.indicatesDeadDaemon(error)) NotRunning else Unreachable(error)
   }
 }
 
@@ -97,14 +198,17 @@ internal interface DaemonLaunchEnvironment {
   /** Whether configuration asks for a forced restart (explicit flag, or `CI`). */
   val forceRestartRequested: Boolean
 
-  /** When this runner JVM started (epoch ms), or null when unknown. */
+  /**
+   * When this test run started (epoch ms): the build-wide run start when configured, otherwise this
+   * runner JVM's start; null when unknown.
+   */
   val runnerStartedAtMs: Long?
 
   val startTimeoutMs: Long
 
   val clientIdentity: DaemonClientIdentity
 
-  fun isDaemonAvailable(): Boolean
+  fun probeDaemon(): DaemonProbe
 
   fun readPidRecord(): DaemonPidRecord
 
@@ -124,19 +228,37 @@ internal object DaemonLauncher {
    * Make sure a daemon of this runner's build is serving the shared socket.
    *
    * The check-and-restart runs under a cross-process lock, and a requested forced restart is
-   * skipped when the running daemon started after this runner JVM: another runner of the same run
-   * (a parallel Gradle fork) already replaced the stale daemon, and stopping it again would fail
-   * that runner's in-flight plans (#10170). The version, build and asset-version skew checks are
-   * unchanged.
+   * skipped when the running daemon started after this run
+   * ([DaemonLaunchEnvironment.runnerStartedAtMs]: the build-wide run start, else this runner JVM's
+   * start): another runner of the same run (a parallel Gradle fork) already replaced the stale
+   * daemon, and stopping it again would fail that runner's in-flight plans (#10170). The version,
+   * build and asset-version skew checks are unchanged.
    */
   fun ensureRunning(env: DaemonLaunchEnvironment) {
     env.withRunnerRestartLock { ensureRunningLocked(env) }
   }
 
+  /**
+   * Whether a daemon is serving the socket. A probe that failed for a reason local to this runner
+   * (e.g. EMFILE) throws instead of reporting "unavailable", which would (re)start a shared daemon
+   * that may be healthy (#10169).
+   */
+  private fun isDaemonAvailable(env: DaemonLaunchEnvironment): Boolean =
+    when (val probe = env.probeDaemon()) {
+      DaemonProbe.Available -> true
+      DaemonProbe.NotRunning -> false
+      is DaemonProbe.Unreachable ->
+        throw DaemonUnavailableException(
+          "AutoMobile daemon socket could not be probed for a reason local to this runner " +
+            "(${probe.error.message}); not (re)starting the shared daemon",
+          probe.error,
+        )
+    }
+
   private fun ensureRunningLocked(env: DaemonLaunchEnvironment) {
     val identity = env.clientIdentity
     val forceRestartRequested = env.forceRestartRequested
-    val daemonAvailable = env.isDaemonAvailable()
+    val daemonAvailable = isDaemonAvailable(env)
     val record = env.readPidRecord()
 
     // A daemon of a different build already owning the shared per-uid socket would silently serve
@@ -248,7 +370,13 @@ internal class DefaultDaemonLaunchEnvironment(
 
   override val forceRestartRequested: Boolean = DaemonSocketPaths.resolveForceRestart()
 
-  override val runnerStartedAtMs: Long? = runnerJvmStartedAtMs()
+  // A build-wide run start (set once per Gradle build) wins over this fork's JVM start, so a fork
+  // started after a sibling already restarted the daemon does not restart it again (#10170).
+  override val runnerStartedAtMs: Long? =
+    DaemonSocketPaths.resolveRunnerStartedAtMs(
+      SystemPropertyCache.get(DaemonSocketPaths.RUN_STARTED_AT_PROPERTY, "").ifBlank { null },
+      ::runnerJvmStartedAtMs,
+    )
 
   override val startTimeoutMs: Long = DaemonSocketPaths.daemonStartTimeoutMs()
 
@@ -261,7 +389,7 @@ internal class DefaultDaemonLaunchEnvironment(
         assetVersionPin = DaemonSocketPaths.resolveCallerAssetVersionPin(),
       )
 
-  override fun isDaemonAvailable(): Boolean = DaemonSocketClient.isAvailable(socketPath)
+  override fun probeDaemon(): DaemonProbe = DaemonSocketClient.probe(socketPath)
 
   override fun readPidRecord(): DaemonPidRecord =
     DaemonPidRecord(

@@ -41,9 +41,14 @@ class DaemonLauncherTest {
 
     override val startTimeoutMs: Long = 1
 
-    override fun isDaemonAvailable(): Boolean {
-      if (!inLock) decisionsOutsideLock += "isDaemonAvailable"
-      return daemon.available
+    var probeOverride: DaemonProbe? = null
+
+    override fun probeDaemon(): DaemonProbe {
+      if (!inLock) decisionsOutsideLock += "probeDaemon"
+      probeOverride?.let {
+        return it
+      }
+      return if (daemon.available) DaemonProbe.Available else DaemonProbe.NotRunning
     }
 
     override fun readPidRecord(): DaemonPidRecord = daemon.record
@@ -92,6 +97,52 @@ class DaemonLauncherTest {
     DaemonLauncher.ensureRunning(forkB)
 
     assertEquals(listOf(true), daemon.launches)
+  }
+
+  @Test
+  fun `a later fork with the build-wide run start reuses a sibling's restarted daemon`() {
+    // Run started at 400; fork A (JVM 500) restarts the stale daemon at 1_000. Fork B's JVM starts
+    // at 2_000 (forkEvery / second module), after that restart. Keyed on its own JVM start it would
+    // restart again; keyed on the run start it reuses the daemon (#10170).
+    val daemon = FakeDaemon(record = DaemonPidRecord(version = "1.0.0", startedAtMs = 100))
+    val runStart = DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 500 }
+    DaemonLauncher.ensureRunning(FakeEnvironment(daemon, runnerStartedAtMs = runStart))
+    daemon.nowMs = 3_000
+
+    val laterForkStart = DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 2_000 }
+    DaemonLauncher.ensureRunning(FakeEnvironment(daemon, runnerStartedAtMs = laterForkStart))
+
+    assertEquals(listOf(true), daemon.launches)
+  }
+
+  @Test
+  fun `runner start resolution prefers the build-wide run start`() {
+    assertEquals(400L, DaemonSocketPaths.resolveRunnerStartedAtMs("400") { 500 })
+    assertEquals(400L, DaemonSocketPaths.resolveRunnerStartedAtMs(" 400 ") { 500 })
+    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs(null) { 500 })
+    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("") { 500 })
+    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("abc") { 500 })
+    assertEquals(500L, DaemonSocketPaths.resolveRunnerStartedAtMs("0") { 500 })
+    assertNull(DaemonSocketPaths.resolveRunnerStartedAtMs(null) { null })
+  }
+
+  @Test
+  fun `local probe failure surfaces without restarting a possibly healthy daemon`() {
+    // EMFILE in this runner must not read as "daemon unavailable": under CI that would force a
+    // restart of the shared daemon (#10169).
+    val daemon = FakeDaemon(record = DaemonPidRecord(version = "1.0.0", startedAtMs = 100))
+    val env = FakeEnvironment(daemon)
+    val emfile = java.net.SocketException("Too many open files")
+    env.probeOverride = DaemonProbe.Unreachable(emfile)
+
+    try {
+      DaemonLauncher.ensureRunning(env)
+      fail("expected DaemonUnavailableException")
+    } catch (e: DaemonUnavailableException) {
+      assertTrue(e.cause === emfile)
+      assertTrue(e.message.orEmpty().contains("Too many open files"))
+    }
+    assertEquals(emptyList<Boolean>(), daemon.launches)
   }
 
   @Test

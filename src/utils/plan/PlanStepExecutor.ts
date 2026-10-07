@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutError } from "./waitForTimeout";
+import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import type { PlanStep, PlanExecutionResult } from "../../models/Plan";
@@ -515,6 +516,9 @@ export class DefaultPlanStepExecutor<
         ? stripUndeclaredDeviceLabel(enhancedParams, tool.schema)
         : enhancedParams,
     );
+    if (step.tool === "tapAt" && step.geometry) {
+      parsedParams.__tapAtPlanContext = { geometry: step.geometry };
+    }
 
     if (context.deviceId) {
       ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -538,6 +542,13 @@ export class DefaultPlanStepExecutor<
     return !!step.optional && !(context.targetDevice && context.signal?.aborted);
   }
 
+  private returnedFailureMessage(checkResult: object, context: StepExecutionContext): string {
+    const fallbackError = context.targetDevice
+      ? String(Reflect.get(checkResult, "message") ?? "returned failure status")
+      : "Tool execution failed";
+    return "error" in checkResult ? formatToolError(checkResult.error) : fallbackError;
+  }
+
   private async resultFromResponse(
     step: PlanStep,
     context: StepExecutionContext,
@@ -551,13 +562,11 @@ export class DefaultPlanStepExecutor<
       "success" in checkResult &&
       checkResult.success === false
     ) {
-      const fallbackError = context.targetDevice
-        ? String(Reflect.get(checkResult, "message") ?? "returned failure status")
-        : "Tool execution failed";
-      const error = "error" in checkResult ? formatToolError(checkResult.error) : fallbackError;
+      const error = this.returnedFailureMessage(checkResult, context);
       return this.resultFromToolFailure(step, context, response, toolResult, error);
     }
-    const error = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, step.tool);
+    const payload = getStructuredPayload(toolResult) ?? toolResult;
+    const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
     if (error) {
       if (this.shouldSkipReturnedFailure(step, context)) {
         return {

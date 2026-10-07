@@ -128,7 +128,9 @@ nav:
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
+      - "iOS iproxy tunnel client": design-docs/plat/ios/iproxy-tunnel-client.md
       - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
+      - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android overlay specification": design-docs/plat/android/overlay-ux.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md

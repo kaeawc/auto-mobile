@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.DragResult
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.OverlayScalar
@@ -26,6 +27,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.BeforeClass
 import org.junit.Test
 
 /**
@@ -38,6 +40,16 @@ import org.junit.Test
  * tests — no Robolectric.
  */
 class CtrlProxyMessageHandlerTest {
+  companion object {
+    @BeforeClass
+    @JvmStatic
+    fun initializeDispatchClasses() = runTest {
+      // Initialize coroutines and generated serializers once, outside per-test timings.
+      // Each test still gets its own recording fake and handler.
+      CtrlProxyMessageHandlerTest()
+        .dispatch("""{"type":"request_select_all","requestId":"warmup"}""")
+    }
+  }
 
   private val json = Json {
     classDiscriminator = "type"
@@ -482,6 +494,31 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches the optional IME commit budget`() = runTest {
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-1", "long text", null, ImeTextDelivery.COMMIT, 14_500L),
+      lastCall,
+    )
+    dispatch("""{"type":"request_commit_text","requestId":"commit-2","text":"short"}""")
+    assertEquals(
+      "requestCommitText" to listOf<Any?>("commit-2", "short", null, ImeTextDelivery.COMMIT, null),
+      lastCall,
+    )
+    dispatch(
+      """{"type":"request_commit_text","requestId":"commit-3","text":"abc","delivery":"keyEvents","timeoutMs":9000}"""
+    )
+    assertEquals(
+      "requestCommitText" to
+        listOf<Any?>("commit-3", "abc", null, ImeTextDelivery.KEY_EVENTS, 9_000L),
+      lastCall,
+    )
+  }
+
+  @Test
   fun `dispatches correlated IME cancellation`() = runTest {
     dispatch(
       """{"type":"request_cancel_ime_commit","requestId":"cancel-1","targetRequestId":"commit-1"}"""
@@ -517,6 +554,12 @@ class CtrlProxyMessageHandlerTest {
       """{"type":"request_ime_action","requestId":"i1","action":"search","frameContext":"frame-1"}"""
     )
     assertEquals("requestImeAction" to listOf<Any?>("i1", "search", "frame-1"), lastCall)
+  }
+
+  @Test
+  fun `dispatches request_click_focused_input`() = runTest {
+    dispatch("""{"type":"request_click_focused_input","requestId":"fc1"}""")
+    assertEquals("requestClickFocusedInput" to listOf<Any?>("fc1"), lastCall)
   }
 
   @Test

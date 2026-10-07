@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +47,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import kotlin.math.roundToInt
 
 data class GridImage(val id: String, val imageUrl: String, val description: String)
@@ -164,7 +164,7 @@ fun GridImageItem(
     }
   }
 
-  Card(
+  AutoMobileContentCard(
     modifier =
       modifier
         .aspectRatio(1f)

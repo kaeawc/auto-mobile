@@ -22,6 +22,27 @@ import {
   normalizeCtrlProxyMilliseconds,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 
+describe("IME commit budget serialization", () => {
+  test("includes the optional budget and preserves legacy omission", () => {
+    const request: CtrlProxyRequest = {
+      type: "request_commit_text",
+      requestId: "commit-1",
+      text: "long text",
+      timeoutMs: 14_500,
+    };
+    expect(serializeCtrlProxyRequest(request)).toBe(
+      '{"type":"request_commit_text","requestId":"commit-1","text":"long text","timeoutMs":14500}',
+    );
+    expect(
+      serializeCtrlProxyRequest({
+        type: "request_commit_text",
+        requestId: "commit-1",
+        text: "long text",
+      }),
+    ).toBe('{"type":"request_commit_text","requestId":"commit-1","text":"long text"}');
+  });
+});
+
 describe("Android millisecond serialization", () => {
   const gestures = (value: number): CtrlProxyRequest[] => [
     { type: "request_tap_coordinates", requestId: "ms", x: 1.5, y: 2.5, duration: value },
@@ -168,6 +189,7 @@ const KOTLIN_SERIAL_NAMES = [
   "request_ime_action",
   "request_select_all",
   "request_action",
+  "request_click_focused_input",
   "request_activate_accessibility_link",
   "request_hit_test",
   "request_clipboard",
@@ -974,6 +996,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"start_recording"}',
     },
     {
+      builder: "requestClickFocusedInput",
+      name: "selectorless click",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.requestClickFocusedInput({ requestId: "fc-1" }),
+      ),
+      expected: '{"type":"request_click_focused_input","requestId":"fc-1"}',
+    },
+    {
       builder: "stopRecording",
       name: "no requestId on the wire",
       actual: serializeCtrlProxyRequest(ctrlProxyRequests.stopRecording()),
@@ -989,9 +1019,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 44", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 47", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(46);
+    expect(builderNames.length).toBe(47);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

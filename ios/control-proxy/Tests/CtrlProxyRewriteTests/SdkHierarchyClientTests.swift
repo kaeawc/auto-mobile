@@ -19,6 +19,24 @@ final class SdkHierarchyClientTests: XCTestCase {
         SdkHierarchyClient(baseURL: baseURL, transport: main, healthTransport: health ?? main)
     }
 
+    func testMagicTapPostPreservesHandledFalseAndFailures() async {
+        for handled in [true, false] {
+            let transport = StubHTTPTransport(status: 200, body: Data("{\"handled\":\(handled)}".utf8))
+            let result = await makeClient(transport).performMagicTap()
+            XCTAssertEqual(result, handled)
+            XCTAssertEqual(transport.recordedRequests.first?.httpMethod, "POST")
+            XCTAssertEqual(transport.recordedRequests.first?.url?.path, "/accessibility/magic-tap")
+        }
+        for outcome in [
+            StubOutcome.transportError,
+            .respond(status: 404, body: Data()),
+            .respond(status: 200, body: Data("{}".utf8)),
+        ] {
+            let result = await makeClient(StubHTTPTransport([outcome])).performMagicTap()
+            XCTAssertNil(result)
+        }
+    }
+
     private static let hierarchyJSON = Data(
         #"{"timestamp":7,"bundleId":"com.example.app","screenScale":3.0,"screenWidth":393,"screenHeight":852}"#.utf8
     )

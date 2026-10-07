@@ -86,12 +86,17 @@ describe("storage-domain URI compatibility", () => {
     [
       "downloads/%20run-42%20",
       "storage-domains/user_files/%20run-42%20",
-      { deviceId: "device 1", namespace: "run-42" },
+      { deviceId: "device 1", namespace: "run-42", domain: "user_files" },
     ],
     [
       "downloads/run-42/dir/file%20name.txt",
       "storage-domains/user_files/run-42/dir/file%20name.txt",
-      { deviceId: "device 1", namespace: "run-42", path: "dir/file name.txt" },
+      {
+        deviceId: "device 1",
+        namespace: "run-42",
+        domain: "user_files",
+        path: "dir/file name.txt",
+      },
     ],
   ])("%s and canonical %s delegate identically", async (alias, canonical, request) => {
     register();

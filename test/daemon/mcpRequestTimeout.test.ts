@@ -1803,6 +1803,17 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
     expect(resolvePlan(content)).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
   });
 
+  test("base64 plan budgets match plain YAML and oversized encoded content saturates", () => {
+    const yamlContent =
+      "name: p\nsteps:\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n";
+    const plainBudget = resolvePlan(yamlContent);
+    expect(plainBudget).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+    expect(resolvePlan(`base64:${Buffer.from(yamlContent).toString("base64")}`)).toBe(plainBudget);
+    expect(resolvePlan(`base64:${"A".repeat(MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS)}`)).toBe(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
+  });
+
   test("parallel device tracks take the longest track's sum, not the total", () => {
     const content = planContent({
       name: "p",

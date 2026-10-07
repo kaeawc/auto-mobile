@@ -17,9 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -27,7 +25,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +32,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 private val LowContrastText = Color(0xFFB8B8B8)
@@ -46,7 +46,7 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.a11y.contrast", composableName = "ContrastDemoScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Contrast Demo") },
           navigationIcon = {
             IconButton(
@@ -73,7 +73,7 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
           text = "Intentional contrast failures for auditing.",
           style = MaterialTheme.typography.bodyLarge,
         )
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
           colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
         ) {
@@ -91,7 +91,7 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
             )
           }
         }
-        Button(
+        AutoMobileContentButton(
           onClick = {},
           modifier = Modifier.semantics { testTag = "contrast_low_button" },
           colors =
@@ -113,7 +113,7 @@ fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
   TrackRecomposition(id = "screen.demo.a11y.tap", composableName = "TapTargetsDemoScreen") {
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Tap Targets Demo") },
           navigationIcon = {
             IconButton(
@@ -172,7 +172,7 @@ fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
               Modifier.padding(2.dp).clickable {}.semantics { testTag = "tap_target_tiny_link_2" },
           )
         }
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "tap_targets_note" },
           elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         ) {

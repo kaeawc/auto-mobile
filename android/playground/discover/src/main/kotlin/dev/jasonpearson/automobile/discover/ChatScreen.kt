@@ -23,17 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,6 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileOutlinedTextField
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
@@ -72,7 +72,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
 
     Column(modifier = Modifier.fillMaxSize()) {
       // Chat Header
-      TopAppBar(
+      AutoMobileTopAppBar(
         title = {
           Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -100,7 +100,7 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
           }
         },
         actions = {
-          Button(
+          AutoMobileContentButton(
             onClick = { viewModel.requestNewIncomingMessage() },
             modifier = Modifier.padding(end = 8.dp),
           ) {
@@ -179,7 +179,7 @@ fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
     }
 
     // Message bubble
-    Card(
+    AutoMobileContentCard(
       modifier = Modifier.weight(1f, fill = false),
       colors =
         CardDefaults.cardColors(
@@ -252,26 +252,20 @@ fun AnimatedChatInput(
       verticalAlignment = Alignment.Bottom,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      OutlinedTextField(
+      AutoMobileOutlinedTextField(
         value = text,
         onValueChange = onTextChange,
         placeholder = { Text("What do you want to say?") },
         modifier = Modifier.weight(1f),
         maxLines = 4,
-        shape = RoundedCornerShape(24.dp),
       )
 
-      FloatingActionButton(
+      AutoMobileFloatingActionButton(
         onClick = onSendMessage,
         modifier = Modifier.size(56.dp).alpha(sendButtonAlpha),
-        containerColor = MaterialTheme.colorScheme.primary,
-      ) {
-        Icon(
-          Icons.Filled.Send,
-          contentDescription = "Send message",
-          tint = MaterialTheme.colorScheme.onPrimary,
-        )
-      }
+        icon = Icons.Filled.Send,
+        contentDescription = "Send message",
+      )
     }
   }
 }

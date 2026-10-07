@@ -14,6 +14,11 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
+import {
+  RealCtrlProxyWebSocketInTestError,
+  defaultWebSocketFactory,
+} from "../../../../src/features/observe/DeviceServiceClient";
+import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
  * Regression coverage (issue #7532): AndroidCtrlProxyClient never escalated
@@ -32,6 +37,8 @@ afterEach(() => {
 });
 
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
+  maskRealCtrlProxyWebSocketOptIn();
+
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",
     platform: "android",
@@ -133,6 +140,51 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(manager.setupCallCount).toBe(0);
     // An actual rebind repair resets the foreground cooldown immediately.
     expect(client.getReconnectStatus()).toBeNull();
+  });
+
+  test("the unit-test WebSocket guard propagates and never escalates to recovery (#10470)", async function () {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const manager = new FakeManager();
+
+    client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      buildFakeAdb(),
+      (url) => defaultWebSocketFactory(url),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => manager,
+    );
+
+    for (let i = 0; i < 3; i++) {
+      await expect(client.ensureConnected()).rejects.toBeInstanceOf(
+        RealCtrlProxyWebSocketInTestError,
+      );
+    }
+    await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    // The typed-result wrappers must rethrow it too, not resolve a failed action.
+    await expect(client.requestAction("click")).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    await expect(client.requestActivateAccessibilityLink("Terms", 0)).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    await flushMicrotasks();
+
+    expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);
+    expect(manager.rebindIfUnhealthyCallCount).toBe(0);
+    expect(manager.setupCallCount).toBe(0);
+    expect(client.getLastConnectionFailureMessage()).toBeUndefined();
   });
 
   test("a second recovery cannot start while the first is in flight", async function () {

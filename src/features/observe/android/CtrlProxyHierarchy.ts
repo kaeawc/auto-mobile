@@ -1,3 +1,4 @@
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import { linkWindowRoots } from "../linkWindowRoots";
@@ -435,6 +436,8 @@ export class CtrlProxyHierarchy {
         fresh: false,
       };
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Failed to get hierarchy after ${duration}ms: ${error}`);
       return {
@@ -796,6 +799,8 @@ export class CtrlProxyHierarchy {
       return convertedHierarchy;
     } catch (error) {
       perf.end();
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] getAccessibilityHierarchy failed after ${duration}ms: ${error}`);
       return null;
@@ -1029,6 +1034,8 @@ export class CtrlProxyHierarchy {
         }
       }
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       if (diagnostics) {
         diagnostics.failureReason = errorMessage(signal?.aborted ? signal.reason : error);
       }
@@ -1177,6 +1184,8 @@ export class CtrlProxyHierarchy {
       logger.warn(`[CTRL_PROXY] Sync hierarchy read failed: ${diagnostics.failureReason}`);
       return null;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       // A correlated runner type:"error" frame (issue #3032 / #3061) rejects the wait with a typed
       // HierarchyRunnerError. Surface its text on the caller-provided diagnostics so the caller can
@@ -1358,6 +1367,8 @@ export class CtrlProxyHierarchy {
         logger.info(`[CTRL_PROXY] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
       }
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       // Safe to swallow for #6932: the hierarchy read still proceeds without tracking this poll.
       logger.debug(`[CTRL_PROXY] Recomposition tracking config skipped: ${error}`);
     }

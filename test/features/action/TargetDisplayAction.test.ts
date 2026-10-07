@@ -2495,6 +2495,16 @@ describe("selected-display double tap delivery", () => {
           tapsDelivered++;
           return { success: true };
         });
+        // The real method opens a localhost WebSocket (#10470), so keep the sequential two-tap
+        // path under test deterministic and off the network.
+        const doubleTap = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "requestDoubleTapCoordinates",
+        ).mockResolvedValue({
+          success: false,
+          totalTimeMs: 0,
+          error: "tap_double_v1 is not confirmed by the connected device service",
+        });
         const sleep = timer.sleep.bind(timer);
         const gap = spyOn(timer, "sleep").mockImplementation((ms) => {
           const pending = sleep(ms);
@@ -2586,6 +2596,7 @@ describe("selected-display double tap delivery", () => {
           }
         } finally {
           gap.mockRestore();
+          doubleTap.mockRestore();
           tap.mockRestore();
           capability.mockRestore();
         }

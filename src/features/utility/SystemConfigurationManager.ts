@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "../../utils/ios-cmdline-tools/simctlArgs";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -139,14 +140,16 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "launchctl",
-        "stop",
-        "com.apple.SpringBoard",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "launchctl",
+          "stop",
+          "com.apple.SpringBoard",
+        ]),
+      );
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
       return false;
@@ -155,14 +158,16 @@ export class SystemConfigurationManager {
     for (let i = 0; i < SPRINGBOARD_MAX_RETRIES; i++) {
       await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
       try {
-        const result = await this.processExecutor.executeCommand("xcrun", [
-          "simctl",
-          "spawn",
-          this.device.deviceId,
-          "launchctl",
-          "list",
-          "com.apple.SpringBoard",
-        ]);
+        const result = await this.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs([
+            "spawn",
+            this.device.deviceId,
+            "launchctl",
+            "list",
+            "com.apple.SpringBoard",
+          ]),
+        );
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
         }
@@ -184,14 +189,16 @@ export class SystemConfigurationManager {
     }
 
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "notifyutil",
-        "-p",
-        "com.apple.language.changed",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "notifyutil",
+          "-p",
+          "com.apple.language.changed",
+        ]),
+      );
       return true;
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to post locale notification: ${error}`);
@@ -220,19 +227,15 @@ export class SystemConfigurationManager {
         result.appRestarted = false;
       } else {
         try {
-          await this.processExecutor.executeCommand("xcrun", [
-            "simctl",
-            "terminate",
-            this.device.deviceId,
-            restartAppBundleId,
-          ]);
+          await this.processExecutor.executeCommand(
+            "xcrun",
+            buildSimctlArgs(["terminate", this.device.deviceId, restartAppBundleId]),
+          );
           await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
-          await this.processExecutor.executeCommand("xcrun", [
-            "simctl",
-            "launch",
-            this.device.deviceId,
-            restartAppBundleId,
-          ]);
+          await this.processExecutor.executeCommand(
+            "xcrun",
+            buildSimctlArgs(["launch", this.device.deviceId, restartAppBundleId]),
+          );
           result.appRestarted = true;
         } catch (error) {
           logger.warn(

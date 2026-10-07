@@ -1,3 +1,6 @@
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { createExecResult } from "../../../src/utils/execResult";
+import { listBootedDevicesForResource } from "../../../src/server/resourceDeviceResolver";
 import { FakeDeviceHealthMarkers } from "../../fakes/FakeDeviceHealthMarkers";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
@@ -49,7 +52,10 @@ import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager"
 import { describeDevice, listDevicesEntrySchema } from "../../../src/server/deviceDescription";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { getAndroidAppMetadataViaAdb } from "../../../src/features/observe/GetAppMetadata";
-import { defaultAdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import {
+  androidTransportIdentityAdbFactory,
+  defaultAdbClientFactory,
+} from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { resolveApkChecksum, resolveIpaChecksum } from "../../../src/constants/release";
 import { z } from "zod/v4";
@@ -127,6 +133,74 @@ describe("MCP Booted Device Resources", () => {
     // Reset to default device manager
     setDeviceManager(null);
     restoreHermeticServer();
+  });
+
+  test("booted listings fold aliases and keep the canonical after USB disappears", async () => {
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const usb: BootedDevice = { deviceId: "PHONE-USB", name: "Phone", platform: "android" };
+    const alias = { ...usb, deviceId: "host-a:5555" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(usb.deviceId, ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "resource-alias", {
+        timer,
+        deviceManager: fakeDeviceUtils,
+        androidAdbFactory: new FakeAdbClientFactory(adb),
+      }),
+    );
+    fakeDeviceUtils.setBootedDevices("android", [usb, alias]);
+    await pool.refreshDevices();
+    DaemonState.getInstance().initialize(sessions, pool);
+    try {
+      for (const rows of [[usb, alias], [alias]]) {
+        fakeDeviceUtils.setBootedDevices("android", rows);
+        resetBootedDevicesResourceCache();
+        const result = await getBootedDevicesForPlatforms(["android"], timer);
+        expect(result.devices.map((device) => device.runtime.deviceId)).toEqual([usb.deviceId]);
+        expect(
+          (await listBootedDevicesForResource("android", "alias-test")).map(
+            (device) => device.deviceId,
+          ),
+        ).toEqual([usb.deviceId]);
+      }
+      expect(timer.getSleepHistory()).toEqual([]);
+    } finally {
+      sessions.stopCleanupTimer();
+      timer.reset();
+    }
+  });
+
+  test("direct booted listings and lock states fold proven aliases", async () => {
+    const usb: BootedDevice = { deviceId: "PHONE-USB", name: "Phone", platform: "android" };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(usb.deviceId, ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+    const factory = spyOn(androidTransportIdentityAdbFactory, "create").mockReturnValue(adb);
+    fakeDeviceUtils.setBootedDevices("android", [usb, { ...usb, deviceId: "host-a:5555" }]);
+    setDeviceLockProbe(async () => ({ locked: false, keyguardShowing: false }));
+    try {
+      const result = await getBootedDevicesForPlatforms(["android"], new FakeTimer());
+      expect(result.devices.map((device) => device.runtime.deviceId)).toEqual([usb.deviceId]);
+      expect(
+        (await listBootedDevicesForResource("android", "alias-test")).map(
+          (device) => device.deviceId,
+        ),
+      ).toEqual([usb.deviceId]);
+      const { client } = fixture.getContext();
+      const locks = await client.readResource({ uri: "automobile:devices/lockStates" });
+      const content = locks.contents[0];
+      if (!("text" in content)) {
+        throw new Error("Expected JSON lock-state resource");
+      }
+      const data: DeviceLockStatesResourceContent = JSON.parse(content.text);
+      expect(data.lockStates.map((device) => device.deviceId)).toEqual([usb.deviceId]);
+    } finally {
+      factory.mockRestore();
+    }
   });
 
   test("booted resource surfaces health reason and excludes dirty idle devices from availability", async () => {

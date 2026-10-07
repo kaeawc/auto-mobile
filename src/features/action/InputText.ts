@@ -1,3 +1,4 @@
+import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -1023,6 +1024,8 @@ export class InputText extends BaseVisualChange {
     );
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
+    const before = await readIosTypedTextField(this.observeScreen, this.timer, signal);
+    assertInputNotAborted(signal);
     const deadlineMs = getTextRequestDeadlineMs();
     const result = await client.requestSetText(text, {
       ...(deadlineMs === undefined ? {} : { deadlineMs }),
@@ -1032,9 +1035,8 @@ export class InputText extends BaseVisualChange {
       ),
       abortSignal: signal,
     });
-    assertInputNotAborted(signal, result);
-
     if (!result.success) {
+      assertInputNotAborted(signal, result);
       logger.error(
         `[InputText] CtrlProxy iOS setText failed: ${result.error} totalMs=${Date.now() - startMs}`,
       );
@@ -1049,28 +1051,20 @@ export class InputText extends BaseVisualChange {
 
     logger.debug(`[InputText] iOS setText ok totalMs=${Date.now() - startMs}`);
 
-    // Handle IME action if specified (CtrlProxy iOS supports this)
-    if (imeAction) {
-      let imeError: string | undefined;
-      try {
-        const imeResult = await client.requestImeAction(imeAction);
-        assertInputNotAborted(signal);
-        if (!imeResult.success) {
-          imeError = imeResult.error || "unknown error";
-        }
-      } catch (error) {
-        assertInputNotAborted(signal);
-        imeError = errorMessage(error) || "unknown error";
-      }
-      if (imeError !== undefined) {
-        logger.warn(`[InputText] CtrlProxy iOS IME action '${imeAction}' failed: ${imeError}`);
-        return {
-          success: false,
-          text,
-          method: "a11y",
-          error: imeActionFailedAfterTextEntered(imeAction, imeError),
-        };
-      }
+    const verification = await verifyIosTypedText(
+      text,
+      before,
+      this.observeScreen,
+      this.timer,
+      signal,
+    );
+    if (!verification.success) {
+      return { success: false, text, error: verification.error, method: "a11y" };
+    }
+
+    const imeError = await this.executeIosImeAfterType(client, imeAction, signal);
+    if (imeError !== undefined) {
+      return { success: false, text, method: "a11y", error: imeError };
     }
 
     return {
@@ -1078,7 +1072,34 @@ export class InputText extends BaseVisualChange {
       text,
       imeAction,
       method: "a11y",
+      ...(verification.warning ? { warnings: [verification.warning] } : {}),
     };
+  }
+
+  private async executeIosImeAfterType(
+    client: Pick<IOSCtrlProxyClient, "requestImeAction">,
+    imeAction?: ImeAction,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (!imeAction) {
+      return undefined;
+    }
+    let imeError: string | undefined;
+    try {
+      const imeResult = await client.requestImeAction(imeAction);
+      assertInputNotAborted(signal);
+      if (!imeResult.success) {
+        imeError = imeResult.error || "unknown error";
+      }
+    } catch (error) {
+      assertInputNotAborted(signal);
+      imeError = errorMessage(error) || "unknown error";
+    }
+    if (imeError === undefined) {
+      return undefined;
+    }
+    logger.warn(`[InputText] CtrlProxy iOS IME action '${imeAction}' failed: ${imeError}`);
+    return imeActionFailedAfterTextEntered(imeAction, imeError);
   }
 
   private async executeImeAction(imeAction: string, signal?: AbortSignal): Promise<void> {

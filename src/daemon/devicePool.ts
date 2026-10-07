@@ -1,5 +1,10 @@
 import type { Environment } from "./poolConfig";
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
+import { AndroidTransportAliases, type AndroidTransportRouting } from "../utils/androidSerial";
+import {
+  androidTransportIdentityAdbFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
@@ -603,6 +608,7 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface DevicePoolDependencies {
+  androidAdbFactory?: AdbClientFactory;
   env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
@@ -662,6 +668,10 @@ function createMissingDeviceLiveness(
   factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
 ): MissingDeviceLiveness {
   return factory ? factory(port) : new MissingDeviceLiveness(port);
+}
+
+function createAndroidTransportAliases(factory?: AdbClientFactory): AndroidTransportAliases {
+  return new AndroidTransportAliases(factory ?? androidTransportIdentityAdbFactory);
 }
 
 function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
@@ -758,6 +768,11 @@ export class DevicePool {
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
+  private readonly androidTransportAliases: AndroidTransportAliases;
+  private androidAliasObservation = 0;
+  private androidAliasAppliedObservation = 0;
+  private androidAliasRetirement = 0;
+  private androidAliasAppliedDevices: BootedDevice[] = [];
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
@@ -924,10 +939,12 @@ export class DevicePool {
     runtimeIdentityFactory,
     deviceShutdownReservationsFactory,
     deviceSessionContinuityEnabled,
+    androidAdbFactory,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
     this.recoveryRetryRefresh = new TTLCache(timer, {
       ttlMs: this.RECOVERY_RETRY_REFRESH_INTERVAL_MS,
       maxEntries: 1,
@@ -1194,6 +1211,12 @@ export class DevicePool {
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
         this.shouldRebootDisconnectedAndroidDevice(device),
+      mapAndroidDiscovery: (devices) => this.androidTransportAliases.mapDiscovery(devices, true),
+      needsAndroidTransportNormalization: (devices) =>
+        devices.some((device) => device.platform === "android") &&
+        this.needsAndroidTransportNormalization(devices),
+      isTransportEmulator: (deviceId) =>
+        this.androidTransportAliases.avdName(deviceId) !== undefined,
       matchesRuntimeIdentity: (device, booted) =>
         this.runtimeIdentity.matchesRuntimeIdentity(device, booted),
       reconcilePooledIdentityResolution: (device, booted) =>
@@ -1225,6 +1248,11 @@ export class DevicePool {
 
   private createRefreshPort(): DevicePoolRefreshPort {
     return {
+      normalizeAndroidDiscovery: (devices, held, current, complete) =>
+        this.normalizeAndroidDiscovery(devices, held, current, complete),
+      isAndroidTransportAssignable: (device) => this.androidTransportAliases.isAssignable(device),
+      needsAndroidTransportNormalization: (devices) =>
+        this.needsAndroidTransportNormalization(devices),
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
@@ -1643,11 +1671,17 @@ export class DevicePool {
    * Typically gets devices from --device-list or by querying emulator status.
    */
   async initializeWithDevices(devices: BootedDevice[]): Promise<void> {
+    if (this.needsAndroidTransportNormalization(devices)) {
+      devices = this.mapAndroidDiscovery(devices);
+    }
     const now = this.seedLastUsedAt(this.timer.now());
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("populatePool");
     for (const device of devices) {
+      if (!this.androidTransportAliases.isAssignable(device)) {
+        continue;
+      }
       this.clearAutoStartSuppressionForBootedDevice(device);
       // Full: init/reinit replaces the pooled entry and allocates a new incarnation.
       this.notifyDeviceFramesInvalidated(device.deviceId);
@@ -1741,6 +1775,12 @@ export class DevicePool {
     awaitSessionTracking: boolean = true,
     identityEvidence: IdentityEvidence = neutralIdentityEvidence(device),
   ): Promise<void> {
+    device = this.mapAndroidDiscovery([device])[0];
+    if (!this.androidTransportAliases.isAssignable(device)) {
+      throw new ActionableError(
+        `Android transport '${device.deviceId}' has no proven identity. Refresh devices after reconnecting it.`,
+      );
+    }
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
       this.intentionalShutdowns.delete(device.deviceId);
@@ -1886,6 +1926,9 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    if (device.platform === "android" && this.androidTransportAliases.retire(deviceId)) {
+      this.androidAliasRetirement++;
+    }
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
@@ -3760,7 +3803,7 @@ export class DevicePool {
     return this.getDevicesByPlatform("android").filter(
       (candidate) =>
         candidate !== device &&
-        isAndroidEmulatorSerial(candidate.id) &&
+        this.isPooledAndroidEmulator(candidate.id) &&
         !candidate.identityUnresolved &&
         !isUnresolvedAndroidEmulatorName({
           deviceId: candidate.id,
@@ -4864,6 +4907,11 @@ export class DevicePool {
   private isIdleDeviceEligible(device: PooledDevice): boolean {
     return (
       device.status === "idle" &&
+      this.androidTransportAliases.isAssignable({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }) &&
       !this.isReservedForAssignment(device) &&
       !this.getDeviceHealthMarker(device.id)
     );
@@ -6483,6 +6531,72 @@ export class DevicePool {
     return this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, options);
   }
 
+  /** Explicit routing state shared with adb clients; no process-global alias cache. */
+  getAndroidTransportRouting(): AndroidTransportRouting {
+    return this.androidTransportAliases;
+  }
+
+  getAndroidTransportAliases(deviceId: string): string[] {
+    return this.androidTransportAliases.aliases(deviceId);
+  }
+
+  getAndroidTransportAvdName(deviceId: string): string | undefined {
+    return this.androidTransportAliases.avdName(deviceId);
+  }
+
+  mapAndroidDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
+    return this.androidTransportAliases.mapDiscovery(devices);
+  }
+
+  private isPooledAndroidEmulator(deviceId: string): boolean {
+    return (
+      isAndroidEmulatorSerial(deviceId) ||
+      this.androidTransportAliases.avdName(deviceId) !== undefined
+    );
+  }
+
+  needsAndroidTransportNormalization(devices: readonly BootedDevice[]): boolean {
+    return this.androidTransportAliases.needsNormalization(devices);
+  }
+
+  async normalizeAndroidDiscovery(
+    devices: readonly BootedDevice[],
+    assignmentLockHeld = false,
+    isCurrent: () => boolean = () => true,
+    completeAndroidSnapshot = true,
+  ): Promise<BootedDevice[]> {
+    if (
+      !this.needsAndroidTransportNormalization(devices) ||
+      (!completeAndroidSnapshot && devices.every((device) => device.platform !== "android"))
+    ) {
+      return [...devices];
+    }
+    const observation = ++this.androidAliasObservation;
+    const retirement = this.androidAliasRetirement;
+    const evidence = await this.androidTransportAliases.prepare(devices);
+    const fold = () => {
+      if (!isCurrent()) {
+        return [];
+      }
+      if (observation < this.androidAliasAppliedObservation) {
+        return [...this.androidAliasAppliedDevices];
+      }
+      if (retirement !== this.androidAliasRetirement) {
+        return this.mapAndroidDiscovery(devices);
+      }
+      this.androidAliasAppliedObservation = observation;
+      const normalized = this.androidTransportAliases.fold(
+        devices,
+        evidence,
+        new Set(this.devices.keys()),
+        completeAndroidSnapshot,
+      );
+      this.androidAliasAppliedDevices = normalized;
+      return normalized;
+    };
+    return assignmentLockHeld ? fold() : this.assignmentMutex.runExclusive(fold);
+  }
+
   describesPooledRuntime(expected: Pick<BootedDevice, "deviceId" | "name" | "platform">): boolean {
     return this.runtimeIdentity.describesPooledRuntime(expected);
   }
@@ -6738,12 +6852,7 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    );
+    return Array.from(this.devices.values()).filter((device) => this.isIdleDeviceEligible(device));
   }
 
   /**
@@ -6861,7 +6970,7 @@ export class DevicePool {
       (device) =>
         this.stableDeviceIdFor(device) === target.stableDeviceId &&
         (target.androidEmulator === undefined ||
-          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+          this.isPooledAndroidEmulator(device.id) === target.androidEmulator),
     );
     // A recovery target must prove one exact runtime. A duplicate stable identity
     // is ambiguous and must not collapse back to normal pool selection.
@@ -6886,7 +6995,7 @@ export class DevicePool {
       (device) =>
         this.stableDeviceIdFor(device) === target.stableDeviceId &&
         (target.androidEmulator === undefined ||
-          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+          this.isPooledAndroidEmulator(device.id) === target.androidEmulator),
     );
     if (exactMatches.length !== 1) {
       const { transportReused, transportIdentityUnresolved, absenceAuthoritative } =
@@ -6949,7 +7058,7 @@ export class DevicePool {
           (device.id === target.deviceId ||
             (target.platform === "android" &&
               target.androidEmulator === true &&
-              isAndroidEmulatorSerial(device.id))),
+              this.isPooledAndroidEmulator(device.id))),
       );
     const absenceAuthoritative =
       refreshCompleteness !== undefined &&
@@ -6961,7 +7070,7 @@ export class DevicePool {
     if (device.platform === "ios") {
       return device.id;
     }
-    if (!isAndroidEmulatorSerial(device.id)) {
+    if (!this.isPooledAndroidEmulator(device.id)) {
       return device.id;
     }
     return (
@@ -6991,12 +7100,7 @@ export class DevicePool {
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    const idle = devices.filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    ).length;
+    const idle = devices.filter((device) => this.isIdleDeviceEligible(device)).length;
     const assigned = devices.filter(
       (device) => device.status === "busy" || this.isReservedForAssignment(device),
     ).length;

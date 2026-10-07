@@ -655,9 +655,11 @@ async function releaseDaemonLivenessOwnership(
   }
 }
 
-function printUnknownDaemonCommand(command: string): void {
+export function printUnknownDaemonCommand(command: string | undefined): void {
   try {
-    console.error(`Unknown daemon command: ${command}`);
+    console.error(
+      command === undefined ? "Missing daemon command." : `Unknown daemon command: ${command}`,
+    );
     console.log("\nAvailable commands:");
     console.log("  start                 Start the daemon");
     console.log("  stop                  Stop the daemon");

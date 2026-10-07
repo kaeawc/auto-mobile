@@ -1,4 +1,7 @@
-import { CORESIMULATOR_DEVICE_SET_PATH_ENV } from "../../../src/utils/workingDirectory";
+import {
+  CORESIMULATOR_DEVICE_SET_PATH_ENV,
+  DAEMON_LAUNCH_CWD_ENV,
+} from "../../../src/utils/workingDirectory";
 import { describe, expect, spyOn, test } from "bun:test";
 import * as path from "path";
 import { logger } from "../../../src/utils/logger";
@@ -352,6 +355,24 @@ describe("resolveDeviceDataRoot", () => {
         [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "/custom/device-set",
       }),
     ).toBe(path.join("/custom/device-set", SIM_UDID));
+  });
+
+  test("anchors a trimmed relative device set at the injected launch directory", () => {
+    const launchDirectory = "/launch";
+    expect(
+      resolveDeviceDataRoot(SIM_UDID, "/home/tester", {
+        [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "  relative/devices  ",
+        [DAEMON_LAUNCH_CWD_ENV]: launchDirectory,
+      }),
+    ).toBe(path.resolve(launchDirectory, "relative", "devices", SIM_UDID));
+  });
+
+  test.each(["", "  \t "])("ignores an empty device set %s", (configured) => {
+    expect(
+      resolveDeviceDataRoot(SIM_UDID, "/home/tester", {
+        [CORESIMULATOR_DEVICE_SET_PATH_ENV]: configured,
+      }),
+    ).toBe(path.join("/home/tester", "Library", "Developer", "CoreSimulator", "Devices", SIM_UDID));
   });
 
   test("falls back to the default CoreSimulator device set layout", () => {

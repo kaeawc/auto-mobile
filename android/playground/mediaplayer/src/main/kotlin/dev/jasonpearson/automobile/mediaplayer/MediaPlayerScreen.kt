@@ -22,9 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,7 +32,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +48,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import dev.jasonpearson.automobile.design.system.components.AutoMobileClickableCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import kotlinx.coroutines.delay
@@ -64,7 +64,7 @@ fun MediaPlayerScreen() {
 
     Scaffold(
       topBar = {
-        TopAppBar(
+        AutoMobileTopAppBar(
           title = { Text(text = "Media Player", fontWeight = FontWeight.Bold) },
           colors =
             TopAppBarDefaults.topAppBarColors(
@@ -258,7 +258,7 @@ fun MediaControlsOverlay(
       }
 
       // Play/Pause button
-      Button(
+      AutoMobileContentButton(
         onClick = onPlayPause,
         modifier = Modifier.size(64.dp),
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -284,7 +284,7 @@ private fun formatTime(seconds: Float): String {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaTypeCard(mediaType: MediaType, isSelected: Boolean, onClick: () -> Unit) {
-  Card(
+  AutoMobileClickableCard(
     onClick = onClick,
     modifier = Modifier.fillMaxWidth(),
     colors =

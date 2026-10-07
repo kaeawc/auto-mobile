@@ -1,6 +1,8 @@
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceLostError } from "../models/DeviceLostError";
@@ -83,6 +85,7 @@ type ApkOverrideChecksumEntry = {
 };
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
+class CtrlProxyApkStageError extends ActionableError {}
 
 /**
  * Android-specific accessibility-service lifecycle, extending the
@@ -1009,7 +1012,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
-    const result = await this.adb.executeCommand("shell dumpsys accessibility");
+    const result = await this.adb.executeCommand(
+      "shell dumpsys accessibility",
+      undefined,
+      DUMPSYS_MAX_BUFFER,
+    );
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
       throw new ActionableError(diagnostic);
@@ -1690,6 +1697,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf,
       );
     } catch (error) {
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
@@ -1893,7 +1903,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       try {
         result.attemptedInstall = true;
         perf.startOperation("installApk");
-        await this.adb.executeCommand(`install -r -d "${apkPath}"`, CTRL_PROXY_INSTALL_TIMEOUT_MS);
+        await this.executeApkStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
         perf.endOperation("installApk");
         logger.info("[CTRL_PROXY] APK upgraded successfully");
         this.clearAvailabilityCache();
@@ -1903,6 +1913,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       } catch (upgradeError) {
         perf.endOperation("installApk");
+        if (upgradeError instanceof CtrlProxyApkStageError) {
+          this.clearAvailabilityCache();
+          throw upgradeError;
+        }
         const deviceError = this.statusInspectionDeviceError(upgradeError);
         if (deviceError) {
           throw deviceError;
@@ -1916,9 +1930,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       result.attemptedReinstall = true;
       if (isInstalled) {
-        await this.adb.executeCommand(
+        await this.executeApkStage(
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
-          CTRL_PROXY_INSTALL_TIMEOUT_MS,
+          "CtrlProxy APK uninstall for reinstall",
         );
       }
       perf.startOperation("installApk");
@@ -1934,6 +1948,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         status: isInstalled ? "reinstalled" : "installed",
       };
     } catch (reinstallError) {
+      if (reinstallError instanceof CtrlProxyApkStageError) {
+        this.clearAvailabilityCache();
+        throw reinstallError;
+      }
       const reinstallMessage = errorMessage(reinstallError);
       logger.warn(`[CTRL_PROXY] APK reinstall failed: ${reinstallMessage}`, reinstallError);
       this.clearAvailabilityCache();
@@ -2087,14 +2105,44 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Install APK
    */
+  private async executeApkStage(command: string, stage: string): Promise<ExecResult> {
+    return await runPhaseWithSettlement(
+      {
+        timer: this.timer,
+        timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS,
+        signal: getAbortSignal(),
+        graceMs: 0,
+        label: stage,
+        timeoutError: () =>
+          new CtrlProxyApkStageError(
+            `${stage} timed out after ${CTRL_PROXY_INSTALL_TIMEOUT_MS}ms. Retry device acquisition.`,
+          ),
+        defaultAbortError: () =>
+          new CtrlProxyApkStageError(`${stage} cancelled. Retry device acquisition.`),
+        explicitAbortError: (reason) =>
+          new CtrlProxyApkStageError(`${stage} cancelled: ${errorMessage(reason)}`, {
+            cause: reason,
+          }),
+      },
+      async (signal) => {
+        const result = await this.adb.executeCommand(
+          command,
+          CTRL_PROXY_INSTALL_TIMEOUT_MS,
+          undefined,
+          undefined,
+          signal,
+        );
+        signal.throwIfAborted();
+        return result;
+      },
+    );
+  }
+
   async install(apkPath: string): Promise<void> {
     try {
       logger.info("Installing APK", { path: apkPath });
 
-      const result = await this.adb.executeCommand(
-        `install "${apkPath}"`,
-        CTRL_PROXY_INSTALL_TIMEOUT_MS,
-      );
+      const result = await this.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
       const resultString = result.toString().toLowerCase();
 
       if (resultString.includes("failure") || resultString.includes("error")) {
@@ -2111,11 +2159,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // A failed adb install can still have changed package state before the
       // command reported an error.
       this.clearAvailabilityCache();
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
       }
-      throw new Error(`Failed to install APK: ${errorMessage(error)}`);
+      throw toActionableError(error, "Failed to install APK");
     }
   }
 

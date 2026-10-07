@@ -116,6 +116,34 @@ describe("resolveIosDeviceBackend", () => {
     ]);
   });
 
+  for (const [deviceId, isSimulator] of [
+    [simulatorUdid, true],
+    [physicalUdid, false],
+  ] as const) {
+    test(`skips pre-termination when requested for ${isSimulator ? "simulator" : "physical"}`, async () => {
+      const calls: Call[] = [];
+      const backend = resolveIosDeviceBackend(deviceId, {
+        simctl: new FakeSimctlTerminator(calls),
+        deviceAppUninstaller: new FakeDeviceAppUninstaller(calls),
+      });
+      await backend.uninstallApp(bundleId, undefined, { terminateFirst: false });
+      expect(calls).toEqual([{ operation: "uninstall", deviceId, bundleId, isSimulator }]);
+    });
+  }
+
+  test("an empty options object preserves default simulator termination", async () => {
+    const calls: Call[] = [];
+    const backend = resolveIosDeviceBackend(simulatorUdid, {
+      simctl: new FakeSimctlTerminator(calls),
+      deviceAppUninstaller: new FakeDeviceAppUninstaller(calls),
+    });
+    await backend.uninstallApp(bundleId, undefined, {});
+    expect(calls).toEqual([
+      { operation: "terminate", bundleId, deviceId: simulatorUdid },
+      { operation: "uninstall", deviceId: simulatorUdid, bundleId, isSimulator: true },
+    ]);
+  });
+
   test("still uninstalls a simulator app when termination fails", async () => {
     const calls: Call[] = [];
     const simctl = new FakeSimctlTerminator(calls);

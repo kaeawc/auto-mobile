@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { fixedBackoff } from "../Backoff";
@@ -24,7 +25,7 @@ export async function readAndroidPackageProcesses(
       adb.executeCommand(
         "shell dumpsys activity processes",
         5_000,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         options.signal,
       ),

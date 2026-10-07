@@ -1,5 +1,4 @@
 import { z } from "zod/v4";
-import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
 
@@ -128,45 +127,3 @@ export const sharedStorageFileSchema = z
       }
     }
   });
-
-export const stageSharedStorageSchema = withJsonSchemaOverride(
-  addDeviceTargetingToSchema(
-    z
-      .object({
-        platform: z.literal("android").optional().default("android").describe("Android platform"),
-        namespace: z.string().describe("One caller-named child directory beneath Downloads"),
-        reset: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe("Remove only this declared namespace before writing"),
-        indexMedia: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe("Request Android media indexing for media files"),
-        files: z
-          .array(sharedStorageFileSchema)
-          .min(1)
-          .describe("Files to stage into the namespace"),
-      })
-      .strict(),
-  ).superRefine((args, ctx) => {
-    try {
-      normalizeSharedStorageNamespace(args.namespace);
-    } catch (error) {
-      ctx.addIssue({
-        code: "custom",
-        message: error instanceof Error ? error.message : "namespace must be safe",
-        path: ["namespace"],
-      });
-    }
-  }),
-  (jsonSchema) => {
-    if (Array.isArray(jsonSchema.required)) {
-      jsonSchema.required = jsonSchema.required.filter(
-        (field) => field !== "platform" && field !== "reset" && field !== "indexMedia",
-      );
-    }
-  },
-);

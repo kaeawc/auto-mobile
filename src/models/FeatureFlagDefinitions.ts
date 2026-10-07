@@ -185,6 +185,6 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     label: "Actions: compact metadata",
     description:
       "Omit unchanged device metadata after its first inline action response in a session and omit identical duplicate matched elements.",
-    defaultValue: false,
+    defaultValue: true,
   },
 ];

@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 
 /**
  * Image gallery component using Coil for efficient image loading. Displays multiple images in a
@@ -39,7 +39,7 @@ import coil3.compose.rememberAsyncImagePainter
  */
 @Composable
 fun ImageGalleryComponent(imageUrls: List<String>, modifier: Modifier = Modifier) {
-  Card(
+  AutoMobileContentCard(
     modifier = modifier,
     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -79,7 +79,7 @@ fun ImageGalleryComponent(imageUrls: List<String>, modifier: Modifier = Modifier
 /** Individual image card with loading, error, and success states. */
 @Composable
 fun ImageCard(imageUrl: String, title: String, modifier: Modifier = Modifier) {
-  Card(
+  AutoMobileContentCard(
     modifier = modifier,
     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

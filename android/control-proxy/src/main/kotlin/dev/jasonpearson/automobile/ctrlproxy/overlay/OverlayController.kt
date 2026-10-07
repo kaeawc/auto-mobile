@@ -233,24 +233,35 @@ class OverlayController(
    * [offlineEvents] and go out, oldest first, ahead of the next live event. Runs under [mutex].
    */
   private val offlineAwareSink = OverlayEventSink { event ->
-    if (lifecycle.clientCount() == 0) offlineEvents.add(event)
-    else {
-      replayOfflineEvents()
-      eventSink.send(event)
-    }
+    // A live event never overtakes an older held one: the host ignores lower sequences.
+    if (lifecycle.clientCount() == 0 || !replayOfflineEvents()) offlineEvents.add(event)
+    else eventSink.send(event)
   }
 
-  /** Delivers what was buffered while no host was connected. Delivery failures are logged. */
-  private suspend fun replayOfflineEvents() {
-    for (event in offlineEvents.drain()) {
+  /**
+   * Delivers what was buffered while no host was connected. An event leaves the buffer only once it
+   * is handed to the sink: when delivery fails, or the host goes away mid-replay, that event and
+   * the rest are put back for the next connect or inspect. Returns whether everything went out.
+   */
+  private suspend fun replayOfflineEvents(): Boolean {
+    val pending = offlineEvents.drain()
+    for ((index, event) in pending.withIndex()) {
+      if (lifecycle.clientCount() == 0) {
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
+      }
       try {
         eventSink.send(event)
       } catch (error: CancellationException) {
+        offlineEvents.restore(pending.subList(index, pending.size))
         throw error
       } catch (error: Exception) {
         Log.w("OverlayController", "Buffered overlay event delivery failed", error)
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
       }
     }
+    return true
   }
 
   private fun requireLayerPermitted(layer: OverlayWindowLayer) =
@@ -402,7 +413,9 @@ class OverlayController(
   /**
    * A host connected: hand it the events a device-persistent overlay buffered while it was away.
    */
-  suspend fun onClientConnected() = signal(retryDisconnect = false) { replayOfflineEvents() }
+  suspend fun onClientConnected() = signal(retryDisconnect = false) {
+    replayOfflineEvents()
+  }
 
   /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
   suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {

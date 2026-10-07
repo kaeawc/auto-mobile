@@ -90,7 +90,14 @@ export class OverlayEventCoordinator {
     replayed: readonly OverlayEvent[],
     lastSequence: number,
   ): void {
-    this.show(scope, id, client);
+    const known = this.entries.get(scopeKey(scope, id));
+    if (known?.shown && !known.terminal) {
+      // Re-inspecting an overlay this host already tracks must not start a new epoch: that would
+      // clear the unconsumed events, and advancing the ledger below would make them unrecoverable.
+      this.watch(scope, id, client);
+    } else {
+      this.show(scope, id, client);
+    }
     for (const event of replayed) {
       this.receive(scope.deviceId, event);
     }

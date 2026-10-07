@@ -18,6 +18,7 @@ class OverlayOfflineReplayTest {
   private val statuses = mutableListOf<Triple<String?, List<OverlayStatusEntry>, Long>>()
   private val failures = mutableListOf<String?>()
   private var clients = 1
+  private var failSends = 0
 
   private fun controller(buffer: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer()) =
     OverlayController(
@@ -35,7 +36,14 @@ class OverlayOfflineReplayTest {
           statuses += Triple(requestId, overlays, droppedEvents)
         }
       },
-      eventSink = OverlayEventSink { events += it },
+      eventSink =
+        OverlayEventSink {
+          if (failSends > 0) {
+            failSends--
+            error("socket closed")
+          }
+          events += it
+        },
       clock = { timer.now },
       lifecycle = OverlayLifecycle(timer, TTL, clientCount = { clients }),
       offlineEvents = buffer,
@@ -102,6 +110,70 @@ class OverlayOfflineReplayTest {
     controller.emit("live")
     assertEquals(listOf("offline", "live"), events.map { it.name })
     assertEquals(listOf(1L, 2L), events.map { it.sequence })
+  }
+
+  @Test
+  fun `a failed delivery keeps the failed event and the tail for the next replay`() = runTest {
+    val controller = controller()
+    controller.show(null, spec())
+    clients = 0
+    for (name in listOf("a", "b", "c")) controller.emit(name)
+    clients = 1
+    failSends = 1
+
+    controller.inspect("first")
+    assertTrue(events.isEmpty())
+
+    controller.inspect("second")
+    assertEquals(listOf("a", "b", "c"), events.map { it.name })
+    assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
+  }
+
+  @Test
+  fun `a live event queues behind held events that could not be delivered`() = runTest {
+    val controller = controller()
+    controller.show(null, spec())
+    clients = 0
+    controller.emit("held")
+    clients = 1
+    failSends = 1
+
+    controller.emit("live")
+    assertTrue(events.isEmpty())
+
+    controller.onClientConnected()
+    assertEquals(listOf("held", "live"), events.map { it.name })
+  }
+
+  @Test
+  fun `the host leaving mid replay keeps the undelivered events`() = runTest {
+    val controller = controller()
+    controller.show(null, spec())
+    clients = 0
+    for (name in listOf("a", "b")) controller.emit(name)
+    clients = 1
+    controller.onClientConnected()
+    assertEquals(listOf("a", "b"), events.map { it.name })
+
+    clients = 0
+    controller.emit("c")
+    controller.onClientConnected()
+    assertEquals(listOf("a", "b"), events.map { it.name })
+
+    clients = 1
+    controller.onClientConnected()
+    assertEquals(listOf("a", "b", "c"), events.map { it.name })
+  }
+
+  @Test
+  fun `restore puts events back ahead of newer ones and respects capacity`() {
+    val buffer = OverlayOfflineEventBuffer(capacity = 3)
+    fun event(sequence: Long) =
+      OverlayEvent(0, "id", sequence, OverlayEventKind.EMIT, null, null, emptyMap())
+    buffer.add(event(4))
+    buffer.restore(listOf(event(1), event(2), event(3)))
+    assertEquals(1L, buffer.dropped)
+    assertEquals(listOf(1L, 2L, 3L), buffer.drain().map { it.sequence })
   }
 
   @Test

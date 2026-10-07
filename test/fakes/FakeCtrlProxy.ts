@@ -62,7 +62,17 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       this.supportedCommands.add(command);
     }
   }
+  private probeEvents: OverlayEvent[] = [];
+  /** Events a capability probe delivers, as a device draining its offline ring on connect. */
+  setProbeEvents(events: OverlayEvent[]): void {
+    this.probeEvents = events;
+  }
   async supportsCommand(name: string): Promise<boolean> {
+    const events = this.probeEvents;
+    this.probeEvents = [];
+    for (const event of events) {
+      this.emitOverlayEvent(event);
+    }
     return this.supportedCommands.has(name);
   }
   private tapHistory: Array<{

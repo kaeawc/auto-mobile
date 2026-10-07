@@ -34,4 +34,18 @@ class OverlayOfflineEventBuffer(private val capacity: Int = OVERLAY_OFFLINE_EVEN
 
   /** Removes and returns the buffered events, oldest first. */
   fun drain(): List<OverlayEvent> = events.toList().also { events.clear() }
+
+  /**
+   * Puts events a delivery attempt did not complete back ahead of anything buffered since, keeping
+   * their order. Overflow still drops the oldest and counts it.
+   */
+  fun restore(undelivered: List<OverlayEvent>) {
+    for (event in undelivered.asReversed()) {
+      if (events.size == capacity) {
+        events.removeLast()
+        dropped++
+      }
+      events.addFirst(event)
+    }
+  }
 }

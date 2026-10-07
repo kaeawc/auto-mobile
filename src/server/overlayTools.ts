@@ -448,6 +448,12 @@ const lastResultSchema = z.object({
     .literal(true)
     .optional()
     .describe("The device reported this overlay through inspect; this host did not show it"),
+  persistent: z
+    .boolean()
+    .optional()
+    .describe(
+      "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+    ),
   displayId: z
     .number()
     .int()
@@ -970,6 +976,25 @@ function groupByOverlay(events: readonly OverlayEvent[]): Map<string, OverlayEve
   return grouped;
 }
 
+/**
+ * The report is authoritative for what the device shows: an overlay this host still lists that the
+ * device neither reports nor ended with a replayed terminal event is gone (for example CtrlProxy
+ * restarted), including when the report is empty.
+ */
+function dropUnreportedOverlays(
+  store: OverlayStatusStore,
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  reportedIds: ReadonlySet<string>,
+): void {
+  for (const entry of store.status(scope).overlays) {
+    if (entry.id !== undefined && !reportedIds.has(entry.id)) {
+      events.dismiss(scope.deviceId, entry.id);
+      store.dismissed(scope, entry.id);
+    }
+  }
+}
+
 /** Hands the device's report and the events it replayed to the event buffers and status store. */
 function adoptReportedOverlays(
   store: OverlayStatusStore,
@@ -990,6 +1015,7 @@ function adoptReportedOverlays(
       events.adopt(scope, id, client, grouped, entry?.lastSequence ?? 0);
     }
   }
+  dropUnreportedOverlays(store, events, scope, reportedIds);
   for (const entry of reported) {
     if (!history.has(entry.id)) {
       events.adopt(scope, entry.id, client, [], entry.lastSequence);
@@ -1016,16 +1042,18 @@ async function inspectDevice(
 ): Promise<OverlayOutput> {
   const { store, events, clientFactory } = dependencies;
   const client = clientFactory(device);
-  if (!(await client.supportsCommand(OVERLAY_PERSISTENCE_REPLAY_CAPABILITY))) {
-    return {
-      success: false,
-      error: new ActionableError(overlayInspectUnsupportedMessage()).message,
-    };
-  }
+  // The device drains its offline ring from onClientConnected, which the capability probe below can
+  // trigger by connecting, so the capture must be listening before the first operation.
   const replayed: OverlayEvent[] = [];
   const stopCapture = client.onOverlayEvent((event) => replayed.push(event));
   let result: OverlayResult;
   try {
+    if (!(await client.supportsCommand(OVERLAY_PERSISTENCE_REPLAY_CAPABILITY))) {
+      return {
+        success: false,
+        error: new ActionableError(overlayInspectUnsupportedMessage()).message,
+      };
+    }
     result = await client.requestInspectOverlays(timeoutMs);
   } catch (error) {
     logger.warn("[overlay] Inspect request failed", error);

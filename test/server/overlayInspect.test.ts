@@ -191,4 +191,59 @@ describe("overlay inspect (#10494)", () => {
     const payload = await call({ action: "inspect" });
     expect(payload.overlays).toMatchObject([{ id: "proto" }]);
   });
+
+  test("events replayed while the capability probe connects are not lost", async () => {
+    client.setProbeEvents([event(1, "emit", "tap")]);
+    client.setInspectReply({ success: true, overlays: [reported(1)] });
+    await call({ action: "inspect" });
+    const first = await call({ action: "awaitEvent", id: "proto" });
+    expect([first.event?.sequence, first.event?.name]).toEqual([1, "tap"]);
+    // Only the coordinator's subscription for the adopted overlay remains; the capture is gone.
+    expect(client.getOverlayListenerCount()).toBe(1);
+  });
+
+  test("the capture listener is removed when the runner lacks the capability", async () => {
+    client.setSupportedCommands(["overlay_window_options_v1"]);
+    await call({ action: "inspect" });
+    expect(client.getOverlayListenerCount()).toBe(0);
+  });
+
+  test("a second inspect keeps events the first one buffered and not yet awaited", async () => {
+    client.setInspectReply({ success: true, overlays: [reported(2)] }, [
+      event(1, "emit", "a"),
+      event(2, "emit", "b"),
+    ]);
+    await call({ action: "inspect" });
+    client.setInspectReply({ success: true, overlays: [reported(2)] });
+    const again = await call({ action: "inspect" });
+    expect(again.overlays).toMatchObject([{ id: "proto", pendingCount: 2, lastSequence: 2 }]);
+    const first = await call({ action: "awaitEvent", id: "proto" });
+    expect(first.event?.name).toBe("a");
+  });
+
+  test("the reported persistence flag is carried into status", async () => {
+    client.setInspectReply({ success: true, overlays: [reported(1)] });
+    expect((await call({ action: "inspect" })).overlays).toMatchObject([
+      { id: "proto", persistent: true },
+    ]);
+    client.setInspectReply({
+      success: true,
+      overlays: [{ ...reported(1), persistent: false }],
+    });
+    expect((await call({ action: "inspect" })).overlays).toMatchObject([
+      { id: "proto", persistent: false },
+    ]);
+  });
+
+  test("an empty report clears an overlay the device no longer shows", async () => {
+    client.setInspectReply({ success: true, overlays: [reported(1)] });
+    await call({ action: "inspect" });
+    expect((await call({ action: "status" })).overlays).toHaveLength(1);
+
+    client.setInspectReply({ success: true, overlays: [] });
+    const payload = await call({ action: "inspect" });
+    expect(payload.success).toBe(true);
+    expect(payload.overlays).toEqual([]);
+    expect((await call({ action: "status" })).overlays).toEqual([]);
+  });
 });

@@ -9,6 +9,8 @@ export interface OverlayLastResult {
   lastAction: OverlayMutation;
   /** Reported by the device through `inspect`, not shown by this host. */
   adopted?: true;
+  /** Adopted overlays only: the device keeps it after the host disconnects (`persistence: "device"`). */
+  persistent?: boolean;
   /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
   displayId?: number;
   success: boolean;
@@ -23,6 +25,7 @@ export interface OverlayEventState {
 }
 export interface AdoptedOverlay {
   id: string;
+  persistent?: boolean;
   pages: OverlayEvent["pages"];
   state: OverlayEvent["state"];
 }
@@ -116,6 +119,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
       id: overlay.id,
       lastAction: "show",
       adopted: true,
+      ...(overlay.persistent === undefined ? {} : { persistent: overlay.persistent }),
       success: true,
       timestamp: this.clock.now(),
     };

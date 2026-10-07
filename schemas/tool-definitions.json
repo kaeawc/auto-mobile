@@ -20370,6 +20370,10 @@
                 "type": "boolean",
                 "const": true
               },
+              "persistent": {
+                "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+                "type": "boolean"
+              },
               "displayId": {
                 "description": "Android logical display the overlay was shown on; absent for the default display",
                 "type": "integer",
@@ -20465,6 +20469,10 @@
               "description": "The device reported this overlay through inspect; this host did not show it",
               "type": "boolean",
               "const": true
+            },
+            "persistent": {
+              "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+              "type": "boolean"
             },
             "displayId": {
               "description": "Android logical display the overlay was shown on; absent for the default display",

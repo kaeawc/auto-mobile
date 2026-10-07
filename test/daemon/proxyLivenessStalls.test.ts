@@ -30,6 +30,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
@@ -37,6 +38,14 @@ import type { Timer } from "../../src/utils/SystemTimer";
 // #10053: the proxy's two structured liveness states, against the daemon's real heartbeat
 // handler and session manager, with a scripted-unresponsive daemon socket. Everything runs on a
 // fake timer; nothing sleeps.
+
+// The daemon transport and persistence are pure promises in this harness.
+// Drain their work after each timer event without yielding to a loaded host.
+class LivenessTimer extends FakeTimer {
+  override advanceTimeAsync(ms: number): Promise<void> {
+    return super.advanceTimeAsync(ms, () => drainUntilQuiescent(this));
+  }
+}
 
 const LEASE_MS = 10_000;
 const DEVICE_POOL = {
@@ -213,7 +222,7 @@ describe("proxy liveness stalls (#10053)", () => {
   }
 
   beforeEach(async () => {
-    baseTimer = new FakeTimer();
+    baseTimer = new LivenessTimer();
     timer = new StallableTimer(baseTimer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     daemonManager = new FakeDaemonManager();
@@ -608,7 +617,7 @@ describe("proxy liveness stalls (#10053)", () => {
         },
       );
       await baseTimer.advanceTimeAsync(1);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await drainUntilQuiescent(baseTimer);
       const settledBeforeProbe = recoverySettled;
       daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
       finishProbe(false);
@@ -930,7 +939,7 @@ describe("proxy liveness stalls (#10053)", () => {
           LEASE_MS,
         );
         const acquisition = acquire(proxy, "getAndroid");
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await drainUntilQuiescent(baseTimer);
         await baseTimer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 250);
         await acquisition;
         expect(daemonManager.startCallCount).toBe(1);
@@ -965,7 +974,7 @@ describe("proxy liveness stalls (#10053)", () => {
       isAvailableSpy.mockResolvedValue(false);
       daemonManager.statusResult = { ...daemonManager.statusResult, running: false };
       const acquisition = acquire(proxy, "getAndroid");
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await drainUntilQuiescent(baseTimer);
       await baseTimer.advanceTimeAsync(DAEMON_RESTART_HANDOFF_TIMEOUT_MS + 250);
       await acquisition;
       expect(daemonManager.startCallCount).toBe(1);
@@ -984,7 +993,7 @@ describe("proxy liveness stalls (#10053)", () => {
       const resume = proxy
         .callTool("observe", { sessionUuid: "android-session" })
         .catch((error: unknown) => error);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await drainUntilQuiescent(baseTimer);
       for (let step = 0; step < 100; step += 1) {
         await baseTimer.advanceTimeAsync(250);
       }
@@ -1250,7 +1259,7 @@ describe("proxy liveness stalls (#10053)", () => {
 
       const result = await proxy.callTool("observe", { sessionUuid: "android-session" });
       for (let turn = 0; turn < 5; turn += 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await drainUntilQuiescent(baseTimer);
       }
 
       // The daemon's refusal reaches the harness unchanged; recovery is the proxy's own business.

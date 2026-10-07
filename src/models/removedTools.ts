@@ -5,6 +5,10 @@ export const REMOVED_TOOLS: Readonly<Record<string, string>> = {
   clearText: "sendKeys",
   imeAction: "sendKeys",
   debugSearch: "observe to see elements, and the diagnostics returned by tapOn/waitFor failures",
+  stageSharedStorage:
+    "putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)",
+  stageSharedStorageFixtures:
+    "putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)",
 };
 
 export function getRemovedToolReplacement(toolName: string): string | undefined {

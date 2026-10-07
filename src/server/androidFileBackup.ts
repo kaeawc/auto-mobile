@@ -2,7 +2,7 @@ import { shellQuote } from "../utils/shellQuote";
 
 /**
  * Device-shell script fragments shared by Android file batches (putAppFile app containers and
- * stageSharedStorage). A batch that overwrites an existing file saves its previous content first,
+ * sharedStorageService). A batch that overwrites an existing file saves its previous content first,
  * so a failed batch restores it instead of deleting it.
  */
 

@@ -64,8 +64,6 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
   "stageSessionDownloads",
 ]);
 
@@ -163,12 +161,7 @@ function findOversizedParam(params: Record<string, unknown>): string | undefined
 }
 
 /** Tools that write caller-supplied files, from a host path or inline content. */
-const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set([
-  "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
-  "stageSessionDownloads",
-]);
+const FILE_STAGING_TOOLS: ReadonlySet<string> = new Set(["putAppFile", "stageSessionDownloads"]);
 
 function hasSourcePath(entry: unknown): boolean {
   return typeof entry === "object" && entry !== null && "sourcePath" in entry;

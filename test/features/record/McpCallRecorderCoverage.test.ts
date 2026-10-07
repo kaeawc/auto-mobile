@@ -235,14 +235,6 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
     },
   ],
   [
-    "stageSharedStorage",
-    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
-  [
-    "stageSharedStorageFixtures",
-    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
-  [
     "stageSessionDownloads",
     { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
   ],
@@ -258,8 +250,6 @@ const RECORDED_TOOLS_9966 = [
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
   "stageSessionDownloads",
 ];
 
@@ -314,8 +304,8 @@ describe("tools recorded by #9966", () => {
       destinationPath: "legacy.txt",
       sourcePath: "fixtures/legacy.txt",
     });
-    recorder.record("stageSharedStorage", {
-      namespace: "fixtures",
+    recorder.record("putAppFile", {
+      target: { domain: "user_files", namespace: "fixtures" },
       files: [
         { destinationPath: "a.txt", contentText: "a" },
         { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },

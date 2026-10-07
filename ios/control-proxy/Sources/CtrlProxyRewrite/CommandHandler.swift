@@ -138,11 +138,14 @@ final class CommandHandler: CommandHandling {
         do {
             switch request {
             // View hierarchy commands
-            // On iOS, `request_hierarchy_if_stale` deliberately performs a fresh
-            // capture identical to `request_hierarchy`; there is no cache or timestamp
-            // comparison, and any client-supplied `sinceTimestamp` is ignored.
-            case let .requestHierarchy(payload), let .requestHierarchyIfStale(payload):
+            case let .requestHierarchy(payload):
                 return try await handleRequestHierarchy(payload, startTime: startTime)
+
+            // On iOS, `request_hierarchy_if_stale` always captures fresh, just like
+            // `request_hierarchy`. `sinceTimestamp` is accepted but does not enable
+            // cache reuse: there is no UI-change signal, and polls can miss a change.
+            case let .requestHierarchyIfStale(payload):
+                return try await handleRequestHierarchyIfStale(payload, startTime: startTime)
 
             case let .setHierarchyPollInterval(payload):
                 return try await handleSetHierarchyPollInterval(payload, startTime: startTime)

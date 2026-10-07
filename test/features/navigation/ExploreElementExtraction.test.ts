@@ -182,6 +182,52 @@ describe("ExploreElementExtraction", () => {
       });
     }
 
+    function screenHierarchy(nodes: ViewHierarchyNode[]): ViewHierarchyResult {
+      return { ...createMockViewHierarchy(nodes), screenWidth: 1080, screenHeight: 2400 };
+    }
+
+    function boundedNode(
+      overrides: Partial<ViewHierarchyNode["$"]>,
+      bounds: ViewHierarchyNode["bounds"],
+    ): ViewHierarchyNode {
+      return { ...createMockNode({ ...overrides, bounds }), bounds };
+    }
+
+    test("does not hand an off-screen element a selector that only matches a visible twin", () => {
+      const offscreen = { left: 0, top: 3000, right: 100, bottom: 3050 };
+      const hierarchy = screenHierarchy([
+        boundedNode({ text: "Save", "resource-id": "off" }, offscreen),
+        boundedNode(
+          { text: "Save", "resource-id": "visible" },
+          { ...offscreen, top: 0, bottom: 50 },
+        ),
+        boundedNode({ text: "Save", "resource-id": "" }, { ...offscreen, top: 3100, bottom: 3150 }),
+      ]);
+      const [off, visible, unlabelled] = extractNavigationElements(hierarchy, elementParser);
+
+      // Its own id has no on-screen match, so it cannot reach the visible control.
+      expect(tapSelectorFor(off, hierarchy)).toEqual({ elementId: "off" });
+      expect(tapSelectorFor(visible, hierarchy)).toEqual({ elementId: "visible" });
+      // Only the text is left, and every on-screen match is another control.
+      expect(tapSelectorFor(unlabelled, hierarchy)).toBeNull();
+    });
+
+    test("keeps occurrence indices for repeated scroll-only containers", () => {
+      const list = { class: "android.widget.ListView", text: "List", "resource-id": "" };
+      const scrollOnly = { clickable: "false", scrollable: "true" };
+      const hierarchy = screenHierarchy([
+        boundedNode({ ...list, ...scrollOnly }, { left: 0, top: 0, right: 500, bottom: 500 }),
+        boundedNode({ ...list, ...scrollOnly }, { left: 0, top: 600, right: 500, bottom: 1100 }),
+      ]);
+      const containers = extractScrollableContainers(hierarchy, elementParser);
+
+      expect(containers.map((container) => tapSelectorFor(container, hierarchy))).toEqual([
+        { text: "List", index: 0 },
+        { text: "List", index: 1 },
+      ]);
+      expect(new Set(containers.map((c) => getElementKey(c, hierarchy))).size).toBe(2);
+    });
+
     test("keeps a unique occurrence unindexed", () => {
       const element = createMockElement();
       const selector = {

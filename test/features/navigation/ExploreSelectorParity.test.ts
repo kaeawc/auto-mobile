@@ -209,7 +209,7 @@ const observed = [
   [
     "android-focus/playground-text-field-post-tap.json",
     51,
-    "ed7919e0ca9e34e97bda7cbbd9cbe7f6b4a23cb79dfb0b4029ddf3487bf554ea",
+    "595d7772a288ec52c8b00767b0deadde12f6cbc9ba9bd481119c9be407bae90f",
   ],
   [
     "identify-interactions/playground-tap-resource.json",
@@ -305,6 +305,13 @@ test("an IME key keeps its indexed resource-id rather than a label tapOn cannot 
   const report = reports.get("android-focus/playground-text-field-post-tap.json")!;
   const row = report.explore.find(({ element }) => element?.id === id)!;
   expect(row.selector).toEqual({ elementId: id, index: 0 });
+});
+
+test("a label whose every match is another control gets no selector, so Explore taps its bounds", () => {
+  // The IME toolbar's Settings key: the text selector excludes keys and matches two other nodes.
+  const report = reports.get("android-focus/playground-text-field-post-tap.json")!;
+  const row = report.explore.find(({ element }) => element?.description === "Settings")!;
+  expect(row.selector).toBeNull();
 });
 
 test("an off-screen candidate is filtered before totals and indices", () => {

@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "../../../utils/ios-cmdline-tools/simctlArgs";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { HostCommandExecutor } from "../../../utils/HostCommandExecutor";
 import { logger } from "../../../utils/logger";
@@ -56,17 +57,19 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleLocale", [appleLocale]);
 
       const languages = this.buildAppleLanguages(languageTag);
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "write",
-        ".GlobalPreferences",
-        "AppleLanguages",
-        "-array",
-        ...languages,
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "defaults",
+          "write",
+          ".GlobalPreferences",
+          "AppleLanguages",
+          "-array",
+          ...languages,
+        ]),
+      );
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
       if (!readBack || readBack !== appleLocale) {
@@ -238,15 +241,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
   ): Promise<void> {
     try {
       if (valueArgs === null) {
-        await this.processExecutor.executeCommand("xcrun", [
-          "simctl",
-          "spawn",
-          this.device.deviceId,
-          "defaults",
-          "delete",
-          domain,
-          key,
-        ]);
+        await this.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs(["spawn", this.device.deviceId, "defaults", "delete", domain, key]),
+        );
       } else {
         await this.iosDefaultsWrite(domain, key, valueArgs);
       }
@@ -425,15 +423,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   private async iosDefaultsRead(domain: string, key: string): Promise<string | null> {
     try {
-      const result = await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "read",
-        domain,
-        key,
-      ]);
+      const result = await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs(["spawn", this.device.deviceId, "defaults", "read", domain, key]),
+      );
       return normalizeSettingValue(result.stdout);
     } catch (error) {
       // `defaults read` fails when the domain/key has never been set on this
@@ -447,16 +440,18 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
   }
 
   private async iosDefaultsWrite(domain: string, key: string, valueArgs: string[]): Promise<void> {
-    await this.processExecutor.executeCommand("xcrun", [
-      "simctl",
-      "spawn",
-      this.device.deviceId,
-      "defaults",
-      "write",
-      domain,
-      key,
-      ...valueArgs,
-    ]);
+    await this.processExecutor.executeCommand(
+      "xcrun",
+      buildSimctlArgs([
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "write",
+        domain,
+        key,
+        ...valueArgs,
+      ]),
+    );
   }
 
   private toAppleLocale(languageTag: string): string {

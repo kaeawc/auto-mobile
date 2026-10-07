@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "./simctlArgs";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
 import { promises as fs } from "fs";
@@ -1197,7 +1198,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
       // install-time hash read, and its child must not outlive a cancelled caller.
       const result = await this.execute(
         "xcrun",
-        ["simctl", "get_app_container", deviceUdid, bundleId, "app"],
+        buildSimctlArgs(["get_app_container", deviceUdid, bundleId, "app"]),
         {
           timeoutMs: SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
           killSignal: "SIGKILL",
@@ -1251,7 +1252,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     // Bounded and killable (issue #10077): a wedged `simctl uninstall` must not
     // hold the call, and its child must not be left behind on cancellation.
     try {
-      await this.execute("xcrun", ["simctl", "uninstall", deviceUdid, bundleId], {
+      await this.execute("xcrun", buildSimctlArgs(["uninstall", deviceUdid, bundleId]), {
         timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
         killSignal: "SIGKILL",
         ...(signal ? { signal } : {}),

@@ -16,8 +16,11 @@ export const SDK_CAPABILITY_STATES = [
 
 const sdkCapabilityDescriptorSchema = z.object({
   id: z.string().min(1),
-  // A state written by a newer SDK degrades to UNKNOWN, as the Kotlin decoder does.
-  state: z.enum(SDK_CAPABILITY_STATES).catch("UNKNOWN"),
+  // A string state written by a newer SDK degrades to UNKNOWN, as the Kotlin decoder does. A missing
+  // or non-string state is a malformed descriptor and fails the whole snapshot.
+  state: z.string().transform((value): (typeof SDK_CAPABILITY_STATES)[number] => {
+    return SDK_CAPABILITY_STATES.find((known) => known === value) ?? "UNKNOWN";
+  }),
   reason: z.string().nullable().optional(),
 });
 
@@ -87,6 +90,11 @@ export function parseSdkCapabilitiesState(raw: unknown): SdkCapabilitiesResult {
     return parsed.success
       ? { status: "available", snapshot: parsed.data }
       : sdkCapabilitiesUnavailable("MALFORMED_RESPONSE");
+  }
+  if (outcome !== "unavailable") {
+    // The wire contract defines only `ok` and `unavailable`; anything else is a corrupt or
+    // version-skewed frame, not a statement about the bridge.
+    return sdkCapabilitiesUnavailable("MALFORMED_RESPONSE");
   }
   const known = SDK_CAPABILITIES_UNAVAILABLE_REASONS.find((candidate) => candidate === reason);
   return sdkCapabilitiesUnavailable(known ?? "BRIDGE_UNAVAILABLE");

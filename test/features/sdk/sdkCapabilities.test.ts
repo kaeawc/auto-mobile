@@ -10,6 +10,11 @@ const snapshot = {
   policy: { captureHeaders: true, captureBodies: false, allowMutations: false },
 };
 
+const okWith = (capability: Record<string, unknown>) => ({
+  outcome: "ok",
+  snapshot: { schemaVersion: 1, capabilities: [capability], policy: {} },
+});
+
 describe("parseSdkCapabilitiesState", () => {
   test("accepts a partial capability set and keeps the policy", () => {
     expect(parseSdkCapabilitiesState({ outcome: "ok", snapshot })).toEqual({
@@ -62,6 +67,10 @@ describe("parseSdkCapabilitiesState", () => {
       { outcome: "ok", snapshot: { ...snapshot, policy: { captureBodies: "true" } } },
     ],
     ["missing policy", { outcome: "ok", snapshot: { schemaVersion: 1, capabilities: [] } }],
+    ["missing capability state", okWith({ id: "x.y" })],
+    ["numeric capability state", okWith({ id: "x.y", state: 42 })],
+    ["null capability state", okWith({ id: "x.y", state: null })],
+    ["unknown outcome", { outcome: "corrupt", reason: "BRIDGE_NOT_INSTALLED" }],
   ])("%s is malformed, never an empty capability set", (_name, raw) => {
     expect(parseSdkCapabilitiesState(raw)).toEqual(
       sdkCapabilitiesUnavailable("MALFORMED_RESPONSE"),

@@ -4,7 +4,8 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findUsageError } from "../../src/cli/usageError";
+import { parseArgs } from "../../src/cli/parseArgs";
+
 import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { DaemonLaunchCommand } from "../../src/daemon/DaemonLauncher";
 import type { DaemonProcessSpawner } from "../../src/daemon/manager";
@@ -12,8 +13,11 @@ import type { DaemonOptions } from "../../src/daemon/types";
 import { EVENT_ALL_MARKERS_ENV } from "../../src/utils/eventAllMarkers";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// Issue #10132: findUsageError runs before any server import and exits 1 on a stray
-// word. That is the one way the check could break an INSTALLED setup, so this file
+const invocationError = (args: string[]) =>
+  parseArgs(args, { warn: () => {} }, {}).invalidInvocation;
+
+// Issue #10132: main exits 1 when parseArgs reports a stray word. Pin the
+// installed launchers so this guard cannot mistake a real launch value for a command.
 // pins the argv every launcher in the repo really produces: the argv the daemon
 // manager spawns its child with (built by the real DaemonManager with every option
 // set) and every argv in the MCP client config templates, docs and container
@@ -175,21 +179,21 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
     expect(args).toContain("--enable-tool");
     expect(args).toContain("--a11y-level");
     expect(args).toContain("--actions-compact-metadata");
-    expect(findUsageError(childArgv(args))).toBeUndefined();
+    expect(invocationError(childArgv(args))).toBeUndefined();
   });
 
   test("the empty-marker override form (--event-all-markers=) produces no usage error", async () => {
     const args = await spawnedArgs({ eventAllMarkersCliOverride: true });
 
     expect(args.some((arg) => arg.startsWith("--event-all-markers="))).toBe(true);
-    expect(findUsageError(childArgv(args))).toBeUndefined();
+    expect(invocationError(childArgv(args))).toBeUndefined();
   });
 
   test("the default start (no options) produces no usage error", async () => {
     const args = await spawnedArgs({});
 
     expect(args[0]).toBe("--daemon-mode");
-    expect(findUsageError(childArgv(args))).toBeUndefined();
+    expect(invocationError(childArgv(args))).toBeUndefined();
   });
 
   test.each([
@@ -220,13 +224,13 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
 
     // Everything before --daemon-mode is consumed by the runtime / package runner
     // (`bun`, `bunx -y`, `bun x -y <spec>`), never by this process.
-    expect(findUsageError(childArgv(args))).toBeUndefined();
+    expect(invocationError(childArgv(args))).toBeUndefined();
   });
 
   test("the child argv is exactly what a stray word would break: a bare word makes it fail", async () => {
     const args = await spawnedArgs({ port: 9164 });
 
-    expect(findUsageError([...childArgv(args), "extra"])).toContain("Unexpected argument 'extra'");
+    expect(invocationError([...childArgv(args), "extra"])).toContain("Unexpected argument: extra");
   });
 });
 
@@ -251,11 +255,11 @@ describe("MCP client config templates and entrypoints", () => {
 
     expect(elements.some((element) => element === PACKAGE_SPECIFIER)).toBe(true);
     // The only extra argv any preset adds. A new entry must be added to this pin
-    // deliberately, after checking it against findUsageError.
+    // deliberately, after checking it against invocationError.
     expect(flags).toEqual(["--debug", "--debug-perf"]);
-    expect(findUsageError([])).toBeUndefined();
-    expect(findUsageError(flags)).toBeUndefined();
-    expect(findUsageError(["--debug", "--debug-perf"])).toBeUndefined();
+    expect(invocationError([])).toBeUndefined();
+    expect(invocationError(flags)).toBeUndefined();
+    expect(invocationError(["--debug", "--debug-perf"])).toBeUndefined();
   });
 
   test(".claude-plugin/plugin.json launches the server with no argv after the package", () => {
@@ -266,7 +270,7 @@ describe("MCP client config templates and entrypoints", () => {
 
     expect(server.command).toBe("bunx");
     expect(server.args).toEqual([PACKAGE_SPECIFIER]);
-    expect(findUsageError(server.args.slice(1))).toBeUndefined();
+    expect(invocationError(server.args.slice(1))).toBeUndefined();
   });
 
   test("docs/index.md manual MCP configuration launches the server with no argv", () => {
@@ -276,7 +280,7 @@ describe("MCP client config templates and entrypoints", () => {
     const args = JSON.parse(block![1]) as string[];
 
     expect(args).toEqual([PACKAGE_SPECIFIER]);
-    expect(findUsageError(args.slice(1))).toBeUndefined();
+    expect(invocationError(args.slice(1))).toBeUndefined();
   });
 
   test("docs/using/dynamic-tools.md documents --enable-tool/--disable-tool launches", () => {
@@ -289,7 +293,7 @@ describe("MCP client config templates and entrypoints", () => {
     expect(invocations).toContainEqual(["--enable-tool", "clipboard", "--enable-tool", "sqlQuery"]);
     expect(invocations).toContainEqual(["--disable-tool", "observe"]);
     for (const argv of invocations) {
-      expect(findUsageError(argv)).toBeUndefined();
+      expect(invocationError(argv)).toBeUndefined();
     }
   });
 
@@ -302,7 +306,7 @@ describe("MCP client config templates and entrypoints", () => {
     expect(commands).toContainEqual(["bun", "dist/src/index.js"]);
     expect(commands).toContainEqual(["bun", "--watch", "src/index.ts"]);
     // After the runtime flags and the entry script nothing remains.
-    expect(findUsageError([])).toBeUndefined();
+    expect(invocationError([])).toBeUndefined();
   });
 
   describe("external launchers that name a mode flag first", () => {
@@ -342,7 +346,7 @@ describe("MCP client config templates and entrypoints", () => {
     ];
 
     test.each(launcherArgv)("%s", (_label, argv) => {
-      expect(findUsageError(argv)).toBeUndefined();
+      expect(invocationError(argv)).toBeUndefined();
     });
   });
 });

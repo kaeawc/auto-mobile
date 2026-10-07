@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { spyOn, describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { VoiceOverToggle } from "../../../src/features/accessibility/VoiceOverToggle";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
@@ -479,4 +479,85 @@ describe("VoiceOverToggle", () => {
       expect(fakeDetector.getInvalidatedDevices()).toContain(PHYSICAL_DEVICE.deviceId);
     });
   });
+});
+
+describe("custom simulator device set argv", () => {
+  for (const configured of [false, true]) {
+    test(
+      configured
+        ? "injects --set immediately after simctl"
+        : "preserves the original argv when unset",
+      async () => {
+        const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+        try {
+          if (configured) {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = "/tmp/custom device set";
+          } else {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          }
+          const prefix = configured ? ["simctl", "--set", "/tmp/custom device set"] : ["simctl"];
+          const exec = new FakeProcessExecutor();
+          const capture = spyOn(exec, "executeCommand");
+          const detector = new FakeIosVoiceOverDetector();
+          detector.setVoiceOverEnabled(true);
+          const timer = new FakeTimer();
+          timer.enableAutoAdvance();
+          const toggle = new VoiceOverToggle(
+            SIMULATOR_DEVICE,
+            detector,
+            exec,
+            timer,
+            () => new FakeIOSCtrlProxy(),
+          );
+          expect((await toggle.toggle(true)).applied).toBe(true);
+          expect(capture.mock.calls.map(([file, args]) => [file, args])).toEqual([
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                SIMULATOR_DEVICE.deviceId,
+                "defaults",
+                "write",
+                "com.apple.Accessibility",
+                "VoiceOverTouchEnabled",
+                "-bool",
+                "YES",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                SIMULATOR_DEVICE.deviceId,
+                "notifyutil",
+                "-p",
+                "com.apple.accessibility.VoiceOverStatusDidChange",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                SIMULATOR_DEVICE.deviceId,
+                "launchctl",
+                "kickstart",
+                "-p",
+                "system/com.apple.VoiceOverTouch",
+              ],
+            ],
+          ]);
+          expect(timer.getSleepHistory()).toEqual([]);
+        } finally {
+          if (previous === undefined) {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          } else {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+          }
+        }
+      },
+    );
+  }
 });

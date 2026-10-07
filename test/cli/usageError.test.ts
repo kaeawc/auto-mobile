@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { parseArgs } from "../../src/cli/parseArgs";
-import { findUsageError } from "../../src/cli/usageError";
+import { printUnknownDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 
 const logger = { warn: () => {} };
+const invocationError = (args: string[]) => parseArgs(args, logger, {}).invalidInvocation;
 
-describe("findUsageError (#10132)", () => {
+describe("invocationError (#10132)", () => {
   describe("command lines that must keep starting the stdio MCP server", () => {
     // Each argv is what an MCP client config or the Dockerfile passes after the
     // package/script name: scripts/install.sh writes `bunx @kaeawc/auto-mobile@latest`
@@ -31,7 +32,7 @@ describe("findUsageError (#10132)", () => {
     ];
 
     test.each(clientArgv)("%s", (_label, argv) => {
-      expect(findUsageError(argv)).toBeUndefined();
+      expect(invocationError(argv)).toBeUndefined();
       // parseArgs must still accept it as a stdio launch (not CLI, no daemon command).
       const parsed = parseArgs(argv, logger, {});
       expect(parsed.cliMode).toBe(false);
@@ -61,53 +62,82 @@ describe("findUsageError (#10132)", () => {
     ];
 
     test.each(dispatched)("%s", (_label, argv) => {
-      expect(findUsageError(argv)).toBeUndefined();
+      expect(invocationError(argv)).toBeUndefined();
     });
   });
 
-  test("a bare --daemon names the available commands and an example", () => {
-    const message = findUsageError(["--daemon"]);
-    expect(message).toContain("--daemon requires a command");
-    expect(message).toContain("status");
-    expect(message).toContain("session-info <id>");
-    expect(message).toContain("auto-mobile --daemon status");
+  test("a bare --daemon uses main's command printer and exits with usage", () => {
+    const parsed = parseArgs(["--daemon"], logger, {});
+    expect(parsed.daemonRequested).toBe(true);
+    expect(parsed.daemonCommand).toBeUndefined();
+    const output: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((message) => output.push(String(message)));
+    const error = spyOn(console, "error").mockImplementation((message) =>
+      output.push(String(message)),
+    );
+    const exited = new Error("fake exit");
+    const exit = spyOn(process, "exit").mockImplementation(() => {
+      throw exited;
+    });
+    try {
+      expect(() => printUnknownDaemonCommand(parsed.daemonCommand)).toThrow(exited);
+      expect(output.join("\n")).toContain("Missing daemon command.");
+      expect(output.join("\n")).toContain("Available commands:");
+      expect(output.join("\n")).toContain("status");
+      expect(output.join("\n")).toContain("session-info <id>");
+      expect(exit).toHaveBeenCalledWith(1);
+    } finally {
+      exit.mockRestore();
+      error.mockRestore();
+      log.mockRestore();
+    }
   });
 
-  test("a trailing --daemon after launch flags is also rejected", () => {
-    expect(findUsageError(["--debug", "--daemon"])).toContain("--daemon requires a command");
+  test("a trailing --daemon after launch flags also reaches the usage printer", () => {
+    const parsed = parseArgs(["--debug", "--daemon"], logger, {});
+    expect(parsed.daemonRequested).toBe(true);
+    expect(parsed.daemonCommand).toBeUndefined();
   });
 
   test("--cli=<tool> and --daemon=<command> are rejected with the space-separated form", () => {
-    expect(findUsageError(["--cli=observe"])).toContain("Did you mean: auto-mobile --cli observe");
-    expect(findUsageError(["--daemon=status"])).toContain(
-      "Did you mean: auto-mobile --daemon status",
-    );
-    expect(findUsageError(["--boot-device=ios"])).toContain("--boot-device --platform");
+    expect(invocationError(["--cli=observe"])).toContain("Use --cli <tool>");
+    expect(invocationError(["--daemon=status"])).toContain("Use --daemon status");
+    expect(invocationError(["--boot-device=ios"])).toContain("--boot-device --platform");
   });
 
   test("a malformed mode flag before a real mode flag is still rejected (#10135)", () => {
-    expect(findUsageError(["--debug", "--cli=observe"])).toContain(
-      "Did you mean: auto-mobile --cli observe",
-    );
-    expect(findUsageError(["--daemon=status", "--cli", "observe"])).toContain(
-      "Did you mean: auto-mobile --daemon status",
+    expect(invocationError(["--debug", "--cli=observe"])).toContain("Use --cli <tool>");
+    expect(invocationError(["--daemon=status", "--cli", "observe"])).toContain(
+      "Use --daemon status",
     );
   });
 
   test("an empty element does not hide a real usage error (#10135)", () => {
-    expect(findUsageError(["", "doctor"])).toContain("Unexpected argument 'doctor'");
-    expect(findUsageError(["--daemon", ""])).toContain("--daemon requires a command");
+    expect(invocationError(["", "doctor"])).toContain("Unexpected argument: doctor");
+    const parsed = parseArgs(["--daemon", ""], logger, {});
+    expect(parsed.daemonRequested).toBe(true);
+    expect(parsed.daemonCommand).toBeUndefined();
   });
 
-  test("a stray word is rejected with the nearest valid form", () => {
-    expect(findUsageError(["doctor"])).toContain("Did you mean: auto-mobile --cli doctor");
-    expect(findUsageError(["status"])).toContain("Did you mean: auto-mobile --daemon status");
-    expect(findUsageError(["--debug", "doctor"])).toContain("Unexpected argument 'doctor'");
-    expect(findUsageError(["--port", "8080", "doctor"])).toContain("--cli doctor");
+  test("a stray word is rejected with main's usage hint", () => {
+    expect(invocationError(["doctor"])).toContain("did you mean --cli doctor");
+    expect(invocationError(["status"])).toContain("did you mean --cli status");
+    expect(invocationError(["--debug", "doctor"])).toContain("Unexpected argument: doctor");
+    expect(invocationError(["--port", "8080", "doctor"])).toContain("--cli doctor");
+  });
+
+  test("empty tool values remain in the command argv", () => {
+    const parsed = parseArgs(["--cli", "inputText", "--text", ""], logger, {});
+    expect(parsed.invalidInvocation).toBeUndefined();
+    expect(parsed.cliArgs).toEqual(["inputText", "--text", ""]);
+  });
+
+  test("unknown launcher flags consume one value but do not hide a later stray word", () => {
+    expect(invocationError(["--some-future-flag", "value", "doctor"])).toContain("--cli doctor");
   });
 
   test("words after a mode flag belong to that mode, not to the stray-word check", () => {
-    expect(findUsageError(["--cli", "doctor", "extra", "words"])).toBeUndefined();
-    expect(findUsageError(["--daemon", "session-info", "abc"])).toBeUndefined();
+    expect(invocationError(["--cli", "doctor", "extra", "words"])).toBeUndefined();
+    expect(invocationError(["--daemon", "session-info", "abc"])).toBeUndefined();
   });
 });

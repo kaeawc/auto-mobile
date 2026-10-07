@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import * as manager from "../../src/server/webrtcStreamManager";
 import { WebRtcStreamSocketServer } from "../../src/daemon/webrtcStreamSocketServer";
@@ -91,6 +92,7 @@ function harness(
   const captureHints: Array<{ bitrateBps?: number; fps?: number }> = [];
   const publishers: WebRtcPublisher[] = [];
   manager.setWebRtcStreamManagerDependencies({
+    captureRegistry: createDeviceCaptureRegistry(),
     idGenerator: new CountingIdGenerator(),
     timer,
     now: () => new Date(timer.now()),
@@ -621,6 +623,7 @@ test("leaseless stop is allowed for a caller with mixed owner/viewer leases", as
 test("a failed start still reports the kind minted for its lease", async () => {
   const h = harness();
   manager.setWebRtcStreamManagerDependencies({
+    captureRegistry: createDeviceCaptureRegistry(),
     createSource: () => ({
       start: async () => {
         throw new Error("capture unavailable");

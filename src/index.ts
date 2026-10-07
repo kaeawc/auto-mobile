@@ -126,15 +126,6 @@ async function main() {
     process.exit(0);
   }
 
-  // Reject an unrecognized command line before any server import or startup work,
-  // so a mistyped command cannot fall through to a silent stdio MCP wait (#10132).
-  const { findUsageError } = await import("./cli/usageError");
-  const usageError = findUsageError(rawArgs);
-  if (usageError !== undefined) {
-    console.error(`auto-mobile: ${usageError}`);
-    process.exit(1);
-  }
-
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer, registerMcpTools } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
@@ -231,6 +222,7 @@ async function main() {
     const {
       cliMode,
       cliArgs,
+      invalidInvocation,
       daemonPort,
       daemonHost,
       initialSessionUuid,
@@ -253,6 +245,7 @@ async function main() {
       videoRecordingDefaults,
       daemonMode,
       daemonCommand,
+      daemonRequested,
       daemonArgs,
       skipCtrlProxyDownload,
       embeddedSdk,
@@ -274,6 +267,16 @@ async function main() {
       enabledTools,
       disabledTools,
     } = parseArgs(process.argv.slice(2), logger);
+    if (invalidInvocation) {
+      console.error(invalidInvocation);
+      process.exit(1);
+      return;
+    }
+    if (daemonRequested && daemonCommand === undefined) {
+      const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
+      printUnknownDaemonCommand(undefined);
+      return;
+    }
     if (daemonCommand && PROFILE_TOLERANT_DAEMON_COMMANDS.has(daemonCommand)) {
       await runDaemonCommand(daemonCommand, daemonArgs);
       await exitAfterSuccessfulDaemonCommand(logger, process);

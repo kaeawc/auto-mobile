@@ -4,11 +4,19 @@ import type { VideoRecordingConfigInput } from "../models";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {
+  EVENT_ALL_MARKERS_FLAG,
   hasEventAllMarkersCliOverride,
   parseEventAllMarkersConfig,
 } from "../utils/eventAllMarkers";
-import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
-import { parseToolOutputsDirConfig } from "../utils/toolOutputArtifacts";
+import {
+  OUTPUT_REDUCTION_FLAG_SPECS,
+  parseOutputReductionFlags,
+} from "../utils/outputReductionFlags";
+import {
+  parseToolOutputsDirConfig,
+  TOOL_OUTPUTS_DIR_FLAG,
+  TOOL_OUTPUT_DIR_FLAG_ALIAS,
+} from "../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
@@ -62,13 +70,23 @@ const booleanOptions = Object.fromEntries(
   ].map((name) => [name, { type: "boolean" as const }]),
 );
 
-export const cliOptions = {
+const cliOptions = {
   ...booleanOptions,
   // Process-discovery marker only; namespace paths still come from launch ENV.
   "daemon-socket-path": { type: "string" as const },
   "enable-tool": { type: "string" as const, multiple: true },
   "disable-tool": { type: "string" as const, multiple: true },
 };
+
+// Value-taking options resolved outside the scalar-option walk below.
+const externalValueFlags = [
+  ...Object.entries(cliOptions)
+    .filter(([, option]) => option.type === "string")
+    .map(([name]) => `--${name}`),
+  EVENT_ALL_MARKERS_FLAG,
+  TOOL_OUTPUTS_DIR_FLAG,
+  TOOL_OUTPUT_DIR_FLAG_ALIAS,
+];
 
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
@@ -94,7 +112,9 @@ export function parseArgs(
   const noProxy = hasFlag("no-proxy") || hasFlag("direct");
   const noDaemon = hasFlag("no-daemon");
   const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
+  const daemonRequested = daemonCommandIndex >= 0;
+  const daemonCommand =
+    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
   const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
   const debugPerf =
     hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
@@ -147,6 +167,7 @@ export function parseArgs(
   return {
     cliMode,
     cliArgs,
+    invalidInvocation: scalarOptions.invalidInvocation,
     daemonPort: scalarOptions.daemonPort,
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
@@ -168,6 +189,7 @@ export function parseArgs(
     videoRecordingDefaults,
     runnerReadinessTimeoutMs: scalarOptions.runnerReadinessTimeoutMs,
     daemonMode,
+    daemonRequested,
     daemonCommand,
     daemonArgs,
     skipCtrlProxyDownload,
@@ -320,6 +342,7 @@ function createVideoRecordingDefaults(log: ParseLogger) {
 }
 
 interface ScalarOptions {
+  invalidInvocation?: string;
   daemonPort?: number;
   daemonHost?: string;
   initialSessionUuid?: string;
@@ -345,13 +368,16 @@ function parseValueOptions(
     planExecutionLockScopeExplicit: false,
     runnerReadinessTimeoutMs,
   };
+  const daemonIndex = args.indexOf("--daemon");
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--cli") {
+    if (["--cli", "--boot-device", "--"].includes(args[i])) {
       break;
     }
     const connection = parseConnectionOption(args, i, log, options);
     if (connection !== undefined) {
-      i = connection;
+      // Invalid scalar values still belong to their option; keep the existing
+      // warning/default behavior rather than diagnosing them as stray commands.
+      i = Math.max(connection, optionValueEnd(args, i));
       continue;
     }
     const accessibility = parseAccessibilityOption(args, i, log, options);
@@ -367,9 +393,66 @@ function parseValueOptions(
     const recording = parseVideoOption(args, i, log, video);
     if (recording !== undefined) {
       i = recording;
+      continue;
     }
+    i = inspectInvocationToken(args, i, daemonIndex, options);
   }
   return options;
+}
+
+function optionValueEnd(args: string[], i: number): number {
+  return args[i + 1] !== undefined && !args[i + 1].startsWith("--") ? i + 1 : i;
+}
+
+function inspectInvocationToken(
+  args: string[],
+  i: number,
+  daemonIndex: number,
+  options: ScalarOptions,
+): number {
+  // These values are resolved by Node's parser or the shared flag helpers.
+  // Output-reduction flags are boolean and do not consume a following word.
+  if (externalValueFlags.includes(args[i])) {
+    return optionValueEnd(args, i);
+  }
+  // Command tails belong to their command parser. The scalar walk still
+  // resolves daemon startup options, but must not reject command arguments.
+  if (daemonIndex >= 0 && i >= daemonIndex) {
+    return i;
+  }
+  const malformed = malformedModeInvocation(args[i]);
+  if (malformed) {
+    options.invalidInvocation ??= malformed;
+  } else if (args[i] !== "" && !args[i].startsWith("-")) {
+    options.invalidInvocation ??= `Unexpected argument: ${args[i]}; did you mean --cli ${args[i]}?`;
+  }
+  return unknownLaunchOptionTakesValue(args[i]) ? optionValueEnd(args, i) : i;
+}
+
+/** Mode syntax belongs to this scalar walk only before a command's argv boundary. */
+function malformedModeInvocation(arg: string): string | undefined {
+  if (arg.startsWith("--cli=")) {
+    return "Invalid CLI invocation. Use --cli <tool> instead of --cli=<tool>.";
+  }
+  if (arg.startsWith("--daemon=") || arg.startsWith("--boot-device=")) {
+    const [flag, ...value] = arg.split("=");
+    const form =
+      flag === "--boot-device"
+        ? "--boot-device --platform <android|ios>"
+        : `${flag} ${value.join("=")}`;
+    return `Invalid invocation. Use ${form} instead of ${arg}.`;
+  }
+  return undefined;
+}
+
+/** Preserve forward-compatible launcher values; known booleans consume no word. */
+function unknownLaunchOptionTakesValue(arg: string): boolean {
+  return (
+    arg.startsWith("-") &&
+    !arg.includes("=") &&
+    !Object.hasOwn(cliOptions, arg.replace(/^-+/, "")) &&
+    !OUTPUT_REDUCTION_FLAG_SPECS.some((spec) => spec.cli === arg || spec.disableCli === arg)
+  );
 }
 
 function parseConnectionOption(

@@ -21,8 +21,95 @@ import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/Adb
 import type { BootedDevice } from "../../src/models";
 import { createDoctorDeadline } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeSystemDetection } from "../fakes/FakeSystemDetection";
 import { runDoctor } from "../../src/doctor";
+import { FakeSystemDetection } from "../fakes/FakeSystemDetection";
+
+describe("Android doctor SDK home check", () => {
+  test("warns with the first existing typical SDK path when environment variables are unset", async () => {
+    const system = new FakeSystemDetection();
+    const sdkRoot = "/opt/android-sdk";
+    system.addExistingFile(sdkRoot);
+    system.addExistingFile("/usr/local/android-sdk");
+
+    const result = await checkAndroidHome(system);
+
+    expect(result.status).toBe("warn");
+    expect(result.value).toBe(sdkRoot);
+    expect(result.message).toContain("ANDROID_HOME is unset");
+    expect(result.message).toContain(sdkRoot);
+    expect(result.recommendation).toBe(`export ANDROID_HOME=${sdkRoot}`);
+    expect(system.executeCommandCallCount).toBe(0);
+  });
+
+  test("warns with the SDK root derived from Homebrew command line tools", async () => {
+    const system = new FakeSystemDetection();
+    system.setPlatform("darwin");
+    const sdkRoot = "/opt/homebrew/share/android-commandlinetools";
+    const toolsRoot = `${sdkRoot}/cmdline-tools/latest`;
+    for (const path of [toolsRoot, `${toolsRoot}/bin`, `${toolsRoot}/bin/sdkmanager`]) {
+      system.addExistingFile(path);
+    }
+
+    const result = await checkAndroidHome(system);
+
+    expect(result.status).toBe("warn");
+    expect(result.value).toBe(sdkRoot);
+    expect(result.message).toContain(sdkRoot);
+    expect(result.recommendation).toBe(`export ANDROID_HOME=${sdkRoot}`);
+  });
+
+  test("fails when no SDK is found anywhere", async () => {
+    const result = await checkAndroidHome(new FakeSystemDetection());
+
+    expect(result.status).toBe("fail");
+    expect(result.value).toBeUndefined();
+    expect(result.message).toBe("ANDROID_HOME or ANDROID_SDK_ROOT not set or path does not exist");
+  });
+
+  test.each(["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"])(
+    "passes unchanged when %s points to an existing SDK",
+    async (envVar) => {
+      const system = new FakeSystemDetection();
+      const sdkRoot = "/custom/android-sdk";
+      system.setEnvVar(envVar, sdkRoot);
+      system.addExistingFile(sdkRoot);
+      system.addExistingFile("/opt/android-sdk");
+
+      const result = await checkAndroidHome(system);
+
+      expect(result).toEqual({
+        name: "ANDROID_HOME",
+        status: "pass",
+        message: "Android SDK found",
+        value: sdkRoot,
+      });
+      expect(system.executeCommandCallCount).toBe(0);
+    },
+  );
+
+  test("a discovered SDK warning does not count toward doctor summary.failed", async () => {
+    const system = new FakeSystemDetection();
+    system.addExistingFile("/opt/android-sdk");
+    const report = await runDoctor(
+      { android: true },
+      {
+        timer: new FakeTimer(),
+        runSystemChecks: () => [],
+        runAndroidChecks: async () => [await checkAndroidHome(system)],
+        runIosChecks: async () => [],
+        runAutoMobileChecks: async () => [],
+      },
+    );
+
+    expect(report.summary).toEqual({
+      total: 1,
+      passed: 0,
+      warnings: 1,
+      failed: 0,
+      skipped: 0,
+    });
+  });
+});
 
 const adbVersionOutput = readFileSync(
   join(import.meta.dir, "../fixtures/android-adb/adb-version.txt"),
@@ -119,6 +206,37 @@ describe("Android doctor ANDROID_HOME check (#10127)", () => {
     );
     expect(result.status).toBe("fail");
     expect(result.recommendation).toContain("export ANDROID_HOME");
+  });
+
+  test("keeps main's invalid ANDROID_HOME warning when a fallback SDK exists", async () => {
+    const detection = macDetection();
+    detection.setEnvVar("ANDROID_HOME", "/missing/sdk");
+    const sdkRoot = join("/Users/test", "Library/Android/sdk");
+    detection.addExistingFile(sdkRoot);
+    const result = await checkAndroidHome(detection);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("ANDROID_HOME is invalid");
+    expect(result.value).toBe(sdkRoot);
+    expect(result.recommendation).toBe(`export ANDROID_HOME=${sdkRoot}`);
+    expect(detection.executeCommandCallCount).toBe(0);
+  });
+
+  test("bounds fallback discovery at the caller's deadline without probing adb afterward", async () => {
+    const detection = macDetection();
+    const timer = new FakeTimer();
+    const deadline = createDoctorDeadline({ timeoutMs: 50, timer }, timer);
+    const check = checkAndroidHome(deadline.probe, {
+      ...baseDependencies,
+      systemDetection: detection,
+      detectAndroidCommandLineTools: () => new Promise(() => {}),
+    });
+    timer.advanceTime(50);
+    const result = await check;
+    deadline.dispose();
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("Doctor diagnostic deadline elapsed");
+    expect(detection.executeCommandCallCount).toBe(0);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("warns instead of failing when fallback detection itself errors", async () => {

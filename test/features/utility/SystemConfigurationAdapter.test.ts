@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it, expect, spyOn, type Mock } from "bun:test";
+import { createExecResult } from "../../../src/utils/execResult";
+import { afterEach, beforeEach, describe, it, test, expect, spyOn, type Mock } from "bun:test";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
@@ -1162,4 +1163,125 @@ describe("SystemConfigurationAdapter", () => {
       expect(adapter).toBeInstanceOf(IosSystemConfigurationAdapter);
     });
   });
+});
+
+describe("custom simulator device set argv", () => {
+  for (const configured of [false, true]) {
+    test(
+      configured
+        ? "injects --set immediately after simctl"
+        : "preserves the original argv when unset",
+      async () => {
+        const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+        try {
+          if (configured) {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = "/tmp/custom device set";
+          } else {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          }
+          const prefix = configured ? ["simctl", "--set", "/tmp/custom device set"] : ["simctl"];
+          const device: BootedDevice = {
+            platform: "ios",
+            deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+            name: "iPhone",
+          };
+          const exec = new FakeProcessExecutor();
+          let reads = 0;
+          exec.setCommandHandler("defaults read .GlobalPreferences AppleTimeZone", () =>
+            createExecResult(reads++ === 0 ? "" : "UTC", ""),
+          );
+          const capture = spyOn(exec, "executeCommand");
+          const adapter = new IosSystemConfigurationAdapter(device, exec);
+          await adapter.setLocale("en-US", {});
+          expect(capture.mock.calls.map(([file, args]) => [file, args])).toEqual([
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                device.deviceId,
+                "defaults",
+                "read",
+                ".GlobalPreferences",
+                "AppleLocale",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                device.deviceId,
+                "defaults",
+                "write",
+                ".GlobalPreferences",
+                "AppleLocale",
+                "en_US",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                device.deviceId,
+                "defaults",
+                "write",
+                ".GlobalPreferences",
+                "AppleLanguages",
+                "-array",
+                "en-US",
+                "en",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                device.deviceId,
+                "defaults",
+                "read",
+                ".GlobalPreferences",
+                "AppleLocale",
+              ],
+            ],
+          ]);
+          capture.mockClear();
+          await adapter.setTimeZone("Europe/London");
+          expect(
+            capture.mock.calls.every(
+              ([file, args]) =>
+                file === "xcrun" &&
+                JSON.stringify(args?.slice(0, prefix.length)) === JSON.stringify(prefix),
+            ),
+          ).toBe(true);
+          expect(capture.mock.calls.map(([, args]) => args)).toContainEqual([
+            ...prefix,
+            "spawn",
+            device.deviceId,
+            "defaults",
+            "delete",
+            ".GlobalPreferences",
+            "AppleTimeZone",
+          ]);
+          expect(capture.mock.calls.map(([, args]) => args)).toContainEqual([
+            ...prefix,
+            "spawn",
+            device.deviceId,
+            "defaults",
+            "delete",
+            "com.apple.mobiletimerd",
+            "AutomaticTimeZoneSetting",
+          ]);
+        } finally {
+          if (previous === undefined) {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          } else {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+          }
+        }
+      },
+    );
+  }
 });

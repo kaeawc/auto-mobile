@@ -5,6 +5,7 @@
 
 import { errorMessage } from "../../utils/describeUnknownError";
 import { existsSync } from "node:fs";
+import { DefaultSystemDetection, type SystemDetection } from "../../utils/system/SystemDetection";
 import { CheckResult, DoctorOptions, DoctorProbeOptions } from "../types";
 import {
   detectAndroidCommandLineTools,
@@ -21,8 +22,6 @@ import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClie
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { readSdkManagerVersion } from "../../utils/android-cmdline-tools/SdkManagerClient";
 import { logger } from "../../utils/logger";
-import { DefaultSystemDetection } from "../../utils/system/SystemDetection";
-import type { SystemDetection } from "../../utils/system/SystemDetection";
 import type { AndroidToolsLocation } from "../../utils/android-cmdline-tools/detection";
 import {
   FileAvdConfigReader,
@@ -221,7 +220,7 @@ async function resolveSdkWithoutEnvironment(
   }
 
   const locations = await awaitDoctorProbe(probe, () =>
-    dependencies.detectAndroidCommandLineTools(),
+    dependencies.detectAndroidCommandLineTools(detection),
   );
   const best = dependencies.getBestAndroidToolsLocation(locations);
   if (best) {
@@ -237,12 +236,26 @@ async function resolveSdkWithoutEnvironment(
  * when the SDK cannot be located any other way, because adb/emulator
  * resolution does not require the variable.
  */
+export function checkAndroidHome(systemDetection: SystemDetection): Promise<CheckResult>;
+export function checkAndroidHome(
+  options?: DoctorProbeOptions,
+  dependencies?: AndroidDoctorDependencies,
+): Promise<CheckResult>;
 export async function checkAndroidHome(
-  options: DoctorProbeOptions = {},
+  optionsOrDetection: DoctorProbeOptions | SystemDetection = {},
   dependencies: AndroidDoctorDependencies = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
+  let options: DoctorProbeOptions = {};
+  let systemDetection = dependencies.systemDetection ?? new DefaultSystemDetection();
+  if ("getCurrentPlatform" in optionsOrDetection) {
+    systemDetection = optionsOrDetection;
+  } else {
+    options = optionsOrDetection;
+  }
+  dependencies = { ...dependencies, systemDetection };
   const name = "ANDROID_HOME";
-  const androidHome = getAndroidSdkFromEnvironment(dependencies.systemDetection);
+  const androidHome = getAndroidSdkFromEnvironment(systemDetection);
+  const homeStatus = systemDetection.getEnvVar("ANDROID_HOME") ? "invalid" : "unset";
 
   if (androidHome) {
     return { name, status: "pass", message: `Android SDK found`, value: androidHome };
@@ -255,11 +268,14 @@ export async function checkAndroidHome(
       remainingDoctorProbe(probeOptions(options)),
     );
   } catch (error) {
-    logger.warn(`Android SDK fallback detection failed: ${errorMessage(error)}`, error);
+    dependencies.logger.warn(
+      `Android SDK fallback detection failed: ${errorMessage(error)}`,
+      error,
+    );
     return {
       name,
       status: "warn",
-      message: `ANDROID_HOME is not set and SDK detection did not finish: ${errorMessage(error)}`,
+      message: `ANDROID_HOME is ${homeStatus} and SDK detection did not finish: ${errorMessage(error)}`,
       recommendation: ANDROID_HOME_EXPORT_HINT,
     };
   }
@@ -268,9 +284,11 @@ export async function checkAndroidHome(
     return {
       name,
       status: "warn",
-      message: `ANDROID_HOME is not set; Android tooling was found via ${resolved.how}`,
+      message: resolved.root
+        ? `ANDROID_HOME is ${homeStatus}; Android SDK found at ${resolved.root} via ${resolved.how}`
+        : `ANDROID_HOME is ${homeStatus}; Android tooling was found via ${resolved.how}`,
       recommendation: resolved.root
-        ? `Optional: export ANDROID_HOME=${resolved.root}`
+        ? `export ANDROID_HOME=${resolved.root}`
         : ANDROID_HOME_EXPORT_HINT,
       ...(resolved.root ? { value: resolved.root } : {}),
     };

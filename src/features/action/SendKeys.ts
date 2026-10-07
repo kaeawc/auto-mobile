@@ -1634,7 +1634,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         }),
       checkAbort: (error) => this.checkAbort(signal, error),
       lacksRequiredFocus: (observation) => this.imeReadBackLacksRequiredFocus(observation, routing),
-      focusedText: (observation) => this.readImeCommitText(observation, operation),
+      focusedText: (observation) => this.readImeCommitText(observation, operation, text),
       focusError: ANDROID_TYPE_FOCUSED_INPUT_ERROR,
     });
   }
@@ -1655,13 +1655,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readImeCommitText(
     observation: ObserveResult,
     operation: SendKeysOperation,
+    sent: string,
   ): string | undefined {
     const text = this.readFocusedText(observation);
-    // Replace read-back must not report an Android placeholder as delivered text.
-    if (text !== undefined && operation === "replace") {
-      return this.readFocusedTextSnapshot(observation)?.length === 0 ? "" : text;
+    if (!text || this.readFocusedTextSnapshot(observation)?.length !== 0) {
+      return text;
     }
-    return text;
+    // The field shows only its hint, which is not delivered text (#10252): a hint such as
+    // "Search settings" must not satisfy the suffix/subsequence match for "set". Only text
+    // that could itself have produced the hint is indistinguishable, so it stays unverified.
+    const couldBeTyped = operation === "replace" ? text === sent : text.endsWith(sent);
+    return couldBeTyped ? undefined : "";
   }
 
   private describeImeCommitFailure(result: TextActionResult): TextActionResult {
@@ -1916,6 +1920,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     wasEnabled: boolean,
     subtype: ImeSubtypeSnapshot,
   ): Promise<void> {
+    if (priorImeId === this.commitImeId) {
+      // The commit IME was already the keyboard, so nothing was switched away from (#10409).
+      return;
+    }
     const catalog = new AndroidImeCatalog(this.adb, this.device.deviceId);
     try {
       // Cleanup must complete even when the ambient request signal has been cancelled.
@@ -2260,7 +2268,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const confirmed = unchangedWarning
       ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
       : typed;
-    return this.verifyEventAllLetterCase(text, confirmed, signal, display);
+    return this.verifyKeyEventLetterCase(text, confirmed, "eventAll", signal, display);
   }
 
   /**
@@ -2295,12 +2303,14 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   /**
-   * Some keyboards/fields change letter case after key events (#9888). Warn only on the
+   * Some keyboards/fields change letter case after key events, e.g. a keyboard's sentence-start
+   * shift capitalising the first letter in an empty field (#9888, #10404). Warn only on a
    * case-insensitive match; any other mismatch or an unreadable field is left alone.
    */
-  private async verifyEventAllLetterCase(
+  private async verifyKeyEventLetterCase(
     text: string,
     typed: TextActionResult,
+    mode: "eventAll" | "eventOnly",
     signal?: AbortSignal,
     display?: string,
   ): Promise<TextActionResult> {
@@ -2313,23 +2323,20 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           await this.timer.sleep(IME_COMMIT_READ_BACK_SETTLE_MS);
         }
         const field = this.readFocusedText(await this.readFreshObservation(signal, display));
-        if (field === undefined || field.includes(text)) {
-          return typed;
-        }
-        if (!field.toLowerCase().includes(text.toLowerCase())) {
+        if (field === undefined || keyEventLetterCase(field, text) !== "changed") {
           return typed;
         }
         if (attempt === ANDROID_READ_BACK_ATTEMPTS - 1) {
           // The app may intend the other case (all-caps, auto-capitalise). The text was typed,
           // so stay successful: a failed result invites a retry that would duplicate it.
-          const warning = `eventAll typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case (possibly intended). Use mode "ime" or "a11y" for exact case.`;
+          const warning = `${mode} typed ${JSON.stringify(text)} but the focused field holds ${JSON.stringify(field)}: the keyboard or field changed the letter case (possibly intended). Use mode "ime" or "a11y" for exact case.`;
           logger.warn(`[SendKeys] ${warning}`);
           return this.withTextWarnings(typed, [warning]);
         }
       }
     } catch (error) {
       this.checkAbort(signal, error);
-      logger.warn(`[SendKeys] eventAll case read-back unavailable: ${errorMessage(error)}`, error);
+      logger.warn(`[SendKeys] ${mode} case read-back unavailable: ${errorMessage(error)}`, error);
     }
     return typed;
   }
@@ -2653,7 +2660,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       mutated = true;
     }
-    return { success: true };
+    return this.verifyKeyEventLetterCase(text, { success: true }, "eventOnly", signal, display);
   }
 
   private async clearEventOnlyForReplace(
@@ -3648,6 +3655,29 @@ export class SendKeys {
         }));
     }
   }
+}
+
+/** Inline-format markers a rich-text editor may consume while keys are typed. */
+const KEY_EVENT_FORMAT_MARKERS = /[*_~`]/g;
+
+/**
+ * Whether the field holds the typed text, holds it only in a different letter case, or neither.
+ * Rich-text editors may consume formatting markers, so a marker-free view is compared too.
+ */
+function keyEventLetterCase(field: string, text: string): "exact" | "changed" | "other" {
+  const views = [
+    { field, text },
+    {
+      field: field.replace(KEY_EVENT_FORMAT_MARKERS, ""),
+      text: text.replace(KEY_EVENT_FORMAT_MARKERS, ""),
+    },
+  ].filter((view) => view.text.length > 0);
+  if (views.some((view) => view.field.includes(view.text))) {
+    return "exact";
+  }
+  return views.some((view) => view.field.toLowerCase().includes(view.text.toLowerCase()))
+    ? "changed"
+    : "other";
 }
 
 function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {

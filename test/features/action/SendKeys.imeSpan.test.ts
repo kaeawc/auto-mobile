@@ -24,12 +24,12 @@ const restore = `shell ime set ${priorIme}`;
 const type = (text: string): SendKeysCommand => ({ action: "type", text, mode: "ime" });
 let serial = 0;
 
-function harness(observe: SendKeysObserver = observer) {
+function harness(observe: SendKeysObserver = observer, initialIme = priorIme) {
   const device = { ...android, deviceId: `ime-span-10406-${++serial}` };
   const h = createSendKeysHarness(device, observe);
   const timer = new FakeTimer();
   // Model selection across repeated captures, beyond the harness's two-read stub.
-  let selectedIme = priorIme;
+  let selectedIme = initialIme;
   const execute = h.adb.executeCommand.bind(h.adb);
   h.adb.executeCommand = async (...args) => {
     const result = await execute(...args);
@@ -494,6 +494,39 @@ test("single IME type preserves the original complete adb command sequence", asy
     "shell ime list -s",
   ]);
 });
+
+test.each([
+  ["one command", [type("a")]],
+  ["a span", [type("a"), type("b")]],
+] as const)(
+  "%s typed while the commit IME is already the default keyboard needs no restore (#10409)",
+  async (_label, commands) => {
+    const h = harness(observer, AUTO_MOBILE_IME_ID);
+    // Android drops a subtype the commit IME does not advertise, so a subtype restore
+    // aimed at the commit IME itself could never verify.
+    h.adb.setCommandResponseSequence("shell settings get secure selected_input_method_subtype", [
+      { stdout: "3", stderr: "" },
+      { stdout: "-1", stderr: "" },
+    ]);
+    try {
+      const first = await h.action.execute([...commands]);
+      expect(first).toMatchObject({ success: true, completedCommands: commands.length });
+      // A second call proves the device was not quarantined.
+      expect(await h.action.execute([type("c")])).toMatchObject({ success: true });
+      const executed = h.adb.getExecutedCommands();
+      expect(h.selections()).toEqual([activate, activate]);
+      expect(
+        executed.filter((command) => /secure selected_input_method_subtype/.test(command)),
+      ).toEqual([
+        "shell settings get secure selected_input_method_subtype",
+        "shell settings get secure selected_input_method_subtype",
+      ]);
+      expect(executed).not.toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
+    } finally {
+      clearAndroidImeQuarantine(h.device.deviceId);
+    }
+  },
+);
 
 test("direct executor type outside a span retains the device-side restore prior", async () => {
   const h = harness();

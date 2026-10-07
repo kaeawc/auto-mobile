@@ -674,6 +674,36 @@ describe("SendKeys", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("default insert never accepts a hint-only field as the typed text (#10252)", async () => {
+    // "set" is a subsequence of the hint, so reading the hint as content passed verification.
+    const { executor, timer } = imeVerificationHarness({
+      execute: async () =>
+        focusedAndroidObservation("Search settings", { "hint-text": "Search settings" }, 0),
+    });
+    const result = await executor.type({ action: "type", text: "set" });
+    expect(result).toMatchObject({ success: false, partialApplication: true, resolvedMode: "ime" });
+    expect(result.error).toContain('the focused field holds ""');
+    expect(timer.getSleepHistory()).toEqual([150, 150]);
+  });
+
+  test.each([
+    ["insert", "settings"],
+    ["replace", "Search settings"],
+  ] as const)(
+    "default %s of text that matches the hint stays unverified rather than failing (#10252)",
+    async (operation, text) => {
+      const { executor, timer } = imeVerificationHarness({
+        execute: async () =>
+          focusedAndroidObservation("Search settings", { "hint-text": "Search settings" }, 0),
+      });
+      expect(await executor.type({ action: "type", text, operation })).toMatchObject({
+        success: true,
+        resolvedMode: "ime",
+      });
+      expect(timer.getSleepHistory()).toEqual([]);
+    },
+  );
+
   test.each([
     ["default type", undefined],
     ["explicit insert/append", "insert"],
@@ -1842,7 +1872,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
           expect(result).toMatchObject({ success: false, partialApplication: true });
           expect(result.error).toContain("Cannot verify");
         }
-        const expectedReads = operation === "clear" ? 3 : 2;
+        // A typed replacement adds the eventOnly letter-case read-back (#10404).
+        const expectedReads = operation === "clear" || after === "" ? 3 : 2;
         expect(options).toHaveLength(expectedReads);
         expect(options[expectedReads - 1]).toMatchObject({ freshness: "fresh" });
         expect(adb.getExecutedCommands().includes("shell input keyevent KEYCODE_A")).toBe(
@@ -1865,7 +1896,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       adb.setAndroidApiLevel(apiLevel);
       let reads = 0;
       const observer: SendKeysObserver = {
-        execute: async () => focusedAndroidObservation(++reads % 2 === 1 ? "old\ntext" : "", {}, 0),
+        // Focus pre-check, clear verification, then the letter-case read-back (#10404).
+        execute: async () => focusedAndroidObservation(++reads % 3 === 1 ? "old\ntext" : "", {}, 0),
       };
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
@@ -5238,6 +5270,46 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         await h.executor.type({ action: "type", text: "123 456", mode: "eventAll" }),
       ).toMatchObject({ success: true });
       expect(h.seq.reads()).toBe(1);
+    });
+  });
+
+  describe("#10404 key-event modes warn when the keyboard capitalises the first letter", () => {
+    test.each([
+      ["eventAll", "hi @ever", "Hi @ever"],
+      ["eventOnly", "hi @here and @channel ", "Hi @here and @channel "],
+      // A rich-text editor consumed the markers, so only a marker-free view can match.
+      ["eventAll", "ev *bold* x", "Ev bold x"],
+      ["eventOnly", "ev *bold* x", "Ev bold x"],
+    ] as const)(
+      "%s %j read back as %j stays successful with a warning",
+      async (mode, text, field) => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          // The first read is the focus pre-check; later reads are the case read-back.
+          const h = harness(["", field]);
+          const result = await h.executor.type({ action: "type", text, mode });
+          expect(result.success).toBe(true);
+          expect(result.partialApplication).toBeUndefined();
+          expect(result.warning).toContain(`${mode} typed ${JSON.stringify(text)}`);
+          expect(result.warning).toContain(`holds ${JSON.stringify(field)}`);
+          expect(result.warning).toContain("letter case");
+          expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+        } finally {
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each([
+      ["eventOnly", "hi there", "hi there"],
+      ["eventAll", "ev *bold* x", "ev bold x"],
+      ["eventOnly", "hi there", "something else"],
+    ] as const)("%s %j read back as %j has no case warning", async (mode, text, field) => {
+      const h = harness(["", field]);
+      const result = await h.executor.type({ action: "type", text, mode });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
+      expect(h.timer.getSleepHistory()).toEqual([]);
     });
   });
 });

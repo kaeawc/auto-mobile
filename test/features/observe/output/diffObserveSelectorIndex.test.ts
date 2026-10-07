@@ -182,7 +182,7 @@ describe("merged Android roots and window copies (#9804)", () => {
     expect(selector).toHaveProperty("ambiguous", true);
   });
 
-  test("mirrored inert descendants preserve tap-ancestor ambiguity", () => {
+  test("mirrored inert descendants share one selectable owner", () => {
     const { baseline, next } = mirroredAndroidPair(false, 2);
     for (const observation of [baseline, next]) {
       const hierarchy = observation.viewHierarchy!;
@@ -202,7 +202,7 @@ describe("merged Android roots and window copies (#9804)", () => {
     expect(selectors).toHaveLength(2);
     for (const selector of selectors) {
       expect(selector).not.toHaveProperty("index");
-      expect(selector).toHaveProperty("ambiguous", true);
+      expect(selector).not.toHaveProperty("ambiguous");
     }
   });
 });
@@ -308,10 +308,9 @@ describe("diff selector replay indexes (#9693)", () => {
     ).toEqual(parseBounds(changed.bounds));
   });
 
-  test("a promoted inert duplicate suppresses the group's replay index", () => {
+  test("a promoted inert duplicate shares its owner's replay index", () => {
     const baseline = structuredClone(capture);
-    // #9693 / #7627: the matching child is promoted to its clickable parent
-    // by resolution, but excluded from skeleton duplicate accounting.
+    // #10280: the matching child and its clickable parent occupy one slot.
     const [parent, inert] = duplicates(baseline);
     // Retain two selectable matches so omission tests the unsafe-group check,
     // rather than merely the unique-selector rule after dropping the child.
@@ -331,12 +330,44 @@ describe("diff selector replay indexes (#9693)", () => {
     const promoted = new ResolverElementSelector().selectByResourceId(
       next.viewHierarchy!,
       resourceId,
-      { index: 2 },
+      { index: 1 },
     );
-    expect(promoted.totalMatches).toBe(3);
+    expect(promoted.totalMatches).toBe(2);
     expect(promoted.element?.bounds).toEqual(parseBounds(parent.bounds));
-    expect(selector.index).toBeUndefined();
-    expect(changedPair(baseline, 1).selector.index).toBeUndefined();
+    expect(selector.index).toBe(1);
+    expect(selector).not.toHaveProperty("ambiguous");
+    const childSelector = changedPair(baseline, 1).selector;
+    expect(childSelector.index).toBe(selector.index);
+    expect(childSelector).not.toHaveProperty("ambiguous");
+    expectReplay(baseline, 1);
+  });
+
+  test("a promoted match owned by another ID does not suppress displayed replay indexes", () => {
+    const baseline = structuredClone(capture);
+    const [parent, child] = duplicates(baseline);
+    const peers = [50, 100].map((growth) => {
+      const peer = structuredClone(parent);
+      delete peer.node;
+      const b = parseBounds(peer.bounds)!;
+      peer.bounds = { ...b, right: b.right + growth };
+      return peer;
+    });
+    parent["resource-id"] = "distinct-owner";
+    child.clickable = false;
+    parent.node = [child, ...peers];
+    for (const [occurrence, expectedIndex] of [
+      [1, 1],
+      [2, 2],
+    ]) {
+      const { next, changed, selector } = changedPair(baseline, occurrence);
+      expect(selector.index).toBe(expectedIndex);
+      expect(selector).not.toHaveProperty("ambiguous");
+      expect(
+        new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
+          index: selector.index,
+        }).element?.bounds,
+      ).toEqual(parseBounds(changed.bounds));
+    }
   });
 
   test("an offscreen changed duplicate has no replay index", () => {
@@ -352,8 +383,16 @@ describe("diff selector replay indexes (#9693)", () => {
     const baseline = structuredClone(capture);
     duplicates(baseline)[0].clickable = false;
     expect(changedPair(baseline).selector.index).toBeUndefined();
-    // The inert parent also cannot consume its actionable child's position.
-    expect(changedPair(baseline, 1).selector.index).toBeUndefined();
+    // The inert parent can promote to another owner, but the displayed child's
+    // own slot is now proved by the complete resolver candidate set.
+    const { next, changed, selector } = changedPair(baseline, 1);
+    expect(selector.index).toBe(0);
+    expect(selector).not.toHaveProperty("ambiguous");
+    expect(
+      new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
+        index: selector.index,
+      }).element?.bounds,
+    ).toEqual(parseBounds(changed.bounds));
   });
 
   test("a changed unbounded duplicate has no replay index", () => {
@@ -395,14 +434,16 @@ describe("review regressions", () => {
     }
   });
 
-  test("tap-promoted inert duplicates explicitly declare ambiguity", () => {
+  test("tap-promoted inert duplicates form one unique selector", () => {
     const baseline = structuredClone(capture);
     duplicates(baseline)[1].clickable = false;
     const selector = changedPair(baseline).selector;
     expect(selector.index).toBeUndefined();
-    expect(selector).toHaveProperty("ambiguous", true);
-    expect(changedPair(baseline, 1).selector).toHaveProperty("ambiguous", true);
-    expect(observeDiffSelectorSchema.parse(selector)).toHaveProperty("ambiguous", true);
+    expect(selector).not.toHaveProperty("ambiguous");
+    const childSelector = changedPair(baseline, 1).selector;
+    expect(childSelector.index).toBe(selector.index);
+    expect(childSelector).not.toHaveProperty("ambiguous");
+    expect(observeDiffSelectorSchema.parse(selector)).not.toHaveProperty("ambiguous");
   });
 
   test("toggle-only ancestors make inert matching children promotable", () => {
@@ -426,9 +467,11 @@ describe("review regressions", () => {
     parent.checkable = true;
     child.clickable = false;
     const selector = changedPair(baseline).selector;
-    expect(selector.index).toBeUndefined();
-    expect(selector).toHaveProperty("ambiguous", true);
-    expect(changedPair(baseline, 1).selector).toHaveProperty("ambiguous", true);
+    expect(selector.index).toBe(1);
+    expect(selector).not.toHaveProperty("ambiguous");
+    const childSelector = changedPair(baseline, 1).selector;
+    expect(childSelector.index).toBe(selector.index);
+    expect(childSelector).not.toHaveProperty("ambiguous");
   });
 
   test("unique changed selectors do not request a skeleton projection", () => {

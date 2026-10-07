@@ -10,6 +10,7 @@ import {
 } from "./SkeletonProjection";
 import { DefaultObserveElementCollector } from "../ObserveElementCollector";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
+import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
@@ -511,9 +512,9 @@ export interface ObserveDiffSelector {
   label?: string;
   /**
    * Replay disambiguator from the next observation's own skeleton projection.
-   * Omitted for nodes absent from that projection and for a group containing an
-   * inert match promotable to an action ancestor. Duplicate selectors without
-   * a safe index carry `ambiguous: true`. Unique selectors carry neither field.
+   * Promoted children share their matching owner's slot. Omitted when the
+   * selector cannot be proved to identify a projected row. Duplicate selectors
+   * without a safe index carry `ambiguous: true`. Unique selectors carry neither field.
    */
   index?: number;
   /** A duplicate selector whose replay index cannot safely be emitted. */
@@ -619,7 +620,11 @@ function computeSelectorOccurrenceIndexes(
   const candidates = distinctSelectorCandidates(nonImeCandidates);
   const byId = new Map<string, SearchableEntry[]>();
   const byLabel = new Map<string, SearchableEntry[]>();
-  const unsafeGroups = new Set<string>();
+  const promotedSources = matchingPromotedSources(nonImeCandidates, projected);
+  const targetFor = (candidate: SearchableEntry) =>
+    candidate.affordances.length === 0
+      ? (tapAncestor(candidate, projected) ?? candidate)
+      : candidate;
   for (const candidate of candidates) {
     const elementId = diffElementId(candidate.properties);
     const label = diffLabel(candidate.properties);
@@ -635,18 +640,9 @@ function computeSelectorOccurrenceIndexes(
       byLabel.set(key, group);
     }
   }
-  // Inspect both copies' original ancestry, without renumbering projected entries.
-  for (const candidate of nonImeCandidates) {
-    if (candidate.affordances.length === 0 && hasTapAncestor(candidate, projected)) {
-      // Only this candidate's preferred selector group is unsafe. An id-bearing
-      // child's label must not suppress an unrelated id-less label group.
-      const key = selectorGroupKey(
-        diffElementId(candidate.properties),
-        diffLabel(candidate.properties),
-      );
-      if (key !== undefined) {
-        unsafeGroups.add(key);
-      }
+  for (const groups of [byId, byLabel]) {
+    for (const [key, group] of groups) {
+      groups.set(key, selectableCandidates(group, targetFor));
     }
   }
   return new Map(
@@ -659,14 +655,43 @@ function computeSelectorOccurrenceIndexes(
           : label !== undefined
             ? byLabel.get(normalizeQuotes(label).trim().toLowerCase())
             : undefined;
-      const row = rowsBySource.get(node.source);
-      const unsafe = unsafeGroups.has(selectorGroupKey(elementId, label) ?? "");
-      const index = unsafe ? undefined : row?.index;
+      const ownerSource = promotedSources.get(node.source);
+      const row =
+        rowsBySource.get(node.source) ?? (ownerSource ? rowsBySource.get(ownerSource) : undefined);
+      const index = row?.index;
       const replay =
         index !== undefined ? { index } : (group?.length ?? 0) > 1 ? { ambiguous: true } : {};
       return [node.pathKey, replay];
     }),
   );
+}
+
+/** Prove which suppressed sources select the same row as their emitted owner. */
+function matchingPromotedSources(
+  candidates: readonly SearchableEntry[],
+  projected: readonly SearchableEntry[],
+) {
+  const promotedSources = new Map<ViewHierarchyNode, ViewHierarchyNode>();
+  // Inspect both copies' original ancestry, without renumbering projected entries.
+  for (const candidate of candidates) {
+    const owner =
+      candidate.affordances.length === 0 ? tapAncestor(candidate, projected) : undefined;
+    if (owner) {
+      // Associate only an owner matching the child's preferred selector.
+      // An id-bearing child's label must not select an unrelated id-less row.
+      const key = selectorGroupKey(
+        diffElementId(candidate.properties),
+        diffLabel(candidate.properties),
+      );
+      // A child and an owner matching the same selector now occupy one slot.
+      const ownerMatches =
+        key === selectorGroupKey(diffElementId(owner.properties), diffLabel(owner.properties));
+      if (ownerMatches) {
+        promotedSources.set(candidate.source, owner.source);
+      }
+    }
+  }
+  return promotedSources;
 }
 
 function selectorGroupKey(
@@ -680,7 +705,10 @@ function selectorGroupKey(
 }
 
 /** Mirror ElementResolver.hasActionAffordance's tap promotion: tap or toggle. */
-function hasTapAncestor(node: SearchableEntry, entries: readonly SearchableEntry[]): boolean {
+function tapAncestor(
+  node: SearchableEntry,
+  entries: readonly SearchableEntry[],
+): SearchableEntry | undefined {
   let parent = node.parentIndex;
   while (parent !== undefined) {
     const ancestor = entries[parent];
@@ -688,11 +716,11 @@ function hasTapAncestor(node: SearchableEntry, entries: readonly SearchableEntry
       ancestor.bounds &&
       ancestor.affordances.some((action) => action === "tap" || action === "toggle")
     ) {
-      return true;
+      return ancestor;
     }
     parent = ancestor.parentIndex;
   }
-  return false;
+  return undefined;
 }
 
 /**

@@ -60,6 +60,7 @@ import {
   withImeFailure,
   type ImeFailureDiagnostic,
 } from "./imeFailureDiagnostics";
+import { withImeActionApproximationWarning } from "./imeActionApproximationWarning";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement, tapFocusFailure, type TapOnFocusResult } from "./TapOnElement";
@@ -870,6 +871,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         modifiers,
         success: result.success,
         ...(result.retryable === false ? { retryable: false } : {}),
+        ...(result.warning ? { warning: result.warning } : {}),
         ...(result.error ? { error: result.error } : {}),
       };
     }
@@ -3045,7 +3047,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           ),
         clear: async () => client.requestClearText(),
         ime: async (action, signal, onDispatch) =>
-          client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+          withImeActionApproximationWarning(
+            await client.requestImeAction(action, 5000, undefined, signal, onDispatch),
+          ),
         supportsImeCommit: async () =>
           (await client.supportsCommand("request_commit_text")) &&
           (await client.supportsCommand("request_cancel_ime_commit")),

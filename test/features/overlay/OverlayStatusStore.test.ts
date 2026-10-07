@@ -1,3 +1,4 @@
+import { event } from "../../helpers/overlayTestEvent";
 import { describe, expect, test } from "bun:test";
 import { InMemoryOverlayStatusStore } from "../../../src/features/overlay/OverlayStatusStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -5,6 +6,48 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const ok = { success: true };
 
 describe("InMemoryOverlayStatusStore scope bound", () => {
+  test("event snapshots are copied on ingestion and status reads and survive mutation results", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    const scope = { deviceId: "device", sessionUuid: "one" };
+    store.record(scope, "show", { id: "panel" }, ok);
+    const pushed = { ...event(1), pages: { pager: 2 } };
+    store.recordEvent(scope, pushed);
+    pushed.pages.pager = 9;
+    pushed.state.title = "changed";
+    const status = store.status(scope);
+    const snapshot = status.overlays[0];
+    expect(snapshot).toMatchObject({
+      pages: { pager: 2 },
+      state: { title: "Hello" },
+      lastKnown: true,
+    });
+    if (snapshot.pages && snapshot.state) {
+      snapshot.pages.pager = 7;
+      snapshot.state.title = "caller mutation";
+    }
+    store.record(scope, "update", { id: "panel" }, { success: false });
+    expect(store.status(scope).overlays[0]).toMatchObject({
+      pages: { pager: 2 },
+      state: { title: "Hello" },
+      lastKnown: true,
+    });
+    expect(store.status({ ...scope, sessionUuid: "two" })).toEqual({ overlays: [] });
+    store.dismissed(scope, "panel");
+    expect(store.status(scope).overlays).toEqual([]);
+    store.record(scope, "show", { id: "panel" }, ok);
+    expect(store.status(scope).overlays[0]).not.toHaveProperty("lastKnown");
+  });
+
+  test("snapshots before a show are bounded without inventing mutation results", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer(), 1);
+    const scope = { deviceId: "device", sessionUuid: "one" };
+    store.recordEvent(scope, event(1));
+    expect(store.status(scope)).toEqual({ overlays: [] });
+    store.recordEvent({ deviceId: "other" }, event(2));
+    store.record(scope, "show", { id: "panel" }, ok);
+    expect(store.status(scope).overlays[0]).not.toHaveProperty("lastKnown");
+  });
+
   test("evicts the least recently recorded scope past the cap", () => {
     const store = new InMemoryOverlayStatusStore(new FakeTimer(), 2);
     for (const session of ["a", "b", "c"]) {

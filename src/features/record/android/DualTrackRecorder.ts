@@ -4,6 +4,7 @@ import type {
   GestureEmitter,
   GestureEvent,
   A11ySource,
+  DisplayChangeSource,
   ReceivedInteraction,
   TouchTrackFailure,
 } from "./types";
@@ -11,10 +12,18 @@ import { GESTURE_THRESHOLDS } from "./types";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverTouchNode } from "./TouchNodeDiscovery";
-import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
+import { queryDensity, queryDisplaySize } from "./AxisRanges";
+import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
+import {
+  createAdbGeometryProbe,
+  DisplayGeometryTracker,
+  type DisplayGeometryProbe,
+} from "./DisplayGeometryTracker";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "../../action/tapAtGesture";
 import { GetEventReader } from "./GetEventReader";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 
 interface OrderedStep {
   resolved: boolean;
@@ -54,6 +63,19 @@ function buildTextCommand(text: string | null): SendKeysTextCommand {
 export const MERGE_WINDOW_MS = 750;
 
 /**
+ * One budget for everything stop does against the device: waiting for in-flight
+ * geometry refreshes plus the stop-time rotation cross-check. It is far below the
+ * manager's 10 s stop deadline (`STOP_RECORDING_TIMEOUT_MS`) so that a stalled adb
+ * read can never cost the recording: on expiry the captured steps are returned with
+ * `GEOMETRY_UNCONFIRMED_WARNING`. Each read inside also has its own shorter timeout
+ * (`GEOMETRY_READ_TIMEOUT_MS`).
+ */
+export const GEOMETRY_FINALIZE_BUDGET_MS = 3_000;
+
+export const GEOMETRY_UNCONFIRMED_WARNING =
+  "rotation/size could not be confirmed at stop; tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction";
+
+/**
  * Merges GestureEvents from getevent with InteractionEvents from the CtrlProxy
  * to build AutoMobile plan steps with full gesture-type and element-identity information.
  *
@@ -76,6 +98,12 @@ export class DualTrackRecorder {
   private activeA11y: AndroidCtrlProxyClient | null = null;
   private stopped = false;
   private firstTouchTrackFailure?: TouchTrackFailure;
+  /** Rotation/size timeline for the touch track; built at start in real mode (#10174). */
+  private geometry?: DisplayGeometryTracker;
+  private unsubscribeDisplay: (() => void) | null = null;
+  /** Touch time span of each step whose coordinates or direction depend on the geometry. */
+  private readonly geometrySpans = new Map<PlanStep, { downAt: number; upAt: number }>();
+  private finalized?: Promise<string[]>;
 
   get touchTrackFailure(): TouchTrackFailure | undefined {
     return this.firstTouchTrackFailure;
@@ -83,6 +111,11 @@ export class DualTrackRecorder {
 
   get stepCount(): number {
     return this.steps.length;
+  }
+
+  /** The steps captured so far; complete once `stop()` has been called, labels aside. */
+  get capturedSteps(): readonly PlanStep[] {
+    return this.steps;
   }
 
   constructor(
@@ -93,7 +126,13 @@ export class DualTrackRecorder {
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
     private readonly timer: Timer = defaultTimer,
-  ) {}
+    /** Optional override for testing — defaults to the timeline built from the device at start */
+    geometry?: DisplayGeometryTracker,
+    /** Optional override for testing — defaults to the CtrlProxy client's display changes */
+    private readonly displaySource?: DisplayChangeSource,
+  ) {
+    this.geometry = geometry;
+  }
 
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
@@ -129,6 +168,7 @@ export class DualTrackRecorder {
     );
 
     this.unsubscribeA11y = a11y.onInteraction((e) => this.handleInteractionEvent(e));
+    this.subscribeDisplayChanges(a11yClient);
 
     logger.debug("[DualTrackRecorder] Started dual-track recording");
   }
@@ -137,13 +177,12 @@ export class DualTrackRecorder {
     steps: PlanStep[];
     stepCount: number;
     touchTrackFailure?: TouchTrackFailure;
+    /** Rotation/size problems that may have mis-recorded tapAt/swipeOn steps (#10174). */
+    geometryWarnings?: string[];
   }> {
     if (this.stopped) {
-      return {
-        steps: this.steps,
-        stepCount: this.steps.length,
-        ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
-      };
+      const geometryWarnings = (await this.finalized) ?? [];
+      return this.stopResult(geometryWarnings);
     }
     this.stopped = true;
 
@@ -164,13 +203,102 @@ export class DualTrackRecorder {
     }
     this.pendingGestures = [];
 
+    // Display pushes stay subscribed until finalisation is done: the device debounces
+    // them (100 ms), so a rotation just before stop is pushed after it.
+    this.finalized = this.finalizeGeometry().finally(() => {
+      this.unsubscribeDisplay?.();
+      this.unsubscribeDisplay = null;
+    });
+    const geometryWarnings = await this.finalized;
+
     logger.debug(`[DualTrackRecorder] Stopped with ${this.steps.length} steps`);
 
+    return this.stopResult(geometryWarnings);
+  }
+
+  private stopResult(geometryWarnings: string[]) {
     return {
       steps: this.steps,
       stepCount: this.steps.length,
       ...(this.touchTrackFailure ? { touchTrackFailure: this.touchTrackFailure } : {}),
+      ...(geometryWarnings.length > 0 ? { geometryWarnings } : {}),
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Private: display geometry (rotation / size) during the recording
+  // -------------------------------------------------------------------------
+
+  private subscribeDisplayChanges(a11yClient?: AndroidCtrlProxyClient): void {
+    const source = this.displaySource ?? (a11yClient ? clientDisplaySource(a11yClient) : undefined);
+    const geometry = this.geometry;
+    if (source && geometry) {
+      this.unsubscribeDisplay = source.onDisplayChange((change) =>
+        geometry.handleTransition(change),
+      );
+    }
+  }
+
+  /**
+   * Attach a warning label to every tapAt/swipeOn step whose touch overlapped a
+   * display change or ran under a geometry that could not be read, and return the
+   * distinct warnings for the recording result. Runs at stop so late pushes count.
+   * Strictly best-effort: it never rejects and is bounded by
+   * `GEOMETRY_FINALIZE_BUDGET_MS`, because the steps are already captured.
+   */
+  private async finalizeGeometry(): Promise<string[]> {
+    const geometry = this.geometry;
+    if (!geometry) {
+      return [];
+    }
+    const { mismatch, unconfirmed } = await this.confirmGeometryAtStop(geometry);
+    const warnings = new Set<string>();
+    for (const [step, { downAt, upAt }] of this.geometrySpans) {
+      const stepWarnings = geometry.timeline.warningsFor(downAt, upAt);
+      // A rotation the device never pushed can have happened at any time after the last
+      // known-good geometry, so every touch from there on may be mapped with a stale one.
+      if (mismatch && upAt >= geometry.timeline.lastKnownGoodAt) {
+        stepWarnings.push(mismatch);
+      }
+      if (stepWarnings.length > 0) {
+        step.label = `Warning: ${stepWarnings.join("; ")}`;
+        for (const warning of stepWarnings) {
+          warnings.add(warning);
+        }
+      }
+    }
+    if (mismatch) {
+      warnings.add(mismatch);
+    }
+    if (unconfirmed) {
+      warnings.add(GEOMETRY_UNCONFIRMED_WARNING);
+    }
+    return [...warnings];
+  }
+
+  private async confirmGeometryAtStop(
+    geometry: DisplayGeometryTracker,
+  ): Promise<{ mismatch?: string; unconfirmed: boolean }> {
+    try {
+      const mismatch = await raceWithDeadline(
+        async () => {
+          await geometry.settle();
+          return geometry.verifyAtStop();
+        },
+        {
+          timer: this.timer,
+          timeoutMs: GEOMETRY_FINALIZE_BUDGET_MS,
+          label: "Confirming display geometry at stop",
+        },
+      );
+      return { mismatch, unconfirmed: false };
+    } catch (error) {
+      logger.warn(
+        `[DualTrackRecorder] Could not confirm display geometry at stop: ${errorMessage(error)}`,
+        error,
+      );
+      return { unconfirmed: true };
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -341,6 +469,7 @@ export class DualTrackRecorder {
     const event = this.selectInteraction(pending, interaction);
     const step = buildMergedStep(pending.gesture, event);
     pending.step = step ?? undefined;
+    this.trackGeometrySpan(pending.gesture, step);
     this.flushResolvedSteps();
     if (!step && hasUnknownAxes(pending.gesture)) {
       warnUnknownGesture(pending.gesture);
@@ -358,6 +487,12 @@ export class DualTrackRecorder {
       logger.warn(
         `[DualTrackRecorder] No element match for ${gesture.type} at (${x}, ${y}) — ${outcome}`,
       );
+    }
+  }
+
+  private trackGeometrySpan(gesture: GestureEvent, step: PlanStep | null): void {
+    if (step && gesture.downAt !== undefined && ["tapAt", "swipeOn"].includes(step.tool)) {
+      this.geometrySpans.set(step, { downAt: gesture.downAt, upAt: gesture.arrivedAt });
     }
   }
 
@@ -518,17 +653,82 @@ export class DualTrackRecorder {
       throw new Error("[DualTrackRecorder] No multitouch input device found on this device");
     }
     const density = await queryDensity(adb);
-    const rotation = await queryRotation(adb);
-    const ranges = await buildAxisRanges(adb, node, rotation);
-    const scaler = buildScaler(ranges);
+    const probe = createAdbGeometryProbe(adb);
+    const display = await queryDisplaySize(adb);
+    const { rotation, caveats } = await readStartRotation(probe);
+    const timeline = new ScreenGeometryTimeline(
+      { xMin: node.axisXMin, xMax: node.axisXMax, yMin: node.axisYMin, yMax: node.axisYMax },
+      { rotation, display },
+      this.timer.now(),
+      caveats,
+    );
+    this.geometry = new DisplayGeometryTracker(timeline, probe, this.timer);
 
-    return new GetEventReader({
+    const reader = new GetEventReader({
       adb,
       touchNode: node,
-      scaler,
+      // Each touch is mapped with the geometry in force at its DOWN, not at recording start.
+      scaler: timeline,
       density,
+      timer: this.timer,
     });
+    const rotated = rotation % 2 !== 0;
+    const geometry = {
+      platform: "android" as const,
+      deviceWidth: rotated ? display.height : display.width,
+      deviceHeight: rotated ? display.width : display.height,
+      orientation: rotation,
+    };
+    return {
+      start: (onGesture, onError) =>
+        reader.start((event) => onGesture({ ...event, geometry }), onError),
+      stop: () => reader.stop(),
+    };
   }
+}
+
+/**
+ * The rotation at recording start. An unreadable rotation is not assumed to be
+ * portrait silently: the timeline carries a caveat that labels affected steps.
+ */
+async function readStartRotation(
+  probe: DisplayGeometryProbe,
+): Promise<{ rotation: number; caveats: string[] }> {
+  try {
+    const rotation = await probe.readRotation();
+    if (rotation !== null) {
+      return { rotation, caveats: [] };
+    }
+    logger.warn("[DualTrackRecorder] WindowManager reported no display rotation at start");
+  } catch (error) {
+    logger.warn(
+      `[DualTrackRecorder] Failed to read display rotation at start: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  return { rotation: 0, caveats: [ROTATION_UNKNOWN_CAVEAT] };
+}
+
+/**
+ * Adapt the CtrlProxy client's single-slot display observer to a subscription,
+ * chaining any observer already installed and restoring it on unsubscribe.
+ */
+function clientDisplaySource(client: AndroidCtrlProxyClient): DisplayChangeSource {
+  return {
+    onDisplayChange(listener) {
+      const previous = client.onDisplayTransition;
+      const handler: NonNullable<AndroidCtrlProxyClient["onDisplayTransition"]> = (event) => {
+        previous?.(event);
+        listener(event);
+      };
+      client.onDisplayTransition = handler;
+      return () => {
+        if (client.onDisplayTransition === handler) {
+          client.onDisplayTransition = previous;
+        }
+      };
+    },
+  };
 }
 
 // -------------------------------------------------------------------------
@@ -697,7 +897,13 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
       Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
     );
   }
-  return { tool: "tapAt", params };
+  return {
+    tool: "tapAt",
+    params,
+    ...(gesture.geometry
+      ? { geometry: { ...gesture.geometry, x: gesture.screenX, y: gesture.screenY } }
+      : {}),
+  };
 }
 
 function warnUnknownGesture(gesture: GestureEvent): void {

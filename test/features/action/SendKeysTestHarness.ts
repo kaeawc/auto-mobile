@@ -41,7 +41,72 @@ const commitImeId = "dev.jasonpearson.automobile.ctrlproxy/.ime.CtrlProxyIme";
 const priorImeId = "com.example.keyboard/.Ime";
 export type TextDelivery =
   | { kind: "insert" | "replace" | "commit"; text: string }
-  | { kind: "keyevent"; text: string };
+  | { kind: "keyevent" | "inputText"; text: string };
+
+/**
+ * Split a device-shell command line into words the way `/system/bin/sh` does for the subset
+ * adb commands use: single quotes, backslash escapes outside quotes, and unquoted whitespace.
+ * Throws on unquoted characters the shell would expand or treat as operators so a test
+ * fails instead of silently accepting an unquoted payload.
+ */
+export function splitDeviceShellWords(line: string): string[] {
+  const words: string[] = [];
+  let word: string | undefined;
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index] ?? "";
+    if (char === "'") {
+      const close = line.indexOf("'", index + 1);
+      if (close < 0) {
+        throw new Error(`unterminated single quote in ${line}`);
+      }
+      word = (word ?? "") + line.slice(index + 1, close);
+      index = close;
+    } else if (char === "\\") {
+      word = (word ?? "") + (line[++index] ?? "");
+    } else if (/\s/.test(char)) {
+      if (word !== undefined) {
+        words.push(word);
+      }
+      word = undefined;
+    } else if ('$`"|&;<>()*?'.includes(char)) {
+      throw new Error(`unquoted shell metacharacter ${char} in ${line}`);
+    } else {
+      word = (word ?? "") + char;
+    }
+  }
+  return word === undefined ? words : [...words, word];
+}
+
+/** Android `input text` argument decoding: `%s` becomes a space; any other `%` is literal. */
+export function decodeAndroidInputTextArgument(argument: string): string {
+  const chars = Array.from(argument);
+  let escape = false;
+  for (let index = 0; index < chars.length; index++) {
+    if (escape) {
+      escape = false;
+      if (chars[index] === "s") {
+        chars[index] = " ";
+        chars.splice(--index, 1);
+      }
+    }
+    if (chars[index] === "%") {
+      escape = true;
+    }
+  }
+  return chars.join("");
+}
+
+/** The text a `shell input text ...` adb command types on the device, or undefined. */
+export function decodeInputTextCommand(command: string): string | undefined {
+  if (!command.startsWith("shell input text ")) {
+    return undefined;
+  }
+  const words = splitDeviceShellWords(command.slice("shell ".length));
+  if (words.length !== 3) {
+    throw new Error(`input text expects exactly one argument: ${command}`);
+  }
+  return decodeAndroidInputTextArgument(words[2] ?? "");
+}
 
 function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): AdbClientFactory {
   // The catalog verifies component state with argv reads after `ime set`.
@@ -75,6 +140,10 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
           const keyEvent = args[0].match(/^shell input keyevent KEYCODE_([A-Z0-9])$/)?.[1];
           if (keyEvent) {
             deliveries.push({ kind: "keyevent", text: keyEvent.toLowerCase() });
+          }
+          const inputText = decodeInputTextCommand(args[0]);
+          if (inputText !== undefined) {
+            deliveries.push({ kind: "inputText", text: inputText });
           }
           const result = await target.executeCommand(...args);
           if (args[0].startsWith("shell ime set ") && !result.stderr.trim()) {
@@ -124,9 +193,15 @@ export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObs
     },
     supportsImeCommit: async () => true,
     supportsImeKeyEvents: async () => true,
+    supportsImeClearField: async () => true,
+    supportsImePasswordCommit: async () => false,
     supportsKeyboardProfiles: async () => true,
     setKeyboardProfile: async () => ({ success: true, previousProfileId: "direct" }),
-    commitViaIme: async (text) => {
+    commitViaIme: async (text, _prior, _signal, delivery) => {
+      if (delivery === "clearField") {
+        clientCalls.push("clearField");
+        return { success: true };
+      }
       committed.push(text);
       clientCalls.push(`commit:${text}`);
       deliveries.push({ kind: "commit", text });

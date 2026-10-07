@@ -52,7 +52,8 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
-  overlay: HOST_LOCAL,
+  prototype: HOST_LOCAL,
+  overlay: HOST_LOCAL, // hidden deprecated alias of prototype
   highlight: HOST_LOCAL,
   doctor: READ_ONLY, // hidden/gated, so absent from the generated definitions
   hitTest: READ_ONLY,
@@ -235,14 +236,6 @@ const RECORDED_STEP_CALLS: ReadonlyArray<readonly [string, Record<string, unknow
     },
   ],
   [
-    "stageSharedStorage",
-    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
-  [
-    "stageSharedStorageFixtures",
-    { namespace: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
-  ],
-  [
     "stageSessionDownloads",
     { directory: "fixtures", files: [{ destinationPath: "a.txt", contentText: "a" }] },
   ],
@@ -258,8 +251,6 @@ const RECORDED_TOOLS_9966 = [
   "resetKeychain",
   "resetAppLogs",
   "putAppFile",
-  "stageSharedStorage",
-  "stageSharedStorageFixtures",
   "stageSessionDownloads",
 ];
 
@@ -314,8 +305,8 @@ describe("tools recorded by #9966", () => {
       destinationPath: "legacy.txt",
       sourcePath: "fixtures/legacy.txt",
     });
-    recorder.record("stageSharedStorage", {
-      namespace: "fixtures",
+    recorder.record("putAppFile", {
+      target: { domain: "user_files", namespace: "fixtures" },
       files: [
         { destinationPath: "a.txt", contentText: "a" },
         { destinationPath: "b.txt", sourcePath: "/tmp/b.txt" },

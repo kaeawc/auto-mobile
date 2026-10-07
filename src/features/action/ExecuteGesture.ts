@@ -19,6 +19,7 @@ import { SwipeResult } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { isRunnerDeadlineCompletedLate } from "../observe/ios/runnerErrorCodes";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -33,6 +34,23 @@ export interface FencedGestureOptions extends GestureOptions {
   onSearchFallback?: () => void;
   searchDragState?: AndroidSearchDragState;
   displayFence?: DisplayFence;
+}
+
+/**
+ * A failed iOS swipe whose effect is unknown: sent without a runner reply (only a reply, success or
+ * refusal, is acknowledged), or answered with the runner's "completed after its deadline" error.
+ */
+function swipeOutcomeUnknown(
+  result: {
+    dispatched?: boolean;
+    acknowledged?: boolean;
+    errorCode?: string;
+    error?: string;
+  },
+  dispatchedByHost: boolean,
+): boolean {
+  const unacknowledged = (result.dispatched ?? dispatchedByHost) && result.acknowledged !== true;
+  return unacknowledged || isRunnerDeadlineCompletedLate(result);
 }
 
 /**
@@ -390,7 +408,8 @@ export class ExecuteGesture extends BaseVisualChange {
       return indeterminateResult(errorMessage(error));
     }
     // Only a runner reply (success or refusal) is acknowledged; a sent swipe without one may have run.
-    if (!result.success && (result.dispatched ?? dispatched) && result.acknowledged !== true) {
+    // A reply saying the gesture finished after its deadline is acknowledged but equally unknown.
+    if (!result.success && swipeOutcomeUnknown(result, dispatched)) {
       logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${result.error}`);
       return indeterminateResult(result.error ?? "unknown error");
     }

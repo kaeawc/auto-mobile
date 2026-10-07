@@ -9,6 +9,8 @@ import {
 } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 import { getRequestedResourceUri } from "./resourceRegistry";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 export const APP_FILE_CONTAINERS = [
   "documents",
@@ -457,7 +459,7 @@ export const putAppFileSchema = withJsonSchemaOverride(
 function encodePathSegments(path: string): string {
   return normalizeAppFileRelativePath(path)
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => encodeUriSegment(segment))
     .join("/");
 }
 
@@ -471,10 +473,10 @@ export function buildCanonicalAppFileResourceUri(parts: AppFileResourceParts): s
 
 function buildAppFileUri(parts: AppFileResourceParts, canonical: boolean): string {
   const base =
-    `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
+    `automobile:devices/${encodeUriSegment(parts.deviceId)}` +
     (canonical
-      ? `/storage-domains/app_containers/${encodeURIComponent(parts.appId)}/${encodeURIComponent(parts.container)}`
-      : `/apps/${encodeURIComponent(parts.appId)}/files/${encodeURIComponent(parts.container)}`);
+      ? `/storage-domains/app_containers/${encodeUriSegment(parts.appId)}/${encodeUriSegment(parts.container)}`
+      : `/apps/${encodeUriSegment(parts.appId)}/files/${encodeUriSegment(parts.container)}`);
   const uri = parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
   return parts.userId === undefined
     ? uri
@@ -496,7 +498,7 @@ export function parseAppFileResourceParams(params: Record<string, string>): AppF
     }
   }
 
-  const container = decodeURIComponent(params.container);
+  const container = decodeSegmentOrThrow(params.container);
   if (!APP_FILE_CONTAINERS.includes(container as AppFileContainer)) {
     throw new Error(`Unsupported app file container: ${container}`);
   }
@@ -510,11 +512,11 @@ export function parseAppFileResourceParams(params: Record<string, string>): AppF
   }
   return {
     ...(userId === undefined ? {} : { userId }),
-    deviceId: decodeURIComponent(params.deviceId),
-    appId: decodeURIComponent(params.appId),
+    deviceId: decodeSegmentOrThrow(params.deviceId),
+    appId: decodeSegmentOrThrow(params.appId),
     container: container as AppFileContainer,
     ...(params.path !== undefined
-      ? { path: normalizeAppFileRelativePath(decodeURIComponent(params.path)) }
+      ? { path: normalizeAppFileRelativePath(decodeSegmentOrThrow(params.path)) }
       : {}),
   };
 }

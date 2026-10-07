@@ -3,6 +3,7 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import type { AutoTargetSelectorService } from "../../../../src/features/action/swipeon/types";
 import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { DefaultScrollableElementsQuery } from "../../../../src/features/utility/InteractiveElementQueries";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { Element, ObserveResult, SwipeOnOptions } from "../../../../src/models";
@@ -12,7 +13,7 @@ import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWindow } from "../../../fakes/FakeWindow";
@@ -30,7 +31,7 @@ const textObservation: ObserveResult = {
   screenSize: { width: 1080, height: 2400 },
   systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
 };
-const finder = new DefaultElementFinder();
+const finder = new DefaultScrollableElementsQuery();
 const scrollables = finder.findScrollableElements(textObservation.viewHierarchy!);
 const largest = new AutoTargetSelector().pickLargestScrollable(scrollables)!;
 
@@ -46,7 +47,7 @@ function harness({
   after?: ObserveResult;
   selector?: AutoTargetSelectorService;
   geometry?: DefaultElementGeometry;
-  elementFinder?: FakeElementFinder;
+  elementFinder?: FakeScrollableElementsQuery;
   accessibilityDetector?: FakeAccessibilityDetector;
 } = {}) {
   const timer = new FakeTimer();
@@ -296,7 +297,9 @@ describe("Android unnamed auto-target capture regression", () => {
     const named = finder
       .findScrollableElements(before.viewHierarchy!)
       .find((element) => element["resource-id"] === "tap_screen_content")!;
-    spyOn(DefaultElementFinder.prototype, "findScrollableElements").mockReturnValue([named]);
+    spyOn(DefaultScrollableElementsQuery.prototype, "findScrollableElements").mockReturnValue([
+      named,
+    ]);
     const auto = await harness({ before, after }).action.execute({ direction: "up" });
     const explicit = await harness({ before, after }).action.execute({
       direction: "up",
@@ -345,7 +348,7 @@ describe("Android unnamed auto-target capture regression", () => {
       .findScrollableElements(before.viewHierarchy!)
       .find((element) => element["resource-id"] === "tap_screen_content")!;
     const h = harness({ before });
-    spyOn(DefaultElementFinder.prototype, "findScrollableElements").mockReturnValue([
+    spyOn(DefaultScrollableElementsQuery.prototype, "findScrollableElements").mockReturnValue([
       { ...only, orientation: "vertical" },
     ]);
     const result = await h.action.execute({ direction: "left" });
@@ -378,7 +381,7 @@ describe("Android unnamed auto-target capture regression", () => {
       ...largest,
       bounds: { left: 80, top: 1000, right: 280, bottom: 1600 },
     };
-    const elementFinder = new FakeElementFinder();
+    const elementFinder = new FakeScrollableElementsQuery();
     elementFinder.nextScrollableElements = [largest, smaller];
     const realSelector = new AutoTargetSelector();
     const selector: AutoTargetSelectorService = {

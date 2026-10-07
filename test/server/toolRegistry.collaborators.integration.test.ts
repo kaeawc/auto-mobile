@@ -6,7 +6,11 @@ import {
   type AuditRunnerInput,
   type PlanLifecycleInput,
 } from "../../src/server/toolRegistry";
-import type { AppCleanupConfig, AppCleanupService } from "../../src/server/AppCleanupService";
+import type {
+  AppCleanupConfig,
+  AppCleanupOutcome,
+  AppCleanupService,
+} from "../../src/server/AppCleanupService";
 import type { BootedDevice } from "../../src/models";
 import type { SessionBindingReleaseHandler } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -175,8 +179,9 @@ describe("DefaultAuditRunner", () => {
 class FakeAppCleanupService implements AppCleanupService {
   calls: Array<{ device: BootedDevice; config: AppCleanupConfig }> = [];
 
-  async cleanup(device: BootedDevice, config: AppCleanupConfig): Promise<void> {
+  async cleanup(device: BootedDevice, config: AppCleanupConfig): Promise<AppCleanupOutcome> {
     this.calls.push({ device, config });
+    return { status: "cleaned" };
   }
 }
 

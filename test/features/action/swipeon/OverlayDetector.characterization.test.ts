@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
 import type { SwipeDirection, ViewHierarchyResult } from "../../../../src/models";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeElementParser } from "../../../fakes/FakeElementParser";
 import capture from "../../../fixtures/observe/android-container-scope.json";
@@ -39,11 +38,7 @@ describe("OverlayDetector safe swipe coordinate characterization", () => {
       const parser = new FakeElementParser();
       const root = parser.extractRootNodes(capture.viewHierarchy as ViewHierarchyResult)[0];
       const container = parser.parseNodeBounds(root)!;
-      const detector = new OverlayDetector(
-        new FakeElementFinder(),
-        new FakeElementGeometry(),
-        parser,
-      );
+      const detector = new OverlayDetector(new FakeElementGeometry(), parser);
       const overlays = parser
         .flattenViewHierarchy(capture.viewHierarchy as ViewHierarchyResult)
         .map(({ element }) => element)
@@ -66,7 +61,7 @@ describe("OverlayDetector safe swipe coordinate characterization", () => {
     )!;
     const geometry = new FakeElementGeometry();
     geometry.swipeResult = { startX: -10, startY: 999, endX: 999, endY: -10 };
-    const detector = new OverlayDetector(new FakeElementFinder(), geometry, parser);
+    const detector = new OverlayDetector(geometry, parser);
     expect(detector.computeSafeSwipeCoordinates("down", container.bounds, [])).toEqual({
       startX: 150,
       startY: 300,
@@ -88,11 +83,7 @@ describe("OverlayDetector safe swipe coordinate characterization", () => {
     const container = parser.parseNodeBounds(
       parser.extractRootNodes(capture.viewHierarchy as ViewHierarchyResult)[0],
     )!;
-    const detector = new OverlayDetector(
-      new FakeElementFinder(),
-      new FakeElementGeometry(),
-      parser,
-    );
+    const detector = new OverlayDetector(new FakeElementGeometry(), parser);
     expect(
       detector.computeSafeSwipeCoordinates("up", container.bounds, [container.bounds]),
     ).toBeNull();

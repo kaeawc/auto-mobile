@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -31,7 +32,8 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeInstalledAppsProvider } from "../../fakes/FakeInstalledAppsProvider";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
-import { FakeTimer } from "../../fakes/FakeTimer";
+import type { FakeTimer } from "../../fakes/FakeTimer";
+import { MicrotaskPumpFakeTimer } from "../../fakes/MicrotaskPumpFakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
@@ -99,7 +101,7 @@ describe("LaunchApp", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeObserveScreen = new FakeObserveScreen();
-    fakeTimer = new FakeTimer();
+    fakeTimer = new MicrotaskPumpFakeTimer();
     fakeWindow = new FakeWindow();
 
     fakeObserveScreen.setObserveResult(createObserveResult());
@@ -180,10 +182,21 @@ describe("LaunchApp", () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", {
-      stdout: "123:com.example.app/u0a123\n",
+      // Synthetic filler around the existing inline process unit vector, not a capture.
+      stdout: "  filler_feature_flag=true\n".repeat(50_000) + "123:com.example.app/u0a123\n",
       stderr: "",
     });
 
+    const execute = fakeAdb.executeCommand.bind(fakeAdb);
+    const execSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+      const result = await execute(...args);
+      if (args[0] === "shell dumpsys activity processes") {
+        expect(args[2]).toBe(DUMPSYS_MAX_BUFFER);
+        expect(Buffer.byteLength(result.stdout)).toBeGreaterThan(1024 * 1024);
+        expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(args[2] ?? 1024 * 1024);
+      }
+      return result;
+    });
     const result = await launchApp.execute(
       packageName,
       false,
@@ -198,6 +211,7 @@ describe("LaunchApp", () => {
     // is already there is the goal satisfied — a success carrying
     // `alreadyForeground: true` plus the observation, never an error a client has
     // to string-match to decide whether to continue.
+    execSpy.mockRestore();
     expect(result.success).toBe(true);
     expect(result.alreadyForeground).toBe(true);
     expect(result.error).toBeUndefined();
@@ -348,8 +362,8 @@ describe("LaunchApp", () => {
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
       expect(calls).toEqual([
-        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
-        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
+        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
+        ["shell dumpsys activity processes", 5_000, DUMPSYS_MAX_BUFFER, true, controller.signal],
       ]);
       expect(dispatches).toBe(2);
       expect(fakeTimer.now()).toBe(200);
@@ -1834,6 +1848,16 @@ describe("LaunchApp", () => {
         stdout: "Error: no launcher activity",
         stderr: "",
       });
+      // An am error after the cache said installed triggers one live install check (#10192);
+      // these packages are installed (they have launcher dumps), just without a launcher.
+      const listing = {
+        stdout: [packageName, playgroundPackage, "com.android.egg"]
+          .map((name) => `package:${name}`)
+          .join("\n"),
+        stderr: "",
+      };
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", listing);
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", listing);
     });
 
     afterEach(() => ctrlProxySpy.mockRestore());
@@ -1925,6 +1949,114 @@ describe("LaunchApp", () => {
         stderr: "",
       },
     );
+
+  test("resolved launcher component starts directly without package listing or monkey", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse(
+      `shell cmd package resolve-activity --brief --user 0 -c android.intent.category.LAUNCHER '${playground}'`,
+      {
+        stdout:
+          "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\ndev.jasonpearson.automobile.playground/.MainActivity",
+        stderr: "",
+      },
+    );
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.jasonpearson.automobile.playground/.MainActivity }",
+      stderr: "",
+    });
+
+    const result = await performFallbackLaunch(playground);
+    const commands = fakeAdb.getExecutedCommands();
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      commands.some((command) =>
+        command.includes("-n 'dev.jasonpearson.automobile.playground/.MainActivity'"),
+      ),
+    ).toBe(true);
+    expect(commands.some((command) => command.includes("shell monkey"))).toBe(false);
+    expect(commands.some((command) => command.includes("pm list packages"))).toBe(false);
+  });
+
+  test("unresolved launcher keeps bare intent and preserves fail-fast then monkey", async () => {
+    const playground = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse("shell cmd package resolve-activity --brief", {
+      stdout: "No activity found",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=dev.jasonpearson.automobile.playground }",
+      stderr:
+        "Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 xflg=0x4 pkg=dev.jasonpearson.automobile.playground }",
+    });
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${playground}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse(`shell monkey -p '${playground}'`, {
+      stdout: "Monkey finished",
+      stderr: "",
+    });
+
+    const result = await performFallbackLaunch(playground);
+    const commands = fakeAdb.getExecutedCommands();
+    expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
+    expect(
+      commands.some(
+        (command) =>
+          command.startsWith("shell am start --user 0") && command.endsWith(`'${playground}'`),
+      ),
+    ).toBe(true);
+    expect(commands.some((command) => command.includes("shell monkey"))).toBe(true);
+  });
+
+  test("resolver failure falls back to the bare package intent", async () => {
+    fakeAdb.setCommandError(
+      "shell cmd package resolve-activity",
+      new Error("resolver unavailable"),
+    );
+    fakeAdb.setCommandResponse("shell am start --user 0 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] }",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch();
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      fakeAdb.getExecutedCommands().some((command) => command.endsWith(`'${packageName}'`)),
+    ).toBe(true);
+  });
+
+  test("resolver and am start both target the requested nonzero user", async () => {
+    const userPackage = "dev.jasonpearson.automobile.playground";
+    fakeAdb.setCommandResponse("shell cmd package resolve-activity --brief --user 10", {
+      stdout:
+        "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false\ndev.jasonpearson.automobile.playground/.MainActivity",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 10 -a android.intent.action.MAIN", {
+      stdout:
+        "Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=dev.jasonpearson.automobile.playground/.MainActivity }",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch(userPackage, 10);
+    expect(result).toMatchObject({ success: true, activityName: "intent_launch" });
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .some((command) => command.includes("resolve-activity --brief --user 10")),
+    ).toBe(true);
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .some(
+          (command) =>
+            command.includes("am start --user 10") &&
+            command.includes("-n 'dev.jasonpearson.automobile.playground/.MainActivity'"),
+        ),
+    ).toBe(true);
+  });
 
   test("monkey accepted and verified launches without trying later fallbacks", async () => {
     fakeTimer.enableAutoAdvance();
@@ -2447,7 +2579,7 @@ describe("LaunchApp", () => {
 
     const resultPromise = launchApp.execute(packageName, false, false);
 
-    for (let i = 0; i < 50 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
+    for (let i = 0; i < 500 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
       await Promise.resolve();
     }
 

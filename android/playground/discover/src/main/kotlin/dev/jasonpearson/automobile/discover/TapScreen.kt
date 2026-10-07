@@ -20,28 +20,18 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
-import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +50,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentElevatedButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentOutlinedButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTextButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTonalButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileExtendedFloatingActionButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
+import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.storage.AnalyticsRepository
@@ -115,7 +115,7 @@ fun TapScreen() {
 
       // Button press counter for visual feedback
       if (buttonPressCount > 0) {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "button_press_counter" },
           colors =
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
@@ -137,7 +137,7 @@ fun TapScreen() {
       PressDurationTracker()
 
       // Button varieties
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "buttons_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -154,7 +154,7 @@ fun TapScreen() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            Button(
+            AutoMobileContentButton(
               onClick = trackTap,
               modifier =
                 Modifier.weight(1f).semantics {
@@ -165,7 +165,7 @@ fun TapScreen() {
               Text("Button")
             }
 
-            ElevatedButton(
+            AutoMobileContentElevatedButton(
               onClick = trackTap,
               modifier =
                 Modifier.weight(1f).semantics {
@@ -183,7 +183,7 @@ fun TapScreen() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            OutlinedButton(
+            AutoMobileContentOutlinedButton(
               onClick = trackTap,
               modifier =
                 Modifier.weight(1f).semantics {
@@ -194,7 +194,7 @@ fun TapScreen() {
               Text("Outlined")
             }
 
-            TextButton(
+            AutoMobileContentTextButton(
               onClick = trackTap,
               modifier =
                 Modifier.weight(1f).semantics {
@@ -208,7 +208,7 @@ fun TapScreen() {
 
           Spacer(modifier = Modifier.height(8.dp))
 
-          FilledTonalButton(
+          AutoMobileContentTonalButton(
             onClick = trackTap,
             modifier =
               Modifier.fillMaxWidth().semantics {
@@ -222,7 +222,7 @@ fun TapScreen() {
       }
 
       // Toggle controls
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "toggle_controls_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -306,7 +306,7 @@ fun TapScreen() {
       }
 
       // Icon buttons
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "icon_buttons_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -322,7 +322,7 @@ fun TapScreen() {
           )
 
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -333,7 +333,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Edit, contentDescription = "Edit")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -344,7 +344,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Delete, contentDescription = "Delete")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -355,7 +355,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Favorite, contentDescription = "Favorite")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -366,7 +366,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Star, contentDescription = "Star")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -381,7 +381,7 @@ fun TapScreen() {
       }
 
       // Chips
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "filter_chips_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -400,7 +400,7 @@ fun TapScreen() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
-            FilterChip(
+            AutoMobileFilterChip(
               selected = chip1Selected,
               onClick = {
                 chip1Selected = !chip1Selected
@@ -416,7 +416,7 @@ fun TapScreen() {
                 },
             )
 
-            FilterChip(
+            AutoMobileFilterChip(
               selected = chip2Selected,
               onClick = {
                 chip2Selected = !chip2Selected
@@ -432,7 +432,7 @@ fun TapScreen() {
                 },
             )
 
-            FilterChip(
+            AutoMobileFilterChip(
               selected = chip3Selected,
               onClick = {
                 chip3Selected = !chip3Selected
@@ -452,7 +452,7 @@ fun TapScreen() {
       }
 
       // Slider and progress
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "slider_progress_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -517,7 +517,7 @@ fun TapScreen() {
       }
 
       // FABs
-      Card(
+      AutoMobileContentCard(
         modifier = Modifier.fillMaxWidth().semantics { testTag = "floating_action_buttons_card" },
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
       ) {
@@ -533,21 +533,22 @@ fun TapScreen() {
           )
 
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            FloatingActionButton(
+            AutoMobileFloatingActionButton(
               onClick = trackTap,
+              icon = Icons.Filled.Add,
+              contentDescription = "Add",
               modifier =
                 Modifier.semantics {
                   testTag = "fab_add"
                   contentDescription = "Add"
                 },
-            ) {
-              Icon(Icons.Filled.Add, contentDescription = "Add")
-            }
+            )
 
-            ExtendedFloatingActionButton(
+            AutoMobileExtendedFloatingActionButton(
               onClick = trackTap,
-              icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
-              text = { Text("Settings") },
+              icon = Icons.Filled.Settings,
+              contentDescription = "Settings",
+              text = "Settings",
               modifier =
                 Modifier.semantics {
                   testTag = "fab_extended_settings"
@@ -587,7 +588,7 @@ private fun PressDurationTracker() {
   var isPressing by remember { mutableStateOf(false) }
   var updateJob by remember { mutableStateOf<Job?>(null) }
 
-  Card(
+  AutoMobileContentCard(
     modifier =
       Modifier.fillMaxWidth()
         .pointerInput(Unit) {

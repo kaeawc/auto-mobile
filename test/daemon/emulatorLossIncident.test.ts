@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   InMemoryEmulatorLossIncidentStore,
+  deviceLossCancellationReason,
+  isDeviceLossCancellationReason,
   type EmulatorLossIncident,
 } from "../../src/daemon/emulatorLossIncident";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -80,4 +82,26 @@ describe("emulator loss incident store", () => {
 
     expect(await store.list(0)).toEqual([]);
   });
+});
+
+test("device loss recognition preserves the existing prefix protocol", () => {
+  expect(deviceLossCancellationReason("device-a")).toBe("device-disconnected:device-a");
+  expect(deviceLossCancellationReason("device-a", "incident-a")).toBe(
+    "device-disconnected:device-a;incident=incident-a",
+  );
+  for (const reason of [
+    deviceLossCancellationReason("device-a"),
+    deviceLossCancellationReason("device-a", "incident-a"),
+    "device-disconnected:",
+  ]) {
+    expect(isDeviceLossCancellationReason(reason)).toBe(true);
+  }
+  for (const reason of [
+    "device-disconnected",
+    "explicit-release",
+    undefined,
+    new Error("device-disconnected:device-a"),
+  ]) {
+    expect(isDeviceLossCancellationReason(reason)).toBe(false);
+  }
 });

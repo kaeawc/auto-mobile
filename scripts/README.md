@@ -216,6 +216,7 @@ bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json
 **Notes:**
 
 - Runs `prepublishOnly` before packing to match the published package contents.
+- Explicitly enables bundled-dependency trimming locally and in CI; the size cap assumes trimmed contents.
 - Always reports remaining headroom in bytes and as a percentage of the cap, rounded to one decimal (zero for a non-positive cap).
 - Passing sizes with less than `warnHeadroomBytes` (1 MiB by default) remaining emit a warning without failing the check. Exactly at the cap still passes; exceeding it or violating packed-asset requirements fails.
 - Warnings and failures list the 10 largest packed files, ordered by size descending and path ascending for ties. JSON reports include the same diagnostics for the PR summary.
@@ -404,6 +405,7 @@ The following scripts are invoked by GitHub Actions workflows:
 
 - `benchmark-context-thresholds.ts` - Runs in `.github/workflows/merge.yml`
 - `benchmark-startup.sh` - Runs in `.github/workflows/pull_request.yml`
+- `measure-cold-imports.sh` - Advisory cold-import timing (median/min/max ms, module count) for slow action suites; runs non-failing on Linux in the `node-unit-tests` job of `.github/workflows/pull_request.yml`
 - `benchmark-npm-unpacked-size.ts` - Runs in `.github/workflows/pull_request.yml`
 - `validate_*.sh` - Various validation workflows in `.github/workflows/pull_request.yml`
 

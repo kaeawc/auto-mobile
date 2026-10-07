@@ -38,6 +38,109 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  test("recording notifications preserve fire-and-forget wire messages", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation(() => {});
+    try {
+      client.notifyRecordingStarted();
+      client.notifyRecordingStopped();
+      expect(send.mock.calls).toEqual([
+        ['{"type":"start_recording"}'],
+        ['{"type":"stop_recording"}'],
+      ]);
+      expect(client["requestManager"].getPendingCount()).toBe(0);
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+  });
+
+  test.each(["success", "unknown request"])("focused input click maps %s", async (mode) => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const message = JSON.parse(String(data));
+      expect(message).toEqual({
+        type: "request_click_focused_input",
+        requestId: expect.any(String),
+      });
+      socket.simulateMessage(
+        JSON.stringify(
+          mode === "success"
+            ? {
+                type: "action_result",
+                requestId: message.requestId,
+                action: "click",
+                success: true,
+                totalTimeMs: 2,
+              }
+            : {
+                type: "error",
+                requestId: message.requestId,
+                error: "Unknown command type: request_click_focused_input",
+              },
+        ),
+      );
+    });
+    try {
+      const result = await client.requestClickFocusedInput();
+      expect(result).toMatchObject({
+        success: mode === "success",
+        action: "click",
+        dispatched: true,
+        acknowledged: true,
+      });
+      if (mode !== "success") {
+        expect(result.error).toBe("Unknown command type: request_click_focused_input");
+      }
+      expect(client["requestManager"].getPendingCount()).toBe(0);
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+  });
+
+  test("focused input click settles when an old runner rejects it without a requestId", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation(() => {
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "error",
+          error: "Unknown command type: request_click_focused_input",
+        }),
+      );
+    });
+    try {
+      const result = await client.requestClickFocusedInput();
+      expect(result).toMatchObject({ success: false, action: "click", acknowledged: true });
+      expect(result.error).toBe("Unknown command type: request_click_focused_input");
+      expect(client["requestManager"].getPendingCount()).toBe(0);
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+  });
+
   test("requestAction reports no dispatch when connection is unavailable", async () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       testDevice,

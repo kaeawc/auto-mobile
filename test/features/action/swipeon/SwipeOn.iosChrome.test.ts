@@ -1,28 +1,69 @@
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
-import { describe, expect, test } from "bun:test";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
-import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
+import fixture from "../../../fixtures/observe/ios-reminders-xctest-noise-after.json";
+import type { ObserveResult } from "../../../../src/models";
+import type { AdbClient } from "../../../../src/utils/android-cmdline-tools/AdbClient";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
+import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
+import { FakeScreenshotCapturer } from "../../../fakes/FakeScreenshotCapturer";
+import { FakeFeatureFlagRepository } from "../../../fakes/FakeFeatureFlagRepository";
+import { FakeFeatureFlagApplier } from "../../../fakes/FakeFeatureFlagApplier";
+import { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import { screenshotPathProtection } from "../../../../src/features/observe/ScreenshotPathProtection";
+import { defaultTimer } from "../../../../src/utils/SystemTimer";
+
+// An injected observer must also prevent constructor-time screenshot directory I/O
+// and retention intervals, including the cold first test in this file.
+let restoreHostWorkGuards = () => {};
+beforeEach(() => {
+  const guards = [
+    spyOn(screenshotPathProtection, "start"),
+    spyOn(defaultTimer, "sleep"),
+    spyOn(defaultTimer, "setTimeout"),
+    spyOn(defaultTimer, "setInterval"),
+  ];
+  for (const guard of guards) {
+    guard.mockImplementation(() => {
+      throw new Error("iOS chrome tests must not start real retention or timer waits");
+    });
+  }
+  restoreHostWorkGuards = () => guards.forEach((guard) => guard.mockRestore());
+});
+afterEach(() => restoreHostWorkGuards());
 
 function harness() {
-  const fixture = loadIosRemindersNoiseObservePair().after;
-  const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+  const observation = {
+    ...(fixture as ObserveResult),
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  };
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation);
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const voiceOverExecutor = new FakeTalkBackSwipeExecutor();
-  const finder = new FakeElementFinder();
-  const action = new SwipeOn({ name: "iOS fake", deviceId: "ios-chrome", platform: "ios" }, null, {
-    observeScreen,
-    finder,
-    timer,
-    voiceOverExecutor,
-    accessibilityDetector: new FakeAccessibilityDetector(),
-  });
+  const finder = new FakeScrollableElementsQuery();
+  const action = new SwipeOn(
+    { name: "iOS fake", deviceId: "ios-chrome", platform: "ios" },
+    new FakeAdbClient() as unknown as AdbClient,
+    {
+      observeScreen,
+      executeGesture: new FakeGestureExecutor(),
+      screenshotCapturer: new FakeScreenshotCapturer(),
+      featureFlags: new FeatureFlagService(
+        new FakeFeatureFlagRepository(),
+        new FakeFeatureFlagApplier(),
+      ),
+      finder,
+      timer,
+      voiceOverExecutor,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+    },
+  );
   action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
   return { action, voiceOverExecutor, finder };
 }

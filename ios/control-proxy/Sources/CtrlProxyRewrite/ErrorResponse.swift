@@ -16,7 +16,8 @@ enum ErrorResponse {
         let errorResponse = WebSocketResponse.error(
             type: "error",
             requestId: requestId,
-            error: WireError.message(for: error)
+            error: WireError.message(for: error),
+            errorCode: (error as? CommandError)?.wireCode
         )
 
         let encoder = JSONEncoder()

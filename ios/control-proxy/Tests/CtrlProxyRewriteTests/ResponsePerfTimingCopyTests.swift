@@ -61,7 +61,8 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
             timestamp: 1_730_000_000_000,
             requestId: "hierarchy-1",
             error: "capture failed",
-            frameContext: "epoch:1:abc123"
+            frameContext: "epoch:1:abc123",
+            servedFromCache: true
         )
 
         let copied = response.withPerfTiming(PerfTiming(name: "hierarchy", durationMs: 5))
@@ -73,6 +74,7 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
         XCTAssertNil(decoded.data)
         XCTAssertEqual(decoded.error, "capture failed")
         XCTAssertEqual(decoded.frameContext, "epoch:1:abc123")
+        XCTAssertEqual(decoded.servedFromCache, true)
         XCTAssertEqual(decoded.perfTiming?.name, "hierarchy")
         XCTAssertEqual(decoded.perfTiming?.durationMs, 5)
     }

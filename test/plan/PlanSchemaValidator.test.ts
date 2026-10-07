@@ -2,6 +2,9 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach } from "bun:test
 import Ajv from "ajv";
 import { dump } from "js-yaml";
 import path from "path";
+import planSchema from "../../schemas/test-plan.schema.json";
+import toolDefinitions from "../../schemas/tool-definitions.json";
+import { setDeviceStateSchema } from "../../src/server/utilityTools";
 import type { FileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
 import {
   PlanSchemaValidator,
@@ -22,6 +25,205 @@ describe("PlanSchemaValidator", () => {
     // cold compile inside a test body was clocked at 106.32ms in CI (#6244
     // related run).
     validator.validateYaml("name: warmup\nsteps:\n  - tool: observe\n");
+  });
+
+  it("keeps timestamps and YAML 1.1 boolean words as strings", () => {
+    for (const quoted of [false, true]) {
+      for (const label of ["yes", "no", "on", "off", "YES", "ON"]) {
+        const scalar = (value: string) => (quoted ? JSON.stringify(value) : value);
+        const result = validator.validateYaml(`
+name: clock-plan
+generated: ${scalar("2026-01-08T00:00:00Z")}
+metadata:
+  createdAt: ${scalar("2026-01-08T00:00:00Z")}
+steps:
+  - tool: setDeviceState
+    clock:
+      mode: set
+      instant: ${scalar("2026-03-01T09:00:00Z")}
+  - tool: observe
+    label: ${scalar(label)}
+`);
+        expect(result.errors ?? []).toEqual([]);
+        expect(result.valid).toBe(true);
+      }
+    }
+  });
+
+  it("reports the window error for an unquoted out-of-window clock instant", () => {
+    const result = validator.validateYaml(`
+name: clock-plan
+steps:
+  - tool: setDeviceState
+    clock:
+      mode: set
+      instant: 1999-01-01T00:00:00Z
+`);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        field: "steps[0].clock.instant",
+        message: expect.stringContaining("2000-01-01"),
+      }),
+    ]);
+  });
+
+  it("preserves core scalar types and merge keys", () => {
+    for (const number of ["01000", "0o1750", "0x3e8", "1e3", "1000.0"]) {
+      const result = validator.validateYaml(`
+name: scalar-plan
+metadata:
+  generatedFromToolCalls: true
+  duration: 1.5e2
+steps:
+  - &state
+    tool: setDeviceState
+    connectivity: {airplaneMode: false, wifiEnabled: TRUE}
+  - <<: *state
+    clock: {mode: advance, byMs: ${number}}
+  - tool: observe
+    label: "true"
+`);
+      expect(result.errors ?? []).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
+    for (const text of ["0b10", "1_000", "1:20", "-0x10", "+0o10"]) {
+      expect(
+        validator.validateYaml(`name: scalar-plan\nsteps: [{tool: observe, label: ${text}}]`).valid,
+      ).toBe(true);
+    }
+    for (const value of ["null", "Null", "NULL", "~", "", "true", "false"]) {
+      expect(validator.validateYaml(`name: ${value}\nsteps: [{tool: observe}]`).valid).toBe(false);
+    }
+    for (const value of ["null", "Null", "NULL", "~", "", "true", "false", '"1000"']) {
+      expect(
+        validator.validateYaml(
+          `name: scalar-plan\nsteps: [{tool: setDeviceState, clock: {mode: advance, byMs: ${value}}}]`,
+        ).valid,
+      ).toBe(false);
+    }
+  });
+
+  it("validates native tap geometry and rejects incomplete provenance", () => {
+    const geometry = {
+      platform: "ios",
+      deviceWidth: 390,
+      deviceHeight: 844,
+      orientation: 0,
+      x: 2.125,
+      y: 3.75,
+    };
+    const validate = (value: unknown) =>
+      validator.validateYaml(
+        dump({
+          name: "native",
+          steps: [{ tool: "tapAt", params: { x: 2.125, y: 3.75 }, geometry: value }],
+        }),
+      ).valid;
+    expect(validate(geometry)).toBe(true);
+    expect(validate({ ...geometry, orientation: 4 })).toBe(false);
+    expect(validate({ ...geometry, deviceWidth: 0 })).toBe(false);
+    expect(validate({ ...geometry, platform: "other" })).toBe(false);
+    expect(validate({ platform: "ios" })).toBe(false);
+  });
+
+  it("keeps both setDeviceState field requirements aligned with the live tool", () => {
+    const targetingKeys = ["platform", "deviceId", "sessionUuid", "keepScreenAwake", "device"];
+    const fields = Object.keys(setDeviceStateSchema.shape)
+      .filter((key) => !targetingKeys.includes(key))
+      .sort();
+    const rule = planSchema.$defs.planStep.allOf.find(
+      (rule) => rule.if?.properties?.tool?.const === "setDeviceState",
+    );
+    expect(rule?.then?.anyOf?.flatMap((branch) => branch.required).sort()).toEqual(
+      [...fields, "params"].sort(),
+    );
+    expect(
+      planSchema.$defs.setDeviceStateParams.anyOf.flatMap((branch) => branch.required).sort(),
+    ).toEqual(fields);
+    expect(Object.keys(planSchema.$defs.setDeviceStateParams.properties).sort()).toEqual(fields);
+  });
+
+  it.each([
+    ["connectivity", { connectivity: { airplaneMode: true } }],
+    ["location", { location: { mode: "static", latitude: 37.77, longitude: -122.42 } }],
+  ])("accepts %s alone in inline and params setDeviceState steps", (_field, params) => {
+    for (const step of [
+      { tool: "setDeviceState", ...params },
+      { tool: "setDeviceState", params },
+    ]) {
+      expect(validator.validateYaml(dump({ name: "state", steps: [step] })).valid).toBe(true);
+    }
+  });
+
+  it.each(["elementId", "id"])("accepts highlight %s inline and under params", (key) => {
+    const params = { [key]: "com.example:id/btn_login" };
+    for (const step of [
+      { tool: "highlight", ...params },
+      { tool: "highlight", params },
+    ]) {
+      expect(validator.validateYaml(dump({ name: "highlight", steps: [step] })).valid).toBe(true);
+    }
+  });
+
+  it.each([
+    ["box", { type: "box", bounds: { x: 1, y: 2, width: 3, height: 4 } }],
+    ["style", { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 }, style: {} }],
+  ])("rejects unsupported highlight shape %s inline and under params", (_name, shape) => {
+    for (const step of [
+      { tool: "highlight", shape },
+      { tool: "highlight", params: { shape } },
+    ]) {
+      expect(validator.validateYaml(dump({ name: "highlight", steps: [step] })).valid).toBe(false);
+    }
+  });
+
+  it("continues accepting circle highlight shapes", () => {
+    const shape = { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } };
+    expect(
+      validator.validateYaml(dump({ name: "circle", steps: [{ tool: "highlight", shape }] })).valid,
+    ).toBe(true);
+  });
+
+  it("accepts scoped dragAndDrop endpoints inline and under params", () => {
+    const params = {
+      source: {
+        text: "Item 1",
+        container: {
+          elementId: "com.example:id/list_a",
+          index: 0,
+          selectionStrategy: "unique",
+          container: { text: "Outer", selectionStrategy: "first" },
+        },
+        selectionStrategy: "unique",
+      },
+      target: { text: "Item 2", container: { text: "List B" }, selectionStrategy: "random" },
+    };
+    for (const step of [
+      { tool: "dragAndDrop", ...params },
+      { tool: "dragAndDrop", params },
+    ]) {
+      expect(validator.validateYaml(dump({ name: "drag", steps: [step] })).valid).toBe(true);
+    }
+  });
+
+  it("matches the live dragAndDrop endpoint and recursive container shapes", () => {
+    const live = toolDefinitions.find((tool) => tool.name === "dragAndDrop")?.inputSchema;
+    const endpoint = live?.properties?.source?.anyOf?.[0];
+    expect(planSchema.$defs.dragAndDropSelector.properties.container).toEqual({
+      ...endpoint?.properties?.container,
+      $ref: "#/$defs/dragAndDropContainer",
+    });
+    expect(planSchema.$defs.dragAndDropSelector.properties.selectionStrategy).toEqual(
+      endpoint?.properties?.selectionStrategy,
+    );
+    const container = JSON.parse(
+      JSON.stringify(live?.$defs?.__schema0).replaceAll(
+        "#/$defs/__schema0",
+        "#/$defs/dragAndDropContainer",
+      ),
+    );
+    expect(Reflect.get(planSchema.$defs, "dragAndDropContainer")).toEqual(container);
   });
 
   it.each([

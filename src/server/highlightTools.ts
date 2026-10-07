@@ -23,12 +23,15 @@ import {
   matchedSourceNode,
   type ElementResolution,
 } from "../features/utility/ElementResolver";
-import type { SearchableEntry } from "../features/utility/SearchableNode";
+import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
+import { scopeHierarchyForSelector } from "../features/observe/hierarchyLayer";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import {
   elementContainerSchema,
   elementIdTextFieldsSchema,
-  elementSelectionStrategySchema,
+  hierarchyLayerSchema,
+  nestedElementContainerSchema,
+  resolverSelectionStrategySchema,
   validateElementIdTextSelector,
 } from "./elementSelectorSchemas";
 import { logger } from "../utils/logger";
@@ -51,11 +54,17 @@ const highlightBaseSchema = z
     shape: highlightShapeSchema.optional().describe("Optional bounds for a red hand-drawn circle"),
     elementId: elementIdTextFieldsSchema.shape.elementId,
     text: elementIdTextFieldsSchema.shape.text,
-    container: elementContainerSchema.optional().describe("Scope search to a container"),
+    container: nestedElementContainerSchema
+      .or(elementContainerSchema)
+      .optional()
+      .describe(
+        "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
+      ),
     containerOf: z.boolean().optional().describe("Highlight selected element's container"),
-    selectionStrategy: elementSelectionStrategySchema
+    selectionStrategy: resolverSelectionStrategySchema
       .optional()
       .describe("Selection strategy when multiple match (default: first)"),
+    layer: hierarchyLayerSchema.optional(),
   })
   .strict();
 
@@ -90,6 +99,12 @@ export const highlightSchema = addDeviceTargetingToSchema(highlightBaseSchema).s
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: "selectionStrategy can only be used with selector",
+        });
+      }
+      if (value.layer) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "layer can only be used with selector",
         });
       }
     }
@@ -153,6 +168,20 @@ const captureHighlightHierarchy = (
   });
 };
 
+/** Resolve the highlight selector in the app or the AutoMobile overlay only (issue #9305). */
+const layerScopedSnapshot = (
+  snapshot: HierarchySnapshot,
+  layer: HighlightArgs["layer"],
+): HierarchySnapshot => {
+  if (layer === undefined) {
+    return snapshot;
+  }
+  const hierarchy = scopeHierarchyForSelector(snapshot.hierarchy, layer);
+  return hierarchy === snapshot.hierarchy
+    ? snapshot
+    : { ...snapshot, hierarchy, nodes: new SearchableHierarchy().project(hierarchy) };
+};
+
 const selectHighlightElement = (
   device: BootedDevice,
   args: HighlightArgs,
@@ -184,7 +213,10 @@ const resolveHighlightShapeFromSelector = async (
   args: HighlightArgs,
   dependencies: HighlightToolDependencies = {},
 ): Promise<HighlightShape> => {
-  const snapshot = await captureHighlightHierarchy(device, args, dependencies);
+  const snapshot = layerScopedSnapshot(
+    await captureHighlightHierarchy(device, args, dependencies),
+    args.layer,
+  );
   const viewHierarchy = snapshot.hierarchy;
   const resolution = new ElementResolver().resolve(
     { id: snapshot.captureId, nodes: snapshot.nodes },

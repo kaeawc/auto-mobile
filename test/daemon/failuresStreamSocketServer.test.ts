@@ -1,4 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { createTestDatabase } from "../db/testDbHelper";
+import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
+import { beforeAll, afterAll, describe, expect, test } from "bun:test";
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+  type StreamAuthorizeInput,
+} from "../../src/daemon/streamSocketAuth";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   FailuresStreamSocketServer,
@@ -53,10 +60,16 @@ class TestableServer extends FailuresStreamSocketServer {
   }
 }
 
-function makeServer(): { server: TestableServer; repo: FakeFailuresRepository; timer: FakeTimer } {
+function makeServer(authenticator: StreamSocketAuthenticator = { authorize() {} }): {
+  server: TestableServer;
+  repo: FakeFailuresRepository;
+  timer: FakeTimer;
+} {
   const repo = new FakeFailuresRepository();
   const timer = new FakeTimer();
-  const server = new TestableServer("/tmp/failures-stream-test.sock", timer, repo);
+  const server = new TestableServer("/tmp/failures-stream-test.sock", timer, repo, {
+    authenticator,
+  });
   return { server, repo, timer };
 }
 
@@ -160,5 +173,106 @@ describe("FailuresStreamSocketServer command validation", () => {
     const request = { command: "poll_everything" } as unknown as FailuresStreamSocketRequest;
 
     await expect(server.run(request)).rejects.toThrow(/Unsupported command: poll_everything/);
+  });
+});
+
+describe("failures poll authentication", () => {
+  test("rejects missing session with push-stream registration guidance", async () => {
+    const repo = new FakeFailuresRepository();
+    const server = new TestableServer("/fake/failures.sock", new FakeTimer(), repo);
+    await expect(server.run({ command: "poll_notifications" })).rejects.toThrow(
+      "Register a session with daemon/registerSession",
+    );
+    expect(repo.lastNotificationsQuery).toBeUndefined();
+  });
+
+  test("passes the session to the fake authenticator and preserves the poll response", async () => {
+    const calls: StreamAuthorizeInput[] = [];
+    const authenticator: StreamSocketAuthenticator = {
+      authorize(input) {
+        calls.push(input);
+      },
+    };
+    const { server } = makeServer(authenticator);
+    const response = await server.run({
+      command: "poll_notifications",
+      sessionUuid: "live-session",
+    });
+    expect(calls).toEqual([{ sessionUuid: "live-session" }]);
+    expect(response).toEqual({
+      success: true,
+      notifications: [],
+      lastTimestamp: undefined,
+      lastId: undefined,
+    });
+  });
+
+  test("auth opt-out permits a poll without a session", async () => {
+    const previous = process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+    process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = "0";
+    try {
+      const { server } = makeServer(
+        createDefaultStreamSocketAuthenticator("failuresStream", { allowObserverSessions: true }),
+      );
+      expect((await server.run({ command: "poll_notifications" })).success).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_DAEMON_STREAM_AUTH;
+      } else {
+        process.env.AUTOMOBILE_DAEMON_STREAM_AUTH = previous;
+      }
+    }
+  });
+  for (const command of [
+    "poll_notifications",
+    "poll_groups",
+    "poll_timeline",
+    "acknowledge",
+  ] as const) {
+    test(`authenticates ${command} before repository access`, async () => {
+      const { server, repo } = makeServer({
+        authorize() {
+          throw new Error("session rejected");
+        },
+      });
+      await expect(server.run({ command, notificationIds: [1] })).rejects.toThrow(
+        "session rejected",
+      );
+      expect(repo.lastNotificationsQuery).toBeUndefined();
+      expect(repo.lastGroupsQuery).toBeUndefined();
+      expect(repo.lastTimelineQuery).toBeUndefined();
+      expect(repo.acknowledgedIds).toBeUndefined();
+    });
+  }
+});
+
+describe("failures poll in-memory repository", () => {
+  let db: Awaited<ReturnType<typeof createTestDatabase>>;
+  beforeAll(async () => {
+    db = await createTestDatabase();
+  });
+  afterAll(async () => {
+    await db.destroy();
+  });
+
+  test("preserves an empty poll response with an admitting authenticator", async () => {
+    const timer = new FakeTimer();
+    const server = new TestableServer(
+      "/fake/failures.sock",
+      timer,
+      new FailureAnalyticsRepository(timer, db),
+      { authenticator: { authorize() {} } },
+    );
+    const response = await server.run({
+      command: "poll_notifications",
+      sessionUuid: "live-session",
+      sinceId: 7,
+    });
+    expect(response).toEqual({
+      success: true,
+      notifications: [],
+      lastTimestamp: undefined,
+      lastId: 7,
+    });
   });
 });

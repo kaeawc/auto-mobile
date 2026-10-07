@@ -57,6 +57,9 @@ function decodeHierarchyUpdate(
       hierarchy: message.data,
       perfTiming: message.perfTiming,
       frameContext: message.frameContext,
+      ...(message.servedFromCache === undefined
+        ? {}
+        : { servedFromCache: message.servedFromCache }),
     },
   };
 }
@@ -159,6 +162,7 @@ function decodeGestureActionResult(
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error && phaseSummary ? `${message.error}; ${phaseSummary}` : message.error,
     perfTiming: message.perfTiming,
+    ...(message.errorCode === undefined ? {} : { errorCode: message.errorCode }),
     ...(type === "tap_coordinates_result" && message.tapDiagnostics !== undefined
       ? { tapDiagnostics: message.tapDiagnostics }
       : {}),
@@ -345,6 +349,23 @@ function decodeSetNetworkFaultRulesResult(message: WebSocketMessage): unknown {
   };
 }
 
+/**
+ * `rejectedMockIds` is passed through only when the runner sent it: its absence means the runner
+ * (or the app SDK behind it) did not report, which the host must not read as "none rejected".
+ */
+function decodeSetNetworkMockRulesResult(message: WebSocketMessage): unknown {
+  const msg = message as { rejectedMockIds?: unknown; rejectedReasons?: unknown };
+  return {
+    success: message.success ?? message.ok ?? false,
+    totalTimeMs: message.totalTimeMs ?? 0,
+    error: message.error,
+    ...(Array.isArray(msg.rejectedMockIds) ? { rejectedMockIds: msg.rejectedMockIds } : {}),
+    ...(typeof msg.rejectedReasons === "object" && msg.rejectedReasons !== null
+      ? { rejectedReasons: msg.rejectedReasons }
+      : {}),
+  };
+}
+
 function decodeExecuteSqlResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? false,
@@ -452,6 +473,32 @@ const messageDecoders = new Map<
   ["hinge_angle_result", decodeHingeAngleResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
+  [
+    "magic_tap_result",
+    (message) => ({
+      success: message.success ?? false,
+      available: message.available ?? false,
+      handled: message.handled,
+      unsupported: message.unsupported ?? false,
+      requiresVoiceOver: false,
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
+  [
+    "sdk_trigger_result",
+    (message) => ({
+      success: message.success ?? false,
+      available: message.available ?? false,
+      statusCode: message.statusCode,
+      sdkError: message.sdkError,
+      reason: message.reason,
+      registeredModules: message.registeredModules,
+      supportedTriggers: message.supportedTriggers,
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
   ["voiceover_state_result", decodeVoiceoverStateResult],
   ["voiceover_set_result", decodeVoiceoverSetResult],
   ["highlight_response", decodeHighlightResponse],
@@ -463,6 +510,7 @@ const messageDecoders = new Map<
   ["set_preference_result", decodeSetPreferenceResult],
   ["remove_preference_result", decodeSetPreferenceResult],
   ["clear_preferences_result", decodeSetPreferenceResult],
+  ["set_network_mock_rules_result", decodeSetNetworkMockRulesResult],
   ["set_network_fault_rules_result", decodeSetNetworkFaultRulesResult],
   ["set_network_error_simulation_result", decodeSetNetworkFaultRulesResult],
   ["execute_sql_result", decodeExecuteSqlResult],

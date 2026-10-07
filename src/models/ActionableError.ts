@@ -1,12 +1,32 @@
+import type { ResolverSelector } from "../server/elementSelectorSchemas";
 import { errorMessage } from "../utils/describeUnknownError";
-/**
- If thrown, the MCP server will catch it and send the message to the client.
- */
+// Structural match for ElementResolution.containerFailure from dependency PR #10292.
+export interface ContainerFailure {
+  level: number;
+  reason: "not-found" | "ambiguous";
+  selector: ResolverSelector;
+}
+
+/** If thrown, the MCP server will catch it and send the message to the client. */
 export class ActionableError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  declare readonly containerFailure?: ContainerFailure;
+
+  constructor(message: string, options?: ErrorOptions & { containerFailure?: ContainerFailure }) {
     super(message, options);
+    const containerFailure =
+      options?.containerFailure ??
+      (options?.cause instanceof ActionableError ? options.cause.containerFailure : undefined);
+    if (containerFailure) {
+      this.containerFailure = containerFailure;
+    }
   }
 }
+
+/**
+ * The target app is not installed, so there is nothing to act on. A subclass so callers can
+ * tell "nothing to clean" from a real failure without matching message text.
+ */
+export class AppNotInstalledError extends ActionableError {}
 
 /**
  * Wrap an unknown caught error in an ActionableError with actionable context.

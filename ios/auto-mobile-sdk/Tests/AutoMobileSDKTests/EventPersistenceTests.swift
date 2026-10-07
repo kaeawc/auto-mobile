@@ -24,6 +24,19 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - Persist + Load Round-Trip
 
+    func testPersistAndLoadFrameMetricsEvent() throws {
+        let event = SdkFrameMetricsEvent(timestamp: 1000, fps: 55, frameTimeMs: 18, jankFrames: 2)
+        XCTAssertNotNil(persistence.persist([event]))
+        let pending = persistence.loadPending()
+        XCTAssertEqual(pending.count, 1)
+        let loaded = try XCTUnwrap(pending.first?.events.first as? SdkFrameMetricsEvent)
+        XCTAssertEqual(loaded.eventType, .frameMetrics)
+        XCTAssertEqual(loaded.timestamp, 1000)
+        XCTAssertEqual(loaded.fps, 55)
+        XCTAssertEqual(loaded.frameTimeMs, 18)
+        XCTAssertEqual(loaded.jankFrames, 2)
+    }
+
     func testPersistAndLoadInteractionEvent() {
         let event = SdkInteractionEvent(interactionType: "test_event", properties: ["key": "value"])
         let batchId = persistence.persist([event])

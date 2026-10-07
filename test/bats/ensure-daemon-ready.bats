@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/ci/ensure-daemon-ready.sh
 # These tests mock the `auto-mobile` CLI so no real daemon/device is required.

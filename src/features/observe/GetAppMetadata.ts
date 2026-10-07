@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AppMetadataResult } from "../../models/AppMetadataResult";
 import type { BootedDevice, ExecResult } from "../../models";
@@ -108,7 +109,7 @@ export interface AndroidAppMetadataAdbOptions {
   optional?: boolean;
 }
 
-async function getAndroidAppMetadataFromAdb(
+export async function getAndroidAppMetadataFromAdb(
   adb: AdbExecutor,
   packageName: string,
   options: AndroidAppMetadataAdbOptions = {},
@@ -118,7 +119,7 @@ async function getAndroidAppMetadataFromAdb(
     result = await adb.executeCommand(
       `shell dumpsys package ${shellQuote(packageName)}`,
       options.timeoutMs,
-      undefined,
+      DUMPSYS_MAX_BUFFER,
       undefined,
       options.signal,
     );

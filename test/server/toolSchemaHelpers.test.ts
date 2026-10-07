@@ -128,6 +128,19 @@ describe("addDeviceTargetingToSchema", () => {
   });
 });
 
+describe("shakeSchema bounds", () => {
+  test("accepts bounded values and rejects invalid duration or intensity", () => {
+    expect(shakeSchema.safeParse({ duration: 1, intensity: 1 }).success).toBe(true);
+    expect(shakeSchema.safeParse({ duration: 1_798_000, intensity: 1_000 }).success).toBe(true);
+    for (const duration of [0, -1, 1.5, 1_798_001, Number.NaN, Infinity, 1e300]) {
+      expect(shakeSchema.safeParse({ duration }).success).toBe(false);
+    }
+    for (const intensity of [0, -1, 1_001, Number.NaN, Infinity, 1e300]) {
+      expect(shakeSchema.safeParse({ intensity }).success).toBe(false);
+    }
+  });
+});
+
 describe("enforceAnthropicToolSchemaSubset", () => {
   test("strips unsupported keywords, preserves nested supported combinators, and merges root allOf", () => {
     const schema: Record<string, unknown> = {

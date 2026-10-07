@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   AdbClient,
   AdbCommandTimeoutError,
@@ -1137,4 +1138,94 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
     expect(argvs).toEqual([["devices"]]);
   });
+});
+
+describe("AdbClient alias missing-device attribution", () => {
+  test.each([false, true])(
+    "alias error is non-retryable and notifies its canonical device (noRetry=%s)",
+    async (noRetry) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const notifications: AdbMissingDeviceEvent[] = [];
+      const stop = onAdbMissingDevice((event) => notifications.push(event));
+      let attempts = 0;
+      const client = new AdbClient(
+        DEVICE,
+        async (_file: string, args: string[], _maxBuffer?: number) => {
+          attempts++;
+          expect(args.slice(0, 2)).toEqual(["-s", "localhost:5555"]);
+          throw new Error("adb: device 'localhost:5555' not found");
+        },
+        null,
+        new DefaultRetryExecutor(timer),
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { resolveTransport: () => "localhost:5555" },
+      );
+      try {
+        await expect(
+          client.execute(["shell", "getprop", "sys.boot_completed"], { noRetry }),
+        ).rejects.toThrow("localhost:5555");
+        expect(attempts).toBe(1);
+        expect(notifications).toEqual([
+          { deviceId: DEVICE.deviceId, message: expect.stringContaining("localhost:5555") },
+        ]);
+        expect(timer.getSleepHistory()).toEqual([]);
+      } finally {
+        stop();
+        timer.reset();
+      }
+    },
+  );
+});
+
+// #9888: password-field key events pass `logLabel`; no log line or error may carry the command.
+describe("AdbClient logLabel redaction", () => {
+  const secret = "input keyevent KEYCODE_Z";
+  // Only the typed command fails; adb path discovery and other probes succeed.
+  const failingExec = (...invocation: unknown[]): Promise<ExecResult> =>
+    JSON.stringify(invocation).includes("KEYCODE_Z")
+      ? Promise.reject(
+          Object.assign(new Error(`Command failed: adb -s emulator-5554 shell ${secret}`), {
+            cmd: `adb -s emulator-5554 shell ${secret}`,
+          }),
+        )
+      : Promise.resolve(ok(""));
+
+  for (const noRetry of [true, false]) {
+    test(`keeps the command out of logs and the error (noRetry=${noRetry})`, async () => {
+      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+        spyOn(logger, level).mockImplementation(() => {}),
+      );
+      try {
+        const client = new AdbClient(DEVICE, failingExec, null, ...autoRetrySeam());
+        const error = await client
+          .execute(["shell", secret], { noRetry, logLabel: "<password key event>" })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+
+        expect(error).toBeInstanceOf(Error);
+        const failure = error as Error & { cmd?: string };
+        expect(failure.message).toContain("<password key event>");
+        const surfaced = [
+          failure.message,
+          failure.stack ?? "",
+          failure.cmd ?? "",
+          JSON.stringify(spies.map((spy) => spy.mock.calls.map((call) => call.map(String)))),
+        ].join("\n");
+        expect(surfaced).not.toContain("KEYCODE");
+        expect(surfaced).toContain("<password key event>");
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    });
+  }
 });

@@ -5,6 +5,8 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BaseSocketServer } from "./BaseSocketServer";
 import { SocketRequest, SocketResponse } from "./SocketServerTypes";
 
+const FRAME_TOO_LARGE_ERROR = "Invalid request: frame too large";
+
 /**
  * Abstract base class for request-response socket servers.
  * Handles sequential request processing with JSON-over-newline protocol, with
@@ -52,6 +54,19 @@ export abstract class RequestResponseSocketServer<
       });
 
     this.pendingBySocket.set(socket, newPending);
+  }
+
+  /**
+   * Answer an oversized frame with a structured error, then drop the connection
+   * once the reply is flushed. The request id is unknowable: the frame was never
+   * completed or parsed, and scanning its prefix for an id would be a heuristic.
+   */
+  protected onFrameOverflow(socket: Socket): void {
+    if (socket.destroyed) {
+      return;
+    }
+    const errorResponse = this.createErrorResponse(undefined, FRAME_TOO_LARGE_ERROR);
+    socket.write(JSON.stringify(errorResponse) + "\n", () => socket.destroy());
   }
 
   /**

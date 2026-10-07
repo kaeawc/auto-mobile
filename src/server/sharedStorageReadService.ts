@@ -1,3 +1,6 @@
+import { SimctlIosFilesFixtureContainer, nodeAppFileFileSystem } from "./appFileService";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { TextDecoder } from "node:util";
@@ -18,6 +21,8 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import {
   buildSharedStorageResourceUri,
+  buildCanonicalUserFilesResourceUri,
+  buildCanonicalMediaLibraryResourceUri,
   type SharedStorageFileEntry,
   type SharedStorageFileReadResult,
   type SharedStorageNamespaceListing,
@@ -36,6 +41,7 @@ const FILE_MISSING_MARKER = "__AUTOMOBILE_FILE_MISSING__";
 export interface ListSharedStorageRequest {
   deviceId: string;
   namespace: string;
+  domain?: "user_files" | "media_library";
   explicitUserId?: number;
   signal?: AbortSignal;
 }
@@ -49,15 +55,23 @@ export interface SharedStorageReadCoverage {
   readonly read: boolean;
 }
 
-/** Separate from app-file providers: bounded Downloads reads are Android-only. */
+export const IOS_MEDIA_READ_UNSUPPORTED_REASON =
+  "simctl addmedia imports fixtures but exposes no supported bounded enumeration or read API for imported media.";
+
+/** Coverage of registered bounded namespace readers. */
 export function describeDefaultSharedStorageReadCoverage(
   platform: Platform,
+  domain: "user_files" | "media_library" = "user_files",
 ): SharedStorageReadCoverage {
-  return { list: platform === "android", read: platform === "android" };
+  const available = domain === "user_files" || platform === "android";
+  return { list: available, read: available };
 }
 
 export interface SharedStorageReadService {
-  describeReadCoverage?(platform: Platform): SharedStorageReadCoverage;
+  describeReadCoverage?(
+    platform: Platform,
+    domain?: "user_files" | "media_library",
+  ): SharedStorageReadCoverage;
   list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing>;
   read(request: ReadSharedStorageRequest): Promise<SharedStorageFileReadResult>;
 }
@@ -72,6 +86,7 @@ export interface SharedStorageReadServiceDependencies {
   createUserResolver?: (adb: AdbExecutor) => SharedStorageUserResolver;
   deviceResolver?: (deviceId: string) => Promise<BootedDevice | null>;
   hashCache?: SharedStorageHashCache;
+  iosFixtureReader?: Pick<SimctlIosFilesFixtureContainer, "listNamespace" | "readNamespaceFile">;
 }
 
 export interface SharedStorageHashCache {
@@ -114,6 +129,11 @@ export function createSharedStorageReadServiceForTesting(
     dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
     dependencies.deviceResolver ?? findBootedDevice,
     dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
+    dependencies.iosFixtureReader ??
+      new SimctlIosFilesFixtureContainer(
+        (device) => new SimCtlClient(device),
+        nodeAppFileFileSystem,
+      ),
   );
 }
 
@@ -122,8 +142,11 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 }
 
 class DefaultSharedStorageReadService implements SharedStorageReadService {
-  describeReadCoverage(platform: Platform): SharedStorageReadCoverage {
-    return describeDefaultSharedStorageReadCoverage(platform);
+  describeReadCoverage(
+    platform: Platform,
+    domain: "user_files" | "media_library" = "user_files",
+  ): SharedStorageReadCoverage {
+    return describeDefaultSharedStorageReadCoverage(platform, domain);
   }
 
   constructor(
@@ -131,6 +154,10 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
     private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice | null>,
     private readonly hashCache: SharedStorageHashCache,
+    private readonly iosFixtureReader: Pick<
+      SimctlIosFilesFixtureContainer,
+      "listNamespace" | "readNamespaceFile"
+    >,
   ) {}
 
   async list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing> {
@@ -152,8 +179,12 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       };
     }
     base.platform = device.platform;
-    if (!this.describeReadCoverage(device.platform).list) {
-      return { ...base, observation: "unsupported", reason: unsupportedReason(device.platform) };
+    const restriction = readRestriction(device, request);
+    if (restriction) {
+      return { ...base, observation: "unsupported", reason: restriction };
+    }
+    if (device.platform === "ios") {
+      return this.listIos(device, request, base);
     }
 
     const adb = this.adbFactory.create(device);
@@ -203,7 +234,14 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       return {
         ...resolved,
         observation: "complete",
-        files: parseListing(statEntries, hashes, request.deviceId, namespace),
+        files: parseListing(statEntries, hashes, request.deviceId, namespace).map((entry) => ({
+          ...entry,
+          resourceUri: resourceUriFor(request)({
+            deviceId: request.deviceId,
+            namespace,
+            path: entry.path,
+          }),
+        })),
       };
     } catch (error) {
       // A permission-denied read of a non-primary profile's storage also lands
@@ -223,7 +261,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       namespace,
       path,
       observation: "complete",
-      resourceUri: buildSharedStorageResourceUri({ deviceId: request.deviceId, namespace, path }),
+      resourceUri: resourceUriFor(request)({ deviceId: request.deviceId, namespace, path }),
     };
 
     const device = await this.deviceResolver(request.deviceId);
@@ -235,8 +273,19 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
       };
     }
     base.platform = device.platform;
-    if (!this.describeReadCoverage(device.platform).read) {
-      return { ...base, observation: "unsupported", reason: unsupportedReason(device.platform) };
+    if (device.platform === "ios" && request.domain !== "media_library") {
+      base.resourceUri = buildCanonicalUserFilesResourceUri({
+        deviceId: request.deviceId,
+        namespace,
+        path,
+      });
+    }
+    const restriction = readRestriction(device, request);
+    if (restriction) {
+      return { ...base, observation: "unsupported", reason: restriction };
+    }
+    if (device.platform === "ios") {
+      return this.readIos(device, request, base);
     }
 
     const adb = this.adbFactory.create(device);
@@ -269,24 +318,114 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         return { ...base, observation: "missing", reason: fileMissingReason(file) };
       }
       const buffer = Buffer.from(output.replace(/\s+/g, ""), "base64");
-      const text = decodeUtf8Text(buffer);
-      return {
-        ...base,
-        observation: "complete",
-        byteCount: buffer.byteLength,
-        sha256: createHash("sha256").update(buffer).digest("hex"),
-        ...(text === undefined
-          ? {
-              mimeType: mimeTypeForPath(path) ?? "application/octet-stream",
-              blob: buffer.toString("base64"),
-            }
-          : { mimeType: mimeTypeForPath(path) ?? "text/plain; charset=utf-8", text }),
-      };
+      return { ...base, ...readContent(buffer, path) };
     } catch (error) {
       logger.warn(`[SharedStorageRead] read ${file} failed: ${errorMessage(error)}`, error);
       return { ...base, observation: "unavailable", reason: errorMessage(error) };
     }
   }
+  private async listIos(
+    device: BootedDevice,
+    request: ListSharedStorageRequest,
+    base: SharedStorageNamespaceListing,
+  ): Promise<SharedStorageNamespaceListing> {
+    try {
+      const entries = await this.iosFixtureReader.listNamespace(
+        device,
+        base.namespace,
+        request.signal,
+      );
+      return {
+        ...base,
+        files: entries.map((entry) => ({
+          path: entry.path,
+          name: entry.name ?? posix.basename(entry.path),
+          byteCount: entry.byteCount,
+          lastModified: entry.lastModified,
+          mimeType: mimeTypeForPath(entry.path),
+          resourceUri: buildCanonicalUserFilesResourceUri({
+            deviceId: device.deviceId,
+            namespace: base.namespace,
+            path: entry.path,
+          }),
+        })),
+      };
+    } catch (error) {
+      logger.warn("[SharedStorageRead] iOS namespace list failed", error);
+      return {
+        ...base,
+        observation: isMissing(error) ? "missing" : "unavailable",
+        reason: errorMessage(error),
+      };
+    }
+  }
+
+  private async readIos(
+    device: BootedDevice,
+    request: ReadSharedStorageRequest,
+    base: SharedStorageFileReadResult,
+  ): Promise<SharedStorageFileReadResult> {
+    try {
+      const buffer = await this.iosFixtureReader.readNamespaceFile(
+        device,
+        base.namespace,
+        base.path,
+        request.signal,
+      );
+      return { ...base, ...readContent(buffer, base.path) };
+    } catch (error) {
+      logger.warn("[SharedStorageRead] iOS namespace read failed", error);
+      return {
+        ...base,
+        observation: isMissing(error) ? "missing" : "unavailable",
+        reason: errorMessage(error),
+      };
+    }
+  }
+}
+
+/** Shared byte encoding and metadata for both bounded platform readers. */
+function readContent(
+  buffer: Buffer,
+  path: string,
+): Pick<SharedStorageFileReadResult, "byteCount" | "sha256" | "mimeType" | "text" | "blob"> {
+  const text = decodeUtf8Text(buffer);
+  return {
+    byteCount: buffer.byteLength,
+    sha256: createHash("sha256").update(buffer).digest("hex"),
+    mimeType:
+      mimeTypeForPath(path) ??
+      (text === undefined ? "application/octet-stream" : "text/plain; charset=utf-8"),
+    ...(text === undefined ? { blob: buffer.toString("base64") } : { text }),
+  };
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function resourceUriFor(request: ListSharedStorageRequest) {
+  return request.domain === "media_library"
+    ? buildCanonicalMediaLibraryResourceUri
+    : buildSharedStorageResourceUri;
+}
+
+function readRestriction(
+  device: BootedDevice,
+  request: ListSharedStorageRequest,
+): string | undefined {
+  if (request.domain === "media_library") {
+    if (device.platform === "ios") {
+      return IOS_MEDIA_READ_UNSUPPORTED_REASON;
+    }
+    if (normalizeSharedStorageNamespace(request.namespace) !== "automobile-media") {
+      return "Only the putAppFile automobile-media namespace supports media_library list/read.";
+    }
+  }
+  if (device.platform === "ios" && resolveIosDeviceKind(device) !== "simulator") {
+    return unsupportedReason(device.platform);
+  }
+  return undefined;
 }
 
 function downloadsDirectory(userId: number, namespace: string): string {
@@ -614,7 +753,7 @@ function deviceNotBootedReason(deviceId: string): string {
 }
 
 function unsupportedReason(platform: string): string {
-  return `User-visible Downloads resources are only supported on Android devices, not ${platform}.`;
+  return `Bounded user_files reads require Android or an iOS Simulator; physical ${platform} devices are unsupported.`;
 }
 
 function namespaceMissingReason(directory: string): string {

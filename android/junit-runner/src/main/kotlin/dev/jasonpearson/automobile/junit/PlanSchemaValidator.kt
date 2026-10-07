@@ -42,6 +42,6 @@ object PlanSchemaValidator {
           )
         }
 
-    return PlanValidationResult(valid = result.valid, errors = errors)
+    return PlanValidationResult(valid = result.valid && errors.isEmpty(), errors = errors)
   }
 }

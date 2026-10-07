@@ -36,6 +36,12 @@ android {
 
   buildFeatures { compose = true }
 
+  // Robolectric needs the merged resources to render Compose Material 3 off-device (its components
+  // read library string resources); used by the overlay renderer screenshot tests. The default
+  // Robolectric SDK this would otherwise change is pinned in
+  // src/test/resources/robolectric.properties.
+  testOptions { unitTests.isIncludeAndroidResources = true }
+
   compileOptions {
     sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
     targetCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())
@@ -93,4 +99,21 @@ dependencies {
 
   // Compose test dependencies
   debugImplementation(libs.bundles.compose.ui.debug)
+}
+
+// Forward the overlay renderer screenshot switches from the Gradle invocation to the forked test
+// JVM so `-Dscreenshot.record=true` (and friends) reach the tests. See
+// src/test/kotlin/.../overlay/screenshot/OverlayScreenshotEnvironment.kt for the supported flags.
+val screenshotProperties =
+  listOf(
+    "screenshot.record",
+    "screenshot.reference.os",
+    "screenshot.golden.dir",
+    "screenshot.report.dir",
+  )
+
+tasks.withType<Test>().configureEach {
+  screenshotProperties.forEach { key ->
+    System.getProperty(key)?.let { value -> systemProperty(key, value) }
+  }
 }

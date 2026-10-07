@@ -35,6 +35,25 @@ describe("FakeCtrlProxy node actions", () => {
     ]);
   });
 
+  test("focused-input clicks implement the interface and honor configured results", async () => {
+    const fake = new FakeCtrlProxy();
+    const proxy: AndroidCtrlProxy = fake;
+    expect(await proxy.requestClickFocusedInput()).toMatchObject({
+      success: true,
+      action: "click",
+    });
+    const refusal = {
+      success: false,
+      action: "click",
+      totalTimeMs: 1,
+      error: "Unknown command type: request_click_focused_input",
+    };
+    fake.setActionResult(refusal);
+    expect(await proxy.requestClickFocusedInput()).toBe(refusal);
+    fake.setFailureMode("requestClickFocusedInput", new Error("disconnected"));
+    await expect(proxy.requestClickFocusedInput()).rejects.toThrow("disconnected");
+  });
+
   test("honors configured action results and restores default success", async () => {
     const fake = new FakeCtrlProxy();
     const result = { success: false, action: "long_click", totalTimeMs: 1, error: "rejected" };

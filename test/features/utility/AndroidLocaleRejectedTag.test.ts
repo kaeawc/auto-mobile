@@ -3,16 +3,30 @@ import { AndroidSystemConfigurationAdapter } from "../../../src/features/utility
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, ExecResult } from "../../../src/models";
+import {
+  LOCALE_CAPTURE_APP_ID,
+  LOCALE_CAPTURE_MISSING_APP_ID,
+  readLocaleCapture,
+  readMissingPackageCapture,
+  type LocaleCaptureName,
+} from "../../helpers/androidLocaleCapture";
 
 /**
  * Issue #10155: a locale change that is reported as failed must not leave the
  * rejected locale applied on the device. Layer 1 rejects a tag that cannot be a
  * real locale before anything is sent; layer 2 restores the earlier locale when
  * a tag that passed validation does not read back.
+ *
+ * Device replies come from the API 36 captures in test/fixtures/android-locale/
+ * (see test/helpers/androidLocaleCapture.ts), against the capture's own package.
+ * The two places that still use a hand-built reply say so: the multi-locale list
+ * and the ICU / tag-shape acceptance sweeps were never captured. The legacy
+ * device-wide path keeps its own strings (`persist.sys.locale` was empty in every
+ * capture, so that path was not exercised).
  */
 describe("Android changeLocalization rejected locale (#10155)", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel 7", platform: "android" };
-  const APP = "com.example.app";
+  const APP = LOCALE_CAPTURE_APP_ID;
   const GET_APP = `cmd locale get-app-locales '${APP}' --user 0`;
   const SET_APP = `cmd locale set-app-locales '${APP}' --user 0`;
 
@@ -23,8 +37,15 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
     trim: () => stdout.trim(),
     includes: (s: string) => stdout.includes(s),
   });
-  const appLocales = (list: string): ExecResult =>
+  /** What the device printed for `get-app-locales <pkg> --user 0` in a capture. */
+  const captured = (name: LocaleCaptureName): ExecResult =>
+    result(readLocaleCapture(name).appLocalesUser0);
+  // Not captured: the comma-joined multi-locale list. Android's LocaleList joins with a comma, but
+  // no capture holds a two-locale app override, so this reply is hand-built.
+  const uncapturedMultiLocale = (list: string): ExecResult =>
     result(`Locales for ${APP} for user 0 are [${list}]\n`);
+  // A reply with nothing to parse: the case where the read-back cannot be understood.
+  const emptyReply = (): ExecResult => result("");
 
   let adb: FakeAdbExecutor;
   let adapter: AndroidSystemConfigurationAdapter;
@@ -76,13 +97,17 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
 
   describe("restore after a read-back mismatch", () => {
     it("restores an app that had no locale override and says so", async () => {
-      adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales("und"), appLocales("")]);
+      adb.setCommandResponseSequence(GET_APP, [
+        captured("0-initial"),
+        captured("3-zz-ZZ"),
+        captured("12-restored"),
+      ]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toBe(
-        `Read-back verification failed for ${APP}: expected "fr-FR" but got "und". Restored the app's previous locale (unset).`,
+        `Read-back verification failed for ${APP}: expected "fr-FR" but got "zz-ZZ". Restored the app's previous locale (unset).`,
       );
       expect(setCommands()).toEqual([
         `shell ${SET_APP} --locales 'fr-FR'`,
@@ -96,9 +121,9 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
 
     it("restores every previous locale, not just the first", async () => {
       adb.setCommandResponseSequence(GET_APP, [
-        appLocales("en-US,de-DE"),
-        appLocales("fr"),
-        appLocales("en-US,de-DE"),
+        uncapturedMultiLocale("en-US,de-DE"),
+        captured("3-zz-ZZ"),
+        uncapturedMultiLocale("en-US,de-DE"),
       ]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
@@ -113,53 +138,50 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
     });
 
     it("names the left-over state when the restore command fails", async () => {
-      adb.setCommandResponseSequence(GET_APP, [appLocales("en-US"), appLocales("und")]);
-      adb.setCommandError(`--locales 'en-US'`, new Error("device offline"));
+      adb.setCommandResponseSequence(GET_APP, [captured("6-he-IL"), captured("3-zz-ZZ")]);
+      adb.setCommandError(`--locales 'he-IL'`, new Error("device offline"));
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toBe(
-        `Read-back verification failed for ${APP}: expected "fr-FR" but got "und". ` +
-          `Restoring the app's previous locale ("en-US") failed (device offline); the app's locale is left as "und".`,
+        `Read-back verification failed for ${APP}: expected "fr-FR" but got "zz-ZZ". ` +
+          `Restoring the app's previous locale ("he-IL") failed (device offline); the app's locale is left as "zz-ZZ".`,
       );
     });
 
     it("names the left-over state when the restore does not read back", async () => {
-      adb.setCommandResponseSequence(GET_APP, [appLocales("en-US"), appLocales("und")]);
+      adb.setCommandResponseSequence(GET_APP, [captured("6-he-IL"), captured("3-zz-ZZ")]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toContain(
-        `Restoring the app's previous locale ("en-US") failed; the app's locale is left as "und".`,
+        `Restoring the app's previous locale ("he-IL") failed; the app's locale is left as "zz-ZZ".`,
       );
       expect(setCommands()).toHaveLength(2);
     });
 
     it("does not restore when the device still reports the previous locale", async () => {
-      adb.setCommandResponseSequence(GET_APP, [appLocales("en-US")]);
+      adb.setCommandResponseSequence(GET_APP, [captured("6-he-IL")]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toBe(
-        `Read-back verification failed for ${APP}: expected "fr-FR" but got "en-US"`,
+        `Read-back verification failed for ${APP}: expected "fr-FR" but got "he-IL"`,
       );
       expect(setCommands()).toEqual([`shell ${SET_APP} --locales 'fr-FR'`]);
     });
 
     it("does not guess a restore when the previous locale could not be read", async () => {
-      adb.setCommandResponseSequence(GET_APP, [
-        result("Unknown package com.example.app for userId 0\n"),
-        appLocales("und"),
-      ]);
+      adb.setCommandResponseSequence(GET_APP, [emptyReply(), captured("3-zz-ZZ")]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toContain(
-        `previous locale could not be read before the change, so it was not restored; the app's locale is now "und".`,
+        `previous locale could not be read before the change, so it was not restored; the app's locale is now "zz-ZZ".`,
       );
       expect(setCommands()).toEqual([`shell ${SET_APP} --locales 'fr-FR'`]);
     });
@@ -167,17 +189,14 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
 
   describe("unreadable read-back is indeterminate, not a failed apply", () => {
     it("does not restore the app locale when the read-back cannot be parsed", async () => {
-      adb.setCommandResponseSequence(GET_APP, [
-        appLocales("en-US"),
-        result("Unknown package com.example.app for userId 0\n"),
-      ]);
+      adb.setCommandResponseSequence(GET_APP, [captured("6-he-IL"), emptyReply()]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
 
       expect(outcome.success).toBe(false);
       expect(outcome.error).toContain("Locale change outcome is indeterminate");
       expect(outcome.error).toContain(`"fr-FR" was sent`);
-      expect(outcome.error).toContain('previously "en-US"');
+      expect(outcome.error).toContain('previously "he-IL"');
       expect(outcome.error).toContain("Do not retry automatically");
       expect(setCommands()).toEqual([`shell ${SET_APP} --locales 'fr-FR'`]);
       expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
@@ -185,9 +204,9 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
 
     it("treats a readable but different app locale as not applied and restores", async () => {
       adb.setCommandResponseSequence(GET_APP, [
-        appLocales("en-US"),
-        appLocales("de"),
-        appLocales("en-US"),
+        captured("6-he-IL"),
+        captured("3-zz-ZZ"),
+        captured("6-he-IL"),
       ]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
@@ -254,6 +273,27 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
   });
 
   describe("canonical read-back comparison", () => {
+    // [requested, capture taken after sending it]: the device's own read-back.
+    const capturedCases: ReadonlyArray<readonly [string, LocaleCaptureName]> = [
+      ["he", "1-he"],
+      ["iw", "2-iw"],
+      ["zz-ZZ", "3-zz-ZZ"],
+      ["he-IL", "6-he-IL"],
+      ["fr-FR", "7-fr-FR"],
+      ["in-ID", "11-in-ID"],
+    ];
+    for (const [requested, capture] of capturedCases) {
+      it(`app path: request ${requested} read back as the device printed it (${capture}) is applied`, async () => {
+        adb.setCommandResponseSequence(GET_APP, [captured("0-initial"), captured(capture)]);
+
+        const outcome = await adapter.setLocale(requested, { broadcast: false, appId: APP });
+
+        expect(outcome.success).toBe(true);
+        expect(setCommands()).toEqual([`shell ${SET_APP} --locales '${requested}'`]);
+      });
+    }
+
+    // Preserve the pre-existing comparison cases; these replies were not captured.
     const cases: ReadonlyArray<readonly [requested: string, reported: string]> = [
       ["iw", "he"],
       ["in-ID", "id-ID"],
@@ -264,14 +304,29 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
     ];
     for (const [requested, reported] of cases) {
       it(`app path: request ${requested} read back as ${reported} is applied`, async () => {
-        adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales(reported)]);
+        adb.setCommandResponseSequence(GET_APP, [
+          uncapturedMultiLocale(""),
+          uncapturedMultiLocale(reported),
+        ]);
 
         const outcome = await adapter.setLocale(requested, { broadcast: false, appId: APP });
 
         expect(outcome.success).toBe(true);
         expect(setCommands()).toEqual([`shell ${SET_APP} --locales '${requested}'`]);
       });
+    }
 
+    // Legacy device-wide path: `persist.sys.locale` was empty in every capture, so these pairs are
+    // not device-observed and keep their original strings.
+    const legacyCases: ReadonlyArray<readonly [requested: string, reported: string]> = [
+      ["iw", "he"],
+      ["in-ID", "id-ID"],
+      ["ji", "yi"],
+      ["he", "he-IL"],
+      ["zh-TW", "zh-Hant-TW"],
+      ["fr-FR", "fr-fr"],
+    ];
+    for (const [requested, reported] of legacyCases) {
       it(`legacy path: request ${requested} read back as ${reported} is applied`, async () => {
         adb.setAndroidApiLevel(32);
         adb.setCommandResponse("getprop ro.build.version.sdk", result("32"));
@@ -290,9 +345,9 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
 
     it("still restores when the device reports a different region than requested", async () => {
       adb.setCommandResponseSequence(GET_APP, [
-        appLocales(""),
-        appLocales("fr-CA"),
-        appLocales(""),
+        uncapturedMultiLocale(""),
+        uncapturedMultiLocale("fr-CA"),
+        uncapturedMultiLocale(""),
       ]);
 
       const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
@@ -300,11 +355,112 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
       expect(outcome.success).toBe(false);
       expect(outcome.error).toContain("Restored the app's previous locale (unset)");
     });
+
+    it("restores when the device keeps only the language of a request that named a region", async () => {
+      // The device printed [he] after a he request; a he-IL request that reads back [he]
+      // dropped the region and is not applied.
+      adb.setCommandResponseSequence(GET_APP, [
+        captured("0-initial"),
+        captured("1-he"),
+        captured("0-initial"),
+      ]);
+
+      const outcome = await adapter.setLocale("he-IL", { broadcast: false, appId: APP });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toContain("Restored the app's previous locale (unset)");
+    });
+  });
+
+  describe("an app that is not installed (#10211)", () => {
+    const missing = readMissingPackageCapture();
+    const MISSING = LOCALE_CAPTURE_MISSING_APP_ID;
+    const GET_MISSING = `cmd locale get-app-locales '${MISSING}' --user 0`;
+    const SET_MISSING = `cmd locale set-app-locales '${MISSING}' --user 0`;
+    const notInstalled = (): ExecResult => result(missing.getAppLocalesUser0.output);
+    const NOT_INSTALLED_ERROR = `Cannot change the locale: app ${MISSING} is not installed for user 0; nothing was changed. Check the appId, or install the app first.`;
+
+    it("the captured replies are the Unknown package line, and the command exits 0", () => {
+      for (const reply of [
+        missing.getAppLocales,
+        missing.setAppLocales,
+        missing.getAppLocalesUser0,
+      ]) {
+        expect(reply.output).toBe(`Unknown package ${MISSING} for userId 0\n`);
+        expect(reply.exitCode).toBe(0);
+      }
+    });
+
+    it("fails definitively on the read before the write and sends nothing", async () => {
+      adb.setCommandResponse(GET_MISSING, notInstalled());
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: MISSING });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBe(NOT_INSTALLED_ERROR);
+      expect(outcome.error).not.toContain("indeterminate");
+      expect(outcome.error).not.toContain("may have changed");
+      expect(outcome.previousLanguageTag).toBeNull();
+      expect(setCommands()).toEqual([]);
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+      // One read, no retry, no restore probe.
+      expect(adb.getExecutedCommands().filter((c) => c.includes("get-app-locales"))).toEqual([
+        `shell ${GET_MISSING}`,
+      ]);
+    });
+
+    it("fails definitively when only the set reports the unknown package", async () => {
+      // The pre-write read could not be understood, then the set itself names the package unknown.
+      adb.setCommandResponse(GET_MISSING, emptyReply());
+      adb.setCommandResponse(SET_MISSING, result(missing.setAppLocales.output));
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: MISSING });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBe(NOT_INSTALLED_ERROR);
+      expect(setCommands()).toEqual([`shell ${SET_MISSING} --locales 'fr-FR'`]);
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    it("fails definitively, without a restore, when only the read-back reports the unknown package", async () => {
+      adb.setCommandResponseSequence(GET_MISSING, [captured("6-he-IL"), notInstalled()]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: MISSING });
+
+      expect(outcome.success).toBe(false);
+      expect(outcome.error).toBe(NOT_INSTALLED_ERROR);
+      expect(setCommands()).toEqual([`shell ${SET_MISSING} --locales 'fr-FR'`]);
+    });
+
+    it("classifies the unknown package from stderr as well as stdout", async () => {
+      adb.setCommandResponse(GET_MISSING, {
+        ...result(""),
+        stderr: missing.getAppLocalesUser0.output,
+      });
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: MISSING });
+
+      expect(outcome.error).toBe(NOT_INSTALLED_ERROR);
+      expect(setCommands()).toEqual([]);
+    });
+
+    it("keeps an installed app's success path at exactly one read, one write and one read-back", async () => {
+      adb.setCommandResponseSequence(GET_APP, [captured("0-initial"), captured("7-fr-FR")]);
+
+      const outcome = await adapter.setLocale("fr-FR", { broadcast: false, appId: APP });
+
+      expect(outcome.success).toBe(true);
+      expect(adb.getExecutedCommands().filter((c) => /locale/.test(c))).toEqual([
+        `shell ${GET_APP}`,
+        `shell ${SET_APP} --locales 'fr-FR'`,
+        `shell ${GET_APP}`,
+      ]);
+    });
   });
 
   describe("success path", () => {
     it("sends exactly the same commands as before", async () => {
-      adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales("fr-FR")]);
+      adb.setCommandResponseSequence(GET_APP, [captured("0-initial"), captured("7-fr-FR")]);
 
       const outcome = await adapter.setLocale("fr-FR", { appId: APP });
 
@@ -324,10 +480,16 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
       ]);
     });
 
+    // The two sweeps below assert that validation lets a tag through and what is sent. Their
+    // read-back echoes the tag because no capture holds a device reply for these tags (not
+    // device-observed); the replies are hand-built.
+    const echoed = (tag: string): ExecResult =>
+      result(`Locales for ${APP} for user 0 are [${tag}]\n`);
+
     it("sends real languages the runtime's ICU has no display name for and lets the device judge", async () => {
       for (const tag of ["apc-SY", "lld-IT", "mhn-IT", "skr-PK"]) {
         adb.clearHistory();
-        adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales(tag)]);
+        adb.setCommandResponseSequence(GET_APP, [captured("0-initial"), echoed(tag)]);
 
         const outcome = await adapter.setLocale(tag, { broadcast: false, appId: APP });
 
@@ -339,7 +501,7 @@ describe("Android changeLocalization rejected locale (#10155)", () => {
     it("accepts the tag shapes the issue calls out", async () => {
       for (const tag of ["fr-FR", "sr-Latn-RS", "zh-Hant-TW", "en_US", "fil"]) {
         adb.clearHistory();
-        adb.setCommandResponseSequence(GET_APP, [appLocales(""), appLocales(tag)]);
+        adb.setCommandResponseSequence(GET_APP, [captured("0-initial"), echoed(tag)]);
 
         const outcome = await adapter.setLocale(tag, { broadcast: false, appId: APP });
 

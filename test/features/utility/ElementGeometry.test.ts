@@ -2,7 +2,8 @@ import { describe, expect, test, it } from "bun:test";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import type { Element } from "../../../src/models/Element";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
+  visibleTapBounds,
   screenSizeForOffscreenCheck,
 } from "../../../src/features/utility/ElementGeometry";
 
@@ -143,33 +144,54 @@ describe("ElementGeometry getVisibleBounds", () => {
   });
 });
 
-describe("element center screen geometry", () => {
+describe("element visible-part screen geometry", () => {
   const screen = { width: 100, height: 80 };
 
-  test("treats a center exactly on each screen edge as on-screen", () => {
-    expect(isElementCenterOffScreen({ left: 90, right: 100, top: 0, bottom: 10 }, screen)).toBe(
-      false,
-    );
-    expect(isElementCenterOffScreen({ left: 0, right: 10, top: 70, bottom: 80 }, screen)).toBe(
-      false,
-    );
+  test.each([
+    ["right", { left: 99, right: 109, top: 20, bottom: 30 }],
+    ["bottom", { left: 20, right: 30, top: 79, bottom: 89 }],
+    ["left", { left: -9, right: 1, top: 20, bottom: 30 }],
+    ["top", { left: 20, right: 30, top: -9, bottom: 1 }],
+    ["corner", { left: 99, right: 109, top: 79, bottom: 89 }],
+  ] as const)(
+    "accepts a visible sliver at the %s edge despite an off-screen center",
+    (_name, bounds) => {
+      expect(hasVisibleScreenPart(bounds, screen)).toBe(true);
+      expect(visibleTapBounds(bounds, screen)).not.toBeNull();
+    },
+  );
+
+  test.each([
+    { left: 100, right: 110, top: 20, bottom: 30 },
+    { left: 20, right: 30, top: 80, bottom: 90 },
+    { left: -10, right: 0, top: 20, bottom: 30 },
+    { left: 20, right: 30, top: -10, bottom: 0 },
+    { left: 20, right: 20, top: 20, bottom: 30 },
+    { left: 30, right: 20, top: 20, bottom: 30 },
+  ])("rejects bounds with no on-screen area: %j", (bounds) => {
+    expect(hasVisibleScreenPart(bounds, screen)).toBe(false);
+    expect(visibleTapBounds(bounds, screen)).toBeNull();
   });
 
-  test("keeps missing bounds and zero dimensions on-screen", () => {
-    expect(isElementCenterOffScreen(undefined, screen)).toBe(false);
-    expect(
-      isElementCenterOffScreen(
-        { left: -2, right: -1, top: 0, bottom: 1 },
-        { width: 0, height: 80 },
-      ),
-    ).toBe(false);
+  test("keeps missing bounds and unknown dimensions accepted", () => {
+    expect(hasVisibleScreenPart(undefined, screen)).toBe(true);
+    const bounds = { left: -2, right: -1, top: 0, bottom: 1 };
+    expect(hasVisibleScreenPart(bounds, { width: 0, height: 80 })).toBe(true);
+    expect(hasVisibleScreenPart(bounds, undefined)).toBe(true);
+    expect(visibleTapBounds(bounds, undefined)).toEqual(bounds);
   });
 
-  test("detects a negative center and a center past the far edge", () => {
-    expect(isElementCenterOffScreen({ left: -4, right: -2, top: 1, bottom: 3 }, screen)).toBe(true);
-    expect(isElementCenterOffScreen({ left: 100, right: 102, top: 1, bottom: 3 }, screen)).toBe(
-      true,
-    );
+  test("constrains the actionable target to the matched overlap before clipping", () => {
+    const target = { left: -10, right: 110, top: 10, bottom: 40 };
+    const matched = { left: 99, right: 109, top: 20, bottom: 30 };
+    expect(visibleTapBounds(target, screen, matched)).toEqual({
+      left: 99,
+      right: 100,
+      top: 20,
+      bottom: 30,
+    });
+    expect(visibleTapBounds(target, undefined, matched)).toEqual(matched);
+    expect(visibleTapBounds(target, screen, { ...matched, left: 110, right: 120 })).toBeNull();
   });
 
   test("prefers complete hierarchy dimensions and falls back when either is missing", () => {

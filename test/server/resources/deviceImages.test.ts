@@ -393,6 +393,12 @@ describe("Device Image Resources with Fakes", () => {
             reason: "iOS 18.0 runtime is not installed",
           },
           {
+            id: "ios.simulator.cameraPoster",
+            state: "unsupported",
+            source: "platform",
+            reason: "Camera posters are only supported at Android emulator boot.",
+          },
+          {
             id: "ios.simulator.nfc",
             state: "unsupported",
             source: "platform",

@@ -2,14 +2,12 @@ import { expect, test, spyOn } from "bun:test";
 import type { ElementBounds, ViewHierarchyResult } from "../../../src/models";
 import {
   screenSizeForOffscreenCheck,
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../../../src/features/utility/ElementGeometry";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
 import { logger } from "../../../src/utils/logger";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
@@ -18,7 +16,6 @@ import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { findWaitForElement } from "../../../src/server/observeTools";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { FakeElementFinder } from "../../fakes/FakeElementFinder";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { issue8379Hierarchy } from "../../fixtures/issue8379Hierarchy";
@@ -202,7 +199,7 @@ function withTarget(capture: ViewHierarchyResult, center: [number, number]) {
   return { hierarchy: capture, target: new DefaultElementParser().parseNodeBounds(target)! };
 }
 
-test.each(rows)("five consumers: $name", (row) => {
+test.each(rows)("four consumers: $name", (row) => {
   const { hierarchy, target } = withTarget(row.capture(), row.center);
   const device = selectionFixtureDevice(row.platform, row.panels ?? 1);
   const options = {
@@ -210,7 +207,6 @@ test.each(rows)("five consumers: $name", (row) => {
     platform: row.platform,
     iosMultiPanel: row.platform === "ios" && (row.panels ?? 1) > 1,
   };
-  const selector = new DefaultElementSelector(new DefaultElementFinder(), options);
   const tapAny = new TapAnyElement(device, new FakeAdbExecutor(), {
     timer: new FakeTimer(),
     elementSelector: new FakeElementSelector(target),
@@ -224,7 +220,6 @@ test.each(rows)("five consumers: $name", (row) => {
   };
   const resolver = new ResolverElementSelector(undefined, undefined, options);
   expect({
-    selector: selector.selectByText(hierarchy, "D43 target").element !== null,
     tapAny: tapAny["findClickableElement"]({ action: "tap" }, hierarchy, options).element !== null,
     tapOn: !tapOn["isElementTapTargetOffScreen"](
       selection,
@@ -242,7 +237,6 @@ test.each(rows)("five consumers: $name", (row) => {
       ) !== null,
     resolver: resolver.selectByText(hierarchy, "D43 target").element !== null,
   }).toEqual({
-    selector: row.accepted,
     tapAny: row.accepted,
     tapOn: row.accepted,
     wait: row.accepted,
@@ -284,9 +278,9 @@ test("fallback logs once per resolution, primary paths do not log", () => {
     });
     expect(debug).not.toHaveBeenCalled();
     expect(screenSizeForOffscreenCheck(missing)).toBeUndefined();
-    expect(
-      isElementCenterOffScreen({ left: 700, right: 800, top: 24, bottom: 82 }, undefined),
-    ).toBe(false);
+    expect(!hasVisibleScreenPart({ left: 700, right: 800, top: 24, bottom: 82 }, undefined)).toBe(
+      false,
+    );
   } finally {
     debug.mockRestore();
   }
@@ -355,17 +349,4 @@ test("tapOn replacement cannot relabel a carried default-display size as a new d
   // ObserveResult requires a size; use ObserveScreen's existing unknown-size
   // representation rather than retaining another display's dimensions.
   expect(observation.screenSize).toEqual({ width: 0, height: 0 });
-});
-
-test("tapAny passes raw single-panel iOS context to an injected legacy selector", () => {
-  // owner decision D43 (#6523): one screen-size source. Legacy raw selection
-  // formerly rejected this right-hand target; now accepts via per-call options.
-  const { hierarchy, target } = withTarget(issue8379Hierarchy(), [750, 53]);
-  const finder = new FakeElementFinder();
-  finder.nextClickableElementsInContainer = [target];
-  const tap = new TapAnyElement(selectionFixtureDevice("ios", 1), new FakeAdbExecutor(), {
-    timer: new FakeTimer(),
-    elementSelector: new DefaultElementSelector(finder),
-  });
-  expect(tap["findClickableElement"]({ action: "tap" }, hierarchy).element).toBe(target);
 });

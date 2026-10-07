@@ -78,7 +78,7 @@ describe("RealEmulatorConsoleClient", () => {
     await client.gsmCall("+15551234567");
 
     expect(transport.calls.length).toBe(1);
-    expect(transport.calls[0].host).toBe("localhost");
+    expect(transport.calls[0].host).toBe("127.0.0.1");
     expect(transport.calls[0].port).toBe(5554);
     expect(transport.calls[0].authToken).toBe("test-token");
     expect(transport.calls[0].commands).toEqual(["gsm call +15551234567"]);

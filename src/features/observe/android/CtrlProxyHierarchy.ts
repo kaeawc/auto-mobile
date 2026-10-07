@@ -1,3 +1,5 @@
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
+import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import { linkWindowRoots } from "../linkWindowRoots";
 /**
@@ -57,6 +59,18 @@ const DEFAULT_FRESH_WAIT_MS = 1000;
  * the caller via the `HierarchySyncDiagnostics` out-parameter. Module-private: it is an internal
  * control-flow signal, not part of any public contract.
  */
+/**
+ * The bound service's runtime `isAccessibilityTool` (#6233), carried only when the runner reported a
+ * boolean; the runner serializes an unknown value as JSON null, which stays omitted (unknown).
+ */
+function accessibilityToolSpread(hierarchy: AccessibilityHierarchy): {
+  accessibilityTool?: boolean;
+} {
+  return typeof hierarchy.accessibilityTool === "boolean"
+    ? { accessibilityTool: hierarchy.accessibilityTool }
+    : {};
+}
+
 class HierarchyRunnerError extends Error {
   constructor(readonly runnerError: string) {
     super(runnerError);
@@ -434,6 +448,8 @@ export class CtrlProxyHierarchy {
         fresh: false,
       };
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Failed to get hierarchy after ${duration}ms: ${error}`);
       return {
@@ -632,7 +648,7 @@ export class CtrlProxyHierarchy {
       const result = await this.context.adb.executeCommand(
         "shell dumpsys activity processes",
         timeoutMs,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -795,6 +811,8 @@ export class CtrlProxyHierarchy {
       return convertedHierarchy;
     } catch (error) {
       perf.end();
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] getAccessibilityHierarchy failed after ${duration}ms: ${error}`);
       return null;
@@ -1028,6 +1046,8 @@ export class CtrlProxyHierarchy {
         }
       }
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       if (diagnostics) {
         diagnostics.failureReason = errorMessage(signal?.aborted ? signal.reason : error);
       }
@@ -1176,6 +1196,8 @@ export class CtrlProxyHierarchy {
       logger.warn(`[CTRL_PROXY] Sync hierarchy read failed: ${diagnostics.failureReason}`);
       return null;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       // A correlated runner type:"error" frame (issue #3032 / #3061) rejects the wait with a typed
       // HierarchyRunnerError. Surface its text on the caller-provided diagnostics so the caller can
@@ -1249,6 +1271,7 @@ export class CtrlProxyHierarchy {
           // The API level decides whether a rootless incomplete capture can be Android 14+
           // data-sensitive withholding (issue #6151), so keep it on this branch too.
           sdkInt: accessibilityHierarchy.sdkInt,
+          ...accessibilityToolSpread(accessibilityHierarchy),
           // Carry the #4548 scale metadata through the rootless / UIAutomator-fallback branch too,
           // so #4549 can consume it regardless of which route produced the hierarchy. Same
           // all-or-nothing validator as the main return and client retention.
@@ -1301,6 +1324,7 @@ export class CtrlProxyHierarchy {
         sdkInt: accessibilityHierarchy.sdkInt,
         deviceModel: accessibilityHierarchy.deviceModel,
         isEmulator: accessibilityHierarchy.isEmulator,
+        ...accessibilityToolSpread(accessibilityHierarchy),
         truncationReasons: accessibilityHierarchy.truncationReasons,
         // Additive scale metadata (#4548), retained for #4549. All-or-nothing via the shared
         // validator (same rule as client retention): the three keys are spread only when the whole
@@ -1357,6 +1381,8 @@ export class CtrlProxyHierarchy {
         logger.info(`[CTRL_PROXY] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
       }
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       // Safe to swallow for #6932: the hierarchy read still proceeds without tracking this poll.
       logger.debug(`[CTRL_PROXY] Recomposition tracking config skipped: ${error}`);
     }

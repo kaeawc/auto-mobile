@@ -19,6 +19,24 @@ final class SdkHierarchyClientTests: XCTestCase {
         SdkHierarchyClient(baseURL: baseURL, transport: main, healthTransport: health ?? main)
     }
 
+    func testMagicTapPostPreservesHandledFalseAndFailures() async {
+        for handled in [true, false] {
+            let transport = StubHTTPTransport(status: 200, body: Data("{\"handled\":\(handled)}".utf8))
+            let result = await makeClient(transport).performMagicTap()
+            XCTAssertEqual(result, handled)
+            XCTAssertEqual(transport.recordedRequests.first?.httpMethod, "POST")
+            XCTAssertEqual(transport.recordedRequests.first?.url?.path, "/accessibility/magic-tap")
+        }
+        for outcome in [
+            StubOutcome.transportError,
+            .respond(status: 404, body: Data()),
+            .respond(status: 200, body: Data("{}".utf8)),
+        ] {
+            let result = await makeClient(StubHTTPTransport([outcome])).performMagicTap()
+            XCTAssertNil(result)
+        }
+    }
+
     private static let hierarchyJSON = Data(
         #"{"timestamp":7,"bundleId":"com.example.app","screenScale":3.0,"screenWidth":393,"screenHeight":852}"#.utf8
     )
@@ -104,6 +122,49 @@ final class SdkHierarchyClientTests: XCTestCase {
     func testSetMockRulesFalseOnNon200() async {
         let ok = await makeClient(StubHTTPTransport(status: 500)).setMockRules([])
         XCTAssertFalse(ok)
+    }
+
+    // MARK: - Network mock rule report (#10101)
+
+    func testPushMockRulesReturnsTheRulesTheSdkRejected() async {
+        let body = Data(#"{"status":"ok","rejected":[{"mockId":"m1","reason":"invalid regex: x"}]}"#.utf8)
+        let stub = StubHTTPTransport(status: 200, body: body)
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(
+            outcome,
+            SdkMockRulesOutcome(ok: true, rejectedMockIds: ["m1"], rejectedReasons: ["m1": "invalid regex: x"])
+        )
+        XCTAssertEqual(stub.recordedRequests.first?.url?.path, "/network/mock")
+        XCTAssertEqual(stub.recordedRequests.first?.httpMethod, "POST")
+    }
+
+    func testPushMockRulesTreatsAnEmptyRejectedListAsAReportThatNothingWasRejected() async {
+        let stub = StubHTTPTransport(status: 200, body: Data(#"{"status":"ok","rejected":[]}"#.utf8))
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: true, rejectedMockIds: [], rejectedReasons: [:]))
+    }
+
+    func testPushMockRulesHasNoReportFromAnSdkThatPredatesIt() async {
+        let stub = StubHTTPTransport(status: 200, body: Data(#"{"status":"ok"}"#.utf8))
+
+        let outcome = await makeClient(stub).pushMockRules([])
+
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: true))
+        XCTAssertNil(outcome.rejectedMockIds)
+    }
+
+    func testPushMockRulesFailsOnNon200() async {
+        let outcome = await makeClient(StubHTTPTransport(status: 500)).pushMockRules([])
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: false))
+    }
+
+    func testPushMockRulesFailsOnTransportError() async {
+        let outcome = await makeClient(StubHTTPTransport([.transportError])).pushMockRules([])
+        XCTAssertEqual(outcome, SdkMockRulesOutcome(ok: false))
     }
 
     func testSetNetworkErrorSimulationHitsPath() async {

@@ -9,7 +9,7 @@ import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./android
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
-import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
+import { runBoomerangReturnLeg, throwIfAbortedKeepingForwardNote } from "./boomerangReturnLeg";
 import { isDeviceLostError } from "../../../models/DeviceLostError";
 import {
   withStaleDisplay,
@@ -38,9 +38,9 @@ import {
   ViewHierarchyResult,
 } from "../../../models";
 import { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
-import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
+import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
-import { DefaultElementFinder } from "../../utility/ElementFinder";
+import { DefaultScrollableElementsQuery } from "../../utility/InteractiveElementQueries";
 import { DefaultElementGeometry } from "../../utility/ElementGeometry";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { ExecuteGesture, type FencedGestureOptions } from "../ExecuteGesture";
@@ -88,6 +88,7 @@ import {
 import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
+import { SwipeOutcomeIndeterminateError } from "./SwipeOutcomeIndeterminateError";
 import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible, type ScrollUntilVisibleStrategy } from "./ScrollUntilVisible";
 import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
@@ -118,6 +119,17 @@ const DISPLAY_SWIPE_OPTIONS = [
 type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+/**
+ * The error that stops a lock-screen swipe after a failed iOS gesture. It keeps the unconfirmed-
+ * outcome marker as a type: the legacy catch rebuilds a plain failure result from the message.
+ */
+function iosGestureFailureError(result: Pick<SwipeResult, "error" | "outcomeIndeterminate">) {
+  const message = result.error ?? "iOS lock-screen swipe failed";
+  return result.outcomeIndeterminate === true
+    ? new SwipeOutcomeIndeterminateError(message)
+    : new ActionableError(message);
+}
+
 /** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
 function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
   return result.success || result.outcomeIndeterminate === true;
@@ -183,7 +195,7 @@ export class SwipeOn extends BaseVisualChange {
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture!: GestureExecutor;
-  private finder!: ElementFinder;
+  private finder!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
   private accessibilityService!: AndroidCtrlProxyClient;
   private accessibilityDetector!: AccessibilityDetector;
@@ -220,7 +232,7 @@ export class SwipeOn extends BaseVisualChange {
     }
 
     // Initialize extracted modules
-    this.overlayDetector = new OverlayDetector(this.finder, this.geometry, parser);
+    this.overlayDetector = new OverlayDetector(this.geometry, parser);
     this.autoTargetSelector = dependencies.autoTargetSelector ?? new AutoTargetSelector();
     this.talkBackExecutor = new TalkBackSwipeExecutor(
       device,
@@ -271,7 +283,7 @@ export class SwipeOn extends BaseVisualChange {
   ) {
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     const parser = dependencies.parser ?? new DefaultElementParser();
-    this.finder = dependencies.finder ?? new DefaultElementFinder();
+    this.finder = dependencies.finder ?? new DefaultScrollableElementsQuery();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
@@ -1065,7 +1077,7 @@ export class SwipeOn extends BaseVisualChange {
         if (error instanceof SwipeSearchCancelledError) {
           throw error;
         }
-        throwIfAborted(signal);
+        throwIfAbortedKeepingForwardNote(signal, error);
         if (error instanceof Error && error.name === "AbortError") {
           throw error;
         }
@@ -1249,7 +1261,7 @@ export class SwipeOn extends BaseVisualChange {
       if (error instanceof SwipeSearchCancelledError) {
         throw error;
       }
-      throwIfAborted(signal);
+      throwIfAbortedKeepingForwardNote(signal, error);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
       if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
@@ -1286,7 +1298,14 @@ export class SwipeOn extends BaseVisualChange {
         );
       }
 
-      return SwipeOn.legacyFailureResult(this, normalizedOptions, perf, errorMsg, debugContext);
+      return SwipeOn.legacyFailureResult({
+        action: this,
+        normalizedOptions,
+        perf,
+        errorMsg,
+        debugContext,
+        cause: error,
+      });
     }
   }
 
@@ -1323,17 +1342,27 @@ export class SwipeOn extends BaseVisualChange {
     return null;
   }
 
-  private static legacyFailureResult(
-    action: SwipeOn,
-    normalizedOptions: SwipeOnResolvedOptions,
-    perf: PerformanceTracker,
-    errorMsg: string,
-    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>,
-  ): SwipeOnResult {
+  private static legacyFailureResult({
+    action,
+    normalizedOptions,
+    perf,
+    errorMsg,
+    debugContext,
+    cause,
+  }: {
+    action: SwipeOn;
+    normalizedOptions: SwipeOnResolvedOptions;
+    perf: PerformanceTracker;
+    errorMsg: string;
+    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>;
+    /** The caught error; a typed unconfirmed-outcome marker survives onto the result. */
+    cause: unknown;
+  }): SwipeOnResult {
     const timing = action.device.platform === "ios" ? perf.getTimings() : null;
     return {
       success: false,
       error: errorMsg,
+      ...(cause instanceof SwipeOutcomeIndeterminateError ? { outcomeIndeterminate: true } : {}),
       ...(timing ? { timing } : {}),
       targetType: normalizedOptions.container ? "element" : "screen",
       x1: 0,
@@ -1427,10 +1456,14 @@ export class SwipeOn extends BaseVisualChange {
     diagnostics: { boomerang?: BoomerangConfig },
   ): Promise<SwipeOnResult> {
     let previous: ObserveResult | null = null;
-    const result: SwipeOnResult = await this.observedInteraction(async (observation, fence) => {
-      previous = observation;
-      return block(observation, fence);
-    }, options);
+    const result: SwipeOnResult = await this.observedInteraction(
+      async (observation, fence) => {
+        previous = observation;
+        return block(observation, fence);
+      },
+      // A boomerang whose return leg failed has moved the content: observe it on iOS too.
+      { ...options, observePartialApplication: true },
+    );
     if (this.device.platform !== "android") {
       return result;
     }
@@ -1544,7 +1577,7 @@ export class SwipeOn extends BaseVisualChange {
         ) {
           // A timed-out request may still be executing in the Swift runner.
           // Skip observedInteraction's post-swipe reads on this recovery path.
-          throw new ActionableError(swipeResult.error ?? "iOS lock-screen swipe failed");
+          throw iosGestureFailureError(swipeResult);
         }
         throwIfAborted(signal);
         // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.

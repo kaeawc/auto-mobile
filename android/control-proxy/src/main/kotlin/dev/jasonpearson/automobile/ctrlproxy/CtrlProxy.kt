@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
@@ -112,6 +113,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -276,6 +278,43 @@ internal fun nodeActionFailure(action: String, availableActionIds: Collection<In
     return "Accessibility action is unavailable: $action"
   }
   return null
+}
+
+/** What to do with a node action request given the node's current state (issue #10148). */
+internal sealed interface NodeActionDecision {
+  /** Send [actionId] to the node. */
+  data class Perform(val actionId: Int) : NodeActionDecision
+
+  /** The node is already in the requested state; no action is sent and the request succeeds. */
+  data object AlreadySatisfied : NodeActionDecision
+
+  /** The request cannot be honored; [message] is the failure reported to the host. */
+  data class Refused(val message: String) : NodeActionDecision
+}
+
+/**
+ * Accessibility focus is state, not a one-shot action: a node holding accessibility focus
+ * advertises only ACTION_CLEAR_ACCESSIBILITY_FOCUS and an unfocused node only
+ * ACTION_ACCESSIBILITY_FOCUS. So `focus` on an already-focused node and `clear_focus` on an
+ * unfocused node are satisfied as-is, rather than refused as "unavailable". Every other case keeps
+ * the availability check.
+ */
+internal fun decideNodeAction(
+  action: String,
+  isAccessibilityFocused: Boolean,
+  availableActionIds: Collection<Int>?,
+): NodeActionDecision {
+  if (action == "focus" && isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  if (action == "clear_focus" && !isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  nodeActionFailure(action, availableActionIds)?.let {
+    return NodeActionDecision.Refused(it)
+  }
+  val actionId = nodeActionId(action)
+  return if (actionId == null) {
+    NodeActionDecision.Refused("Unsupported accessibility action: $action")
+  } else {
+    NodeActionDecision.Perform(actionId)
+  }
 }
 
 internal fun nodeActionId(action: String): Int? =
@@ -1082,8 +1121,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
   private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
     Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
-
-  @Volatile private var isRecording: Boolean = false
 
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
@@ -2756,6 +2793,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     text: String,
     priorImeId: String?,
     delivery: ImeTextDelivery,
+  ) = requestCommitText(requestId, text, priorImeId, delivery, null)
+
+  override fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+    timeoutMs: Long?,
   ) {
     rememberedInsert = null
     val start = System.currentTimeMillis()
@@ -2802,7 +2847,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
         return@launchRequestScope
       }
-      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery) { result ->
+      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery, timeoutMs) {
+        result ->
         finish(result)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(
@@ -2940,6 +2986,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
 
+  override fun requestClickFocusedInput(requestId: String?) {
+    rememberedInsert = null
+    val startTime = System.currentTimeMillis()
+    // Like performNodeAction, stay on the inbound command queue until settling and replying.
+    try {
+      val outcome =
+        clickFocusedInput(
+          findFocusedInput = {
+            findNodeInDisplayWindows { root -> findFocusedEditableNode(root) }
+          },
+          click = { node ->
+            nodeActionFailure("click", node.actionList?.map { it.id }) == null &&
+              node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+          },
+          recycle = { node -> node.recycle() },
+          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+        )
+      kotlinx.coroutines.runBlocking {
+        broadcastActionResult(
+          requestId,
+          "click",
+          outcome.success,
+          outcome.error,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (e: Exception) {
+      if (e is CancellationException) throw e
+      Log.e(TAG, "Focused input click failed", e)
+      kotlinx.coroutines.runBlocking {
+        broadcastActionResult(
+          requestId,
+          "click",
+          false,
+          e.message ?: "Focused input click failed",
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    }
+  }
+
   override fun requestAction(
     requestId: String?,
     action: String,
@@ -3020,14 +3107,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       occlusionEnabled = occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = broadcastNetworkMockRules(rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    broadcastNetworkMockRules(requestId, rulesJson)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
 
@@ -3133,12 +3222,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     handleClearPreferences(requestId, packageName, fileName)
 
   override fun startRecording() {
-    isRecording = true
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording started")
   }
 
   override fun stopRecording() {
-    isRecording = false
+    // Accepted for wire compatibility; currently has no effect on the device.
     Log.d(TAG, "Recording stopped")
   }
 
@@ -3235,16 +3324,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private fun broadcastNetworkMockRules(rulesJson: String) {
+  private fun broadcastNetworkMockRules(requestId: String?, rulesJson: String) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_MOCK_RULES).apply {
           putExtra(NetworkMockRuleStore.EXTRA_RULES_JSON, rulesJson)
         }
-      sendBroadcast(intent)
-      Log.d(TAG, "Broadcast network mock rules")
+      if (requestId == null) {
+        sendBroadcast(intent)
+        Log.d(TAG, "Broadcast network mock rules")
+        return
+      }
+      // The app's rule store answers an ordered broadcast through its result data (which rules the
+      // device's regex engine rejected); forward that to the host as the correlated reply. An SDK
+      // that predates the reply leaves the data null and the host reports "not confirmed".
+      sendOrderedBroadcast(
+        intent,
+        null,
+        object : BroadcastReceiver() {
+          override fun onReceive(context: Context?, intent: Intent?) {
+            replyNetworkMockRules(networkMockRulesResult(requestId, resultData))
+          }
+        },
+        null,
+        Activity.RESULT_OK,
+        null,
+        null,
+      )
+      Log.d(TAG, "Broadcast network mock rules (awaiting report)")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        replyNetworkMockRules(
+          networkMockRulesFailure(requestId, "Failed to broadcast network mock rules: ${e.message}")
+        )
+      }
+    }
+  }
+
+  private fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      serviceScope.launch { webSocketServer.broadcast(result) }
     }
   }
 
@@ -3253,10 +3373,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_ERROR_SIMULATION).apply {
+          remainingMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_REMAINING_MS, it) }
           putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, enabled)
           errorType?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, it) }
           limit?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_LIMIT, it) }
@@ -3303,6 +3425,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
     if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    // A window appearing in an app is the cheapest sign its process (re)started; an open storage
+    // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
+    // for every package without a subscription, so this is free on the hot path.
+    if (
+      eventPackage != null &&
+        event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        ::storageSubscriptionManager.isInitialized
+    ) {
+      storageSubscriptionManager.onPackageActivity(eventPackage)
+    }
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
@@ -3834,6 +3966,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Check if running on an emulator. */
+  /**
+   * Runtime `AccessibilityServiceInfo.isAccessibilityTool` of this bound service (#6233). The
+   * getter exists from API 31; below that (or without serviceInfo) the value is unknown (null).
+   */
+  private fun getAccessibilityTool(): Boolean? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) serviceInfo?.isAccessibilityTool else null
+
   private fun getIsEmulator(): Boolean {
     return (Build.FINGERPRINT.startsWith("generic") ||
       Build.FINGERPRINT.startsWith("unknown") ||
@@ -4026,6 +4165,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
@@ -4299,6 +4439,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
@@ -5135,7 +5276,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     rememberedInsert = null
     val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performSetText: text='${text.take(20)}...' resourceId=$resourceId")
+    // Never log the text: the target may be a password field.
+    Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
     perfProvider.serial("performSetText")
 
     try {
@@ -5512,8 +5654,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           setTextArguments,
         )
       textMutated = setTextSucceeded
-      // Refresh after SET_TEXT to capture the field's actual reported selection, even when the
-      // replacement text has not reached the accessibility cache yet.
+      // Compose may acknowledge SET_TEXT before its semantics reflect the replacement. Wait
+      // briefly on the same node before reading selection support and placing the caret (#10414).
       val mutationNodeKey = nodeKey()
       fun readMutationSnapshot(): InsertTextSnapshot? {
         // After writing, never re-find and move a caret in a different focused field.
@@ -5532,7 +5674,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           targetNode.textSelectionEnd,
         )
       }
-      val afterSetText = if (setTextSucceeded) readMutationSnapshot() else null
+      val afterSetText =
+        if (setTextSucceeded) {
+          awaitInsertTextMutation(
+            plan,
+            readSnapshot = ::readMutationSnapshot,
+            nowMs = { android.os.SystemClock.uptimeMillis() },
+            pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },
+          )
+        } else null
       AutoMobileLog.d(
         TAG,
         "insertText selectionAfterSetTextStart=${afterSetText?.selectionStart ?: -1} selectionAfterSetTextEnd=${afterSetText?.selectionEnd ?: -1}",
@@ -5542,7 +5692,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           afterSetText != null &&
           android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in
             targetNode.actionList.map { it.id }
-      val selectionSucceeded =
+      val selectionReturned =
         if (selectionAttempted) {
           val selectionArguments =
             android.os.Bundle().apply {
@@ -5560,18 +5710,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
             selectionArguments,
           )
-        } else {
-          // If selection is unavailable, trust only an observed caret at the planned offset.
-          setTextSucceeded &&
-            afterSetText != null &&
-            afterSetText.selectionStart == plan.caret &&
-            afterSetText.selectionEnd == plan.caret
-        }
+        } else false
+      // A widget may reject SET_SELECTION when SET_TEXT already placed the caret correctly.
+      val observedSelection =
+        if (selectionAttempted && !selectionReturned) readMutationSnapshot() else afterSetText
+      val selectionSucceeded =
+        insertTextSelectionSucceeded(
+          setTextSucceeded,
+          selectionAttempted,
+          selectionReturned,
+          plan,
+          observedSelection,
+        )
       AutoMobileLog.d(
         TAG,
-        "insertText selectionAttempted=$selectionAttempted selectionReturned=${selectionAttempted && selectionSucceeded}",
+        "insertText selectionAttempted=$selectionAttempted selectionReturned=$selectionReturned",
       )
-      // Record immediately after failed placement; refresh is for the next insert's first plan.
+      // Record the reported selection after placement, including the rejected-action refresh.
       val afterSelection =
         if (afterSetText != null)
           InsertTextSnapshot(
@@ -5629,16 +5784,27 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  internal enum class ImeActionStep(val error: String? = null) {
+  internal enum class ImeActionStep(val error: String? = null, val approximated: Boolean? = null) {
     NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
-    NEXT,
-    PREVIOUS,
+    NEXT(approximated = true),
+    PREVIOUS(approximated = true),
+    EDITOR_NEXT,
+    EDITOR_PREVIOUS,
     IME_ENTER,
     KEYCODE_ENTER,
     UNSUPPORTED;
 
     companion object {
-      fun select(action: String, hasFocusedEditable: Boolean, sdkInt: Int): ImeActionStep {
+      fun select(
+        action: String,
+        hasFocusedEditable: Boolean,
+        sdkInt: Int,
+        hasImeConnection: Boolean = false,
+      ): ImeActionStep {
+        if (hasImeConnection) {
+          if (action == "next") return EDITOR_NEXT
+          if (action == "previous") return EDITOR_PREVIOUS
+        }
         if (!hasFocusedEditable) {
           return NO_FOCUSED_EDITABLE
         }
@@ -5656,8 +5822,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform IME action using AccessibilityService. This properly handles focus movement
-   * (next/previous) and keyboard actions (done/go/search/send).
+   * Dispatch navigation through the active IME when possible, otherwise approximate it with focus
+   * traversal. Other keyboard actions retain their AccessibilityService handling.
    */
   private fun performImeAction(requestId: String?, action: String) {
     rememberedInsert = null
@@ -5667,13 +5833,35 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     var root: android.view.accessibility.AccessibilityNodeInfo? = null
     var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
+    var approximated: Boolean? = null
     try {
       perfProvider.startOperation("findFocusedNode")
       root = rootInActiveWindow
       focusedNode = findFocusedEditableNode(root)
       perfProvider.endOperation("findFocusedNode")
 
-      val step = ImeActionStep.select(action, focusedNode != null, android.os.Build.VERSION.SDK_INT)
+      val navigationActionId =
+        when (action) {
+          "next" -> android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
+          "previous" -> android.view.inputmethod.EditorInfo.IME_ACTION_PREVIOUS
+          else -> null
+        }
+      val editorActionResult =
+        if (navigationActionId != null) {
+          kotlinx.coroutines.runBlocking {
+            CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
+          }
+        } else null
+      // Accessibility nodes expose no configured imeOptions. ACTION_IME_ENTER alone does not
+      // prove the editor is configured for NEXT, so an unavailable IME uses traversal.
+      val step =
+        ImeActionStep.select(
+          action,
+          focusedNode != null,
+          android.os.Build.VERSION.SDK_INT,
+          hasImeConnection = editorActionResult != null,
+        )
+      approximated = step.approximated
       val error = step.error
       if (error != null) {
         perfProvider.end()
@@ -5688,6 +5876,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       perfProvider.startOperation("executeAction")
       val success =
         when (step) {
+          ImeActionStep.EDITOR_NEXT,
+          ImeActionStep.EDITOR_PREVIOUS -> editorActionResult == true
           ImeActionStep.NEXT -> {
             // Find next focusable element and focus it
             val nextNode = findNextFocusableNode(root, focusedNode!!)
@@ -5773,6 +5963,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           if (success) null else "Action failed",
           totalTime,
+          approximated,
         )
       }
     } catch (e: Exception) {
@@ -5780,7 +5971,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing IME action", e)
       kotlinx.coroutines.runBlocking {
-        broadcastImeActionResult(requestId, action, false, e.message, errorTime - startTime)
+        broadcastImeActionResult(
+          requestId,
+          action,
+          false,
+          e.message,
+          errorTime - startTime,
+          approximated,
+        )
       }
     } finally {
       if (focusedNode !== root) {
@@ -6004,6 +6202,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
+  private fun refreshHierarchyAfterNodeAction() {
+    val freshHierarchy =
+      hierarchyDebouncer.extractAfterQuiescence(
+        quiescenceMs = HierarchyQuiescence.POLL_MS,
+        maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+        pollIntervalMs = 10L,
+      )
+    if (freshHierarchy != null) {
+      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
+    }
+  }
+
   private fun performNodeAction(
     requestId: String?,
     action: String,
@@ -6053,9 +6264,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("executeAction")
-      val actionId = nodeActionId(action)
-      val actionError = nodeActionFailure(action, targetNode.actionList?.map { it.id })
-      val success = actionId != null && actionError == null && targetNode.performAction(actionId)
+      val decision =
+        decideNodeAction(
+          action,
+          targetNode.isAccessibilityFocused,
+          targetNode.actionList?.map { it.id },
+        )
+      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
+      val actionError = (decision as? NodeActionDecision.Refused)?.message
+      val success =
+        alreadySatisfied ||
+          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -6065,15 +6284,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
       if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
-        }
+        refreshHierarchyAfterNodeAction()
       }
 
       val totalTime = System.currentTimeMillis() - startTime
@@ -6086,6 +6297,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           if (success) null else actionError ?: "performAction returned false",
           totalTime,
+          alreadySatisfied,
         )
       }
     } catch (e: Exception) {
@@ -7073,8 +7285,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     node: android.view.accessibility.AccessibilityNodeInfo,
     result: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
   ) {
-    // A node is a valid IME target if it's editable and focusable
-    if (node.isEditable && node.isFocusable) {
+    // Approximate traversal must only include editors the user can reach.
+    if (
+      isImeFocusCandidate(
+        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled)
+      )
+    ) {
       // Create a copy to add to our list (we'll recycle the originals as we traverse)
       result.add(android.view.accessibility.AccessibilityNodeInfo.obtain(node))
     }
@@ -7395,6 +7611,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    approximated: Boolean? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
@@ -7404,6 +7621,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resultBroadcaster.guard(requestId, "ime_action_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
         webSocketFrameJson("ime_action_result", requestId = requestId, perfTiming = perfTiming) {
+          if (approximated != null) put("approximated", approximated)
           put("action", action)
           put("success", success)
           put("totalTimeMs", totalTimeMs)
@@ -7449,6 +7667,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    alreadySatisfied: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping action result broadcast")
@@ -7463,6 +7682,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (alreadySatisfied) {
+            put("alreadySatisfied", true)
           }
         }
       }
@@ -8937,3 +9159,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 }
+
+internal data class ImeFocusCandidate(
+  val isEditable: Boolean,
+  val isFocusable: Boolean,
+  val isVisibleToUser: Boolean,
+  val isEnabled: Boolean,
+)
+
+internal fun isImeFocusCandidate(row: ImeFocusCandidate): Boolean =
+  row.isEditable && row.isFocusable && row.isVisibleToUser && row.isEnabled

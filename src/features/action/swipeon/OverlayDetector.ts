@@ -1,5 +1,4 @@
 import { Element, SwipeDirection, ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
-import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
@@ -13,7 +12,6 @@ export class OverlayDetector implements OverlayAnalyzer {
   private static readonly CANDIDATE_FRACTIONS = [0.5, 0.25, 0.75, 0.15, 0.85];
 
   constructor(
-    private readonly finder: ElementFinder,
     private readonly geometry: ElementGeometry,
     private readonly elementParser: ElementParser,
   ) {}

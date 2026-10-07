@@ -3,10 +3,14 @@ import {
   foldSearchableLabels,
   inheritsOwnerLabel,
 } from "../../utility/SearchableLabels";
-import { toSearchable } from "../../utility/SearchableNode";
+import { ElementResolver } from "../../utility/ElementResolver";
+import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
+import type { SearchableEntry } from "../../utility/SearchableNode";
+import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import { compareSelectionRank } from "../../utility/selectionRank";
-import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
+import { isFullyCoveredByApplicationWindow } from "../ApplicationWindowCover";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -19,10 +23,17 @@ import {
   ElementProvenance,
   getElementProvenance,
   getHierarchyNodeSource,
+  getSearchableEntries,
   getCapturedKeyboard,
   getUncollectedWrappers,
   isStrictAncestor,
 } from "./elementProvenance";
+import {
+  KEYCAP_ID_PATTERN,
+  MIN_FALLBACK_KEYCAPS,
+  isImeOwnedId,
+  resourceIdPackage,
+} from "../android/ImeKeycapIds";
 import {
   IOS_KEYBOARD_MIN_VISIBLE_HEIGHT,
   clipRectToScreen,
@@ -182,8 +193,10 @@ interface SkeletonAccumulator {
   affordances: Set<Affordance>;
   checked?: boolean;
   enabled?: false;
-  /** The Android IME covers every coordinate action on this app row. */
+  /** The Android IME or an application window covers every coordinate action on this app row. */
   occluded?: true;
+  /** First element merged into this row; resolves its owning window for cover checks. */
+  target?: Element;
   /**
    * Root/window ancestry, when the collector supplied it (issue #5881). Present
    * on real captures; absent on hand-built fixtures and non-provenance producers,
@@ -271,6 +284,7 @@ function accumulateByIdentity(
     if (acc.provenance === undefined) {
       acc.provenance = getElementProvenance(el);
     }
+    acc.target ??= el;
     for (const affordance of affordances) {
       acc.affordances.add(affordance);
     }
@@ -566,14 +580,16 @@ function isSelectableForReplay(
 export function assignDuplicateIndexes(
   entries: SkeletonAccumulator[],
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  nodes?: readonly SearchableEntry[],
 ): void {
   const byElementId = new Map<string, SkeletonAccumulator[]>();
   const byLabel = new Map<string, SkeletonAccumulator[]>();
-  for (const entry of entries) {
-    // Mirror tap selection's visible-bounds and affordance gate before indexing.
-    if (!isSelectableForReplay(entry, viewport)) {
-      continue;
-    }
+  // Emitted rows already represent their promoted children. Use the same
+  // selectable-set normalization as the resolver before grouping and ranking.
+  const candidates = selectableCandidates(entries, (entry) =>
+    isSelectableForReplay(entry, viewport) ? entry : null,
+  );
+  for (const entry of candidates) {
     if (entry.label !== undefined) {
       const label = normalizeQuotes(entry.label).trim().toLowerCase();
       const group = byLabel.get(label) ?? [];
@@ -590,25 +606,114 @@ export function assignDuplicateIndexes(
       byElementId.set(entry.elementId, [entry]);
     }
   }
-  for (const group of byElementId.values()) {
-    if (group.length < 2) {
+  const selectionViewport = serverConfig.isRawElementSearchEnabled() ? undefined : viewport;
+  // A single exact source cannot produce multiple selectable targets. Count
+  // potential exact matches once; uncertain/fallback selectors still resolve
+  // over the complete capture so hidden promoted matches keep their slots.
+  const exactCounts = exactSelectorMatchCounts(nodes ?? []);
+  for (const [elementId, group] of byElementId) {
+    if (canSkipSelectorGroup(group, exactCounts.byId.get(elementId), nodes !== undefined)) {
       continue;
     }
-    group.sort(bySelectorRank);
-    group.forEach((entry, position) => {
-      entry.index = position;
-    });
+    indexSelectorGroup(group, { elementId }, selectionViewport, nodes);
   }
-  for (const group of byLabel.values()) {
-    if (group.length < 2) {
+  for (const [text, group] of byLabel) {
+    if (
+      canSkipSelectorGroup(
+        group,
+        exactCounts.byText.get(text.replace(/\s+/g, " ")),
+        nodes !== undefined,
+        true,
+      )
+    ) {
       continue;
     }
-    group.sort(bySelectorRank);
-    group.forEach((entry, position) => {
-      if (entry.elementId === undefined) {
-        entry.index = position;
+    indexSelectorGroup(group, { text }, selectionViewport, nodes, true);
+  }
+}
+
+function canSkipSelectorGroup(
+  group: readonly SkeletonAccumulator[],
+  exactCount: number | undefined,
+  hasCapture: boolean,
+  labelOnly = false,
+): boolean {
+  if (labelOnly && group.every((entry) => entry.elementId !== undefined)) {
+    return true;
+  }
+  return group.length < 2 && (!hasCapture || exactCount === 1);
+}
+
+/** Conservative raw-match counts, before promotion, visibility and copy dedup. */
+function exactSelectorMatchCounts(nodes: readonly SearchableEntry[]) {
+  const byId = new Map<string, number>();
+  const byText = new Map<string, number>();
+  for (const node of nodes) {
+    if (isImeKeyEntry(node)) {
+      continue;
+    }
+    for (const id of new Set([node.nativeId, node.nodeKey])) {
+      if (id !== undefined) {
+        byId.set(id, (byId.get(id) ?? 0) + 1);
       }
+    }
+    const texts = new Set(
+      node.textFields.map((field) =>
+        normalizeQuotes(field).trim().replace(/\s+/g, " ").toLowerCase(),
+      ),
+    );
+    for (const text of texts) {
+      byText.set(text, (byText.get(text) ?? 0) + 1);
+    }
+  }
+  return { byId, byText };
+}
+
+/** Real captures use the resolver's complete selectable set, including promoted owners. */
+function indexSelectorGroup(
+  group: SkeletonAccumulator[],
+  selector: ResolverSelector,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  nodes: readonly SearchableEntry[] | undefined,
+  labelOnly = false,
+): void {
+  const candidates = nodes
+    ? new ElementResolver().resolve({ id: "skeleton", nodes }, selector, {
+        action: "tap",
+        viewport,
+        excludeImeKeys: true,
+      }).candidates
+    : undefined;
+  if ((candidates?.length ?? group.length) < 2) {
+    return;
+  }
+  group.sort(bySelectorRank);
+  const indexable = labelOnly ? group.filter((entry) => entry.elementId === undefined) : group;
+  for (const entry of indexable) {
+    if (!candidates) {
+      entry.index = group.indexOf(entry);
+      continue;
+    }
+    // Merged identical siblings cannot advertise a specific captured occurrence.
+    const sameRow = candidates.filter((candidate) => {
+      const b = candidate.bounds;
+      return (
+        b &&
+        entry.elementId === candidate.elementId &&
+        normalizeQuotes(entry.label ?? "")
+          .trim()
+          .toLowerCase() ===
+          normalizeQuotes(candidate.displayedLabel ?? "")
+            .trim()
+            .toLowerCase() &&
+        entry.bounds.every((edge, index) => edge === [b.left, b.top, b.right, b.bottom][index])
+      );
     });
+    if (sameRow.length === 1 || (sameRow.length > 1 && group.length > 1)) {
+      // Serialized merged/window copies can describe the same emitted row.
+      // Its first ranked occurrence is the topmost copy, just as resolution uses.
+      entry.index = candidates.indexOf(sameRow[0]);
+    }
   }
 }
 
@@ -698,53 +803,14 @@ function collapseSystemUiBlock(nonActionable: SkeletonAccumulator[]): SkeletonAc
  */
 const IME_ELEMENT_ID = "<ime>";
 
-/**
- * The `…:id/key_pos_*` resource-id family every AOSP/Gboard-derived IME gives
- * its keycaps. The suffix is NOT a `<row>_<col>` grid coordinate — the captured
- * Gboard fixtures under `test/fixtures/observe/diff/` carry `key_pos_shift`,
- * `key_pos_space`, `key_pos_del`, `key_pos_ime_action` and
- * `key_pos_header_access_points_menu` alongside positional ones — so the prefix
- * is all that can be matched, and corroboration has to come from
- * {@link MIN_FALLBACK_KEYCAPS} rather than from the suffix shape.
- *
- * This is the FALLBACK identification path (issue #6871): the authoritative one
- * is `ElementProvenance.keyboardPackage`, which the collector inherits from the
- * control proxy's `automobile:imePackage` window extra — but that extra only
- * exists on a re-cut control proxy, so on an older on-device build (and on the
- * `uiautomator dump` path) the ~40 keycaps still reached the skeleton. The
- * capture group is the IME's own package, which is also what distinguishes a
- * keycap from the framework chrome that shares the window
- * (`android:id/input_method_nav_back`).
- */
-const KEYCAP_ID_PATTERN = /^([A-Za-z0-9_.]+):id\/key_pos_/;
-
-/**
- * How many DISTINCT `key_pos_*` resource-ids one package must own before the
- * fallback path is willing to call it a keyboard (issue #6871).
- *
- * Without this fence a single app control that merely borrows the prefix
- * (`com.app:id/key_pos_preview`) was conclusive evidence on a screen with no
- * keyboard at all: its own row was folded away, `keyboard` announced
- * `{ visible: true, package: "com.app" }`, and a synthetic `<ime>` row appeared
- * for a keyboard that was never up. Nothing authoritative exists on that path to
- * override the false marker, so the corroboration has to come from the markers
- * themselves — a keyboard is a grid of keys and always presents many, while a
- * borrowed prefix is one node. Two is the smallest threshold that rejects the
- * lone decoy; the real captures carry eight or more.
- */
-const MIN_FALLBACK_KEYCAPS = 2;
-
 /** Every collected element, in the category order the projection consumes them. */
 function allElements(elements: ObserveElements): Element[] {
   return [...elements.clickable, ...elements.scrollable, ...elements.text];
 }
 
-/** The `package` half of a canonical `package:id/name` Android resource-id. */
-const RESOURCE_ID_PACKAGE_PATTERN = /^([A-Za-z0-9_.]+):id\//;
-
 /** The owning package of a `package:id/name` resource-id, when it has that shape. */
 function idPackage(el: Element): string | undefined {
-  return RESOURCE_ID_PACKAGE_PATTERN.exec(deriveId(el) ?? "")?.[1];
+  return resourceIdPackage(deriveId(el));
 }
 
 /**
@@ -1177,8 +1243,7 @@ function isImeKeycap(el: Element, ime: ImeWindow | undefined): boolean {
   if (!ime || !isImeMember(el, ime)) {
     return false;
   }
-  const owner = idPackage(el);
-  return owner === undefined || owner === ime.package;
+  return isImeOwnedId(deriveId(el), ime.package);
 }
 
 /**
@@ -1330,6 +1395,29 @@ function markAppRowsCoveredByIme(
 }
 
 /**
+ * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
+ * row's window covers it, using the same hit test as the tap path (issue #10481).
+ */
+function markAppRowsCoveredByApplicationWindow(
+  kept: SkeletonAccumulator[],
+  hierarchy: ViewHierarchyResult | undefined,
+): void {
+  if (!hierarchy?.windows?.length) {
+    return;
+  }
+  for (const acc of kept) {
+    if (acc.occluded || !acc.target || acc.affordances.size === 0) {
+      continue;
+    }
+    const [left, top, right, bottom] = acc.bounds;
+    if (isFullyCoveredByApplicationWindow(hierarchy, acc.target, { left, top, right, bottom })) {
+      acc.affordances.clear();
+      acc.occluded = true;
+    }
+  }
+}
+
+/**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
  * categories, apply the keep rule, split on affordance count, and collapse
@@ -1340,6 +1428,7 @@ function markAppRowsCoveredByIme(
 export function projectSkeleton(
   elements: ObserveElements,
   viewport?: Pick<ObserveResult["screenSize"], "width" | "height">,
+  androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
   const accumulators = accumulateByIdentity(elements, ime);
@@ -1357,6 +1446,7 @@ export function projectSkeleton(
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
+  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 
@@ -1367,11 +1457,9 @@ export function projectSkeleton(
     actionable.push(imeRow);
   }
 
-  // Disambiguate duplicate ids (issue #6221 item 2) against the FINAL emitted
-  // actionable set, not the pre-filter accumulators — a duplicate suppressed by
-  // the keep rule (e.g. folded/hoisted text) must not consume an index slot a
-  // client will never see.
-  assignDuplicateIndexes(actionable, viewport);
+  // Number emitted rows against the same complete captured candidate set used
+  // by positional resolution. Promoted sources and their owners share a slot.
+  assignDuplicateIndexes(actionable, viewport, getSearchableEntries(elements));
 
   return {
     // Report only observed IME identity; missing capture evidence does not mean hidden.

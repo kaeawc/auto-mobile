@@ -3,6 +3,7 @@ import type { BootedDevice } from "../../src/models";
 import { ResourceRegistry, type ResourceReadContext } from "../../src/server/resourceRegistry";
 import { registerSessionLogResources } from "../../src/server/sessionLogResources";
 import { SESSION_LOG_RESOURCE_TEMPLATE } from "../../src/server/sessionLogContract";
+import type { SessionLogCollectionResult } from "../../src/server/sessionLogContract";
 import type {
   SessionLogCollectRequest,
   SessionLogService,
@@ -14,6 +15,7 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 class RecordingSessionLogService implements SessionLogService {
   readonly collects: SessionLogCollectRequest[] = [];
   failure: Error | null = null;
+  androidLogcat: SessionLogCollectionResult["androidLogcat"];
 
   async collect(request: SessionLogCollectRequest) {
     this.collects.push(request);
@@ -31,6 +33,7 @@ class RecordingSessionLogService implements SessionLogService {
         container: "documents" as const,
         entries: [{ path: "app.log", status: "read" as const, text: "hi" }],
       },
+      ...(this.androidLogcat ? { androidLogcat: this.androidLogcat } : {}),
     };
   }
 
@@ -82,6 +85,16 @@ describe("session log resources (#7006)", () => {
 
   test("collects for the session's own device and returns JSON on the canonical URI", async () => {
     const { service } = harness();
+    service.androidLogcat = {
+      status: "ok",
+      lastSeconds: 30,
+      level: "default",
+      pid: 1234,
+      lineLimit: 1000,
+      byteCount: 8,
+      truncated: true,
+      text: "line one",
+    };
     const controller = new AbortController();
 
     const content = await read(`${baseUri}?${appLogPathsQuery}&lastSeconds=30`, {
@@ -97,6 +110,16 @@ describe("session log resources (#7006)", () => {
       sessionUuid,
       deviceId: "emulator-5554",
       files: { status: "ok", entries: [{ path: "app.log", status: "read" }] },
+      androidLogcat: {
+        status: "ok",
+        lastSeconds: 30,
+        level: "default",
+        pid: 1234,
+        lineLimit: 1000,
+        byteCount: 8,
+        truncated: true,
+        text: "line one",
+      },
     });
     expect(service.collects).toHaveLength(1);
     expect(service.collects[0]).toMatchObject({
@@ -104,6 +127,23 @@ describe("session log resources (#7006)", () => {
       device,
       signal: controller.signal,
       request: { appId: "com.example.app", files: { container: "documents", paths: ["app.log"] } },
+    });
+  });
+
+  test("returns Android logcat unavailability reasons in the resource JSON", async () => {
+    const { service } = harness();
+    service.androidLogcat = {
+      status: "unavailable",
+      reason: "Android logcat is not available: pidof is missing.",
+    };
+
+    const content = await read(`${baseUri}?lastSeconds=30`);
+
+    expect(JSON.parse(content.text!)).toMatchObject({
+      androidLogcat: {
+        status: "unavailable",
+        reason: "Android logcat is not available: pidof is missing.",
+      },
     });
   });
 
@@ -150,6 +190,21 @@ describe("session log resources (#7006)", () => {
       expect(body.code).toBe("INVALID_REQUEST");
       expect(body.error).toContain(message);
     }
+    expect(service.collects).toEqual([]);
+  });
+
+  test("reports a malformed percent-escape in appId as INVALID_REQUEST without touching the device (#10117)", async () => {
+    const { service } = harness();
+
+    const content = await read(
+      `automobile:device-session/${sessionUuid}/apps/com.example%zz/logs?${appLogPathsQuery}`,
+    );
+
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("INVALID_REQUEST");
+    expect(body.error).toBe(
+      "Malformed resource URI: a path segment is not valid percent-encoding.",
+    );
     expect(service.collects).toEqual([]);
   });
 

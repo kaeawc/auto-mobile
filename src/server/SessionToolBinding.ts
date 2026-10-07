@@ -1,3 +1,4 @@
+import { ActionableError } from "../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
@@ -51,9 +52,9 @@ export class SessionToolBinding {
       explicitSessionUuid !== this.initialSessionUuid &&
       explicitSessionUuid !== this.connectionToolSelectionProfileUuid(mcpSessionId)
     ) {
-      throw new Error(
+      throw new ActionableError(
         `MCP connection is bound to device session ${this.initialSessionUuid}; ` +
-          `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
+          `cannot route this call to ${explicitSessionUuid} until the binding is released. Use a separate MCP connection for ${explicitSessionUuid}.`,
       );
     }
     return explicitSessionUuid ?? boundSessionUuid;

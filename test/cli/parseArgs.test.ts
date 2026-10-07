@@ -3,6 +3,76 @@ import { parseArgs } from "../../src/cli/parseArgs";
 
 const logger = { warn: () => {} };
 
+describe("malformed invocations (#10132)", () => {
+  test("signals a daemon request without a subcommand", () => {
+    const parsed = parseArgs(["--daemon"], logger, {});
+    expect(parsed.daemonRequested).toBe(true);
+    expect(parsed.daemonCommand).toBeUndefined();
+  });
+
+  test("rejects inline CLI tool syntax with the accepted form", () => {
+    expect(parseArgs(["--cli=observe"], logger, {}).invalidInvocation).toContain("--cli <tool>");
+  });
+
+  test.each(["doctor", "status"])("rejects stray %s with a usage hint", (word) => {
+    expect(parseArgs([word], logger, {}).invalidInvocation).toContain(`--cli ${word}`);
+  });
+
+  test.each([
+    [],
+    ["--port", "8080", "--host", "127.0.0.1"],
+    ["--cli"],
+    ["--cli", "observe"],
+    ["--cli", "observe", "--text", "hello"],
+    ["--daemon", "status"],
+    ["--daemon", "bogus"],
+    ["--daemon", "session-info", "session-id"],
+    ["--enable-tool", "observe", "--enable-tool", "tapOn", "--disable-tool", "clipboard"],
+    ["--enable-tool=observe", "--disable-tool=clipboard"],
+  ])("preserves accepted argv %j", (...args) => {
+    const parsed = parseArgs(args, logger, {});
+    expect(parsed.invalidInvocation).toBeUndefined();
+    expect(parsed.daemonRequested).toBe(args.includes("--daemon"));
+    expect(parsed.cliMode).toBe(args.includes("--cli"));
+    expect(parsed.daemonCommand).toBe(
+      args.includes("--daemon") ? args[args.indexOf("--daemon") + 1] : undefined,
+    );
+  });
+
+  test.each([
+    ["--daemon-socket-path", "scratch/socket"],
+    ["--initial-session-uuid", "session-id"],
+    ["--liveness-owner-token", "owner-token"],
+    ["--a11y-level", "AA"],
+    ["--a11y-failure-mode", "warn"],
+    ["--a11y-min-severity", "critical"],
+    ["--plan-execution-lock-scope", "session"],
+    ["--runner-readiness-timeout-ms", "20000"],
+    ["--video-quality", "high"],
+    ["--video-quality-preset", "medium"],
+    ["--video-target-bitrate-kbps", "800"],
+    ["--video-max-throughput-mbps", "3.5"],
+    ["--video-fps", "20"],
+    ["--video-format", "mp4"],
+    ["--video-archive-size-mb", "50"],
+    ["--event-all-markers", "tap,swipe"],
+    ["--tool-outputs-dir", "scratch/tool-outputs"],
+    ["--tool-output-dir", "scratch/tool-outputs"],
+    ["--port", "invalid"],
+  ])("does not confuse %s values with commands", (flag, value) => {
+    expect(parseArgs([flag, value], logger, {}).invalidInvocation).toBeUndefined();
+    expect(parseArgs([flag, value, "doctor"], logger, {}).invalidInvocation).toContain(
+      "--cli doctor",
+    );
+  });
+
+  test("keeps boolean output-reduction flags from consuming stray words", () => {
+    expect(parseArgs(["--actions-no-observe", "doctor"], logger, {}).invalidInvocation).toContain(
+      "--cli doctor",
+    );
+  });
+});
+
 describe("parseArgs (#4277)", () => {
   test("video environment defaults are applied before CLI overrides and warnings", () => {
     const values = {
@@ -174,6 +244,17 @@ describe("parseArgs (#4277)", () => {
     expect(parsed.initialSessionUuid).toBe("device-session-a");
   });
 
+  test("parses a harness-supplied stable liveness owner token for proxy mode", () => {
+    const parsed = parseArgs(
+      ["--initial-session-uuid", "device-session-a", "--liveness-owner-token", "harness-token"],
+      logger,
+    );
+
+    expect(parsed.initialSessionUuid).toBe("device-session-a");
+    expect(parsed.livenessOwnerToken).toBe("harness-token");
+    expect(parseArgs([], logger).livenessOwnerToken).toBeUndefined();
+  });
+
   test("uses the runner readiness environment default and lets CLI override it", () => {
     const fromEnvironment = parseArgs([], logger, {
       AUTOMOBILE_RUNNER_READINESS_TIMEOUT_MS: "20000",
@@ -243,6 +324,11 @@ describe("parseArgs (#4277)", () => {
         args: ["--initial-session-uuid", "--debug"],
         expected: { initialSessionUuid: undefined, debug: true },
       },
+      {
+        name: "--liveness-owner-token with no value preserves the following --debug",
+        args: ["--liveness-owner-token", "--debug"],
+        expected: { livenessOwnerToken: undefined, debug: true },
+      },
     ])("$name", ({ args, expected }) => {
       const parsed = parseArgs(args, logger);
 
@@ -269,6 +355,12 @@ describe("parseArgs (#4277)", () => {
         args: ["--initial-session-uuid", "device-session-a"],
         key: "initialSessionUuid",
         value: "device-session-a",
+      },
+      {
+        name: "--liveness-owner-token with a valid value",
+        args: ["--liveness-owner-token", "harness-token"],
+        key: "livenessOwnerToken",
+        value: "harness-token",
       },
     ])("$name still parses correctly", ({ args, key, value }) => {
       const parsed = parseArgs(args, logger);

@@ -217,8 +217,8 @@ public final class AutoMobilePlanExecutor: Sendable {
         }
         PerfTimer.log("planContent loaded, length=\(planContent.count) chars")
 
-        let substituted = PerfTimer.measure("substituteParameters") {
-            substituteParameters(in: planContent, parameters: configuration.parameters)
+        let substituted = try PerfTimer.measure("substituteParameters") {
+            try PlanParameterSubstitutor.substitute(in: planContent, parameters: configuration.parameters)
         }
         let planMetadata = try PerfTimer.measure("parsePlanMetadata") {
             try PlanMetadataParser.parse(from: substituted)
@@ -473,26 +473,11 @@ public final class AutoMobilePlanExecutor: Sendable {
         return args
     }
 
-    private func substituteParameters(in content: String, parameters: [String: String]) -> String {
-        guard !parameters.isEmpty else {
-            return content
-        }
-        var substituted = content
-        // Deterministic (sorted) order so the single ordered pass produces a reproducible result — the
-        // redaction path re-runs this same function to derive exactly what landed (issue #6029), and a
-        // hash-ordered pass would make that mapping (and the daemon payload) non-reproducible. Kept in
-        // sync with Android's sorted substitution.
-        for (key, value) in parameters.sorted(by: { $0.key < $1.key }) {
-            substituted = substituted.replacingOccurrences(of: "${\(key)}", with: value)
-        }
-        return substituted
-    }
-
     /// The concrete secret strings to scrub, derived entirely from THIS executor's substitution so
     /// they always equal what landed in the recovery context (issue #6029). Secret keys come from the
     /// caller config plus the RAW plan's `secretParameters:` (parsed placeholder-tolerantly); any
     /// `${...}` inside a key name is resolved with the same substitution; and for each key both its raw
-    /// parameter value and its actual substituted value (`substituteParameters` applied to the bare
+    /// parameter value and its actual substituted value (`PlanParameterSubstitutor.substituteText` applied to the bare
     /// `${key}`, matching the ordered single pass exactly) are collected.
     private func resolveSecretValues(rawPlan: String) -> [String] {
         let declaredKeys = configuration.secretParameterKeys
@@ -501,14 +486,14 @@ public final class AutoMobilePlanExecutor: Sendable {
             return []
         }
         let params = configuration.parameters
-        let resolvedKeys = Set(declaredKeys.map { substituteParameters(in: $0, parameters: params) })
+        let resolvedKeys = Set(declaredKeys.map { PlanParameterSubstitutor.substituteText(in: $0, parameters: params) })
 
         // Raw parameter values via the lenient/fail-safe matcher (so an exotically-encoded key name
         // cannot leak), plus each key's actual substituted value from this executor's ordered pass.
         var values = SecretRedaction.secretParameterValues(declaredKeys: resolvedKeys, parameters: params)
         for key in resolvedKeys {
             let placeholder = "${\(key)}"
-            let landed = substituteParameters(in: placeholder, parameters: params)
+            let landed = PlanParameterSubstitutor.substituteText(in: placeholder, parameters: params)
             if landed != placeholder, !landed.isEmpty {
                 values.append(landed)
             }

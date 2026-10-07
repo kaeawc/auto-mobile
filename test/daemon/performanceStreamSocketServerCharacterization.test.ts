@@ -34,7 +34,9 @@ class TestableServer extends PerformanceStreamSocketServer {
 
 function setup() {
   const repository = new FakeRepository();
-  const server = new TestableServer("/fake/performance.sock", new FakeTimer(), repository);
+  const server = new TestableServer("/fake/performance.sock", new FakeTimer(), repository, {
+    authenticator: { authorize() {} },
+  });
   return { repository, server };
 }
 

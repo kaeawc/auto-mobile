@@ -48,15 +48,17 @@ describe("BEGIN IMMEDIATE with the read-then-write paths of the other db branche
     };
   }
 
-  test("the full migration chain orders the two 2026_10_05 migrations deterministically", async () => {
+  test("the full migration chain orders the 2026_10_05 migrations deterministically", async () => {
     const names = (
       await sql<{ name: string }>`SELECT name FROM kysely_migration ORDER BY name`.execute(db)
     ).rows.map((row) => row.name);
     const deviceLocks = names.indexOf("2026_10_05_000_device_locks_device_identity");
     const storage = names.indexOf("2026_10_05_001_storage_events_key_lookup_insertion_order");
+    const edgeCoverage = names.indexOf("2026_10_05_002_test_edge_coverage_edge_id_index");
     expect(deviceLocks).toBeGreaterThan(-1);
     expect(storage).toBe(deviceLocks + 1);
-    expect(storage).toBe(names.length - 1);
+    expect(edgeCoverage).toBe(storage + 1);
+    expect(edgeCoverage).toBe(names.length - 1);
 
     const column = await sql<{ name: string }>`
       SELECT name FROM pragma_table_info('device_locks') WHERE name = 'device_identity'

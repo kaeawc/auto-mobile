@@ -13,6 +13,7 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
 import { Database, NewMemoryAuditResult } from "../../db/types";
 import { selectTopContributors } from "../../utils/topContributors";
+import { redactTypedTextArguments } from "../../utils/redactTypedTextArguments";
 
 /**
  * Represents a single memory threshold violation
@@ -374,7 +375,7 @@ export class MemoryAudit {
         session_id: sessionId,
         package_name: packageName,
         tool_name: toolName,
-        tool_args: JSON.stringify(toolArgs),
+        tool_args: JSON.stringify(redactTypedTextArguments(toolName, toolArgs)),
         timestamp: new Date().toISOString(),
         passed: passed ? 1 : 0,
         pre_java_heap_mb: metrics.preSnapshot.javaHeapMb,

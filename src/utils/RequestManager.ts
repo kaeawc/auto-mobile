@@ -41,6 +41,8 @@ type ResponseErrorFactory<T> = (error: string, totalTimeMs: number) => T;
 export class RequestManager {
   private pending: Map<string, PendingRequest<unknown>> = new Map();
   private readonly timer: Timer;
+  /** When a request was last registered or settled (#10497 lease idleness). */
+  private lastActivityAt: number | undefined;
 
   constructor(
     timer: Timer = defaultTimer,
@@ -89,6 +91,7 @@ export class RequestManager {
         const request = this.pending.get(id);
         if (request) {
           this.pending.delete(id);
+          this.touch();
           logger.warn(
             `[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
           );
@@ -98,6 +101,7 @@ export class RequestManager {
       }, timeoutMs);
 
       // Store pending request
+      this.touch();
       this.pending.set(id, {
         id,
         type,
@@ -141,6 +145,7 @@ export class RequestManager {
 
     // Remove from pending
     this.pending.delete(id);
+    this.touch();
 
     // Resolve the promise
     const duration = this.timer.now() - request.createdAt;
@@ -170,6 +175,7 @@ export class RequestManager {
 
     this.timer.clearTimeout(request.timeoutId);
     this.pending.delete(id);
+    this.touch();
 
     try {
       const result = request.responseErrorFactory
@@ -211,6 +217,7 @@ export class RequestManager {
 
     // Remove from pending
     this.pending.delete(id);
+    this.touch();
 
     // Reject the promise
     logger.debug(
@@ -234,6 +241,15 @@ export class RequestManager {
    */
   getPendingCount(): number {
     return this.pending.size;
+  }
+
+  /** When a request was last registered or settled; undefined before the first one. */
+  getLastActivityAt(): number | undefined {
+    return this.lastActivityAt;
+  }
+
+  private touch(): void {
+    this.lastActivityAt = this.timer.now();
   }
 
   /**

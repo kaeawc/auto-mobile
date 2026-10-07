@@ -61,6 +61,15 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   override fun run(notifier: RunNotifier) {
     // Skip the entire class if no devices are available
     if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
+      val checker = AutoMobileSharedUtils.deviceChecker
+      if (checker.checkFailed()) {
+        // A failed adb probe is an infrastructure problem, not "no devices": fail, never skip.
+        val detail = checker.getLastError() ?: "unknown adb failure"
+        notifier.fireTestFailure(
+          Failure(description, IllegalStateException("Android device check failed: $detail"))
+        )
+        return
+      }
       println("No Android devices found - skipping entire test class: ${klass.simpleName}")
 
       // Mark all tests in the class as ignored
@@ -168,6 +177,10 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     println(message)
   }
 
+  /** History is keyed by fully qualified class name; pre-#10091 rows used the simple name. */
+  private fun timingFor(method: FrameworkMethod): TestTimingEntry? =
+    TestTimingCache.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
+
   private fun orderChildrenByTiming(
     children: List<FrameworkMethod>,
     strategy: TimingOrderingStrategy,
@@ -176,12 +189,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       return children
     }
 
-    val className = klass.simpleName
     val candidates = children.mapIndexed { index, method ->
       TimingCandidate(
         method = method,
         index = index,
-        durationMs = TestTimingCache.getTiming(className, method.name)?.averageDurationMs,
+        durationMs = timingFor(method)?.averageDurationMs,
       )
     }
 

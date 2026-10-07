@@ -28,7 +28,8 @@ export interface DevicectlCommandInvoker {
 }
 
 export type DevicectlCommandResult =
-  | { kind: "ok" }
+  /** `output` is this invocation's raw `--json-output` text; it is never memoized. */
+  | { kind: "ok"; output?: string }
   | { kind: "unsupported"; capabilityFeatureId?: string }
   | { kind: "failed"; message: string };
 
@@ -46,7 +47,8 @@ export interface DevicectlVersionSource {
 }
 
 export type CoreDeviceCapabilityResult =
-  | { kind: "supported" }
+  /** `output` lets the caller read this check's own JSON instead of running the command twice. */
+  | { kind: "supported"; output?: string }
   | { kind: "unsupported"; reason: string }
   | { kind: "unavailable"; reason: string }
   | { kind: "notBooted"; error: ActionableError }
@@ -231,7 +233,9 @@ export class CoreDeviceCapabilityProbe implements CoreDeviceProbeDiagnostics {
     }
     if (result.kind === "ok") {
       this.rememberCommand(key, { scope, command, status: "supported" });
-      return { kind: "supported" };
+      return result.output === undefined
+        ? { kind: "supported" }
+        : { kind: "supported", output: result.output };
     }
     return result;
   }

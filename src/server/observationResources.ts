@@ -7,6 +7,7 @@ import {
 } from "./resourceRegistry";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { logger } from "../utils/logger";
+import { safeDecodeSegment } from "./resourceUriSegments";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { ScreenshotJobTracker } from "../utils/ScreenshotJobTracker";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
@@ -277,16 +278,6 @@ function observationScreenshotMalformedUriError(uri: string): ResourceContent {
   };
 }
 
-function safeDecodeSegment(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch (error) {
-    // A malformed client URI is expected input validation, so preserve the typed envelope.
-    logger.debug(`[ObservationResources] Malformed URI segment '${value}': ${error}`);
-    return null;
-  }
-}
-
 function matchesObservationId(deviceId: string, observationId: string): boolean {
   const cachedResult = RealObserveScreen.getRecentCachedResultForDevice(deviceId);
   return cachedResult?.observationId === observationId;
@@ -434,7 +425,7 @@ function resourceErrorText(content: ResourceContent): string {
 
 /**
  * Reads the bytes behind `automobile:observation/{deviceId}/{observationId}/screenshot` for host
- * consumers such as the overlay tool. It runs the same handler as the resource read, so the
+ * consumers such as the prototype tool. It runs the same handler as the resource read, so the
  * observation must still be the device's current one, a pending capture is awaited, and the file
  * is read through the same retention lease. That resource is readable by any client without
  * session ownership, so this exposes nothing a client could not already read.

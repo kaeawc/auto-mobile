@@ -1,6 +1,7 @@
 import {
   DEFAULT_WAIT_FOR_TIMEOUT_MS,
   DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
+  MAX_WAIT_FOR_TIMEOUT_MS,
 } from "../features/observe/waitForTimeout";
 import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
@@ -19,6 +20,7 @@ import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
+import { stripInternalToolParams } from "./internalToolParams";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
@@ -87,18 +89,26 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import {
+  hierarchyLayerSchema,
   nestedElementContainerSchema,
   resolverSelectionStrategySchema,
 } from "./elementSelectorSchemas";
+import {
+  scopeHierarchyForSelector,
+  scopeHierarchyToLayer,
+  scopeObserveResultToLayer,
+} from "../features/observe/hierarchyLayer";
+import type { HierarchyLayer } from "../models/HierarchyLayer";
 import { observeToolResultSchema } from "./toolOutputSchemas";
 import {
   ElementResolver,
   isMissingContainerError,
   type MatchMode,
+  type ContainerFailure,
 } from "../features/utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../features/utility/SearchableNode";
 import {
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../features/utility/ElementGeometry";
@@ -205,8 +215,20 @@ const waitForCommonShape = {
   absent: absentPredicateSchema
     .optional()
     .describe("Wait until an element matching these fields is absent"),
-  timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-  timeoutMs: z.number().optional().describe("Alias for timeout"),
+  timeout: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Wait timeout ms (default: 5000)"),
+  timeoutMs: z
+    .number()
+    .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+      message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+    })
+    .optional()
+    .describe("Alias for timeout"),
   container: waitForContainerField,
   selectionStrategy: resolverSelectionStrategySchema.optional(),
 };
@@ -353,8 +375,20 @@ const waitForConditionDslSchema = z
       .number()
       .optional()
       .describe("Consecutive stable reads for countStable/stable (default 2)"),
-    timeout: z.number().optional().describe("Wait timeout ms (default 5000; stable default 2500)"),
-    timeoutMs: z.number().optional().describe("Alias for timeout"),
+    timeout: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Wait timeout ms (default 5000; stable default 2500)"),
+    timeoutMs: z
+      .number()
+      .max(MAX_WAIT_FOR_TIMEOUT_MS, {
+        message: `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+      })
+      .optional()
+      .describe("Alias for timeout"),
     container: waitForContainerField,
     selectionStrategy: resolverSelectionStrategySchema.optional(),
     textAny: z.never().optional(),
@@ -491,8 +525,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: { $ref: "#waitForContainer" },
     selectionStrategy: WAIT_SELECTION_ADVERTISED_SCHEMA,
-    timeout: { type: "number" },
-    timeoutMs: { type: "number" },
+    timeout: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
+    timeoutMs: { type: "number", maximum: MAX_WAIT_FOR_TIMEOUT_MS },
   },
   // Enforce the same shape the runtime does: either the `for` DSL, or at least one
   // legacy predicate with textAny mutually exclusive from the element predicates /
@@ -534,15 +568,47 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
 // (not env). Every dimension is always honored when requested — the focus /
 // region / overview scoping is on by default and applies only when a call sets
 // the matching `scope` field.
+const legacyObserveFocusObjectSchema = z.object({
+  resourceId: z.string().optional().describe("Anchor by exact resource-id"),
+  text: z.string().optional().describe("Anchor by substring text match"),
+});
+const routedLegacyObserveFocusSchema = withJsonSchemaOverride(
+  legacyObserveFocusObjectSchema
+    .extend({ elementId: z.never().optional(), container: z.never().optional() })
+    .refine((value) => !("elementId" in value || "container" in value)),
+  (schema) => {
+    const properties = schema.properties as Record<string, unknown>;
+    delete properties.elementId;
+    delete properties.container;
+    schema.not = { anyOf: [{ required: ["elementId"] }, { required: ["container"] }] };
+    schema.additionalProperties = true;
+  },
+);
 const observeScopeFocusSchema = z
-  .union([
-    z.boolean(),
-    z.object({
-      resourceId: z.string().optional().describe("Anchor by exact resource-id"),
-      text: z.string().optional().describe("Anchor by substring text match"),
-    }),
-  ])
-  .describe("Scope to a subtree: true = foreground app; {resourceId|text} = anchor.");
+  .preprocess(
+    (value, ctx) => {
+      const cleanValue = stripInternalToolParams(value);
+      const nested =
+        cleanValue !== null &&
+        typeof cleanValue === "object" &&
+        ("elementId" in cleanValue || "container" in cleanValue);
+      const parsed = (
+        nested
+          ? nestedElementContainerSchema
+          : z.union([z.boolean(), legacyObserveFocusObjectSchema])
+      ).safeParse(cleanValue);
+      if (!parsed.success) {
+        // Abort before the permissive legacy arm can consume an invalid nested selector.
+        ctx.issues.push(...parsed.error.issues.map((issue) => ({ ...issue, continue: false })));
+        return z.NEVER;
+      }
+      return parsed.data;
+    },
+    z.union([z.boolean(), routedLegacyObserveFocusSchema, nestedElementContainerSchema]),
+  )
+  .describe(
+    "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
+  );
 
 const observeScopeRegionBoxSchema = z
   .object({
@@ -688,6 +754,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           ),
         skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling"),
         scope: observeScopeSchema.optional(),
+        layer: hierarchyLayerSchema.optional(),
       })
       .strict(),
   )
@@ -769,7 +836,11 @@ const WAIT_FOR_POLL_INTERVAL_MS = 100;
 export type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
 export type SettledOptions = z.infer<typeof settledSchema>;
 /** waitFor options carrying the (top-level) settled gate, as threaded to {@link waitForObservation}. */
-export type WaitForWithSettled = ObserveWaitForOptions & { settled?: SettledOptions };
+export type WaitForWithSettled = ObserveWaitForOptions & {
+  settled?: SettledOptions;
+  /** Scope element predicates to the app or the AutoMobile overlay (issue #9305). */
+  layer?: HierarchyLayer;
+};
 type ObserveArgs = z.infer<typeof observeSchema>;
 type WaitForConditionDsl = z.infer<typeof waitForConditionDslSchema>;
 type WaitForConditionKind = (typeof WAIT_FOR_CONDITION_KINDS)[number];
@@ -788,6 +859,45 @@ export interface WaitForObservationOutcome {
   waitMs: number;
   matchedElement?: Element;
   candidates?: Element[];
+  containerFailure?: ContainerFailure;
+}
+
+interface ObserveConditionEvaluation extends ConditionEvaluation {
+  containerFailure?: ContainerFailure;
+}
+
+function containerFailureMetadata(failed: boolean, failure: ContainerFailure | undefined) {
+  return failed && failure ? { containerFailure: failure } : {};
+}
+
+/** Record resolver diagnostics without changing predicate matching or other tools. */
+function trackContainerFailure(
+  finder: ConditionResolver,
+  container: ObserveWaitForOptions["container"],
+) {
+  // Resolution may propagate unique; diagnostics keep each client-sent level.
+  const levels: NonNullable<ObserveWaitForOptions["container"]>[] = [];
+  for (let level = container; level; level = level.container) {
+    levels.unshift(level);
+  }
+  let failure: ContainerFailure | undefined;
+  return {
+    finder: {
+      resolve: (...args: Parameters<ConditionResolver["resolve"]>) => {
+        const result = finder.resolve(...args);
+        const resolved = result.containerFailure;
+        failure ??= resolved && {
+          ...resolved,
+          selector: levels[resolved.level - 1] ?? resolved.selector,
+        };
+        return result;
+      },
+    } satisfies ConditionResolver,
+    failure: () => failure,
+    reset: () => {
+      failure = undefined;
+    },
+  };
 }
 
 /** True when the waitFor options are the #4398 declarative `for` DSL form. */
@@ -928,9 +1038,9 @@ const runWaitForConditionDsl = async (
     return applySettledGate(outcome, settle.settled);
   }
 
-  const finder = new ElementResolver();
-  const predicate = buildConditionPredicate(
-    finder,
+  const tracked = trackContainerFailure(new ElementResolver(), waitFor.container);
+  const evaluate = buildConditionPredicate(
+    tracked.finder,
     waitFor.for,
     {
       elementId: waitFor.elementId,
@@ -940,6 +1050,13 @@ const runWaitForConditionDsl = async (
     },
     { stableReads: waitFor.stableReads },
   );
+  const predicate: ConditionPredicate = (observation) => {
+    tracked.reset();
+    const evaluation = evaluate(
+      layerScopedObservation(observation, (waitFor as WaitForWithSettled).layer),
+    );
+    return { ...evaluation, ...containerFailureMetadata(!evaluation.matched, tracked.failure()) };
+  };
   const result = await new RealWaitForCondition(pollingScreen, timer).execute(predicate, {
     timeoutMs: waitFor.timeout ?? waitFor.timeoutMs,
     pollMs,
@@ -956,6 +1073,7 @@ const runWaitForConditionDsl = async (
     waitMs: result.waitMs,
     matchedElement: result.matchedElement,
     candidates: result.candidates,
+    ...containerFailureMetadata(result.timedOut, tracked.failure()),
     ...(result.diagnostic
       ? {
           timeoutReason: `Timed out after ${result.waitMs} ms waiting for ${waitFor.for}; ${result.diagnostic}`,
@@ -1001,9 +1119,7 @@ function isWaitSourceVisible(
   screenSize: ScreenSize | undefined,
   negative: boolean,
 ): boolean {
-  return (
-    element !== undefined && (negative || !isElementCenterOffScreen(element.bounds, screenSize))
-  );
+  return element !== undefined && (negative || hasVisibleScreenPart(element.bounds, screenSize));
 }
 
 interface WaitForElementOptions extends ScreenSizeForOffscreenCheckOptions {
@@ -1360,6 +1476,24 @@ const matchesDisplayStamp = (
   );
 };
 
+/**
+ * The observation an element predicate sees for `layer` (issue #9305). Only the
+ * hierarchy is scoped; the polled observation itself, and the cache behind it,
+ * keep every window.
+ */
+function layerScopedObservation(
+  observation: ObserveResult,
+  layer: HierarchyLayer | undefined,
+): ObserveResult {
+  if (layer === undefined || !observation.viewHierarchy) {
+    return observation;
+  }
+  return {
+    ...observation,
+    viewHierarchy: scopeHierarchyToLayer(observation.viewHierarchy, layer),
+  };
+}
+
 const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: WaitForWithSettled,
@@ -1367,14 +1501,17 @@ const evaluateWaitForObservation = (
   platform: BootedDevice["platform"] | undefined,
   displayInventory: DisplayInventoryClassification,
   { modes, iosMultiPanel }: { modes: Map<string, MatchMode>; iosMultiPanel: boolean },
-): ConditionEvaluation & { awaitedElement?: Element } => {
+): ObserveConditionEvaluation & { awaitedElement?: Element } => {
+  observation = layerScopedObservation(observation, waitFor.layer);
   const sizeOptions = {
     platform,
     iosMultiPanel,
     observationScreenSize: observation.screenSize,
     display: observation.viewHierarchy,
   };
-  const evaluation: ConditionEvaluation = { matched: false };
+  const evaluation: ObserveConditionEvaluation = { matched: false };
+  const tracked = trackContainerFailure(finder, waitFor.container);
+  finder = tracked.finder;
   const needsHierarchy =
     hasElementPredicate(waitFor) || waitFor.absent !== undefined || waitFor.settled !== undefined;
   const diagnostic = needsHierarchy ? waitCaptureUnavailableReason(observation) : undefined;
@@ -1407,14 +1544,16 @@ const evaluateWaitForObservation = (
           )
         : false;
 
+  const matched = [
+    activeWindowMatched,
+    displayMatched,
+    absentSatisfied,
+    !needsElementMatch || awaitedElement !== null,
+  ].every(Boolean);
   return {
     ...evaluation,
-    matched: [
-      activeWindowMatched,
-      displayMatched,
-      absentSatisfied,
-      !needsElementMatch || awaitedElement !== null,
-    ].every(Boolean),
+    ...containerFailureMetadata(!matched, tracked.failure()),
+    matched,
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1562,13 +1701,16 @@ function recordDisplayWaitEvidence(
   activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
 }
 
-function scopedWaitTimeoutMetadata(evaluation: ConditionEvaluation, waitMs: number) {
-  return evaluation.diagnostic
-    ? {
-        candidates: evaluation.candidates,
-        timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
-      }
-    : {};
+function scopedWaitTimeoutMetadata(evaluation: ObserveConditionEvaluation, waitMs: number) {
+  return {
+    ...containerFailureMetadata(!evaluation.matched, evaluation.containerFailure),
+    ...(evaluation.diagnostic
+      ? {
+          candidates: evaluation.candidates,
+          timeoutReason: `Timed out after ${waitMs} ms waiting for element; ${evaluation.diagnostic}`,
+        }
+      : {}),
+  };
 }
 
 export const waitForObservation = async (
@@ -1956,6 +2098,7 @@ function createObserveWaitResponse(
     waitMs: waitOutcome.waitMs,
     matchedElement: waitOutcome.matchedElement,
     candidates: waitOutcome.candidates,
+    ...(waitOutcome.containerFailure ? { containerFailure: waitOutcome.containerFailure } : {}),
   };
   return createObserveResponse(
     { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
@@ -1989,6 +2132,26 @@ async function attachObserveCrop(
     dependencies,
     selectorObservation,
   );
+}
+
+/**
+ * The observation `observe` serves for `layer` (issue #9305). A plain observe
+ * that asks for the overlay while none is showing is an actionable error; a
+ * waitFor observe returns the (empty) scoped capture so its timeout reports the miss.
+ */
+function layerScopedObserveResult(
+  result: ObserveResult,
+  layer: HierarchyLayer | undefined,
+  platform: BootedDevice["platform"],
+  requireOverlay: boolean,
+): ObserveResult {
+  if (layer === undefined) {
+    return result;
+  }
+  if (requireOverlay && result.viewHierarchy) {
+    scopeHierarchyForSelector(result.viewHierarchy, layer);
+  }
+  return scopeObserveResultToLayer(result, layer, platform);
 }
 
 function recordObservationBackStack(result: ObserveResult, sessionUuid?: string): void {
@@ -2077,7 +2240,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // Include setup timing if this is the first observe after accessibility service setup
-      consumeObserveSetupTiming(deviceRead, device, result);
+      consumeObserveSetupTiming(deviceRead, device, result, args.sessionUuid);
 
       // Record back stack information in navigation graph if available
       if (!deviceRead) {
@@ -2097,14 +2260,16 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         });
       }
 
+      const served = layerScopedObserveResult(result, args.layer, device.platform, !waitOutcome);
+
       if (waitOutcome) {
-        return await createObserveWaitResponse(result, waitOutcome, args.includeScreenshotImage, {
+        return await createObserveWaitResponse(served, waitOutcome, args.includeScreenshotImage, {
           signal,
           protection: dependencies.pathProtection,
         });
       }
 
-      return await createObserveResponse(result, args.includeScreenshotImage, {
+      return await createObserveResponse(served, args.includeScreenshotImage, {
         signal,
         protection: dependencies.pathProtection,
       });
@@ -2147,7 +2312,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    `Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.`,
+    `Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.`,
     observeSchema,
     observeHandler,
     {
@@ -2217,6 +2382,7 @@ function createSettledGate({
     let matchedElement = outcome.matchedElement;
     let awaitedElement = outcome.awaitedElement;
     let conditionMatched = true;
+    let lastEvaluation: ObserveConditionEvaluation = { matched: true };
     while (timer.now() - startTime < timeoutMs) {
       if (matchedHash !== null && timer.now() - quietStart >= settled.quietPeriodMs) {
         return {
@@ -2248,9 +2414,10 @@ function createSettledGate({
       throwIfAborted(signal);
       polls++;
       const unavailableReason = waitCaptureUnavailableReason(observation);
-      const evaluation: ConditionEvaluation = unavailableReason
+      const evaluation: ObserveConditionEvaluation = unavailableReason
         ? { matched: false, diagnostic: unavailableReason }
         : recheck(observation);
+      lastEvaluation = evaluation;
       if (!evaluation.matched) {
         conditionMatched = false;
         matchedHash = null;
@@ -2277,6 +2444,7 @@ function createSettledGate({
       settled: false,
       timedOut: true,
       matched: conditionMatched,
+      ...containerFailureMetadata(!conditionMatched, lastEvaluation.containerFailure),
       ...scopedWaitTimeoutMetadata(
         { matched: conditionMatched, diagnostic: unavailableReason },
         timer.now() - startTime,
@@ -2604,7 +2772,7 @@ function observeWaitParameters(
 ): Parameters<typeof waitForObservation> {
   return [
     observeScreen,
-    { ...args.waitFor, settled: args.settled },
+    { ...args.waitFor, settled: args.settled, layer: args.layer },
     signal,
     args.skipBackStack ?? false,
     dependencies.timer ?? defaultTimer,
@@ -2619,8 +2787,9 @@ function consumeObserveSetupTiming(
   deviceRead: boolean,
   device: BootedDevice,
   result: ObserveResult,
+  sessionId?: string,
 ): void {
-  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
+  const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId, sessionId);
   attachObserveSetupTiming(result, setupTiming);
 }
 

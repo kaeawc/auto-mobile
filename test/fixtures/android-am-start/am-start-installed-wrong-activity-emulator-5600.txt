@@ -1,0 +1,10 @@
+$ adb shell am start -n dev.jasonpearson.automobile.playground/.NoSuchActivity; echo exit=$?
+Starting: Intent { cmp=dev.jasonpearson.automobile.playground/.NoSuchActivity }
+Error type 3
+Error: Activity class {dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.NoSuchActivity} does not exist.
+exit=1
+$ adb shell am start -W -n dev.jasonpearson.automobile.playground/.NoSuchActivity; echo exit=$?
+Starting: Intent { cmp=dev.jasonpearson.automobile.playground/.NoSuchActivity }
+Error type 3
+Error: Activity class {dev.jasonpearson.automobile.playground/dev.jasonpearson.automobile.playground.NoSuchActivity} does not exist.
+exit=1

@@ -1615,6 +1615,69 @@ describe("IosH264Source", () => {
     await stopped;
   });
 
+  test("reports a running-phase helper SIGTRAP with its exit signal and last stderr lines", async () => {
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    helper.emitStderr("capture-phase: first-frame");
+    helper.emitStderr(`${NATIVE_FRAME_METRICS_PREFIX}{"droppedFrames":0}`);
+    helper.emitStderr("Fatal error: unexpected nil in capture callback");
+    helper.emitStderr(`${NATIVE_FRAME_METRICS_PREFIX}{"droppedFrames":1}`);
+    helper.emitExit(null, "SIGTRAP");
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/exited \(code=null, signal=SIGTRAP\); last stderr: /);
+    expect(errors[0].message).toContain("capture-phase: first-frame");
+    expect(errors[0].message).toContain("Fatal error: unexpected nil in capture callback");
+    expect(errors[0].message).not.toContain("droppedFrames");
+  });
+
+  test("reports a running-phase helper non-zero exit code", async () => {
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    helper.emitExit(70, null);
+    await flush();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("screen-capture-helper exited (code=70, signal=null)");
+  });
+
+  test("keeps only the last helper stderr lines in the exit report", async () => {
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    for (let i = 1; i <= 8; i++) {
+      helper.emitStderr(`line-${i}`);
+    }
+    helper.emitExit(null, "SIGTRAP");
+    await flush();
+
+    expect(errors[0].message).not.toContain("line-3");
+    expect(errors[0].message).toContain("line-4 | line-5 | line-6 | line-7 | line-8");
+  });
+
+  test("does not report a helper exit caused by stop() as a stream failure", async () => {
+    const { source, helper, errors } = createHarness(IOS_DEVICE, {
+      runningReconnectMaxAttempts: 0,
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    const stopping = source.stop();
+    helper.emitExit(null, "SIGTERM");
+    await stopping;
+    await flush();
+
+    expect(errors).toEqual([]);
+  });
+
   test("does not report helper startup exits through post-start onError", async () => {
     const { source, helper, errors } = createHarness();
 

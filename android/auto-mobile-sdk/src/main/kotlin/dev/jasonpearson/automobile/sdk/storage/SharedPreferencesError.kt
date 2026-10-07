@@ -28,4 +28,13 @@ sealed class SharedPreferencesError(message: String) : Exception(message) {
   /** A mutating operation was rejected by the SDK capture policy. */
   class MutationNotAllowed :
     SharedPreferencesError("SharedPreferences mutations are disabled by SDK policy")
+
+  /**
+   * The edit was applied in memory but the preferences file could not be written to disk (disk
+   * full, I/O error, read-only data directory). Internal so the module's public API is unchanged;
+   * it reaches the wire as `errorType` "WriteFailed" through the provider's existing
+   * [SharedPreferencesError] handler.
+   */
+  internal class WriteFailed(fileName: String) :
+    SharedPreferencesError("Failed to write preferences file to disk: $fileName")
 }

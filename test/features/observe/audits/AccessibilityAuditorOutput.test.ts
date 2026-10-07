@@ -161,6 +161,10 @@ describe("AccessibilityAuditor: bounded violations", () => {
         "utf8",
       ),
     ) as ViewHierarchyResult;
+    // Stress the cap with four copies of captured nodes in memory. Keyboard violations no longer
+    // belong to the app, so the single capture alone no longer reaches the cap.
+    const nodes = hierarchy.hierarchy.node ?? [];
+    hierarchy.hierarchy.node = Array.from({ length: 4 }, () => structuredClone(nodes)).flat();
     return {
       updatedAt: "2026-01-01T00:00:00.000Z",
       screenSize: { width: hierarchy.screenWidth ?? 1080, height: hierarchy.screenHeight ?? 2400 },

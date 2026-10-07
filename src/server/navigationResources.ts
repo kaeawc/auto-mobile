@@ -28,6 +28,7 @@ import { logger } from "../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
 import { defaultTimer } from "../utils/SystemTimer";
 import { DaemonState } from "../daemon/daemonState";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 export const NAVIGATION_RESOURCE_URIS = {
   APPS: "automobile:navigation/apps",
@@ -220,7 +221,7 @@ async function getNavigationGraphResource(
   context?: ResourceReadContext,
 ): Promise<ResourceContent> {
   const uri = appId
-    ? `automobile:navigation/graph?appId=${encodeURIComponent(appId)}`
+    ? `automobile:navigation/graph?appId=${encodeUriSegment(appId)}`
     : NAVIGATION_RESOURCE_URIS.GRAPH;
 
   try {
@@ -405,7 +406,7 @@ async function getNavigationNodeByIdResource(
   context?: ResourceReadContext,
 ): Promise<ResourceContent> {
   const uri = appId
-    ? `automobile:navigation/nodes/${nodeId}?appId=${encodeURIComponent(appId)}`
+    ? `automobile:navigation/nodes/${nodeId}?appId=${encodeUriSegment(appId)}`
     : `automobile:navigation/nodes/${nodeId}`;
 
   try {
@@ -432,7 +433,7 @@ async function getNavigationNodeByScreenResource(
   screenName: string,
   context?: ResourceReadContext,
 ): Promise<ResourceContent> {
-  const uri = `automobile:navigation/nodes?screen=${encodeURIComponent(screenName)}`;
+  const uri = `automobile:navigation/nodes?screen=${encodeUriSegment(screenName)}`;
 
   try {
     const nodeResource =

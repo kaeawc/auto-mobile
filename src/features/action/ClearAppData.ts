@@ -1,4 +1,9 @@
-import { ActionableError, BootedDevice, ClearAppDataResult } from "../../models";
+import {
+  ActionableError,
+  AppNotInstalledError,
+  BootedDevice,
+  ClearAppDataResult,
+} from "../../models";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -117,7 +122,7 @@ export class ClearAppData {
         userId === undefined &&
         !(await isPackageInstalledForUser(adb, packageName, targetUserId))
       ) {
-        throw new ActionableError(
+        throw new AppNotInstalledError(
           `App ${packageName} is not installed for Android user ${targetUserId}; install the app or specify userId for the user where it is installed`,
         );
       }

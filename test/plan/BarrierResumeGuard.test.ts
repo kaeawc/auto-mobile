@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { computeSafeBarrierResumeStep } from "../../src/utils/plan/BarrierResumeGuard";
+import {
+  computeSafeBarrierResumeStep,
+  findArrivalsBlockedByFailedTrack,
+} from "../../src/utils/plan/BarrierResumeGuard";
 import { Plan } from "../../src/models/Plan";
 
 /**
@@ -270,6 +273,40 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
     expect(computeSafeBarrierResumeStep(p, 2)).toBe(0);
   });
 
+  test("ignores opposite lock orders when every arrival has deviceCount one", () => {
+    const p: Plan = {
+      name: "count-one-cross-lock",
+      mcpVersion: "1.0",
+      devices: ["A", "B"],
+      steps: [
+        actionStep("A"),
+        barrierStep("A", "X", 1),
+        barrierStep("A", "Y", 1),
+        barrierStep("B", "Y", 1),
+        barrierStep("B", "X", 1),
+      ],
+    };
+    expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
+  });
+
+  test("keeps multi-device and mixed-count opposing lock orders unsafe", () => {
+    const multiDevice = plan([
+      barrierStep("A", "X", 2),
+      barrierStep("A", "Y", 2),
+      barrierStep("B", "Y", 2),
+      barrierStep("B", "X", 2),
+    ]);
+    expect(computeSafeBarrierResumeStep(multiDevice, 1)).toBe(0);
+
+    const mixedCounts = plan([
+      barrierStep("A", "X", 2),
+      barrierStep("A", "Y", 1),
+      barrierStep("B", "Y", 1),
+      barrierStep("B", "X", 2),
+    ]);
+    expect(computeSafeBarrierResumeStep(mixedCounts, 1)).toBe(0);
+  });
+
   test("does not flag a single device revisiting two locks in both orders as a cross-lock cycle", () => {
     // Only device A ever alternates between X and Y; nothing else depends on
     // A while it does so, so there is no partner to deadlock against.
@@ -285,5 +322,94 @@ describe("computeSafeBarrierResumeStep (#6234)", () => {
       ],
     };
     expect(computeSafeBarrierResumeStep(p, 1)).toBe(1);
+  });
+});
+
+/**
+ * Issue #10025: which survivors' arrivals can never be satisfied once a track has
+ * terminally failed. Only generations the failed track still owed an arrival to count.
+ */
+describe("findArrivalsBlockedByFailedTrack (#10025)", () => {
+  const barrierStep = (device: string, lock: string, deviceCount: number) => ({
+    tool: "barrier",
+    params: { device, lock, deviceCount },
+  });
+  const actionStep = (device: string) => ({ tool: "tapOn", params: { device, text: "ok" } });
+  const plan = (steps: Plan["steps"]): Plan => ({
+    name: "blocked-arrivals",
+    mcpVersion: "1.0",
+    devices: ["A", "B", "C"],
+    steps,
+  });
+
+  test("blocks the partner arrival in a generation the failed track never reached", () => {
+    const p = plan([
+      actionStep("B"), // 0
+      barrierStep("B", "ready", 2), // 1
+      actionStep("A"), // 2 fails
+      barrierStep("A", "ready", 2), // 3
+    ]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 2)).toEqual([
+      { planIndex: 1, device: "B", lock: "ready", tool: "barrier" },
+    ]);
+  });
+
+  test("ignores a generation the failed track already passed", () => {
+    const p = plan([
+      barrierStep("A", "ready", 2), // 0
+      barrierStep("B", "ready", 2), // 1
+      actionStep("A"), // 2 fails
+    ]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 2)).toEqual([]);
+  });
+
+  test("excludes the failing coordination step itself", () => {
+    const p = plan([barrierStep("A", "ready", 2), barrierStep("B", "ready", 2)]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 0)).toEqual([]);
+  });
+
+  test("only the failed track's own round of a repeated barrier is blocked", () => {
+    const p = plan([
+      barrierStep("B", "rounds", 2), // 0 round one
+      barrierStep("C", "rounds", 2), // 1 round one
+      actionStep("A"), // 2 fails
+      barrierStep("B", "rounds", 2), // 3 round two
+      barrierStep("A", "rounds", 2), // 4 round two
+    ]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 2)).toEqual([
+      { planIndex: 3, device: "B", lock: "rounds", tool: "barrier" },
+    ]);
+  });
+
+  test("a criticalSection rendezvous blocks every other participant", () => {
+    const section = (device: string) => ({
+      tool: "criticalSection",
+      params: { device, lock: "cs", deviceCount: 3, steps: [] },
+    });
+    const p = plan([actionStep("A"), section("B"), section("C"), section("A")]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 0)).toEqual([
+      { planIndex: 1, device: "B", lock: "cs", tool: "criticalSection" },
+      { planIndex: 2, device: "C", lock: "cs", tool: "criticalSection" },
+    ]);
+  });
+
+  test("a failed track outside every generation blocks nothing", () => {
+    const p = plan([barrierStep("B", "pair", 2), actionStep("A"), barrierStep("C", "pair", 2)]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 1)).toEqual([]);
+  });
+
+  test("an unknown failure position blocks nothing", () => {
+    const p = plan([barrierStep("B", "ready", 2), barrierStep("A", "ready", 2)]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", -1)).toEqual([]);
+  });
+
+  test("an unrecoverable shape is skipped instead of throwing", () => {
+    // Three arrivals cannot form groups of two.
+    const p = plan([
+      barrierStep("B", "odd", 2),
+      barrierStep("A", "odd", 2),
+      barrierStep("C", "odd", 2),
+    ]);
+    expect(findArrivalsBlockedByFailedTrack(p, "A", 0)).toEqual([]);
   });
 });

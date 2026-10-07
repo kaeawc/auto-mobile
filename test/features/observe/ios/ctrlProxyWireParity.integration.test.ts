@@ -73,6 +73,8 @@ const SWIFT_REQUEST_TYPES = [
   "get_current_focus",
   "get_traversal_order",
   "add_highlight",
+  "request_magic_tap",
+  "request_sdk_trigger",
   "get_voiceover_state",
   "set_voiceover_state",
   "list_preference_files",

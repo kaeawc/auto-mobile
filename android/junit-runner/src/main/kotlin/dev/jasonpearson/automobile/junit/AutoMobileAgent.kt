@@ -9,21 +9,18 @@ import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
 import ai.koog.serialization.typeToken
 import java.io.File
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Handles AI agent loop functionality for AutoMobile test execution using Koog framework.
@@ -242,10 +239,7 @@ open class AutoMobileAgent(
               // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
               // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
               // still queried with real values — only the returned text is redacted.
-              SecretRedactor.redact(
-                mcpClient.callTool("observe", mapOf("withViewHierarchy" to true)),
-                redactionValues,
-              )
+              SecretRedactor.redact(mcpClient.callTool("observe", emptyMap()), redactionValues)
             } catch (e: Exception) {
               println("Warning: Post-recovery observe failed: ${e.message}")
               null
@@ -253,7 +247,7 @@ open class AutoMobileAgent(
 
           val recoveryTime = timeProvider.currentTimeMillis() - startTime
           RecoveryOutcome(
-            success = observeResult != null,
+            success = observeResult != null && !isToolErrorResult(observeResult),
             recoveryTimeMs = recoveryTime,
             observeResultAfterRecovery = observeResult,
           )
@@ -266,7 +260,13 @@ open class AutoMobileAgent(
 
       return recoveryResult
     } catch (e: Exception) {
-      println("AI recovery initialization failed: ${e.message}")
+      // Loud, actionable and on stderr: recovery is on by default outside CI, so a missing daemon
+      // or model API key must not look like "recovery ran and found nothing" (#10089).
+      System.err.println(
+        "AI-assisted recovery could not start: ${e.message}. " +
+          "The failed step is reported as a plain failure. Make sure the AutoMobile daemon " +
+          "is running and a model API key is configured, or disable AI assistance."
+      )
     } finally {
       try {
         mcpClient.disconnect()
@@ -406,107 +406,76 @@ open class AutoMobileAgent(
 
   @Serializable data class MCPListToolsResponse(val tools: List<MCPToolDefinition>)
 
-  class DefaultMCPClient : MCPClient {
-    private val httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build()
-    private var serverUrl: String? = null
+  /**
+   * Default [MCPClient]: routes every call through [DaemonSocketClientManager], the same daemon
+   * socket transport `executePlan` uses (#10089). It previously ran its own HTTP client against
+   * `/health` and `/mcp`, neither of which the daemon serves (it serves `/heartbeat` and
+   * `/auto-mobile/streamable` only), so recovery could never make a single tool call.
+   *
+   * The `serverUrl` handed to [connect] is ignored: the daemon is located through the socket paths
+   * the runner already resolved. An `isError: true` tool result is thrown, not returned, so neither
+   * the model nor the post-recovery liveness gate can mistake a rejected call for a live device.
+   */
+  class DefaultMCPClient
+  internal constructor(
+    private val daemon: DaemonToolCaller,
+    private val connectivity: DaemonConnectivityChecker,
+  ) : MCPClient {
+    constructor() :
+      this(
+        DaemonToolCaller(DaemonSocketClientManager::callTool),
+        DefaultDaemonConnectivityChecker(),
+      )
+
+    @Volatile private var connected = false
     private val koogJson = Json { ignoreUnknownKeys = true }
 
-    override fun isConnected(): Boolean {
-      return serverUrl != null && testConnection()
-    }
+    override fun isConnected(): Boolean = connected && connectivity.isDaemonAlive()
 
     override fun connect(serverUrl: String) {
-      this.serverUrl = serverUrl
-      if (!testConnection()) {
-        throw RuntimeException("Failed to connect to AutoMobile MCP server at $serverUrl")
+      if (!connectivity.isDaemonAlive()) {
+        throw RuntimeException(
+          "AutoMobile daemon is not reachable on its socket; AI recovery runs through the " +
+            "same daemon as the plan (the configured MCP url $serverUrl is not used)"
+        )
       }
-      println("Connected to AutoMobile MCP server at $serverUrl")
+      connected = true
+      println("Connected to the AutoMobile daemon for AI recovery")
     }
 
     override fun disconnect() {
-      serverUrl = null
+      connected = false
     }
 
     override fun callTool(toolName: String, parameters: Map<String, Any>): String {
-      val url = serverUrl ?: throw RuntimeException("MCP client not connected")
-
-      try {
-        val requestJson =
-          koogJson.encodeToString(
-            buildJsonObject {
-              put("method", JsonPrimitive("tools/call"))
-              put(
-                "params",
-                buildJsonObject {
-                  put("name", JsonPrimitive(toolName))
-                  put("arguments", buildJsonParameters(parameters))
-                },
-              )
-            }
-          )
-
-        val request =
-          HttpRequest.newBuilder()
-            .uri(URI.create("$url/mcp"))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestJson))
-            .timeout(Duration.ofSeconds(30))
-            .build()
-
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-
-        if (response.statusCode() != 200) {
-          throw RuntimeException(
-            "MCP server returned status ${response.statusCode()}: ${response.body()}"
-          )
+      check(connected) { "MCP client not connected" }
+      val response =
+        try {
+          daemon.call(toolName, buildJsonParameters(parameters), TOOL_CALL_TIMEOUT_MS)
+        } catch (e: Exception) {
+          throw RuntimeException("Failed to call MCP tool $toolName: ${e.message}", e)
         }
-
-        val mcpResponse = koogJson.decodeFromString<MCPResponse>(response.body())
-
-        if (mcpResponse.error != null) {
-          throw RuntimeException("MCP server error: ${mcpResponse.error}")
-        }
-
-        return mcpResponse.result?.toString() ?: ""
-      } catch (e: Exception) {
-        throw RuntimeException("Failed to call MCP tool $toolName: ${e.message}", e)
+      if (!response.success) {
+        throw RuntimeException(
+          "Failed to call MCP tool $toolName: ${response.error ?: "daemon returned failure"}"
+        )
       }
+      val result = response.result ?: return ""
+      val resultText = result.toString()
+      if (isToolErrorResult(resultText)) {
+        throw RuntimeException("MCP tool $toolName returned an error: ${toolResultText(result)}")
+      }
+      return resultText
     }
 
-    override fun listAvailableTools(): List<MCPToolDefinition> {
-      val url = serverUrl ?: throw RuntimeException("MCP client not connected")
-
-      try {
-        val requestJson =
-          koogJson.encodeToString(
-            buildJsonObject {
-              put("method", JsonPrimitive("tools/list"))
-              put("params", JsonObject(emptyMap()))
-            }
-          )
-
-        val request =
-          HttpRequest.newBuilder()
-            .uri(URI.create("$url/mcp"))
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(requestJson))
-            .timeout(Duration.ofSeconds(10))
-            .build()
-
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-
-        if (response.statusCode() != 200) {
-          throw RuntimeException(
-            "MCP server returned status ${response.statusCode()}: ${response.body()}"
-          )
-        }
-
-        val mcpResponse = koogJson.decodeFromString<MCPResponse>(response.body())
-        return parseListToolsResponse(mcpResponse)
-      } catch (e: Exception) {
-        throw RuntimeException("Failed to list MCP tools: ${e.message}", e)
-      }
-    }
+    /**
+     * Tool discovery is not exposed over the daemon socket. The agent's tool surface is fixed and
+     * pinned to `schemas/tool-definitions.json` by `RecoveryToolContractTest`.
+     */
+    override fun listAvailableTools(): List<MCPToolDefinition> =
+      throw UnsupportedOperationException(
+        "Tool discovery is not available over the daemon socket; the recovery tool surface is fixed"
+      )
 
     /**
      * Parse a tools/list MCP response. A well-formed response with no `error` but a null/absent
@@ -522,36 +491,17 @@ open class AutoMobileAgent(
     }
 
     private fun buildJsonParameters(parameters: Map<String, Any>): JsonObject = buildJsonObject {
-      parameters.forEach { (key, value) ->
-        put(
-          key,
-          when (value) {
-            is String -> JsonPrimitive(value)
-            is Number -> JsonPrimitive(value)
-            is Boolean -> JsonPrimitive(value)
-            is JsonElement -> value
-            else -> JsonPrimitive(value.toString())
-          },
-        )
-      }
+      parameters.forEach { (key, value) -> put(key, toJsonElement(value)) }
     }
 
-    private fun testConnection(): Boolean {
-      val url = serverUrl ?: return false
-
-      try {
-        val request =
-          HttpRequest.newBuilder()
-            .uri(URI.create("$url/health"))
-            .timeout(Duration.ofSeconds(5))
-            .build()
-
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        return response.statusCode() == 200
-      } catch (e: Exception) {
-        return false
-      }
+    private companion object {
+      const val TOOL_CALL_TIMEOUT_MS = 30_000L
     }
+  }
+
+  /** Seam over [DaemonSocketClientManager.callTool] so the client is testable without a daemon. */
+  internal fun interface DaemonToolCaller {
+    fun call(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse
   }
 
   // Class-based AutoMobile MCP Tools (no reflection required)
@@ -562,28 +512,26 @@ open class AutoMobileAgent(
     SimpleTool<ObserveTool.Args>(
       argsType = typeToken<Args>(),
       name = "observe",
-      description = "Observe the current device state and UI hierarchy",
+      description =
+        "Observe the current device state and UI elements; set raw=true for the full raw view hierarchy",
     ) {
 
-    @Serializable
-    data class Args(val withViewHierarchy: Boolean = true, val includeInvisible: Boolean = false)
+    @Serializable data class Args(val raw: Boolean = false)
 
     override suspend fun execute(args: Args): String {
-      val parameters =
-        mapOf(
-          "withViewHierarchy" to args.withViewHierarchy,
-          "includeInvisible" to args.includeInvisible,
-        )
+      val parameters = if (args.raw) mapOf<String, Any>("raw" to true) else emptyMap()
       return mcpClient.callTool("observe", parameters)
     }
   }
 
-  /** Tap on UI elements by text, coordinates, or description */
+  /** Tap an element by text or id, or tap at screen coordinates */
   class TapOnTool(private val mcpClient: MCPClient) :
     SimpleTool<TapOnTool.Args>(
       argsType = typeToken<Args>(),
       name = "tapOn",
-      description = "Tap on UI elements by text, coordinates, or description",
+      description =
+        "Tap an element by text or id (id wins when both are given), or at screen coordinates (x and y). " +
+          "action is tap (default), doubleTap, or longPress",
     ) {
 
     @Serializable
@@ -592,36 +540,29 @@ open class AutoMobileAgent(
       val id: String? = null,
       val x: Int? = null,
       val y: Int? = null,
+      val action: String = "tap",
     )
 
-    override suspend fun execute(args: Args): String {
-      val parameters = mutableMapOf<String, Any>()
-      args.text?.let { parameters["text"] = it }
-      args.id?.let { parameters["id"] = it }
-      args.x?.let { parameters["x"] = it }
-      args.y?.let { parameters["y"] = it }
-
-      if (parameters.isEmpty()) {
-        throw IllegalArgumentException("Must specify either text, id, or coordinates (x, y)")
-      }
-
-      return mcpClient.callTool("tapOn", parameters)
-    }
+    override suspend fun execute(args: Args): String =
+      callElementOrCoordinateTap(mcpClient, args.text, args.id, args.x, args.y, args.action)
   }
 
-  /** Enter text into input fields or send text to the device */
+  /** Enter text into the focused input field */
   class TypeTextTool(private val mcpClient: MCPClient) :
     SimpleTool<TypeTextTool.Args>(
       argsType = typeToken<Args>(),
       name = "typeText",
-      description = "Enter text into input fields or send text to the device",
+      description = "Enter text into the focused input field",
     ) {
 
     @Serializable data class Args(val text: String)
 
     override suspend fun execute(args: Args): String {
-      val parameters = mapOf("text" to args.text)
-      return mcpClient.callTool("sendText", parameters)
+      val command = buildJsonObject {
+        put("action", JsonPrimitive("type"))
+        put("text", JsonPrimitive(args.text))
+      }
+      return mcpClient.callTool("sendKeys", mapOf("commands" to JsonArray(listOf(command))))
     }
   }
 
@@ -674,15 +615,12 @@ open class AutoMobileAgent(
 
     override suspend fun execute(args: Args): String {
       val parameters = mutableMapOf<String, Any>("direction" to args.direction)
-
-      return if (args.containerElementId != null) {
-        parameters["containerElementId"] = args.containerElementId
-        mcpClient.callTool("scroll", parameters)
+      if (args.containerElementId != null) {
+        parameters["container"] = mapOf("elementId" to args.containerElementId)
       } else {
         parameters["includeSystemInsets"] = false
-        parameters["duration"] = 300
-        mcpClient.callTool("swipeOnScreen", parameters)
       }
+      return mcpClient.callTool("swipeOn", parameters)
     }
   }
 
@@ -691,7 +629,8 @@ open class AutoMobileAgent(
     SimpleTool<ScrollTool.Args>(
       argsType = typeToken<Args>(),
       name = "scroll",
-      description = "Scroll within a container element",
+      description =
+        "Scroll within a container element, optionally until a text or element id (id wins) is visible",
     ) {
 
     @Serializable
@@ -705,18 +644,16 @@ open class AutoMobileAgent(
     override suspend fun execute(args: Args): String {
       val parameters =
         mutableMapOf<String, Any>(
-          "containerElementId" to args.containerElementId,
           "direction" to args.direction,
+          "gestureType" to "scrollTowardsDirection",
+          "container" to mapOf("elementId" to args.containerElementId),
         )
-
-      if (args.lookForText != null || args.lookForElementId != null) {
-        val lookFor = mutableMapOf<String, Any>()
-        args.lookForText?.let { lookFor["text"] = it }
-        args.lookForElementId?.let { lookFor["elementId"] = it }
-        parameters["lookFor"] = lookFor
+      when {
+        args.lookForElementId != null ->
+          parameters["lookFor"] = mapOf("elementId" to args.lookForElementId)
+        args.lookForText != null -> parameters["lookFor"] = mapOf("text" to args.lookForText)
       }
-
-      return mcpClient.callTool("scroll", parameters)
+      return mcpClient.callTool("swipeOn", parameters)
     }
   }
 
@@ -755,7 +692,7 @@ open class AutoMobileAgent(
 
       while (System.currentTimeMillis() < endTime) {
         try {
-          val observeResult = mcpClient.callTool("observe", mapOf("withViewHierarchy" to true))
+          val observeResult = mcpClient.callTool("observe", mapOf("project" to "full"))
 
           // Check if the element we're waiting for is present
           if (args.text != null && observeResult.contains(args.text, ignoreCase = true)) {
@@ -856,10 +793,8 @@ open class AutoMobileAgent(
 
     @Serializable data class Args(val x: Int, val y: Int)
 
-    override suspend fun execute(args: Args): String {
-      val parameters = mapOf("x" to args.x, "y" to args.y)
-      return mcpClient.callTool("doubleTapOn", parameters)
-    }
+    override suspend fun execute(args: Args): String =
+      mcpClient.callTool("tapAt", mapOf("x" to args.x, "y" to args.y, "action" to "doubleTap"))
   }
 
   /** Long press on coordinates or elements */
@@ -867,7 +802,7 @@ open class AutoMobileAgent(
     SimpleTool<LongPressOnTool.Args>(
       argsType = typeToken<Args>(),
       name = "longPressOn",
-      description = "Long press on coordinates or elements",
+      description = "Long press on an element (text or id) or on coordinates",
     ) {
 
     @Serializable
@@ -879,19 +814,16 @@ open class AutoMobileAgent(
       val duration: Int = 1000,
     )
 
-    override suspend fun execute(args: Args): String {
-      val parameters = mutableMapOf<String, Any>("duration" to args.duration)
-      args.text?.let { parameters["text"] = it }
-      args.id?.let { parameters["id"] = it }
-      args.x?.let { parameters["x"] = it }
-      args.y?.let { parameters["y"] = it }
-
-      if (parameters.size == 1) { // Only duration was set
-        throw IllegalArgumentException("Must specify either text, id, or coordinates (x, y)")
-      }
-
-      return mcpClient.callTool("longPressOn", parameters)
-    }
+    override suspend fun execute(args: Args): String =
+      callElementOrCoordinateTap(
+        mcpClient,
+        args.text,
+        args.id,
+        args.x,
+        args.y,
+        action = "longPress",
+        durationMs = args.duration,
+      )
   }
 
   /**
@@ -945,6 +877,10 @@ open class AutoMobileAgent(
 
     fun isDebugMode(): Boolean
 
+    /**
+     * Retained for source and binary compatibility. [DefaultMCPClient] talks to the daemon over its
+     * socket and ignores this URL; the daemon serves no `/health` or `/mcp` HTTP endpoint (#10089).
+     */
     fun getMcpServerUrl(): String
   }
 
@@ -1150,7 +1086,7 @@ open class AutoMobileAgent(
 
         Core tools typically available:
         - observe: Get current UI state and hierarchy
-        - tapOn: Tap elements by text, id, or coordinates
+        - tapOn: Tap elements by text or id, or at coordinates
         - typeText/sendKeys: Enter, clear, or submit text in input fields
         - swipe/scroll: Navigate with gestures or within containers
         - waitFor: Wait for elements or conditions (implemented as polling)
@@ -1215,3 +1151,86 @@ open class AutoMobileAgent(
  * budget from yielding a zero or negative cap, which would abort before the agent can even observe.
  */
 internal fun recoveryIterationCap(maxToolCalls: Int): Int = maxToolCalls.coerceAtLeast(1) + 1
+
+private val TAP_ACTIONS = setOf("tap", "doubleTap", "longPress")
+
+/**
+ * Taps an element (`tapOn` with a `selector`) or a point (`tapAt`), the two real tools behind what
+ * the legacy `tapOn`/`longPressOn` agent tools tried to do with one made-up parameter shape
+ * (#10089). An element selector wins over coordinates; `id` wins over `text`.
+ */
+private fun callElementOrCoordinateTap(
+  mcpClient: AutoMobileAgent.MCPClient,
+  text: String?,
+  id: String?,
+  x: Int?,
+  y: Int?,
+  action: String,
+  durationMs: Int? = null,
+): String {
+  require(action in TAP_ACTIONS) { "action must be one of $TAP_ACTIONS" }
+  val selector =
+    when {
+      id != null -> mapOf("elementId" to id)
+      text != null -> mapOf("text" to text)
+      else -> null
+    }
+  val parameters = mutableMapOf<String, Any>()
+  if (action != "tap") parameters["action"] = action
+  if (selector != null) {
+    parameters["selector"] = selector
+    if (action == "longPress" && durationMs != null) {
+      parameters["duration"] = durationMs.coerceIn(0, 60_000)
+    }
+    return mcpClient.callTool("tapOn", parameters)
+  }
+  require(x != null && y != null) { "Must specify text, id, or both coordinates (x and y)" }
+  parameters["x"] = x
+  parameters["y"] = y
+  if (action == "longPress" && durationMs != null) {
+    parameters["durationMs"] = durationMs.coerceIn(500, 10_000)
+  }
+  return mcpClient.callTool("tapAt", parameters)
+}
+
+/** Converts a tool parameter value, including nested maps and lists, to JSON. */
+internal fun toJsonElement(value: Any?): JsonElement =
+  when (value) {
+    null -> JsonNull
+    is JsonElement -> value
+    is String -> JsonPrimitive(value)
+    is Number -> JsonPrimitive(value)
+    is Boolean -> JsonPrimitive(value)
+    is Map<*, *> ->
+      JsonObject(value.entries.associate { it.key.toString() to toJsonElement(it.value) })
+    is Iterable<*> -> JsonArray(value.map(::toJsonElement))
+    else -> JsonPrimitive(value.toString())
+  }
+
+/**
+ * True when [resultText] is an MCP tool result carrying `isError: true`. A rejected call (for
+ * example a strict-schema rejection) arrives as a normal-looking result string, so treating any
+ * non-null string as success counted it as a live device (#10089). Non-JSON text is not an error
+ * result.
+ */
+internal fun isToolErrorResult(resultText: String): Boolean {
+  if (!resultText.contains("isError")) return false
+  val parsed =
+    try {
+      Json.parseToJsonElement(resultText) as? JsonObject
+    } catch (e: kotlinx.serialization.SerializationException) {
+      // Not JSON (a plain-text tool result), so it carries no isError flag.
+      println("Note: tool result is not JSON, treating it as a non-error: ${e.message}")
+      null
+    }
+  return (parsed?.get("isError") as? JsonPrimitive)?.booleanOrNull == true
+}
+
+/** The text content of an MCP tool result, or its JSON when it has none. */
+private fun toolResultText(result: JsonElement): String {
+  val texts =
+    ((result as? JsonObject)?.get("content") as? JsonArray)?.mapNotNull {
+      ((it as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull
+    }
+  return texts?.takeIf { it.isNotEmpty() }?.joinToString("\n") ?: result.toString()
+}

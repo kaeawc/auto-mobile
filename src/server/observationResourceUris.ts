@@ -1,3 +1,4 @@
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 /**
  * Canonical builder for the observation-scoped screenshot resource URI
  * (issues #7000, #7018). The resource template
@@ -23,12 +24,12 @@ export const OBSERVATION_SCREENSHOT_URI_TEMPLATE =
  * {@link OBSERVATION_SCREENSHOT_URI_TEMPLATE}.
  */
 export function buildObservationScreenshotUri(deviceId: string, observationId: string): string {
-  return `automobile:observation/${encodeURIComponent(deviceId)}/${encodeURIComponent(observationId)}/screenshot`;
+  return `automobile:observation/${encodeUriSegment(deviceId)}/${encodeUriSegment(observationId)}/screenshot`;
 }
 
 /**
  * How long reading an observation screenshot waits for a capture that is still in flight. Host
- * consumers that read the resource on a caller's behalf (the overlay tool's asset sources) budget
+ * consumers that read the resource on a caller's behalf (the prototype tool's asset sources) budget
  * their request deadline with it.
  */
 export const OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS = 10_000;

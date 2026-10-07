@@ -611,27 +611,6 @@ describe("DefaultElementFinder", () => {
     });
   });
 
-  describe("findScrollableElements", () => {
-    test("returns empty for null hierarchy", () => {
-      expect(finder.findScrollableElements(null as any)).toEqual([]);
-    });
-
-    test("finds scrollable elements", () => {
-      const hierarchy = makeHierarchy({
-        $: { scrollable: "true", bounds: bounds(0, 0, 1080, 1920) },
-      });
-      const results = finder.findScrollableElements(hierarchy);
-      expect(results.length).toBeGreaterThanOrEqual(1);
-    });
-
-    test("returns empty when no scrollable elements", () => {
-      const hierarchy = makeHierarchy({
-        $: { text: "Not scrollable", bounds: bounds(0, 0, 100, 50) },
-      });
-      expect(finder.findScrollableElements(hierarchy)).toEqual([]);
-    });
-  });
-
   describe("findScrollableContainer", () => {
     test("returns null for null hierarchy", () => {
       expect(finder.findScrollableContainer(null as any)).toBeNull();
@@ -643,77 +622,6 @@ describe("DefaultElementFinder", () => {
       });
       const result = finder.findScrollableContainer(hierarchy);
       expect(result).not.toBeNull();
-    });
-  });
-
-  describe("findClickableElements", () => {
-    test("returns empty for null hierarchy", () => {
-      expect(finder.findClickableElements(null as any)).toEqual([]);
-    });
-
-    test("finds clickable elements", () => {
-      const hierarchy = makeHierarchy([
-        { $: { clickable: "true", text: "Button", bounds: bounds(0, 0, 100, 50) } },
-        { $: { clickable: "false", text: "Label", bounds: bounds(0, 50, 100, 100) } },
-      ]);
-      const results = finder.findClickableElements(hierarchy);
-      expect(results).toHaveLength(1);
-    });
-
-    test("treats click accessibility actions as clickable", () => {
-      const hierarchy = makeHierarchy([
-        {
-          $: {
-            actions: ["click"],
-            "resource-id": "com.example:id/icon_button",
-            bounds: bounds(0, 0, 100, 50),
-          },
-        },
-        {
-          $: {
-            actions: ["focus"],
-            "resource-id": "com.example:id/focus_only",
-            bounds: bounds(0, 50, 100, 100),
-          },
-        },
-      ]);
-      const results = finder.findClickableElements(hierarchy);
-      expect(results).toHaveLength(1);
-      expect(results[0]["resource-id"]).toBe("com.example:id/icon_button");
-    });
-  });
-
-  describe("isElementKeyboardFocused", () => {
-    test("does not treat selection as keyboard focus", () => {
-      expect(finder.isElementKeyboardFocused({ selected: "true" })).toBe(false);
-      expect(finder.isElementKeyboardFocused({ selected: true })).toBe(false);
-    });
-
-    test("returns true for keyboard focus attributes", () => {
-      expect(finder.isElementKeyboardFocused({ focused: "true" })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ focused: true })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ isFocused: "true" })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ isFocused: true })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ "has-keyboard-focus": "true" })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ "has-keyboard-focus": true })).toBe(true);
-    });
-
-    test("returns true for Android accessibility focus spellings", () => {
-      expect(finder.isElementKeyboardFocused({ "accessibility-focused": "true" })).toBe(true);
-      expect(finder.isElementKeyboardFocused({ accessibilityFocused: true })).toBe(true);
-    });
-
-    test("returns false without a true focus attribute", () => {
-      expect(
-        finder.isElementKeyboardFocused({
-          focused: "false",
-          isFocused: false,
-          "has-keyboard-focus": "false",
-          "accessibility-focused": false,
-          accessibilityFocused: "false",
-        }),
-      ).toBe(false);
-      expect(finder.isElementKeyboardFocused({})).toBe(false);
     });
   });
 

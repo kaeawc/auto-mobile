@@ -5427,13 +5427,13 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
     });
 
-    test("releases a partial device claim when the session was already bound elsewhere", async () => {
+    test("a liveness failure leaves a session bound elsewhere alone and claims nothing", async () => {
       await initializeLiveDevices([
         createBootedDevice("sim-1", "ios", "iPhone 15"),
         createBootedDevice("sim-2", "ios", "iPhone 16"),
       ]);
       await sessionManager.createSession("session-a", "existing-device", "ios");
-      failIosLivenessAfterFirstSession();
+      fakeDeviceManager.failedPlatforms.add("ios");
 
       await expect(
         devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "ios"),
@@ -5442,8 +5442,34 @@ describe("DevicePool", () => {
       expect(sessionManager.getSession("session-a")).toMatchObject({
         assignedDevice: "existing-device",
       });
+      expect(sessionManager.getSession("session-b")).toBeNull();
       expect(devicePool.getDevice("sim-1")).toMatchObject({ sessionId: null, status: "idle" });
       expect(devicePool.getDevice("sim-2")).toMatchObject({ sessionId: null, status: "idle" });
+    });
+
+    test("never claims a pool device for a session already bound elsewhere", async () => {
+      await initializeLiveDevices([
+        createBootedDevice("sim-1", "ios", "iPhone 15"),
+        createBootedDevice("sim-2", "ios", "iPhone 16"),
+      ]);
+      await sessionManager.createSession("session-a", "existing-device", "ios");
+
+      const assignments = await devicePool.assignMultipleDevices(
+        ["session-a", "session-b"],
+        1000,
+        "ios",
+      );
+
+      // The held session counts with its own device (#10153); only session-b claims.
+      expect(assignments.get("session-a")).toBe("existing-device");
+      expect(sessionManager.getSession("session-a")).toMatchObject({
+        assignedDevice: "existing-device",
+      });
+      const claimed = ["sim-1", "sim-2"].filter(
+        (id) => devicePool.getDevice(id)?.sessionId !== null,
+      );
+      expect(claimed).toEqual([assignments.get("session-b")!]);
+      expect(devicePool.getDevice(claimed[0])?.sessionId).toBe("session-b");
     });
 
     test("preserves a replacement session that reuses a UUID during rollback", async () => {

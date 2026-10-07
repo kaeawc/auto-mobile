@@ -273,5 +273,69 @@ for (const criteria of [false, true]) {
       expect(pool.getDevice("d2")?.status).toBe("idle");
       expect(idleWhileWaiting).toBe("idle");
     });
+
+    test("a held base session counts toward the request without needing an idle device (#10153)", async () => {
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession("other-owner", "d2", "android");
+      const held = sessions.getSession("base");
+      const only = observe(["base"]);
+      await drainUntilQuiescent(timer);
+      // Resolves without advancing fake time: no retry round is needed.
+      expect(only.isSettled()).toBe(true);
+      expect([...((await only.result) as Map<string, string>)]).toEqual([["base", "d1"]]);
+      expect(sessions.getSession("base")).toBe(held);
+      expect(pool.getDevice("d1")?.sessionId).toBe("base");
+      expect(pool.getDevice("d2")?.sessionId).toBe("other-owner");
+    });
+
+    test("an all-held request does not queue behind an earlier blocked waiter", async () => {
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession("other-owner", "d2", "android");
+      // An earlier two-device request is queued waiting for capacity.
+      const blocked = observe(["queued:a", "queued:b"], 2_000);
+      await drainUntilQuiescent(timer);
+      const only = observe(["base"], 2_000);
+      await drainUntilQuiescent(timer);
+      // Resolves without advancing fake time despite the earlier waiter.
+      expect(only.isSettled()).toBe(true);
+      expect([...((await only.result) as Map<string, string>)]).toEqual([["base", "d1"]]);
+      expect(String(await settle(blocked.result))).toContain("Timed out allocating devices");
+      expect(pool.getDevice("d1")?.sessionId).toBe("base");
+      expect(pool.getDevice("d2")?.sessionId).toBe("other-owner");
+    });
+
+    test("a held session plus an aborted new label leaves the held session alone and claims nothing", async () => {
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession("other-owner", "d2", "android");
+      const held = sessions.getSession("base");
+      const waiter = observe(["base", "base:B"]);
+      await drainUntilQuiescent(timer);
+      const reason = new Error("cancel held-base plan");
+      waiter.controller.abort(reason);
+      expect(await settle(waiter.result)).toBe(reason);
+      expect(sessions.getSession("base")).toBe(held);
+      expect(sessions.getSession("base:B")).toBeNull();
+      expect(pool.getDevice("d1")?.sessionId).toBe("base");
+      expect(pool.getDevice("d2")?.sessionId).toBe("other-owner");
+    });
+
+    test("a held base session plus one new label claims only the idle device", async () => {
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      expect([...(await allocate(["base", "base:B"]))]).toEqual([
+        ["base", "d1"],
+        ["base:B", "d2"],
+      ]);
+      expect(pool.getDevice("d2")?.sessionId).toBe("base:B");
+    });
+
+    test("a held base session with no idle device for its new label times out keeping only the base", async () => {
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession("other-owner", "d2", "android");
+      const waiter = observe(["base", "base:B"], 2_000);
+      expect(String(await settle(waiter.result))).toContain("Timed out allocating devices");
+      expect(pool.getDevice("d1")?.sessionId).toBe("base");
+      expect(pool.getDevice("d2")?.sessionId).toBe("other-owner");
+      expect(sessions.getSession("base:B")).toBeNull();
+    });
   });
 }

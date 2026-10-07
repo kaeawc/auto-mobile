@@ -2184,6 +2184,9 @@ export class DevicePool {
             // Try to assign all remaining sessions
             while (assigned.size < requiredCount) {
               const sessionId = sessionIds[assigned.size];
+              if (this.recordHeldAssignment(sessionId, assignments, assigned)) {
+                continue;
+              }
 
               const assignResult = await this.tryAssignDevice(sessionId, platform);
               if (assignResult.refreshCompleted) {
@@ -2377,7 +2380,10 @@ export class DevicePool {
           },
           async () => {
             for (const request of sortedRequests) {
-              if (assignments.has(request.sessionId)) {
+              if (
+                assignments.has(request.sessionId) ||
+                this.recordHeldAssignment(request.sessionId, assignments)
+              ) {
                 continue;
               }
 
@@ -2454,9 +2460,37 @@ export class DevicePool {
     }
   }
 
+  /**
+   * A request session that already holds a device (e.g. a plan's base session)
+   * counts toward the request with that device and needs no idle capacity
+   * (#10153). It is never added to rollback, so it survives wait/timeout/abort.
+   */
+  private heldSessionDevice(sessionId: string): string | undefined {
+    return this.sessionManager.getSession(sessionId)?.assignedDevice || undefined;
+  }
+
+  private recordHeldAssignment(
+    sessionId: string,
+    assignments: Map<string, string>,
+    assigned?: Set<string>,
+  ): boolean {
+    const heldDeviceId = this.heldSessionDevice(sessionId);
+    if (!heldDeviceId) {
+      return false;
+    }
+    assignments.set(sessionId, heldDeviceId);
+    assigned?.add(sessionId);
+    return true;
+  }
+
   private canClaimMultiDeviceAllocation(
     ticket: (typeof this.multiDeviceAllocationQueue)[number],
   ): boolean {
+    // A request whose sessions all hold devices needs no claim, so it must not
+    // wait behind earlier multi-device waiters (#10153).
+    if (ticket.requests.every((request) => this.heldSessionDevice(request.sessionId))) {
+      return true;
+    }
     const earlier = this.multiDeviceAllocationQueue.slice(
       0,
       this.multiDeviceAllocationQueue.indexOf(ticket),

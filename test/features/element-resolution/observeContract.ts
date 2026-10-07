@@ -11,7 +11,10 @@ import { DefaultObserveElementCollector } from "../../../src/features/observe/Ob
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { stableNodeSelectorForElement } from "../../../src/features/talkback/TalkBackTapStrategy";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import {
+  hasVisibleScreenPart,
+  screenSizeForOffscreenCheck,
+} from "../../../src/features/utility/ElementGeometry";
 import type { ElementSelectionStrategy } from "../../../src/models/ElementSelectionStrategy";
 
 export interface ContractCapture {
@@ -201,88 +204,59 @@ export function publicTextCases(cases: ContractCase[]): ContractCase[] {
   return [...unique.values()];
 }
 
+/**
+ * The retired DefaultElementSelector's pick over finder candidates (#10268): drop matches with no
+ * on-screen part, then honour an explicit index, else take the first or use the injected RNG for
+ * "random". Kept only so the legacy reference side of this migration contract stays fixed.
+ */
+function pickLegacy(
+  candidates: Element[],
+  hierarchy: ViewHierarchyResult,
+  query: ContractQuery,
+  random: () => number,
+): Element | null {
+  const screen = screenSizeForOffscreenCheck(hierarchy);
+  const visible = candidates.filter((element) => hasVisibleScreenPart(element.bounds, screen));
+  if (query.index !== undefined) {
+    return visible[query.index] ?? null;
+  }
+  if (visible.length === 0) {
+    return null;
+  }
+  const raw = query.strategy === "random" ? Math.floor(random() * visible.length) : 0;
+  return visible[Number.isFinite(raw) ? Math.min(visible.length - 1, Math.max(0, raw)) : 0];
+}
+
 export class LegacyContractResolver implements ContractResolver {
   private readonly finder = new DefaultElementFinder();
-  private readonly selector: DefaultElementSelector;
-  constructor(random: () => number = () => 0) {
-    this.selector = new DefaultElementSelector(this.finder, random);
-  }
+  constructor(private readonly random: () => number = () => 0) {}
   resolve({ hierarchy }: ContractCapture, query: ContractQuery): ContractResolution {
-    const options = {
-      partialMatch: false,
-      index: query.index,
-      container: query.container,
-      strategy: query.strategy,
-    };
+    const candidates = this.candidates(hierarchy, query);
+    return { candidates, chosen: pickLegacy(candidates, hierarchy, query, this.random) };
+  }
+  private candidates(hierarchy: ViewHierarchyResult, query: ContractQuery): Element[] {
+    const { value, container } = query;
     if (query.kind === "elementId") {
-      if (query.sibling) {
-        return {
-          candidates: this.finder.findClickableSiblingsOfResourceId(
-            hierarchy,
-            query.value,
-            query.container,
-            false,
-          ),
-          chosen: this.selector.selectClickableSiblingOfResourceId(hierarchy, query.value, options)
-            .element,
-        };
-      }
-      return {
-        candidates: this.finder.findElementsByResourceId(
-          hierarchy,
-          query.value,
-          query.container,
-          false,
-          false,
-        ),
-        chosen: this.selector.selectByResourceId(hierarchy, query.value, options).element,
-      };
+      return query.sibling
+        ? this.finder.findClickableSiblingsOfResourceId(hierarchy, value, container, false)
+        : this.finder.findElementsByResourceId(hierarchy, value, container, false, false);
     }
     if (query.kind === "testTag") {
-      return {
-        candidates: this.finder.findElementsByTestTag(
-          hierarchy,
-          query.value,
-          query.container,
-          false,
-        ),
-        chosen: this.selector.selectByTestTag(hierarchy, query.value, options).element,
-      };
+      return this.finder.findElementsByTestTag(hierarchy, value, container, false);
     }
     if (query.sibling) {
-      return {
-        candidates: this.finder.findClickableSiblingsOfText(
-          hierarchy,
-          query.value,
-          query.container,
-          true,
-          false,
-        ),
-        chosen: this.selector.selectClickableSiblingOfText(hierarchy, query.value, {
-          ...options,
-          fuzzyMatch: true,
-          caseSensitive: false,
-        }).element,
-      };
+      return this.finder.findClickableSiblingsOfText(hierarchy, value, container, true, false);
     }
-    return {
-      candidates: this.finder.findElementsByText(
-        hierarchy,
-        query.value,
-        query.container,
-        true,
-        false,
-        false,
-        true,
-        query.intent ?? "tap",
-      ),
-      chosen: this.selector.selectByText(hierarchy, query.value, {
-        ...options,
-        partialMatch: true,
-        caseSensitive: false,
-        selectionIntent: query.intent ?? "tap",
-      }).element,
-    };
+    return this.finder.findElementsByText(
+      hierarchy,
+      value,
+      container,
+      true,
+      false,
+      false,
+      true,
+      query.intent ?? "tap",
+    );
   }
 }
 

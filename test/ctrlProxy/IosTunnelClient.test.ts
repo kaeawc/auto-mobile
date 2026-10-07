@@ -6,6 +6,7 @@ import {
 } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
+import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
@@ -100,6 +101,34 @@ describe("IosTunnelClient", () => {
     expect(client.localPort).toBe(8766);
     expect(executor.getSpawnedProcesses()).toHaveLength(2);
   });
+
+  test.each([false, true])(
+    "async spawn error with PID=%s reports its cause safely",
+    async (hasPid) => {
+      const { client, child, timer, executor } = fixture();
+      if (!hasPid) {
+        child.pid = undefined;
+      } else {
+        executor.setCommandHandler("kill -0", () => {
+          throw new Error("not running");
+        });
+      }
+      const failure = new Error("spawn iproxy ENOENT");
+      const starting = client.start(request);
+      await flush();
+      expect(child.listenerCount("error")).toBeGreaterThan(0);
+      // Emit only after spawn returned and startup installed its immediate listener.
+      expect(() => child.emit("error", failure)).not.toThrow();
+      await expect(starting).rejects.toEqual(
+        new ActionableError("Failed to start iproxy tunnel: spawn iproxy ENOENT", {
+          cause: failure,
+        }),
+      );
+      expect(timer.getSleepHistory()).toEqual(hasPid ? [100] : [0]);
+      expect(timer.getPendingIntervals()).toEqual([]);
+      await expect(starting).rejects.toBeInstanceOf(ActionableError);
+    },
+  );
 
   test("a failed readiness probe keeps the child tracked and preserves the exact Error", async () => {
     const { client, executor, child, timer } = fixture();

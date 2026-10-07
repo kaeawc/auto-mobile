@@ -6,14 +6,15 @@ import type {
 } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { GestureEmitter, GestureEvent } from "./types";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
-import type { CoordScaler } from "./AxisRanges";
+import type { GestureScaler } from "./AxisRanges";
 import { TouchFrameReconstructor } from "./TouchFrameReconstructor";
 import { GestureClassifier } from "./GestureClassifier";
 
 interface GetEventReaderOptions {
   adb: AdbExecutor;
   touchNode: TouchInputNode;
-  scaler: CoordScaler;
+  /** A timeline-backed scaler maps each touch with the geometry current at its DOWN. */
+  scaler: GestureScaler;
   /** Display density in dp multiplier (e.g. 2.75 for 440dpi) */
   density: number;
   timer?: Timer;

@@ -1,0 +1,40 @@
+# adb -s emulator-5600 shell getevent -p /dev/input/event1   (touch node virtio_input_multi_touch_1)
+add device 1: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+  events:
+    KEY (0001): 0141  014b 
+    ABS (0003): 0000  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0001  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0002  : value 0, min 0, max 1, fuzz 0, flat 0, resolution 0
+                002f  : value 0, min 0, max 10, fuzz 0, flat 0, resolution 0
+                0030  : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                0031  : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                0034  : value 0, min 0, max 90, fuzz 0, flat 0, resolution 0
+                0035  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0036  : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                0037  : value 0, min 0, max 15, fuzz 0, flat 0, resolution 0
+                0039  : value 0, min 0, max 65535, fuzz 0, flat 0, resolution 0
+                003a  : value 0, min 0, max 1024, fuzz 0, flat 0, resolution 0
+    SW  (0005): 0000 
+  input props:
+    <none>
+# adb -s emulator-5600 shell getevent -lp /dev/input/event1
+add device 1: /dev/input/event1
+  name:     "virtio_input_multi_touch_1"
+  events:
+    KEY (0001): BTN_TOOL_RUBBER       BTN_STYLUS           
+    ABS (0003): ABS_X                 : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                ABS_Y                 : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                ABS_Z                 : value 0, min 0, max 1, fuzz 0, flat 0, resolution 0
+                ABS_MT_SLOT           : value 0, min 0, max 10, fuzz 0, flat 0, resolution 0
+                ABS_MT_TOUCH_MAJOR    : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                ABS_MT_TOUCH_MINOR    : value 0, min 0, max 2147483647, fuzz 0, flat 0, resolution 0
+                ABS_MT_ORIENTATION    : value 0, min 0, max 90, fuzz 0, flat 0, resolution 0
+                ABS_MT_POSITION_X     : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                ABS_MT_POSITION_Y     : value 0, min 0, max 32767, fuzz 0, flat 0, resolution 0
+                ABS_MT_TOOL_TYPE      : value 0, min 0, max 15, fuzz 0, flat 0, resolution 0
+                ABS_MT_TRACKING_ID    : value 0, min 0, max 65535, fuzz 0, flat 0, resolution 0
+                ABS_MT_PRESSURE       : value 0, min 0, max 1024, fuzz 0, flat 0, resolution 0
+    SW  (0005): SW_LID               
+  input props:
+    <none>

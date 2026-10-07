@@ -10,11 +10,11 @@ import {
   indeterminateSimulatorUninstallError,
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "./simulatorUninstallBound";
-import type { IosInstalledAppRecord } from "./iosInstalledApp";
+import { getIosInstalledAppBundleId, type IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { promises as fs } from "fs";
 import * as path from "path";
-import type { ClearAppDataResult } from "../../models";
+import { AppNotInstalledError, type ClearAppDataResult } from "../../models";
 import { errorMessage } from "../describeUnknownError";
 import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "./iosAppContainerData";
 
@@ -366,7 +366,7 @@ export interface IosClearDataReinstaller {
 }
 
 export interface IosClearDataBackendDeps {
-  simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs">;
+  simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs" | "listAppsOrThrow">;
   createReinstaller: () => IosClearDataReinstaller;
   rm?: typeof fs.rm;
 }
@@ -387,6 +387,13 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
 
     const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
     if (!containerPath) {
+      // Only a successful listing that lacks the bundle proves "not installed"; any other
+      // container miss (or an unreadable listing) stays a retryable failure.
+      if (await this.isConfirmedNotInstalled(bundleId)) {
+        throw new AppNotInstalledError(
+          `App ${bundleId} is not installed on iOS simulator ${this.deviceId}; install the app first`,
+        );
+      }
       return {
         success: false,
         packageName: bundleId,
@@ -410,6 +417,16 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
     } catch (error) {
       logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
       return { success: false, packageName: bundleId, error: errorMessage(error) };
+    }
+  }
+
+  private async isConfirmedNotInstalled(bundleId: string): Promise<boolean> {
+    try {
+      const apps = await this.deps.simctl.listAppsOrThrow(this.deviceId);
+      return !apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
+    } catch (error) {
+      logger.warn(`[iOS] Could not list installed apps to classify ${bundleId}: ${error}`);
+      return false;
     }
   }
 }

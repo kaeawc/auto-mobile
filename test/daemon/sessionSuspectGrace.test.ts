@@ -199,7 +199,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("the rejection names the time left in the window", async () => {
       await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toThrow(
-        /suspect.*10s more.*device reserved/,
+        /being restored; its device stays reserved for 10s\. Retry this call now/,
       );
     });
   });

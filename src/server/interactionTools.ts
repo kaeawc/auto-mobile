@@ -79,7 +79,10 @@ import {
   KEYBOARD_PROFILE_IDS,
   type KeyboardProfileCatalog,
 } from "../features/action/keyboardProfiles";
-import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
+import {
+  AndroidImeCatalog,
+  createForegroundUserSource,
+} from "../features/action/AndroidImeCatalog";
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
@@ -123,6 +126,7 @@ import {
 import { defaultTimer } from "../utils/SystemTimer";
 import { displayWaitInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   withIsErrorOnFailure,
   awaitWhileRequestIsLive,
@@ -193,6 +197,8 @@ import {
   resetSystemTrayDependencies,
   getSystemTrayDependencies,
   waitForNotificationMatch,
+  clearMatchingSystemTrayNotifications,
+  clearIosSystemTrayNotifications,
   listSystemTrayNotifications,
   NotificationShadeNotOpenError,
   readActiveNotificationKeysForApp,
@@ -211,8 +217,6 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-  SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
-  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -2762,7 +2766,8 @@ async function handleInstalledImeAction(
       await createInstalledImeKeySession(device).tapKey(args.imeId, args.key, signal),
     );
   }
-  const catalog = new AndroidImeCatalog(defaultAdbClientFactory.create(device), device.deviceId);
+  const adb = defaultAdbClientFactory.create(device);
+  const catalog = new AndroidImeCatalog(adb, device.deviceId, createForegroundUserSource(adb));
   if (args.action === "listImes") {
     return createStructuredToolResponse(await catalog.list(signal));
   }
@@ -3167,14 +3172,31 @@ export function registerInteractionTools() {
         const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
         // Use statusbar commands directly: an unreadable hierarchy must not
         // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
-        restoreFailedClearAll = () =>
-          initiallyOpen ? clearDetector.expandTray() : clearDetector.collapseTray();
+        restoreFailedClearAll = async () => {
+          // Mark cleanup done before starting it, including when it throws or times out.
+          restoreFailedClearAll = undefined;
+          // Cleanup must still run after request cancellation.
+          try {
+            const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
+            await raceWithDeadline(
+              () => (initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray()),
+              {
+                timer: getSystemTrayDependencies().timer,
+                timeoutMs: awaitTimeoutMs,
+                label: "Notification shade restoration",
+              },
+            );
+          } catch (restoreError) {
+            logger.warn(
+              `Failed to restore notification shade: ${errorMessage(restoreError)}`,
+              restoreError,
+            );
+          }
+        };
       }
 
-      let swipeCount = 0;
       let expectedKeys: string[] | undefined;
       let clearMatchTexts = appMatchTexts;
-      let notificationsListedBeforeClear = false;
       if (device.platform === "android" && notification.appId) {
         const attributionLabel = await resolveClearAllAttributionLabel(
           device,
@@ -3196,7 +3218,6 @@ export function registerInteractionTools() {
           "before",
           signal,
         );
-        notificationsListedBeforeClear = listed.notifications.length > 0;
         // All correlated rows' content text lets the existing row matcher
         // isolate them, whether ownership comes from a header or dumpsys.
         clearMatchTexts = [
@@ -3206,48 +3227,23 @@ export function registerInteractionTools() {
           ]),
         ];
       }
-      const { timer } = getSystemTrayDependencies();
-
-      for (let i = 0; i < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS; i++) {
-        const { observation, match } = await waitForNotificationMatch(
-          device,
-          notification,
-          clearMatchTexts,
-          // The list pass collapses the shade; reopening may take longer than
-          // the short drain wait used after a swipe (#10249).
-          device.platform === "android" &&
-            i === 0 &&
-            (notificationsListedBeforeClear || !notification.appId)
-            ? awaitTimeoutMs
-            : 500,
-          progress,
-          signal,
-        );
-
-        if (!match && clearDetector && !clearDetector.isTrayOpen(observation.viewHierarchy)) {
-          throw new ActionableError(
-            observation.viewHierarchy
-              ? "Could not clear notifications: shade not readable (shade not detected open)."
-              : "Could not clear notifications: shade not readable (view hierarchy missing).",
-          );
-        }
-        if (!match) {
-          break;
-        }
-
-        const swipeTarget = resolveNotificationSwipeElement(match, notification, clearMatchTexts);
-        if (!swipeTarget) {
-          break;
-        }
-
-        await swipeElement(device, swipeTarget, signal);
-        swipeCount++;
-        throwIfAborted(signal);
-        await awaitWhileRequestIsLive(
-          timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
-          signal,
-        );
-      }
+      const drained =
+        device.platform === "android"
+          ? await clearMatchingSystemTrayNotifications(
+              device,
+              notification,
+              clearMatchTexts,
+              awaitTimeoutMs,
+              {
+                maxSwipes: expectedKeys?.length,
+                progress,
+                signal,
+              },
+            )
+          : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
+              progress,
+              signal,
+            });
 
       const remainingKeys =
         expectedKeys === undefined || !notification.appId
@@ -3256,12 +3252,24 @@ export function registerInteractionTools() {
 
       const result = formatClearAllResult(
         notification.appId,
-        swipeCount,
+        drained.dismissedCount,
         expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
       );
+      if (drained.stalled) {
+        // The app inventory is authoritative even if UI/text fallback still matches a row.
+        if (remainingKeys === undefined || remainingKeys.length > 0) {
+          result.success = false;
+        }
+        result.message =
+          expectedKeys === undefined
+            ? `Cleared ${drained.dismissedCount} matching notification(s).`
+            : result.message;
+        result.message += result.success
+          ? " Warning: a matching notification remains in the UI, but the app notification inventory is empty."
+          : " A matching notification remains; dismissal was not confirmed or the swipe limit or deadline was reached.";
+      }
       if (!result.success && restoreFailedClearAll) {
         await restoreFailedClearAll();
-        restoreFailedClearAll = undefined;
       }
 
       const { observeScreenFactory } = getSystemTrayDependencies();
@@ -3286,16 +3294,6 @@ export function registerInteractionTools() {
       return result.success ? response : { ...response, isError: true as const };
     } catch (error) {
       throwIfAborted(signal);
-      if (restoreFailedClearAll) {
-        try {
-          await restoreFailedClearAll();
-        } catch (restoreError) {
-          logger.warn(
-            `Failed to restore notification shade: ${errorMessage(restoreError)}`,
-            restoreError,
-          );
-        }
-      }
       if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
         throw new ActionableError(
           "Could not clear notifications: shade not readable (shade not detected open during list).",
@@ -3306,6 +3304,10 @@ export function registerInteractionTools() {
         throw error;
       }
       throw toActionableError(error, `systemTray failed`);
+    } finally {
+      if (restoreFailedClearAll) {
+        await restoreFailedClearAll();
+      }
     }
   };
 

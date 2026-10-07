@@ -1,3 +1,5 @@
+import { intersectBounds } from "../../utils/bounds";
+import { getScreenBounds } from "../../utils/screenBounds";
 import { getHierarchySnapshot } from "../observe/HierarchyCapture";
 import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import { extractHierarchyRootScreenSize } from "../observe/hierarchyScreenSize";
@@ -10,17 +12,27 @@ import type { ScreenSize, ScreenSizeForOffscreenCheckOptions } from "../../model
 export type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 
-/** Returns whether an element's center lies outside the screen. */
-export function isElementCenterOffScreen(
+/** Intersect the actionable/matched overlap with the screen, if its size is known. */
+export function visibleTapBounds(
+  bounds: ElementBounds,
+  screenSize: ScreenSize | undefined,
+  matchedBounds: ElementBounds = bounds,
+): ElementBounds | null {
+  const overlap = intersectBounds(bounds, matchedBounds);
+  if (!overlap || !isUsableScreenSize(screenSize)) {
+    return overlap;
+  }
+  return intersectBounds(overlap, getScreenBounds(screenSize, undefined, true));
+}
+
+/** Unknown bounds or screen dimensions preserve the existing acceptance policy. */
+export function hasVisibleScreenPart(
   bounds: ElementBounds | undefined,
   screenSize: ScreenSize | undefined,
 ): boolean {
-  if (!bounds || !isUsableScreenSize(screenSize)) {
-    return false;
-  }
-  const centerX = (bounds.left + bounds.right) / 2;
-  const centerY = (bounds.top + bounds.bottom) / 2;
-  return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
+  return (
+    !bounds || !isUsableScreenSize(screenSize) || visibleTapBounds(bounds, screenSize) !== null
+  );
 }
 
 function sameCaptureDisplay(

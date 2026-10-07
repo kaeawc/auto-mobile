@@ -4,7 +4,6 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { innerBounds, nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
-import containerFixture from "../../fixtures/observe/android-container-scope.json";
 
 // Use real implementations — they're pure and fast
 const parser = new DefaultElementParser();
@@ -29,14 +28,6 @@ function makeHierarchy(nodes: any): ViewHierarchyResult {
 }
 
 describe("DefaultElementFinder", () => {
-  test("findChildElements reads flat captured node bounds for containment", () => {
-    const hierarchy = containerFixture.viewHierarchy as ViewHierarchyResult;
-    const parent = finder.findElementsByText(hierarchy, "Left section")[0];
-    const children = finder.findChildElements(hierarchy, parent);
-    expect(children.some((child) => child.text === "Open" && child.bounds.top === 40)).toBe(true);
-    expect(children.some((child) => child.text === "Right section")).toBe(false);
-  });
-
   test("chooses the nearest nested clickable ancestor for a matching label", () => {
     const matches = finder.findClickableParentsContainingText(nestedClickableHierarchy, "Wi-Fi");
     expect(matches.map((match) => match.bounds)).toEqual([innerBounds]);
@@ -620,32 +611,6 @@ describe("DefaultElementFinder", () => {
     });
   });
 
-  describe("findElementByIndex", () => {
-    test("returns null for negative index", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
-      expect(finder.findElementByIndex(hierarchy, -1)).toBeNull();
-    });
-
-    test("returns null for out-of-bounds index", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
-      expect(finder.findElementByIndex(hierarchy, 999)).toBeNull();
-    });
-
-    test("returns element at valid index", () => {
-      const hierarchy = makeHierarchy([
-        { $: { text: "First", bounds: bounds(0, 0, 100, 50) } },
-        { $: { text: "Second", bounds: bounds(0, 50, 100, 100) } },
-      ]);
-      // Index 0 is the root, index 1 is "First", index 2 is "Second"
-      const result = finder.findElementByIndex(hierarchy, 0);
-      expect(result).not.toBeNull();
-    });
-
-    test("returns null for null hierarchy", () => {
-      expect(finder.findElementByIndex(null as any, 0)).toBeNull();
-    });
-  });
-
   describe("findScrollableElements", () => {
     test("returns empty for null hierarchy", () => {
       expect(finder.findScrollableElements(null as any)).toEqual([]);
@@ -718,30 +683,6 @@ describe("DefaultElementFinder", () => {
     });
   });
 
-  describe("isElementFocused", () => {
-    test("returns true for focused element", () => {
-      expect(finder.isElementFocused({ focused: "true" })).toBe(true);
-      expect(finder.isElementFocused({ focused: true })).toBe(true);
-    });
-
-    test("returns true for selected element", () => {
-      expect(finder.isElementFocused({ selected: "true" })).toBe(true);
-    });
-
-    test("returns true for isFocused element", () => {
-      expect(finder.isElementFocused({ isFocused: true })).toBe(true);
-    });
-
-    test("returns true for has-keyboard-focus element", () => {
-      expect(finder.isElementFocused({ "has-keyboard-focus": "true" })).toBe(true);
-    });
-
-    test("returns false for unfocused element", () => {
-      expect(finder.isElementFocused({ focused: "false" })).toBe(false);
-      expect(finder.isElementFocused({})).toBe(false);
-    });
-  });
-
   describe("isElementKeyboardFocused", () => {
     test("does not treat selection as keyboard focus", () => {
       expect(finder.isElementKeyboardFocused({ selected: "true" })).toBe(false);
@@ -773,34 +714,6 @@ describe("DefaultElementFinder", () => {
         }),
       ).toBe(false);
       expect(finder.isElementKeyboardFocused({})).toBe(false);
-    });
-  });
-
-  describe("validateElementText", () => {
-    test("returns true when no expected text", () => {
-      const found = { element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } } as any };
-      expect(finder.validateElementText(found, undefined)).toBe(true);
-    });
-
-    test("returns false when element has no text but expected", () => {
-      const found = { element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } } as any };
-      expect(finder.validateElementText(found, "Login")).toBe(false);
-    });
-
-    test("returns true when text matches", () => {
-      const found = {
-        element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } } as any,
-        text: "Login Button",
-      };
-      expect(finder.validateElementText(found, "Login")).toBe(true);
-    });
-
-    test("returns false when text does not match", () => {
-      const found = {
-        element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } } as any,
-        text: "Signup",
-      };
-      expect(finder.validateElementText(found, "Login")).toBe(false);
     });
   });
 

@@ -11,6 +11,8 @@ import {
   AndroidImeCatalog,
   AUTO_MOBILE_IME_ID,
   imeCapabilities,
+  createForegroundUserSource,
+  pinnedUser,
   parseAdvertisedImeSubtypes,
   parsePackageVersionName,
   parseSelectedImeSubtype,
@@ -20,6 +22,7 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeMultiUserImeAdb } from "../../fakes/FakeMultiUserImeAdb";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const primaryIme = "com.example.primaryime/.PrimaryImeService";
@@ -38,7 +41,7 @@ function fixture(deviceId = "test-device") {
     stdout: `${primaryIme}\n`,
     stderr: "",
   });
-  return { adb, catalog: new AndroidImeCatalog(adb, deviceId) };
+  return { adb, catalog: new AndroidImeCatalog(adb, deviceId, pinnedUser(0)) };
 }
 
 test("explicit selection recovers quarantine only after verified IME readback", async () => {
@@ -170,6 +173,7 @@ test("quarantined explicit selection holds the lock until readback before an ord
       },
     },
     deviceId,
+    pinnedUser(0),
   );
   quarantineAndroidIme(deviceId);
   const selection = catalog.select(alternateIme);
@@ -301,6 +305,7 @@ test("reports the verified IME after cancellation following set dispatch", async
       },
     },
     "dispatch-cancel-device",
+    pinnedUser(0),
   );
 
   expect((await catalog.selectWithinLock(alternateIme, controller.signal)).activeImeId).toBe(
@@ -328,6 +333,7 @@ test("reports a genuine set failure after cancellation following dispatch", asyn
       },
     },
     "dispatch-failure-device",
+    pinnedUser(0),
   );
   adb.setCommandResponse(`shell ime set ${alternateIme}`, {
     stdout: "",
@@ -369,6 +375,7 @@ test("cancels set before dispatch without changing the active IME", async () => 
       },
     },
     "queued-cancel-device",
+    pinnedUser(0),
   );
 
   const selection = catalog.selectWithinLock(alternateIme, controller.signal);
@@ -517,6 +524,117 @@ test("rejects a subtype that is no longer advertised before writing it", async (
   ).toBe(false);
 });
 
+function multiUser(foreground: number) {
+  const adb = new FakeMultiUserImeAdb(foreground, [primaryIme, alternateIme]);
+  adb.seedUser(0, { active: primaryIme });
+  adb.seedUser(foreground, { active: primaryIme, enabled: [primaryIme, alternateIme] });
+  const catalog = new AndroidImeCatalog(adb, `multi-user-${foreground}`, pinnedUser(foreground));
+  return { adb, catalog };
+}
+
+function everyTargetsUser(calls: string[][], userId: number): boolean {
+  return calls.every((args) => args.join(" ").includes(` --user ${userId}`));
+}
+
+test("a non-zero foreground user: list reads that user's active and enabled IMEs", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(0).active = "com.other/.UserZeroIme";
+
+  const state = await catalog.list();
+
+  expect(state.activeImeId).toBe(primaryIme);
+  expect(state.installed.find((ime) => ime.id === alternateIme)?.enabled).toBe(true);
+  expect(everyTargetsUser(adb.calls, 10)).toBe(true);
+});
+
+test("a non-zero foreground user: select applies and verifies the same user", async () => {
+  const { adb, catalog } = multiUser(10);
+
+  const state = await catalog.select(alternateIme);
+
+  expect(state.activeImeId).toBe(alternateIme);
+  expect(adb.state(10).active).toBe(alternateIme);
+  expect(adb.state(0).active).toBe(primaryIme);
+  expect(adb.calls).toContainEqual(["shell", "ime", "set", "--user", "10", alternateIme]);
+  expect(everyTargetsUser(adb.calls, 10)).toBe(true);
+});
+
+test("a non-zero foreground user: scoped restore sends ime set when the temporary IME is active", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(10).active = alternateIme;
+
+  const state = await catalog.selectWithinLock(primaryIme);
+
+  expect(state.activeImeId).toBe(primaryIme);
+  expect(adb.state(10).active).toBe(primaryIme);
+});
+
+test("a non-zero foreground user: subtype read and restore address that user only", async () => {
+  const { adb, catalog } = multiUser(10);
+  adb.state(10).subtype = "42";
+  adb.state(0).subtype = "7";
+
+  expect((await catalog.readSubtype(primaryIme)).id).toBe(42);
+  await catalog.restoreSubtypeWithinLock(primaryIme, { id: null });
+
+  expect(adb.state(10).subtype).toBeNull();
+  expect(adb.state(0).subtype).toBe("7");
+  expect(adb.calls).toContainEqual([
+    "shell",
+    "settings",
+    "--user",
+    "10",
+    "delete",
+    "secure",
+    "selected_input_method_subtype",
+  ]);
+});
+
+test("foreground user 0 keeps the exact pre-existing commands without --user", async () => {
+  const { adb, catalog } = multiUser(0);
+  adb.state(0).active = alternateIme;
+
+  await catalog.selectWithinLock(primaryIme);
+  await catalog.restoreSubtypeWithinLock(primaryIme, { id: 3 });
+
+  expect(adb.calls.map((args) => args.join(" "))).toEqual([
+    "shell ime list -a -s",
+    "shell ime list -s",
+    "shell settings get secure default_input_method",
+    `shell ime set ${primaryIme}`,
+    "shell ime list -a -s",
+    "shell ime list -s",
+    "shell settings get secure default_input_method",
+    "shell dumpsys input_method",
+    "shell settings put secure selected_input_method_subtype 3",
+    "shell settings get secure selected_input_method_subtype",
+  ]);
+});
+
+test("pinForeground keeps one user even if the foreground user changes afterwards", async () => {
+  const adb = new FakeMultiUserImeAdb(10, [primaryIme, alternateIme]);
+  adb.seedUser(10, { active: primaryIme, enabled: [primaryIme, alternateIme] });
+  adb.seedUser(11, { active: primaryIme, enabled: [primaryIme, alternateIme] });
+  let foreground = 10;
+  const catalog = new AndroidImeCatalog(adb, "pin-device", {
+    foregroundUserId: async () => foreground,
+  });
+
+  const pinned = await catalog.pinForeground();
+  foreground = 11;
+  await pinned.selectWithinLock(alternateIme);
+
+  expect(adb.state(10).active).toBe(alternateIme);
+  expect(adb.state(11).active).toBe(primaryIme);
+});
+
+test("foreground user comes from the shared resolver's current-user read", async () => {
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+
+  expect(await createForegroundUserSource(adb).foregroundUserId()).toBe(10);
+});
+
 test("passes the dumpsys bound through fake exec and parses input_method above 1 MiB", async () => {
   // No input_method capture exists under test/fixtures. Pad the pre-existing
   // inline parser unit vector with synthetic feature-flag lines; this is not a capture.
@@ -542,7 +660,9 @@ test("passes the dumpsys bound through fake exec and parses input_method above 1
     new DefaultRetryExecutor(timer),
     timer,
   );
-  expect(await new AndroidImeCatalog(adb, "large-ime-dump").readSubtype(primaryIme)).toEqual({
+  expect(
+    await new AndroidImeCatalog(adb, "large-ime-dump", pinnedUser(0)).readSubtype(primaryIme),
+  ).toEqual({
     id: 42,
     locale: "en_US",
   });
@@ -575,6 +695,7 @@ test.each([
         },
       },
       "read-retry",
+      pinnedUser(0),
       new DefaultRetryExecutor(timer),
     );
     if (operation === "list") {
@@ -602,6 +723,7 @@ test("catalog read retry is bounded and ignores non-timeout errors", async () =>
         },
       },
       "bounded-read",
+      pinnedUser(0),
       new DefaultRetryExecutor(new FakeTimer()),
     );
     await expect(catalog.readSubtype(primaryIme)).rejects.toBe(error);
@@ -630,6 +752,7 @@ test.each(["set", "put", "delete"] as const)(
         },
       },
       "mutation-timeout",
+      pinnedUser(0),
       new DefaultRetryExecutor(new FakeTimer()),
     );
     const result =
@@ -653,6 +776,7 @@ test("catalog cancellation suppresses a read retry", async () => {
       },
     },
     "read-cancel",
+    pinnedUser(0),
     new DefaultRetryExecutor(new FakeTimer()),
   );
   await expect(catalog.readSubtype(primaryIme, controller.signal)).rejects.toThrow();
@@ -678,6 +802,7 @@ test("subtype restore verification retries its read without repeating the mutati
       },
     },
     "restore-read-retry",
+    pinnedUser(0),
     new DefaultRetryExecutor(new FakeTimer()),
   );
   await catalog.restoreSubtypeWithinLock(primaryIme, { id: null });

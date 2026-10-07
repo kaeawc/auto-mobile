@@ -9,6 +9,96 @@ import kotlin.test.assertTrue
 class TestPlanValidatorTest {
 
   @Test
+  fun `core schema keeps timestamps and YAML 1_1 boolean words as strings`() {
+    for (quoted in listOf(false, true)) {
+      for (label in listOf("yes", "no", "on", "off", "YES", "ON")) {
+        val instant = "2026-03-01T09:00:00Z"
+        val createdAt = "2026-01-08T00:00:00Z"
+        val yaml =
+          """
+          name: clock-plan
+          generated: ${if (quoted) "\"$createdAt\"" else createdAt}
+          metadata:
+            createdAt: ${if (quoted) "\"$createdAt\"" else createdAt}
+          steps:
+            - tool: setDeviceState
+              clock:
+                mode: set
+                instant: ${if (quoted) "\"$instant\"" else instant}
+            - tool: observe
+              label: ${if (quoted) "\"$label\"" else label}
+          """
+            .trimIndent()
+        val result = TestPlanValidator.validateYaml(yaml)
+        assertTrue(result.valid, "quoted=$quoted label=$label: ${result.errors}")
+      }
+    }
+  }
+
+  @Test
+  fun `unquoted clock instant reports window error instead of Date pattern error`() {
+    val result =
+      TestPlanValidator.validateYaml(
+        """
+        name: clock-plan
+        steps:
+          - tool: setDeviceState
+            clock:
+              mode: set
+              instant: 1999-01-01T00:00:00Z
+        """
+          .trimIndent()
+      )
+    assertFalse(result.valid)
+    assertEquals(1, result.errors.size, result.errors.toString())
+    assertEquals("steps[0].clock.instant", result.errors.single().field)
+    assertTrue(result.errors.single().message.contains("2000-01-01"), result.errors.toString())
+  }
+
+  @Test
+  fun `core schema preserves scalar types and merge keys`() {
+    for (number in listOf("01000", "0o1750", "0x3e8", "1e3", "1000.0")) {
+      val result =
+        TestPlanValidator.validateYaml(
+          """
+        name: scalar-plan
+        metadata:
+          generatedFromToolCalls: true
+          duration: 1.5e2
+        steps:
+          - &state
+            tool: setDeviceState
+            connectivity: {airplaneMode: false, wifiEnabled: TRUE}
+          - <<: *state
+            clock: {mode: advance, byMs: $number}
+          - tool: observe
+            label: "true"
+        """
+            .trimIndent()
+        )
+      assertTrue(result.valid, "$number: ${result.errors}")
+    }
+    for (text in listOf("0b10", "1_000", "1:20", "-0x10", "+0o10")) {
+      val result =
+        TestPlanValidator.validateYaml("name: scalar-plan\nsteps: [{tool: observe, label: $text}]")
+      assertTrue(result.valid, "$text: ${result.errors}")
+    }
+    for (value in listOf("null", "Null", "NULL", "~", "", "true", "false")) {
+      assertFalse(
+        TestPlanValidator.validateYaml("name: $value\nsteps: [{tool: observe}]").valid,
+        "$value must not become a string",
+      )
+    }
+    for (value in listOf("null", "Null", "NULL", "~", "", "true", "false", "\"1000\"")) {
+      val result =
+        TestPlanValidator.validateYaml(
+          "name: scalar-plan\nsteps: [{tool: setDeviceState, clock: {mode: advance, byMs: $value}}]"
+        )
+      assertFalse(result.valid, "$value must not become a number")
+    }
+  }
+
+  @Test
   fun `clock instant window normalizes offsets in inline and params forms`() {
     val cases =
       listOf(

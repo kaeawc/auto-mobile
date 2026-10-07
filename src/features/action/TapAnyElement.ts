@@ -69,8 +69,9 @@ import {
 import { AdbClient, AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
+  visibleTapBounds,
   DefaultElementGeometry,
-  isElementCenterOffScreen,
+  hasVisibleScreenPart,
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "../utility/ElementGeometry";
@@ -153,6 +154,8 @@ type RefreshViewHierarchy = (
 ) => Promise<ViewHierarchyResult | null>;
 
 interface CapturedTapTarget {
+  observationScreenSize?: ObserveResult["screenSize"];
+  observationDisplay?: ScreenSizeForOffscreenCheckOptions["display"];
   scoped?: boolean;
   talkBackState?: boolean | null;
   element: Element;
@@ -836,7 +839,7 @@ export class TapAnyElement extends BaseVisualChange {
       target = { ...target, element: refound.element, capture };
     }
     // The first tap was unobserved. Retry the captured or re-resolved target once after debounce.
-    let retryPoint = this.geometry.getElementCenter(target.element);
+    let retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
     logger.warn(
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
@@ -851,7 +854,7 @@ export class TapAnyElement extends BaseVisualChange {
     if (target.talkBackState) {
       Object.assign(reportedTarget, target);
     }
-    retryPoint = this.geometry.getElementCenter(target.element);
+    retryPoint = this.resolveTapPoint(target, { observationScreenSize: screenSize });
     if (fenceOptions.dispatch) {
       this.assertSelectedCapture(target.capture);
       await fenceOptions.dispatch(retryPoint);
@@ -975,13 +978,30 @@ export class TapAnyElement extends BaseVisualChange {
       intentAction: options.action === "longPress" ? "long-press" : "tap",
       scrollableContainer: options.scrollableContainer,
     });
-    if (
-      selection.element &&
-      isElementCenterOffScreen(selection.element.bounds, effectiveScreenSize)
-    ) {
+    if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
       return { element: null, containerFound };
     }
     return { element: selection.element, containerFound };
+  }
+
+  private resolveTapPoint(
+    target: CapturedTapTarget,
+    sizeOptions: ScreenSizeForOffscreenCheckOptions = {},
+  ): { x: number; y: number } {
+    const screenSize = screenSizeForOffscreenCheck(target.capture.hierarchy, {
+      observationScreenSize: target.observationScreenSize,
+      display: target.observationDisplay,
+      ...sizeOptions,
+      platform: this.device.platform,
+      iosMultiPanel: this.iosMultiPanel,
+    });
+    const bounds = visibleTapBounds(target.element.bounds, screenSize);
+    if (!bounds) {
+      throw new ActionableError(
+        "Matched element has no visible tap area; scroll it into view, then retry tapAny.",
+      );
+    }
+    return this.geometry.getElementCenter({ bounds });
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
@@ -1680,13 +1700,15 @@ export class TapAnyElement extends BaseVisualChange {
         }));
       }
     }
-    const tapPoint = this.geometry.getElementCenter(element);
     const target = {
       element,
       capture: selectedCapture,
+      observationDisplay: observeResult.viewHierarchy,
+      observationScreenSize: observeResult.screenSize,
       scoped: isStrictlyScoped(options),
       talkBackState,
     };
+    const tapPoint = this.resolveTapPoint(target);
     const action = options.action;
     await this.dispatchTapTarget({
       options,

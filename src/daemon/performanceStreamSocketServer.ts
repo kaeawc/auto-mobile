@@ -1,3 +1,7 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
@@ -30,20 +34,31 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse
 > {
+  private readonly authenticator: StreamSocketAuthenticator;
+
   private readonly auditRepository: PerformanceStreamRepository;
 
   constructor(
     socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     auditRepository: PerformanceStreamRepository = new PerformanceAuditRepository(),
+    options: { authenticator?: StreamSocketAuthenticator } = {},
   ) {
     super(socketPath, timer, "PerformanceStream");
     this.auditRepository = auditRepository;
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("performanceStream", { allowObserverSessions: true });
   }
 
   protected async handleRequest(
     request: PerformanceStreamSocketRequest,
   ): Promise<PerformanceStreamSocketResponse> {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+      deviceId: request.deviceId?.trim() || undefined,
+    });
+
     if (request.command !== "poll") {
       throw new Error(`Unsupported performance stream command: ${String(request.command)}`);
     }

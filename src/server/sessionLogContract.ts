@@ -8,6 +8,8 @@ import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelper
 import { optionalEnum, optionalInteger, optionalString } from "./queryParamValidation";
 import type { Platform } from "../models";
 import type { LocalFileListEntry } from "./appFileService";
+import { decodeSegmentOrThrow } from "./resourceUriSegments";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 
 /**
  * Session-scoped execution-log contract (#7006).
@@ -327,7 +329,7 @@ export function parseSessionLogQuery(
     }
   }
 
-  const appId = normalizeSessionLogAppId(decodeURIComponent(appIdParam));
+  const appId = normalizeSessionLogAppId(decodeSegmentOrThrow(appIdParam));
   const maxBytes =
     optionalInteger(query.maxBytes, "maxBytes", { min: 1, max: SESSION_LOG_MAX_BYTES_LIMIT }) ??
     SESSION_LOG_DEFAULT_MAX_BYTES;
@@ -369,8 +371,8 @@ export function buildSessionLogResourceUri(
   }
   query.set("maxBytes", String(request.maxBytes));
   return (
-    `automobile:device-session/${encodeURIComponent(sessionUuid)}` +
-    `/apps/${encodeURIComponent(request.appId)}/logs?${query.toString()}`
+    `automobile:device-session/${encodeUriSegment(sessionUuid)}` +
+    `/apps/${encodeUriSegment(request.appId)}/logs?${query.toString()}`
   );
 }
 

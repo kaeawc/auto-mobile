@@ -163,6 +163,8 @@ export interface AccessibilityHierarchy {
   deviceModel?: string;
   /** Whether running on an emulator */
   isEmulator?: boolean;
+  /** Runtime isAccessibilityTool of the bound service (#6233); absent/null = unknown. */
+  accessibilityTool?: boolean | null;
   /** Structured reasons why this snapshot is partial or unavailable. */
   truncationReasons?: string[];
   /**

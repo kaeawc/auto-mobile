@@ -3966,6 +3966,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Check if running on an emulator. */
+  /**
+   * Runtime `AccessibilityServiceInfo.isAccessibilityTool` of this bound service (#6233). The
+   * getter exists from API 31; below that (or without serviceInfo) the value is unknown (null).
+   */
+  private fun getAccessibilityTool(): Boolean? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) serviceInfo?.isAccessibilityTool else null
+
   private fun getIsEmulator(): Boolean {
     return (Build.FINGERPRINT.startsWith("generic") ||
       Build.FINGERPRINT.startsWith("unknown") ||
@@ -4158,6 +4165,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
@@ -4431,6 +4439,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)

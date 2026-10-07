@@ -278,7 +278,7 @@ final class CommandHierarchyCaptureTests: XCTestCase {
         try fixture.assertRawCaptures(count: 2)
     }
 
-    func testRequestHierarchyIfStaleIgnoresLegacySinceTimestamp() throws {
+    func testRequestHierarchyIfStaleDecodesSinceTimestamp() throws {
         let request = try JSONDecoder().decode(
             WebSocketRequest.self,
             from: Data(#"{"type":"request_hierarchy_if_stale","requestId":"legacy","sinceTimestamp":123}"#.utf8)
@@ -288,6 +288,7 @@ final class CommandHierarchyCaptureTests: XCTestCase {
             return XCTFail("Expected request_hierarchy_if_stale")
         }
         XCTAssertEqual(payload.requestId, "legacy")
+        XCTAssertEqual(payload.sinceTimestamp, 123)
     }
 
     func testUnfilteredHierarchyRequestDoesNotRecord() async throws {

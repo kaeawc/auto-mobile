@@ -1,3 +1,4 @@
+import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
@@ -1402,15 +1403,33 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    if (this.device.platform !== "ios" && pointInTapBounds(point, visibleBounds)) {
-      return point;
-    }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
     if (this.device.platform !== "ios") {
-      return ime
-        ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
-        : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const proposed = pointInTapBounds(point, visibleBounds)
+        ? point
+        : ime
+          ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
+          : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const safe = applicationWindowSafeTapPoint(
+        hierarchy,
+        target,
+        visibleBounds,
+        proposed,
+        ime && {
+          left: ime.bounds[0],
+          top: ime.bounds[1],
+          right: ime.bounds[2],
+          bottom: ime.bounds[3],
+        },
+      );
+      if (!safe.point) {
+        throw new TapTargetUnavailableError(
+          `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
+          "no-visible-tap-area",
+        );
+      }
+      return safe.point;
     }
     const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });

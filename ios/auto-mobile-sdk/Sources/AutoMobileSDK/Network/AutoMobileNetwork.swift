@@ -189,8 +189,9 @@ public final class AutoMobileNetwork: Sendable {
     /// ```
     ///
     /// Captured requests run on one long-lived inner session that shares the process-wide cookie,
-    /// credential and URL-cache storage and one connection pool; redirects and authentication
-    /// challenges (mTLS, pinning, Basic/NTLM) are forwarded to your session delegate.
+    /// credential and URL-cache storage and one connection pool; authentication challenges (mTLS,
+    /// pinning, Basic/NTLM) are forwarded to your session delegate. Redirects are followed by the
+    /// inner session and your delegate's redirect callback is not consulted.
     ///
     /// The protocol declines, so your own stack handles them uncaptured: upload tasks (data, file or
     /// stream bodies), web-socket and stream tasks, and requests carrying an `Upgrade` header.
@@ -518,7 +519,6 @@ public class AutoMobileURLProtocol: URLProtocol {
         var receivedData = Data()
         var totalBytesReceived = 0
         var stopped = false
-        var redirected = false
     }
 
     // URL loading and session-delegate callbacks may run on different queues.
@@ -909,22 +909,14 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
 
     public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
         let snapshot = state.withLock { $0 }
-        // A redirected request's hop was already recorded when it was handed to the URL loading
-        // system; its completion (the redirect response's body when the app refuses the redirect)
-        // must still reach the client but must not be recorded a second time.
-        let record: (NetworkRequestRecord) -> Void = snapshot.redirected
-            ? { _ in }
-            : { AutoMobileNetwork.shared.recordRequest($0) }
         let durationMs = snapshot.startTime.map { Date().timeIntervalSince($0) * 1000 }
         // After stopLoading() the URL loading system owns the outer task again (it cancelled the
-        // load, or followed a redirect on a new protocol instance), so this instance must never
-        // call the client. The inner session can still deliver callbacks it had already queued
-        // when the cancel landed; forwarding a followed redirect's 302 then completed the app's
-        // task with the redirect response instead of the redirect target.
+        // load), so this instance must never call the client. The inner session can still deliver
+        // callbacks it had already queued when the cancel landed.
         let client = snapshot.stopped ? nil : self.client
 
         if let error = error {
-            record(NetworkRequestRecord(
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: request.url?.absoluteString ?? "",
                 method: request.httpMethod ?? "GET",
                 durationMs: durationMs,
@@ -949,7 +941,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
                 ? AutoMobileNetwork.utf8String(from: snapshot.receivedData)
                 : nil
 
-            record(NetworkRequestRecord(
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: request.url?.absoluteString ?? "",
                 method: request.httpMethod ?? "GET",
                 requestHeaders: request.allHTTPHeaderFields,
@@ -969,58 +961,9 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
     }
 }
 
-// MARK: - Redirects and authentication challenges (issue #10139)
+// MARK: - Authentication challenges (issue #10139)
 
 extension AutoMobileURLProtocol {
-    /// Hands a redirect to the URL loading system so the app's
-    /// `urlSession(_:task:willPerformHTTPRedirection:...)` decides.
-    func forwardRedirect(
-        response: HTTPURLResponse,
-        newRequest: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        // The inner request carries our handled marker; the redirected load must start unmarked
-        // so it is captured again as its own request.
-        let redirected = Self.removingHandledMarker(from: newRequest)
-        let stopped = state.withLock { state -> Bool in
-            state.redirected = true
-            return state.stopped
-        }
-        guard !stopped else {
-            completionHandler(nil)
-            return
-        }
-        recordRedirectHop(response)
-        client?.urlProtocol(self, wasRedirectedTo: redirected, redirectResponse: response)
-        // Never follow inside the inner session: the app (or the system default) owns that choice.
-        // Do not cancel the inner task: when the app refuses the redirect, the URL loading system
-        // takes the redirect response and its body from this load; when the app follows, it stops
-        // this load itself (observed on macOS CFNetwork; cancelling here hangs the refuse case),
-        // and the stopped guards in the data-delegate callbacks keep late inner ones off the client.
-        completionHandler(nil)
-    }
-
-    private func recordRedirectHop(_ response: HTTPURLResponse) {
-        let startTime = state.withLock { $0.startTime }
-        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
-            url: request.url?.absoluteString ?? "",
-            method: request.httpMethod ?? "GET",
-            requestHeaders: request.allHTTPHeaderFields,
-            requestBodySize: request.httpBody?.count,
-            statusCode: response.statusCode,
-            responseHeaders: response.allHeaderFields as? [String: String],
-            durationMs: startTime.map { Date().timeIntervalSince($0) * 1000 }
-        ))
-    }
-
-    static func removingHandledMarker(from request: URLRequest) -> URLRequest {
-        guard let mutable = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
-            return request
-        }
-        URLProtocol.removeProperty(forKey: handledKey, in: mutable)
-        return mutable as URLRequest
-    }
-
     /// Forwards an inner-session authentication challenge to the app through the URL loading
     /// system and completes the inner challenge with whatever the app decides.
     func forwardChallenge(

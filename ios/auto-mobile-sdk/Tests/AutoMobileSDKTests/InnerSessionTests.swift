@@ -114,7 +114,6 @@ private final class AppTaskDelegate: NSObject, URLSessionTaskDelegate, @unchecke
     private let lock = NSLock()
     private var _redirects: [(response: Int, newURL: String?)] = []
     private var _challengeMethods: [String] = []
-    var followRedirects = true
     var challengeAnswer: (disposition: URLSession.AuthChallengeDisposition, credential: URLCredential?) =
         (.performDefaultHandling, nil)
 
@@ -129,7 +128,7 @@ private final class AppTaskDelegate: NSObject, URLSessionTaskDelegate, @unchecke
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
         lock.lock(); _redirects.append((response.statusCode, request.url?.absoluteString)); lock.unlock()
-        completionHandler(followRedirects ? request : nil)
+        completionHandler(request)
     }
 
     func urlSession(
@@ -147,17 +146,14 @@ private final class AppTaskDelegate: NSObject, URLSessionTaskDelegate, @unchecke
 private final class ForwardingRecordingClient: NSObject, URLProtocolClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [String] = []
-    private var _redirectedRequest: URLRequest?
     private var _challenge: URLAuthenticationChallenge?
 
     var calls: [String] { lock.lock(); defer { lock.unlock() }; return _calls }
-    var redirectedRequest: URLRequest? { lock.lock(); defer { lock.unlock() }; return _redirectedRequest }
     var challenge: URLAuthenticationChallenge? { lock.lock(); defer { lock.unlock() }; return _challenge }
 
     private func record(_ name: String) { lock.lock(); _calls.append(name); lock.unlock() }
 
-    func urlProtocol(_: URLProtocol, wasRedirectedTo request: URLRequest, redirectResponse _: URLResponse) {
-        lock.lock(); _redirectedRequest = request; lock.unlock()
+    func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) {
         record("redirect")
     }
 
@@ -191,7 +187,7 @@ private final class ChallengeOutcome: @unchecked Sendable {
 
 // MARK: - Tests
 
-/// Issues #10138 (one long-lived inner session) and #10139 (redirects, challenges, declines).
+/// Issues #10138 (one long-lived inner session) and #10139 (challenges, declines).
 /// The end-to-end cases drive the real URL loading system against an in-process loopback server;
 /// nothing leaves the machine.
 final class InnerSessionTests: XCTestCase {
@@ -330,79 +326,32 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertEqual(builds.withLock { $0 }, 1)
     }
 
-    // MARK: #10139 redirects
+    // MARK: Redirects
 
-    private func redirectServer() throws {
+    // The inner session follows redirects itself and the app's redirect delegate is not consulted.
+    // Forwarding redirects to the app's delegate is deferred to #10139: handing the redirect to the
+    // URL loading system raced the inner 302's completion and could trap `URLSession.data(for:)`.
+
+    func testRedirectIsFollowedByTheInnerSessionAndTheFinalResponseIsCaptured() async throws {
         try startServer { request in
             request.path == "/old"
                 ? .init(status: 302, headers: ["Location": "/new"], body: "moved")
                 : .init(body: "final")
         }
-    }
-
-    func testRedirectIsOfferedToTheAppDelegateAndFollowedWhenItAgrees() async throws {
-        try redirectServer()
+        let collector = EventCollectorBox()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { collector.set($0) }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
         let delegate = AppTaskDelegate()
 
         let (data, response) = try await get("old", delegate: delegate)
 
-        XCTAssertEqual(delegate.redirects.count, 1)
-        XCTAssertEqual(delegate.redirects.first?.response, 302)
-        XCTAssertEqual(delegate.redirects.first?.newURL, baseURL.appendingPathComponent("new").absoluteString)
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertEqual(text(data), "final")
-    }
-
-    func testRedirectRefusedByTheAppDelegateSurfacesTheRedirectResponse() async throws {
-        try redirectServer()
-        let delegate = AppTaskDelegate()
-        delegate.followRedirects = false
-
-        let (_, response) = try await get("old", delegate: delegate)
-
-        XCTAssertEqual(response.statusCode, 302, "the app declined the redirect, so it receives the 302")
-        XCTAssertEqual(response.value(forHTTPHeaderField: "Location"), "/new")
-        XCTAssertEqual(server?.requests.map(\.path), ["/old"], "the redirect target must not be requested")
-    }
-
-    func testRedirectedLoadIsCapturedAsItsOwnRequest() async throws {
-        try redirectServer()
-        let collector = EventCollectorBox()
-        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { collector.set($0) }
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
-
-        _ = try await get("old", delegate: AppTaskDelegate())
-
+        XCTAssertEqual(server?.requests.map(\.path), ["/old", "/new"])
+        XCTAssertTrue(delegate.redirects.isEmpty, "the app's redirect delegate is not consulted")
         buffer.flush()
         let events = collector.events.compactMap { $0 as? SdkNetworkRequestEvent }
-        XCTAssertEqual(events.map(\.statusCode), [302, 200])
-        XCTAssertEqual(events.map(\.url), [
-            baseURL.appendingPathComponent("old").absoluteString,
-            baseURL.appendingPathComponent("new").absoluteString,
-        ])
-    }
-
-    func testForwardRedirectStripsHandledMarkerAndNeverFollowsInside() throws {
-        let client = ForwardingRecordingClient()
-        let request = URLRequest(url: URL(string: "https://api.example.com/old")!)
-        let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
-        let marked = NSMutableURLRequest(url: URL(string: "https://api.example.com/new")!)
-        URLProtocol.setProperty(true, forKey: AutoMobileURLProtocol.handledKey, in: marked)
-        let response = HTTPURLResponse(
-            url: request.url!, statusCode: 302, httpVersion: nil, headerFields: ["Location": "/new"]
-        )!
-        let followed = OSAllocatedUnfairLock<[URLRequest?]>(initialState: [])
-
-        proto.forwardRedirect(response: response, newRequest: marked as URLRequest) { next in
-            followed.withLock { $0.append(next) }
-        }
-
-        XCTAssertEqual(client.calls, ["redirect"])
-        let redirected = try XCTUnwrap(client.redirectedRequest)
-        XCTAssertNil(URLProtocol.property(forKey: AutoMobileURLProtocol.handledKey, in: redirected))
-        XCTAssertTrue(AutoMobileURLProtocol.canInit(with: redirected), "the redirected load is captured again")
-        XCTAssertEqual(followed.withLock { $0.count }, 1)
-        XCTAssertNil(followed.withLock { $0 }[0], "the inner session must not follow the redirect itself")
+        XCTAssertEqual(events.map(\.statusCode), [200], "one record carrying the final response")
     }
 
     // MARK: #10139 authentication challenges
@@ -552,9 +501,8 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertEqual(outcome.outcomes.map(\.0), [.performDefaultHandling])
     }
 
-    /// When the app follows a redirect, the URL loading system stops this load and starts the
-    /// target on a new instance; the inner session can still deliver the 302 it had queued. Those
-    /// late callbacks must never reach the client, or the app's task completes with the 302.
+    /// After stopLoading() the URL loading system owns the outer task again; the inner session can
+    /// still deliver callbacks it had already queued. Those late callbacks must never reach the client.
     func testInnerCallbacksQueuedBeforeStopLoadingNeverReachTheClient() {
         let client = ForwardingRecordingClient()
         let url = URL(string: "https://api.example.com/old")!
@@ -564,12 +512,8 @@ final class InnerSessionTests: XCTestCase {
         let task = session.dataTask(with: url) // never resumed
         let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: nil, headerFields: ["Location": "/new"])!
         let disposition = OSAllocatedUnfairLock<[URLSession.ResponseDisposition]>(initialState: [])
-        let followed = OSAllocatedUnfairLock<[URLRequest?]>(initialState: [])
 
         proto.stopLoading()
-        proto.forwardRedirect(response: response, newRequest: URLRequest(url: url)) { next in
-            followed.withLock { $0.append(next) }
-        }
         proto.urlSession(session, dataTask: task, didReceive: response) { result in
             disposition.withLock { $0.append(result) }
         }
@@ -579,8 +523,6 @@ final class InnerSessionTests: XCTestCase {
 
         XCTAssertEqual(client.calls, [], "a stopped protocol must not call its client")
         XCTAssertEqual(disposition.withLock { $0 }, [.cancel])
-        XCTAssertEqual(followed.withLock { $0.count }, 1)
-        XCTAssertNil(followed.withLock { $0 }[0], "the inner session must not follow the redirect itself")
     }
 
     // MARK: #10139 requests the protocol declines

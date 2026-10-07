@@ -96,19 +96,12 @@ final class InnerSessionHost: NSObject, URLSessionDataDelegate, @unchecked Senda
         releaseOwner(for: task)?.urlSession(session, task: task, didCompleteWithError: error)
     }
 
-    func urlSession(
-        _: URLSession,
-        task: URLSessionTask,
-        willPerformHTTPRedirection response: HTTPURLResponse,
-        newRequest request: URLRequest,
-        completionHandler: @escaping (URLRequest?) -> Void
-    ) {
-        guard let owner = owner(for: task) else {
-            completionHandler(nil)
-            return
-        }
-        owner.forwardRedirect(response: response, newRequest: request, completionHandler: completionHandler)
-    }
+    // Redirects: no `willPerformHTTPRedirection` here on purpose, so the inner session follows
+    // redirects itself and only the final response reaches the app; the app's redirect delegate is
+    // not consulted. Forwarding redirects to the URL loading system raced: the inner 302 could
+    // finish the load before the app's delegate decided, and a follow then trapped
+    // `URLSession.data(for:)` with neither a response nor an error. Redirect-delegate forwarding
+    // is deferred to #10139.
 
     func urlSession(
         _: URLSession,

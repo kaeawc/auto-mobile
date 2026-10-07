@@ -9,7 +9,8 @@ import type { SearchableEntry } from "../../utility/SearchableNode";
 import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
-import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
+import { isFullyCoveredByApplicationWindow } from "../ApplicationWindowCover";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
 import {
@@ -192,8 +193,10 @@ interface SkeletonAccumulator {
   affordances: Set<Affordance>;
   checked?: boolean;
   enabled?: false;
-  /** The Android IME covers every coordinate action on this app row. */
+  /** The Android IME or an application window covers every coordinate action on this app row. */
   occluded?: true;
+  /** First element merged into this row; resolves its owning window for cover checks. */
+  target?: Element;
   /**
    * Root/window ancestry, when the collector supplied it (issue #5881). Present
    * on real captures; absent on hand-built fixtures and non-provenance producers,
@@ -281,6 +284,7 @@ function accumulateByIdentity(
     if (acc.provenance === undefined) {
       acc.provenance = getElementProvenance(el);
     }
+    acc.target ??= el;
     for (const affordance of affordances) {
       acc.affordances.add(affordance);
     }
@@ -1391,6 +1395,29 @@ function markAppRowsCoveredByIme(
 }
 
 /**
+ * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
+ * row's window covers it, using the same hit test as the tap path (issue #10481).
+ */
+function markAppRowsCoveredByApplicationWindow(
+  kept: SkeletonAccumulator[],
+  hierarchy: ViewHierarchyResult | undefined,
+): void {
+  if (!hierarchy?.windows?.length) {
+    return;
+  }
+  for (const acc of kept) {
+    if (acc.occluded || !acc.target || acc.affordances.size === 0) {
+      continue;
+    }
+    const [left, top, right, bottom] = acc.bounds;
+    if (isFullyCoveredByApplicationWindow(hierarchy, acc.target, { left, top, right, bottom })) {
+      acc.affordances.clear();
+      acc.occluded = true;
+    }
+  }
+}
+
+/**
  * Project the flattened `elements` block into the actionable `skeleton` and
  * informational `context` arrays (issue #6221 item 1): merge + dedup the
  * categories, apply the keep rule, split on affordance count, and collapse
@@ -1401,6 +1428,7 @@ function markAppRowsCoveredByIme(
 export function projectSkeleton(
   elements: ObserveElements,
   viewport?: Pick<ObserveResult["screenSize"], "width" | "height">,
+  androidHierarchy?: ViewHierarchyResult,
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
   const accumulators = accumulateByIdentity(elements, ime);
@@ -1418,6 +1446,7 @@ export function projectSkeleton(
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
+  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 

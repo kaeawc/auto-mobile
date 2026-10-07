@@ -116,3 +116,22 @@ Pixel tolerances (per-channel and max differing-pixel ratio) are set per test vi
 | `ScreenshotEnvironment.kt`  | Reads flags, applies OS gating, records or delegates comparison.        |
 | `ScreenshotComparator.kt`   | Pure record/compare/diff logic (no Compose; unit-tested for speed).     |
 | `ComponentScreenshotTest.kt`| Starter baselines for representative components (light + dark).         |
+
+## Overlay renderer snapshots (control-proxy)
+
+`control-proxy` snapshots the overlay renderer (`OverlaySpecContent`) off-device with the same flags,
+OS gating, `pending` flow and tolerances (#10445). The tests live in
+`control-proxy/src/test/kotlin/.../ctrlproxy/overlay/screenshot/` and render the shared specs in
+`test/fixtures/overlay-spec/valid/` through Robolectric's native graphics mode
+(`@GraphicsMode(NATIVE)`), so no screenshot library or device is needed. Baselines live in
+`control-proxy/src/test/resources/screenshots/overlay/` and are committed directly to git (the
+`android/control-proxy/src/**/*.png` rule in `.gitattributes` keeps them out of LFS).
+
+Record them with the same workflow, choosing module `control-proxy` and test filter
+`*OverlaySpecContentScreenshotTest`; the PR's `kotlin-code-coverage` job (Linux) verifies them. To
+look at the renders locally on another OS (not for committing):
+
+```bash
+./gradlew -p android :control-proxy:testDebugUnitTest --tests '*OverlaySpecContentScreenshotTest' \
+  -Dscreenshot.record=true -Dscreenshot.reference.os=any
+```

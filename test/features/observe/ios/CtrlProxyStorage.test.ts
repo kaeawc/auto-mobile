@@ -133,6 +133,7 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("list_preference_files");
+        expect(sentMsg).not.toHaveProperty("timeoutMs");
         expect(sentMsg.appId).toBe("com.example.app");
         expect(typeof sentMsg.requestId).toBe("string");
 
@@ -350,6 +351,8 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("set_preference");
+        // Mutating storage commands carry the wait budget so an expired queued one is dropped (#10500).
+        expect(sentMsg.timeoutMs).toBe(5000);
         expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
@@ -529,6 +532,8 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("remove_preference");
+        // Mutating storage commands carry the wait budget so an expired queued one is dropped (#10500).
+        expect(sentMsg.timeoutMs).toBe(5000);
         expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
@@ -606,6 +611,8 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("clear_preferences");
+        // Mutating storage commands carry the wait budget so an expired queued one is dropped (#10500).
+        expect(sentMsg.timeoutMs).toBe(5000);
         expect(sentMsg.appId).toBe("com.example.app");
         expect(sentMsg.fileName).toBe("com.example.settings");
         expect(sentMsg.sessionId).toBe("session-1");

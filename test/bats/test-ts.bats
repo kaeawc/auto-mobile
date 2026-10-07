@@ -509,6 +509,30 @@ EOF
   [[ "$output" == *"--shards=2"* ]]
 }
 
+@test "macOS CI runner defaults to three unit workers regardless of core count" {
+  for core_count in 3 4 12; do
+    run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=macOS \
+      UNAME_S=Darwin STUB_NPROC_CORES="$core_count" bash "$SCRIPT" unit
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"test-ts: unit lane cores=$core_count workers=3"* ]]
+    [[ "$output" == *"--shards=3"* ]]
+  done
+}
+
+@test "explicit worker count overrides the macOS CI runner default" {
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=macOS \
+    UNAME_S=Darwin STUB_NPROC_CORES=12 AUTOMOBILE_UNIT_TEST_WORKERS=5 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"workers=5"* ]]
+}
+
+@test "Linux CI runner keeps the core-based unit worker default" {
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=Linux \
+    UNAME_S=Linux STUB_NPROC_CORES=12 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"workers=10"* ]]
+}
+
 @test "Linux uses two unit shards on three cores" {
   run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     UNAME_S=Linux STUB_NPROC_CORES=3 bash "$SCRIPT" unit

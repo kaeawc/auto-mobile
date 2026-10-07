@@ -65,6 +65,8 @@ export interface GestureTimingResult extends BaseResult {
  */
 export interface ActionTimingResult extends BaseResult {
   action: string;
+  /** Android IME next/previous only: focus was moved directly instead of dispatching the editor action. */
+  approximated?: boolean;
 }
 
 // =============================================================================

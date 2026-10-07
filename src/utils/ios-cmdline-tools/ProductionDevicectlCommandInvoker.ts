@@ -86,8 +86,10 @@ export class ProductionDevicectlCommandInvoker
         outputPath,
         "--quiet",
       ]);
-      const data: unknown = JSON.parse(await this.options.files.readFile(outputPath));
-      return this.classifyOutput(data, execFailure);
+      const text = await this.options.files.readFile(outputPath);
+      const data: unknown = JSON.parse(text);
+      const result = this.classifyOutput(data, execFailure);
+      return result.kind === "ok" ? { kind: "ok", output: text } : result;
     } catch (error) {
       // A missing or malformed output file must not hide the command's own failure.
       const failure = execFailure ?? error;

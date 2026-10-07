@@ -55,3 +55,10 @@ export function createCoreDeviceProbeHolder(
 ): CoreDeviceProbeHolder {
   return lazyHolder(options.factory ?? (() => createProductionCoreDeviceProbe()));
 }
+
+/**
+ * Process-wide lazy holder for feature call sites that have no composition root of
+ * their own (iOS per-panel screenshots). Nothing is constructed until first use, and
+ * tests inject their own holder or fake source instead of resolving this one.
+ */
+export const sharedCoreDeviceProbeHolder: CoreDeviceProbeHolder = createCoreDeviceProbeHolder();

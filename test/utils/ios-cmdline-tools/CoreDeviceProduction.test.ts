@@ -91,7 +91,10 @@ describe("production CoreDevice wiring", () => {
   test("accepts captured success only after successful exec", async () => {
     const h = harness("info-displays-booted-simulator");
     h.setFailure();
-    expect(await h.invoker.invoke("sim-1", "info displays")).toEqual({ kind: "ok" });
+    expect(await h.invoker.invoke("sim-1", "info displays")).toEqual({
+      kind: "ok",
+      output: capture("info-displays-booted-simulator"),
+    });
     h.setFailure(new Error("exit 1"));
     expect((await h.invoker.invoke("sim-1", "info displays")).kind).toBe("failed");
     h.setOutput("invalid JSON");
@@ -236,6 +239,7 @@ describe("production CoreDevice wiring", () => {
     expect(h.calls.map((call) => call.args)).toEqual([["devicectl", "--version"]]);
     expect(await probe.checkSimulatorCommand("sim-1", "info displays", [651, 0, 0])).toEqual({
       kind: "supported",
+      output: capture("info-displays-booted-simulator"),
     });
     expect(h.calls.filter((call) => call.args.includes("--version"))).toHaveLength(1);
     failure = true;

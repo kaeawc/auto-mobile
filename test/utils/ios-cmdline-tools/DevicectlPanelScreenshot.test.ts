@@ -288,12 +288,12 @@ describe("DevicectlDisplayScreenshotCapture", () => {
       "--device",
       "sim-1",
       "--destination",
-      join("/fake/automobile-devicectl-shot-1", "panel.png"),
+      join("/fake", "automobile-devicectl-shot-1", "panel.png"),
       "--display-unique-id",
       "panel-id",
     ]);
     expect(h.calls[0].options).toMatchObject({ timeoutMs: 10_000, killSignal: "SIGKILL" });
-    expect(h.removed).toEqual(["/fake/automobile-devicectl-shot-1"]);
+    expect(h.removed).toEqual([join("/fake", "automobile-devicectl-shot-1")]);
   });
 
   test("rejects on its deadline, aborts the command, and still removes the directory", async () => {

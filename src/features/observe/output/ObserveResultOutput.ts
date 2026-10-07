@@ -9,6 +9,7 @@ import {
   projectSkeletonReplayRows,
 } from "./SkeletonProjection";
 import { DefaultObserveElementCollector } from "../ObserveElementCollector";
+import { getSearchableEntries } from "./elementProvenance";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
@@ -214,8 +215,18 @@ export function projectSanitizedObserveSkeleton(
  * is never mutated" contract holds; only `out` (the clone) is edited.
  */
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
-  const { skeleton, context, keyboard } = source.elements
-    ? projectSkeleton(source.elements, source.screenSize)
+  // Cache structuredClone and full-output JSON cloning discard the collector's
+  // provenance. Restore the complete candidate set and ancestry together from
+  // the capture, just as diff replay does, without mutating the cached result.
+  const elements =
+    source.elements && !getSearchableEntries(source.elements) && source.viewHierarchy
+      ? new DefaultObserveElementCollector().collect(
+          source.viewHierarchy,
+          isIosObservation(source) ? "ios" : "android",
+        )
+      : source.elements;
+  const { skeleton, context, keyboard } = elements
+    ? projectSkeleton(elements, source.screenSize)
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
   if (keyboard) {

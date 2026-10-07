@@ -6,7 +6,7 @@ import {
 import { ElementResolver } from "../../utility/ElementResolver";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { SearchableEntry } from "../../utility/SearchableNode";
-import { toSearchable } from "../../utility/SearchableNode";
+import { isImeKeyEntry, toSearchable } from "../../utility/SearchableNode";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { compareSelectionRank, selectableCandidates } from "../../utility/selectionRank";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
@@ -603,12 +603,66 @@ export function assignDuplicateIndexes(
     }
   }
   const selectionViewport = serverConfig.isRawElementSearchEnabled() ? undefined : viewport;
+  // A single exact source cannot produce multiple selectable targets. Count
+  // potential exact matches once; uncertain/fallback selectors still resolve
+  // over the complete capture so hidden promoted matches keep their slots.
+  const exactCounts = exactSelectorMatchCounts(nodes ?? []);
   for (const [elementId, group] of byElementId) {
+    if (canSkipSelectorGroup(group, exactCounts.byId.get(elementId), nodes !== undefined)) {
+      continue;
+    }
     indexSelectorGroup(group, { elementId }, selectionViewport, nodes);
   }
   for (const [text, group] of byLabel) {
+    if (
+      canSkipSelectorGroup(
+        group,
+        exactCounts.byText.get(text.replace(/\s+/g, " ")),
+        nodes !== undefined,
+        true,
+      )
+    ) {
+      continue;
+    }
     indexSelectorGroup(group, { text }, selectionViewport, nodes, true);
   }
+}
+
+function canSkipSelectorGroup(
+  group: readonly SkeletonAccumulator[],
+  exactCount: number | undefined,
+  hasCapture: boolean,
+  labelOnly = false,
+): boolean {
+  if (labelOnly && group.every((entry) => entry.elementId !== undefined)) {
+    return true;
+  }
+  return group.length < 2 && (!hasCapture || exactCount === 1);
+}
+
+/** Conservative raw-match counts, before promotion, visibility and copy dedup. */
+function exactSelectorMatchCounts(nodes: readonly SearchableEntry[]) {
+  const byId = new Map<string, number>();
+  const byText = new Map<string, number>();
+  for (const node of nodes) {
+    if (isImeKeyEntry(node)) {
+      continue;
+    }
+    for (const id of new Set([node.nativeId, node.nodeKey])) {
+      if (id !== undefined) {
+        byId.set(id, (byId.get(id) ?? 0) + 1);
+      }
+    }
+    const texts = new Set(
+      node.textFields.map((field) =>
+        normalizeQuotes(field).trim().replace(/\s+/g, " ").toLowerCase(),
+      ),
+    );
+    for (const text of texts) {
+      byText.set(text, (byText.get(text) ?? 0) + 1);
+    }
+  }
+  return { byId, byText };
 }
 
 /** Real captures use the resolver's complete selectable set, including promoted owners. */

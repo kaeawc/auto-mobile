@@ -9,7 +9,7 @@ import {
   type SimCtlFileSystem,
 } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../../src/utils/logger";
-import { captureIosPanelScreenshot } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
+import { captureIosPanelScreenshotWith } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
 import type { BootedDevice } from "../../../src/models";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 import { isAbsolute, join, resolve, sep } from "node:path";
@@ -30,6 +30,28 @@ const device: BootedDevice = {
     "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
   ),
 };
+
+// These suites pin the simctl path, so CoreDevice always declines (as on a host without it).
+const declinedDevicectl = { capturePanel: async () => undefined };
+
+function capturePanel(
+  target: BootedDevice,
+  hierarchy: Parameters<typeof captureIosPanelScreenshotWith>[0]["hierarchy"],
+  simctl: Parameters<typeof captureIosPanelScreenshotWith>[0]["simctl"],
+  runnerCapture: Parameters<typeof captureIosPanelScreenshotWith>[0]["runnerCapture"],
+  signal?: AbortSignal,
+  activePanelKey?: string,
+) {
+  return captureIosPanelScreenshotWith({
+    device: target,
+    hierarchy,
+    simctl,
+    devicectl: declinedDevicectl,
+    runnerCapture,
+    signal,
+    activePanelKey,
+  });
+}
 
 function png(width: number, height: number): Buffer {
   const buffer = Buffer.alloc(24);
@@ -491,7 +513,7 @@ test("missing output file still falls back to runner with its typed warning", as
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   let fallback = 0;
   try {
-    const result = await captureIosPanelScreenshot(
+    const result = await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       h.simctl,
@@ -537,7 +559,7 @@ test("pre-aborted caller never spawns and still removes its private directory", 
 
 test("multi-panel screenshot falls back with a warning when simctl returns cover dimensions", async () => {
   let fallback = 0;
-  const result = await captureIosPanelScreenshot(
+  const result = await capturePanel(
     device,
     { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
     { screenshot: async () => png(1398, 2034) },
@@ -554,7 +576,7 @@ test("multi-panel screenshot selects the inner panel from live hierarchy pixels"
   const captures: string[] = [];
   // Synthetic PNG header using the issue-reported landscape dimensions.
   const issueReportedPanelPng = png(2853, 2007);
-  const result = await captureIosPanelScreenshot(
+  const result = await capturePanel(
     device,
     { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2007, pixelHeight: 2853 },
     {
@@ -577,7 +599,7 @@ test("inner panel rejects a cover-sized PNG despite matching hierarchy points at
     width: 2007,
     height: 2853,
   });
-  const result = await captureIosPanelScreenshot(
+  const result = await capturePanel(
     device,
     {
       updatedAt: 0,
@@ -646,7 +668,7 @@ test("panel capture failure falls back to the runner and the warning names the c
   const caller = new AbortController();
   const runnerResult = { success: true, data: "runner" };
   try {
-    const result = await captureIosPanelScreenshot(
+    const result = await capturePanel(
       device,
       // values reported in issue #8379's 2026-10-01 device verification
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
@@ -671,7 +693,7 @@ test("panel capture logs one empty-output diagnostic before runner fallback", as
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   let fallback = 0;
   try {
-    await captureIosPanelScreenshot(
+    await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       { screenshot: async () => Buffer.alloc(0) },
@@ -696,7 +718,7 @@ test("panel capture logs one non-image diagnostic with the first 16 bytes before
   let fallback = 0;
   const nonImage = Buffer.alloc(32, 0xab);
   try {
-    await captureIosPanelScreenshot(
+    await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       { screenshot: async () => nonImage },
@@ -717,7 +739,7 @@ test("panel capture logs one non-image diagnostic with the first 16 bytes before
 test("panel capture includes typed simctl failure diagnostics in one warning", async () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    const result = await captureIosPanelScreenshot(
+    const result = await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       {
@@ -749,7 +771,7 @@ test("panel capture includes typed simctl failure diagnostics in one warning", a
 test("panel capture distinguishes timeout and caller abort in one warning each", async () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    const timeoutResult = await captureIosPanelScreenshot(
+    const timeoutResult = await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       {
@@ -770,7 +792,7 @@ test("panel capture distinguishes timeout and caller abort in one warning each",
     warn.mockClear();
     const caller = new AbortController();
     caller.abort(new Error("caller stopped"));
-    const callerResult = await captureIosPanelScreenshot(
+    const callerResult = await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       {
@@ -798,7 +820,7 @@ test("valid panel PNG is accepted without a warning", async () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const frame = png(2853, 2007);
   try {
-    const result = await captureIosPanelScreenshot(
+    const result = await capturePanel(
       device,
       { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
       { screenshot: async () => frame },

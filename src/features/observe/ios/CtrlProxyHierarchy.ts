@@ -236,18 +236,19 @@ export class CtrlProxyHierarchy {
       );
       // A client-invalidated tree follows a state-changing action, and a
       // SpringBoard tree may have gained a system-owned dialog without emitting
-      // a hierarchy update. On iOS, `request_hierarchy_if_stale` itself always
-      // captures fresh, with no cache or timestamp comparison. Unlike Android,
-      // this client does not send `sinceTimestamp`.
-      const forceCapture = this.needsForcedCapture(
+      // a hierarchy update. Both request types capture fresh on iOS. The client
+      // sends `sinceTimestamp` on `_if_stale` requests when a minimum timestamp
+      // is supplied, but the runner does not use it to reuse a cached capture.
+      const captureOptions = this.hierarchyCaptureOptions(
         cacheMissing,
         cacheInvalidated,
         cachedIsSpringboard,
         cacheMissesMinTimestamp,
+        minTimestamp,
       );
       const result = await this.requestHierarchySync(perf, false, signal, timeout, false, {
         failureSink: requestFailure,
-        forceCapture,
+        ...captureOptions,
       });
       if (result) {
         if (result.hierarchy.packageName) {
@@ -255,8 +256,8 @@ export class CtrlProxyHierarchy {
         }
         return {
           hierarchy: result.hierarchy,
-          [iosHierarchyAcquisition]: "device",
-          fresh: true,
+          [iosHierarchyAcquisition]: result[iosHierarchyAcquisition],
+          fresh: result.fresh !== false,
           updatedAt: result.hierarchy.updatedAt,
           perfTiming: result.perfTiming,
           frameContext: result.frameContext,
@@ -541,6 +542,7 @@ export class CtrlProxyHierarchy {
       failureSink?: { value?: HierarchyRequestFailure };
       forceCapture?: boolean;
       observerMode?: boolean;
+      sinceTimestamp?: number;
     },
   ): Promise<CtrlProxySyncedHierarchy | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
@@ -574,6 +576,7 @@ export class CtrlProxyHierarchy {
     );
     const promise = this.context.requestManager.register<{
       hierarchy?: XCTestHierarchy;
+      servedFromCache?: boolean;
       perfTiming?: CtrlProxyPerfTiming;
       frameContext?: string;
       error?: string;
@@ -665,13 +668,18 @@ export class CtrlProxyHierarchy {
     }
   }
 
-  private needsForcedCapture(
+  private hierarchyCaptureOptions(
     cacheMissing: boolean,
     cacheInvalidated: boolean,
     cachedIsSpringboard: boolean,
     cacheMissesMinTimestamp: boolean,
-  ): boolean {
-    return cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp;
+    minTimestamp: number,
+  ): { forceCapture: boolean; sinceTimestamp?: number } {
+    return {
+      forceCapture:
+        cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp,
+      sinceTimestamp: minTimestamp === 0 ? undefined : minTimestamp,
+    };
   }
 
   private observerConnectionStatus() {
@@ -701,11 +709,11 @@ export class CtrlProxyHierarchy {
   private hierarchyRequestMessage(
     requestId: string,
     disableAllFiltering: boolean | undefined,
-    requestOptions: { forceCapture?: boolean } | undefined,
+    requestOptions: { forceCapture?: boolean; sinceTimestamp?: number } | undefined,
   ): string {
     // Keep the literal discriminator at the serialization sink for the wire-parity scanner.
-    // iOS `request_hierarchy_if_stale` always performs a fresh capture, just like
-    // `request_hierarchy`; it does not compare timestamps or send `sinceTimestamp` (unlike Android).
+    // The client sends an available `sinceTimestamp` only on `_if_stale` requests.
+    // The iOS runner accepts it but always captures fresh, just like `request_hierarchy`.
     return JSON.stringify({
       type:
         requestOptions?.forceCapture || disableAllFiltering
@@ -713,6 +721,10 @@ export class CtrlProxyHierarchy {
           : "request_hierarchy_if_stale",
       requestId,
       disableAllFiltering: disableAllFiltering ?? false,
+      sinceTimestamp:
+        requestOptions?.forceCapture || disableAllFiltering
+          ? undefined
+          : requestOptions?.sinceTimestamp,
     });
   }
 
@@ -735,14 +747,24 @@ export class CtrlProxyHierarchy {
   }
 
   private acceptHierarchyResponse(
-    result: { hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming; frameContext?: string },
+    result: {
+      hierarchy: XCTestHierarchy;
+      servedFromCache?: boolean;
+      perfTiming?: CtrlProxyPerfTiming;
+      frameContext?: string;
+    },
     requestOptions: { observerMode?: boolean } | undefined,
   ): CtrlProxySyncedHierarchy {
     this.observeReceivedHierarchy(result.hierarchy);
+    // A cached runner reply has not re-verified the screen. Use the existing cache
+    // acquisition class so it cannot satisfy a caller requiring a device capture.
+    const acquisition = result.servedFromCache === true ? "client-cache" : "device";
+    const fresh = result.servedFromCache !== true;
     if (this.isObserverRequest(requestOptions)) {
       return {
         hierarchy: result.hierarchy,
-        [iosHierarchyAcquisition]: "device",
+        [iosHierarchyAcquisition]: acquisition,
+        fresh,
         perfTiming: result.perfTiming,
         frameContext: result.frameContext,
       };
@@ -753,8 +775,14 @@ export class CtrlProxyHierarchy {
     const newCache: CachedHierarchy = {
       hierarchy: result.hierarchy,
       receivedAt: now,
-      captureReceivedAt: this.captureReceivedAt(result.hierarchy, previous, now),
-      fresh: true,
+      captureReceivedAt: result.servedFromCache
+        ? Math.min(
+            result.hierarchy.updatedAt,
+            this.captureReceivedAt(result.hierarchy, previous, now),
+          )
+        : this.captureReceivedAt(result.hierarchy, previous, now),
+      // Clock skew cannot establish freshness for an unverified runner cache.
+      fresh,
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };
@@ -762,7 +790,8 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: result.hierarchy,
-      [iosHierarchyAcquisition]: "device",
+      [iosHierarchyAcquisition]: acquisition,
+      fresh,
       perfTiming: result.perfTiming,
       frameContext: result.frameContext,
     };

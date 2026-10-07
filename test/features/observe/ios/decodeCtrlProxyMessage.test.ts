@@ -76,6 +76,20 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded).toEqual({ requestId: REQ, result: { hierarchy: data, perfTiming } });
   });
 
+  test.each([true, false])(
+    "hierarchy_update retains the optional runner cache marker %p",
+    (servedFromCache) => {
+      expect(
+        decodeCtrlProxyMessage(msg({ type: "hierarchy_update", servedFromCache }))?.result,
+      ).toEqual({
+        hierarchy: undefined,
+        perfTiming: undefined,
+        frameContext: undefined,
+        servedFromCache,
+      });
+    },
+  );
+
   test("hierarchy failure preserves the Swift runner error envelope", () => {
     // Built from WebSocketResponse.error in
     // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.

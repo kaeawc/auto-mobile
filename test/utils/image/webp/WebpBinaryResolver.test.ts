@@ -300,6 +300,18 @@ describe("defaultWebpBinaryFileSystem", () => {
       ).resolves.toBe(false);
     },
   );
+
+  test.skipIf(!hostSupportsPosixExecuteBits)(
+    "rejects a non-executable regular file on POSIX hosts",
+    async () => {
+      // package.json is a checked-in regular file (mode 0644), never executable.
+      const nonExecutable = path.join(import.meta.dir, "../../../../package.json");
+
+      await expect(
+        defaultWebpBinaryFileSystem.isExecutableFile(nonExecutable, "darwin"),
+      ).resolves.toBe(false);
+    },
+  );
 });
 
 /**

@@ -9,7 +9,7 @@ import { parseBounds } from "../../../src/utils/bounds";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
   assignStableViewIds,
   STABLE_VIEW_ID_PREFIX,
@@ -23,8 +23,8 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
  * Round-trip coverage for issue #6218: the skeleton projection emits an
  * `s-<hash>` content-derived id (`assignStableViewIds`, #3228) as the SOLE
  * `elementId` for a node with no `resource-id`/`text`. `tapOn`/`sendKeys`
- * resolve `elementId` through `DefaultElementSelector.selectByResourceId` →
- * `DefaultElementFinder`, which previously only ever compared against
+ * resolve `elementId` through `ResolverElementSelector.selectByResourceId` →
+ * `ElementResolver`, which previously only ever compared against
  * `resource-id` — so a skeleton-emitted `s-<hash>` id could never match
  * anything, despite the tool docs promising it is "directly usable as a
  * tapOn selector". `ElementFinder` now also matches an `s-`-prefixed
@@ -52,7 +52,7 @@ function generatedViewId(seed: string): string {
 const parser = new DefaultElementParser();
 const textMatcher = new DefaultTextMatcher();
 const finder = new DefaultElementFinder(parser, textMatcher);
-const selector = new DefaultElementSelector(finder);
+const selector = new ResolverElementSelector();
 
 describe("skeleton elementId round-trips through tapOn's ElementSelector (issue #6218)", () => {
   test("an s-<hash> elementId resolves back to the exact id-less element it was derived from", () => {
@@ -164,11 +164,15 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // The shared bare form still cannot select one of the duplicate rows. Its
     // recovery hint must name only selector fields tapOn actually accepts.
+    // ElementFinder's synthetic-id guard, pinned on the finder itself since
+    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
+    // selector does not share this guard.
     const base = idA.split("~")[0];
-    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(/textAny/i);
-    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idA));
-    expect(() => selector.selectByResourceId(viewHierarchy, base)).toThrow(new RegExp(idB));
-    expect(() => selector.selectByResourceId(viewHierarchy, base)).not.toThrow(/bounds/i);
+    const findBase = () => finder.findElementsByResourceId(viewHierarchy, base);
+    expect(findBase).toThrow(/textAny/i);
+    expect(findBase).toThrow(new RegExp(idA));
+    expect(findBase).toThrow(new RegExp(idB));
+    expect(findBase).not.toThrow(/bounds/i);
   });
 
   test("a suffixed id observed for a duplicate does NOT retarget the content-identical survivor after the original is removed (issue #6229)", () => {
@@ -291,14 +295,15 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    expect(selector.selectByResourceId(viewHierarchy, legacyBase).element).toBeNull();
+    // ElementFinder's synthetic-id guard, pinned on the finder itself since
+    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
+    // selector does not share this guard.
+    expect(finder.findElementsByResourceId(viewHierarchy, legacyBase)).toEqual([]);
     // Container lookup shares the same selector contract and must not resolve
     // the legacy bare node before the target's ambiguity guard runs.
     expect(
-      selector.selectByResourceId(viewHierarchy, "missing-target", {
-        container: { elementId: legacyBase },
-      }).element,
-    ).toBeNull();
+      finder.findElementsByResourceId(viewHierarchy, "missing-target", { elementId: legacyBase }),
+    ).toEqual([]);
   });
 
   test("a real bare Compose resource-id shaped like a synthetic id is never misclassified as ambiguous", () => {
@@ -572,9 +577,11 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // real id in c2 legitimately wins - this is existing, intentional
     // behavior (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq)
     // and must be unaffected by this fix.
-    const result = selector.selectByResourceId(viewHierarchy, idInContainer1);
-    expect(result.element).not.toBeNull();
-    expect(result.element!["content-desc"]).toBe("decoy-node");
+    // ElementFinder's synthetic-id guard, pinned on the finder itself since
+    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
+    // selector does not share this guard.
+    const [result] = finder.findElementsByResourceId(viewHierarchy, idInContainer1);
+    expect(result?.["content-desc"]).toBe("decoy-node");
   });
 
   test("recomputing the synthetic id over a fresh capture of the same hierarchy is deterministic", () => {

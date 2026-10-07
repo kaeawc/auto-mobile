@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
@@ -8,9 +7,9 @@ import type { ViewHierarchyResult } from "../../../src/models";
 
 const bounds = (top: number, bottom: number) => ({ left: 0, top, right: 100, bottom });
 const finder = new DefaultElementFinder();
-const selector = new DefaultElementSelector(finder, () => 0);
+const selector = new ResolverElementSelector();
 
-describe("legacy selector compatibility with the shared resolution contract", () => {
+describe("resolver selector compatibility with the shared resolution contract", () => {
   test("container text uses an exact match before a partial row and falls back when absent", () => {
     const partial = {
       text: "Inbox (12)",

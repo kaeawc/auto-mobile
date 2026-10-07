@@ -34,8 +34,7 @@ import {
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ElementParser } from "../../../src/utils/interfaces/ElementParser";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
-import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SwipeOnElement } from "../../../src/features/action/SwipeOnElement";
@@ -1487,24 +1486,13 @@ describe("Explore", () => {
         try {
           expect(await perform(candidate, observation)).toBe(true);
           expect(calls).toEqual([{ text: "Skip", action: "tap" }]);
-          const selection = new DefaultElementSelector().selectByText(
+          const selection = new ResolverElementSelector().selectByText(
             observation.viewHierarchy!,
             "Skip",
           );
-          expect(selection.element?.bounds).toEqual(child.bounds);
-          const tapOn = new TapOnElement(device, mockAdb, {
-            timer: fakeTimer,
-            tapStrategy: new FakeTapStrategy(),
-          });
-          const target = tapOn.resolveTapTargetElement(
-            selection.element!,
-            observation.viewHierarchy!,
-            "tap",
-            false,
-          );
-          expect(target.element.bounds).toEqual(parent.bounds);
-          expect(target.element.clickable).toBe("true");
-          expect(target.usedParent).toBe(true);
+          // tapOn's resolver-backed selector promotes the label to its clickable owner.
+          expect(selection.element?.bounds).toEqual(parent.bounds);
+          expect(selection.element?.clickable).toBe("true");
         } finally {
           restore();
         }

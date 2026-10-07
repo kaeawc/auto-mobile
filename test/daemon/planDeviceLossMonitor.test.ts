@@ -20,6 +20,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { InMemoryAdbTransportRestartRegistry } from "../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
 
 const executionIds: string[] = [];
 const previousPlanActive = serverConfig.isPlanExecutionActive();
@@ -240,6 +241,58 @@ describe("confirmed plan device loss", () => {
     await check(missing, present);
     expect(await h.incidents.list()).toHaveLength(1);
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a physical USB device absent from a confirming sweep aborts the plan at once (#10493)", async () => {
+    const h = harness();
+    h.devices.delete(h.device.id);
+    h.device.id = "57281FDCH00462";
+    h.device.avdName = undefined;
+    h.devices.set(h.device.id, h.device);
+    const plan = h.start("executePlan");
+    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+      h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+    );
+    await check(
+      {
+        disconnected: [],
+        missed: [{ deviceId: h.device.id, misses: 1 }],
+        skippedAllDiscoveryFailed: false,
+      },
+      new Set([h.peer.id]),
+    );
+    expect(plan.abortController.signal.aborted).toBe(true);
+    expect(await h.incidents.list()).toHaveLength(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("a physical device whose adbd AutoMobile is restarting keeps the confirmation window (#10493)", async () => {
+    const h = harness();
+    h.devices.delete(h.device.id);
+    h.device.id = "57281FDCH00462";
+    h.device.avdName = undefined;
+    h.devices.set(h.device.id, h.device);
+    const plan = h.start("executePlan");
+    const restarts = new InMemoryAdbTransportRestartRegistry(h.timer);
+    const gate = Promise.withResolvers<void>();
+    const restart = restarts.runRestart(h.device.id, () => gate.promise);
+    const check = h.daemon["createPlanDeviceLossCheck"](
+      h.manager,
+      () => h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+      restarts,
+    );
+    const missing = {
+      disconnected: [],
+      missed: [{ deviceId: h.device.id, misses: 1 }],
+      skippedAllDiscoveryFailed: false,
+    };
+    await check(missing, new Set([h.peer.id]));
+    expect(plan.abortController.signal.aborted).toBe(false);
+    gate.resolve();
+    await restart;
+    h.timer.setCurrentTime(PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS);
+    await check(missing, new Set([h.peer.id]));
+    expect(plan.abortController.signal.aborted).toBe(true);
   });
 
   test("persistent offline rows are inconclusive and break the absence window", async () => {

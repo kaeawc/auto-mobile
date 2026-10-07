@@ -157,6 +157,8 @@ export interface WebSocketMessage {
   method?: "escape" | "dismissKey" | "returnKey";
   totalTimeMs?: number;
   error?: string;
+  /** Additive typed companion to `error` (see `runnerErrorCodes.ts`); older runners omit it. */
+  errorCode?: string;
   /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
   blockingCommandType?: string;
   blockingElapsedMs?: number;

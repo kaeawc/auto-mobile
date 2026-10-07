@@ -1411,6 +1411,80 @@ describe("iOS two-stage unlock", () => {
   }
 });
 
+describe("iOS fast swipe with an unconfirmed outcome (structured marker, not error text)", () => {
+  // A socket close carries no "timed out" text, so only the marker can say it may have landed.
+  const socketClosed = "WebSocket closed before the swipe reply";
+
+  async function run(swipeResult: { success: false; error: string; outcomeIndeterminate?: true }) {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, LOCKED_SWIPE, LOCKED_SWIPE, UNLOCKED];
+    let swipes = 0;
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        return { success: true };
+      },
+      async swipeUp() {
+        swipes++;
+        return swipes === 1 ? swipeResult : { success: true };
+      },
+    };
+    const outcome = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+    })
+      .execute()
+      .then(
+        (result) => ({ result, error: undefined }),
+        (error: unknown) => ({ result: undefined, error }),
+      );
+    return { swipes, outcome };
+  }
+
+  test("an indeterminate fast swipe is not followed by a fallback swipe", async () => {
+    const { swipes, outcome } = await run({
+      success: false,
+      error: socketClosed,
+      outcomeIndeterminate: true,
+    });
+
+    // WakeAndUnlock's own bounded probe may still observe the unlock; no second swipe is sent.
+    expect(swipes).toBe(1);
+    expect(outcome.error).toBeUndefined();
+  });
+
+  test("the same error text without the marker still falls back", async () => {
+    const { swipes, outcome } = await run({ success: false, error: socketClosed });
+
+    expect(swipes).toBe(2);
+    expect(outcome.result?.unlocked).toBe(true);
+  });
+
+  // The runner's typed deadline error (#10084), worded by CommandError.deadlineExceeded.
+  test("a swipe the runner dropped for a passed deadline never started, so the fallback swipe is safe", async () => {
+    const { swipes, outcome } = await run({
+      success: false,
+      error: "Command request_swipe exceeded deadline at 1234ms (gesture was not started)",
+    });
+
+    expect(swipes).toBe(2);
+    expect(outcome.result?.unlocked).toBe(true);
+  });
+
+  test("a swipe the runner finished after its deadline may have landed, so no fallback swipe follows", async () => {
+    const { swipes, outcome } = await run({
+      success: false,
+      error:
+        "Command request_swipe exceeded deadline at 1234ms (gesture completed after its deadline; outcome is indeterminate)",
+    });
+
+    expect(swipes).toBe(1);
+    expect(outcome.error).toBeUndefined();
+  });
+});
+
 // Validate the actual fake-backed branch results before and after finalization.
 const executeForOutputSchema = WakeAndUnlock.prototype.execute;
 let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;

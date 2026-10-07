@@ -13,6 +13,7 @@ import {
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -538,7 +539,7 @@ test("non-IME typing restores before a11y delivery; a later IME type reactivates
   expect(h.selections()).toEqual([activate, restore, activate, restore]);
 });
 
-test("single IME type preserves the original complete adb command sequence", async () => {
+test("single IME type pins the user before the original complete adb command sequence", async () => {
   const h = harness();
   const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("x")]);
@@ -548,6 +549,7 @@ test("single IME type preserves the original complete adb command sequence", asy
   expect(h.selections()).toEqual([activate, restore]);
   expect(h.clientCalls).toEqual(["commit:x"]);
   expect(h.adb.getExecutedCommands()).toEqual([
+    "shell am get-current-user",
     "shell settings get secure default_input_method",
     "shell ime list -s",
     "shell settings get secure selected_input_method_subtype",
@@ -569,6 +571,62 @@ test("single IME type preserves the original complete adb command sequence", asy
     `shell ime disable ${AUTO_MOBILE_IME_ID}`,
     "shell ime list -s",
   ]);
+});
+
+test("an IME span pins a non-zero user once and restores that user after all commits", async () => {
+  const h = harness();
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponseSequence("shell am get-current-user", [
+    { stdout: "10", stderr: "" },
+    { stdout: "11", stderr: "" },
+  ]);
+  adb.setCommandResponse("shell ime list --user 10 -a -s", {
+    stdout: `${priorIme}\n${AUTO_MOBILE_IME_ID}\n`,
+    stderr: "",
+  });
+  adb.setCommandResponse("shell ime list --user 10 -s", { stdout: priorIme, stderr: "" });
+  adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
+    { stdout: priorIme, stderr: "" },
+    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
+    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
+    { stdout: priorIme, stderr: "" },
+  ]);
+  const fake = modelDeviceSideRestore(h);
+  const adbFactory = { create: () => adb };
+  const executor = new DefaultSendKeysCommandExecutor(h.device, adbFactory, observer, {
+    textClient: h.client,
+    timer: h.timer,
+  });
+  const action = new SendKeys(h.device, adbFactory, {
+    executor,
+    observer,
+    timer: h.timer,
+    timestampProvider: { now: async () => 1 },
+  });
+
+  expect(await action.execute([type("a"), type("b"), type("c")])).toMatchObject({
+    success: true,
+    completedCommands: 3,
+  });
+  expect(fake.priors).toEqual([null, null, null]);
+  expect(h.committed).toEqual(["a", "b", "c"]);
+  const commands = adb.getExecutedCommands();
+  expect(commands.filter((command) => command === "shell am get-current-user")).toHaveLength(1);
+  expect(commands.filter((command) => command.startsWith("shell ime set "))).toEqual([
+    `shell ime set --user 10 ${AUTO_MOBILE_IME_ID}`,
+    `shell ime set --user 10 ${priorIme}`,
+  ]);
+  expect(commands).toContain(`shell ime enable --user 10 ${AUTO_MOBILE_IME_ID}`);
+  expect(commands).toContain(`shell ime disable --user 10 ${AUTO_MOBILE_IME_ID}`);
+  expect(commands).toContain(
+    "shell settings --user 10 delete secure selected_input_method_subtype",
+  );
+  expect(commands.filter((command) => /^shell (ime|settings) /.test(command))).not.toHaveLength(0);
+  expect(
+    commands
+      .filter((command) => /^shell (ime|settings) /.test(command))
+      .every((command) => command.includes("--user 10")),
+  ).toBe(true);
 });
 
 test.each([

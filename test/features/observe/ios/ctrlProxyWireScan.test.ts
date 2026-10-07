@@ -49,6 +49,19 @@ describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
     expect(result.unresolved).toEqual([]);
   });
 
+  test("the gesture, text and dispatch sources report no unresolved sink argument", () => {
+    const files = [
+      "../../../../src/features/observe/ios/CtrlProxyGestures.ts",
+      "../../../../src/features/observe/ios/CtrlProxyText.ts",
+      "../../../../src/features/observe/ios/CtrlProxyDispatch.ts",
+      "../../../../src/features/observe/shared/SharedGestureDelegate.ts",
+      "../../../../src/features/observe/shared/SharedTextDelegate.ts",
+    ].map((relative) => resolve(import.meta.dir, relative));
+    for (const file of files) {
+      expect(scanFile(file, readFileSync(file, "utf8")).unresolved).toEqual([]);
+    }
+  });
+
   test("resolves a direct string-literal messageType in a sendCommand object", () => {
     const src = `sendCommand(ctx, { messageType: "request_tap_coordinates", params });`;
     expect(typesOf(src)).toEqual(["request_tap_coordinates"]);
@@ -140,6 +153,85 @@ describe("ctrlProxyWireScan.scanFile — discriminator resolution", () => {
     const result = scanFile(VIRTUAL, src);
     expect(result.emitted).toEqual([]);
     expect(result.unresolved).toHaveLength(1);
+  });
+
+  // ---- sink arguments the scan cannot decide are reported, never skipped silently ----
+  test("reports a call-expression sink argument that is not a known builder", () => {
+    const src = `sendCommand(this.context, buildSomething(request));`;
+    const result = scanFile(VIRTUAL, src);
+    expect(result.emitted).toEqual([]);
+    expect(result.unresolved).toHaveLength(1);
+    expect(result.unresolved[0].text).toBe("buildSomething(request)");
+  });
+
+  test("reports an identifier sink argument that is not bound to an object literal", () => {
+    const src = `sendIOSPressCommand(this.context, requestOptions);`;
+    expect(scanFile(VIRTUAL, src).unresolved).toHaveLength(1);
+  });
+
+  test("reports a spread-only literal whose discriminator the scan cannot see", () => {
+    const src = `sendIOSPressCommand(this.context, { ...build(request), onDispatch });`;
+    const result = scanFile(VIRTUAL, src);
+    expect(result.emitted).toEqual([]);
+    expect(result.unresolved).toHaveLength(1);
+  });
+
+  test("reports a spread-only JSON.stringify literal", () => {
+    const src = `ws.send(JSON.stringify({ ...base, requestId }));`;
+    expect(scanFile(VIRTUAL, src).unresolved).toHaveLength(1);
+  });
+
+  test("reports a delegate seam call whose argument is a call expression", () => {
+    const src = `this.sendTextCommand(makeTextOptions(text));`;
+    expect(scanFile(VIRTUAL, src).unresolved).toHaveLength(1);
+  });
+
+  test("scans the literal passed to a delegate text seam", () => {
+    const src = `this.sendTextCommand({ messageType: "request_set_text", params });`;
+    const result = scanFile(VIRTUAL, src);
+    expect(result.emitted.map((emit) => emit.type)).toEqual(["request_set_text"]);
+    expect(result.unresolved).toEqual([]);
+  });
+
+  test("does not report a request-options builder call or a spread of one", () => {
+    const src = `
+      class Delegate {
+        a() { return sendIOSPressCommand(this.context, this.tapCommandOptions(tap)); }
+        b() { return sendIOSPressCommand(this.context, { ...this.pinchCommandOptions(r), onDispatch }); }
+        tapCommandOptions() { return { messageType: "request_tap_coordinates" }; }
+        pinchCommandOptions() { return { messageType: "request_pinch" }; }
+      }
+    `;
+    const result = scanFile(VIRTUAL, src);
+    expect(result.unresolved).toEqual([]);
+    expect(result.emitted.map((emit) => emit.type).sort()).toEqual([
+      "request_pinch",
+      "request_tap_coordinates",
+    ]);
+  });
+
+  test("does not report options forwarded from a SendCommandOptions parameter", () => {
+    const src = `
+      class Delegate {
+        protected sendSwipeCommand(options: SendCommandOptions<Result>) {
+          return sendCommand<Result>(this.context, options);
+        }
+        wrap(options: SendCommandOptions<Result>) {
+          return sendCommand<Result>(this.context, { ...options, deadlineMs: 1 });
+        }
+      }
+    `;
+    expect(scanFile(VIRTUAL, src).unresolved).toEqual([]);
+  });
+
+  test("an identifier parameter of another type is not a forwarded request", () => {
+    const src = `function send(options: Other) { return sendCommand(this.context, options); }`;
+    expect(scanFile(VIRTUAL, src).unresolved).toHaveLength(1);
+  });
+
+  test("JSON.stringify of arbitrary data is not reported", () => {
+    const src = `const a = JSON.stringify(payload); const b = JSON.stringify(load()); const c = JSON.stringify({ nodeCount, packageName });`;
+    expect(scanFile(VIRTUAL, src).unresolved).toEqual([]);
   });
 
   // ---- sink-scoping: an inbound record carrying a `type` key is NOT a wire command ----

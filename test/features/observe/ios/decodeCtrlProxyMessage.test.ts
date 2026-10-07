@@ -866,6 +866,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
 
   /** Fields the decoders must keep, with the response types the runner sets them on. */
   const CARRIED: Record<string, { value: unknown; types: string[] }> = {
+    errorCode: { value: "deadline_completed_late", types: ["swipe_result"] },
     warning: { value: "runner note", types: ["action_result", "press_key_result"] },
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
@@ -1174,4 +1175,27 @@ describe("preference store resolution decoding", () => {
       }
     });
   }
+});
+
+describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
+  // Matches `WebSocketResponse.errorCode` / `CommandError.wireCode`, pinned in
+  // runnerErrorCodes.contract.test.ts. The code is additive: absent from older runners.
+  test("a gesture failure keeps the runner's typed errorCode", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "swipe_result",
+        success: false,
+        error: "Command request_swipe exceeded deadline at 5000ms (gesture completed late)",
+        errorCode: "deadline_completed_late",
+      }),
+    );
+    expect(decoded?.result).toMatchObject({ success: false, errorCode: "deadline_completed_late" });
+  });
+
+  test("a reply from a runner without the field decodes without one", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: false, error: "boom" }),
+    );
+    expect(decoded?.result).not.toHaveProperty("errorCode");
+  });
 });

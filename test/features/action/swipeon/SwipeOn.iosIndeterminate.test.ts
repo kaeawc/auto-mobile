@@ -80,4 +80,18 @@ describe("iOS screen swipe with an unconfirmed outcome (#9972)", () => {
     expect(result.success).toBe(true);
     expect(invalidations).toEqual(["ios"]);
   });
+
+  test("opts into observing a partially applied failure (boomerang return leg)", async () => {
+    const { action } = harness();
+    const seen: Array<boolean | undefined> = [];
+    const run = action.observedInteraction;
+    action.observedInteraction = async (block, options) => {
+      seen.push(options.observePartialApplication);
+      return run(block, options);
+    };
+
+    await action.execute({ direction: "up", autoTarget: false });
+
+    expect(seen).toEqual([true]);
+  });
 });

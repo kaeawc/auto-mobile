@@ -38,7 +38,7 @@ import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import { PlanDeviceLossMonitor } from "./deviceDisconnectHandler";
+import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -2522,6 +2522,29 @@ export class Daemon {
     }
   }
 
+  private async discoverAndReconcile(
+    deviceManager: Pick<MultiPlatformDeviceManager, "getBootedDevicesDetailed">,
+    {
+      planActive,
+      platform = "either",
+      bypassAndroidDeviceListCache = false,
+    }: {
+      planActive: boolean;
+      platform?: Parameters<MultiPlatformDeviceManager["getBootedDevicesDetailed"]>[0];
+      bypassAndroidDeviceListCache?: boolean;
+    },
+  ) {
+    const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+      bypassAndroidDeviceListCache,
+    });
+    // Reconciliation can quarantine identity and cancel in-flight work. During
+    // allocation, discovery supplies only presence evidence for miss counting.
+    if (!planActive) {
+      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
+    }
+    return discovery;
+  }
+
   private startDeviceDisconnectMonitor(
     deviceManager: Pick<
       MultiPlatformDeviceManager,
@@ -2533,28 +2556,13 @@ export class Daemon {
       return;
     }
 
-    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(deviceManager);
-
-    const discoverAndReconcile = async ({
-      planActive,
-      bypassAndroidDeviceListCache = false,
-    }: {
-      planActive: boolean;
-      bypassAndroidDeviceListCache?: boolean;
-    }) => {
-      const discovery = await deviceManager.getBootedDevicesDetailed("either", {
-        bypassAndroidDeviceListCache,
-      });
-      // Reconciliation can quarantine identity and cancel in-flight work. During
-      // allocation, discovery supplies only presence evidence for miss counting.
-      if (!planActive) {
-        await this.devicePool.reconcileDiscoveryObservation(
-          discovery.devices,
-          "disconnect-monitor",
-        );
-      }
-      return discovery;
-    };
+    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(deviceManager, () =>
+      this.discoverAndReconcile(deviceManager, {
+        planActive: true,
+        platform: "android",
+        bypassAndroidDeviceListCache: true,
+      }),
+    );
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(
       this.timer,
@@ -2565,7 +2573,7 @@ export class Daemon {
         try {
           this.startDeferredSessionRecoverySweep(planActive);
 
-          let discovery = await discoverAndReconcile({ planActive });
+          let discovery = await this.discoverAndReconcile(deviceManager, { planActive });
           const bootedDevices = discovery.devices;
           let succeededPlatforms = discovery.succeededPlatforms;
           let bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
@@ -2619,7 +2627,7 @@ export class Daemon {
               await deviceManager.recoverAndroidOfflineDevices();
               // Reconnect may restore the transport during this await. Never use
               // the pre-recovery absence for miss counting or ADB-reset detection.
-              discovery = await discoverAndReconcile({
+              discovery = await this.discoverAndReconcile(deviceManager, {
                 planActive,
                 bypassAndroidDeviceListCache: true,
               });
@@ -2703,10 +2711,8 @@ export class Daemon {
   }
 
   private createPlanDeviceLossCheck(
-    deviceManager: Pick<
-      MultiPlatformDeviceManager,
-      "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds"
-    >,
+    deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
+    discover: PlanDeviceLossPort["discover"],
   ): (
     result: ReturnType<typeof evaluateDeviceDisconnects>,
     bootedDeviceIds: ReadonlySet<string>,
@@ -2723,8 +2729,7 @@ export class Daemon {
         }),
       isStartupLeased: (id) => this.devicePool.isDeviceLeasedForAndroidStartup(id),
       isShutdownReserved: (id) => this.devicePool.isShutdownReservationHeld(id),
-      discover: () =>
-        deviceManager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+      discover,
       getOfflineDeviceIds: (ids) => deviceManager.getAndroidOfflineDeviceIds(ids),
       isAdbReset: (ids, discovery) =>
         isProcessWideAdbServerReset(

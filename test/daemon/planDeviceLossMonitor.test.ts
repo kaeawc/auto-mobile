@@ -50,6 +50,7 @@ function harness() {
   ]);
   class Manager extends FakeDeviceManager {
     calls: BootedDeviceDiscoveryOptions[] = [];
+    platforms: Parameters<FakeDeviceManager["getBootedDevicesDetailed"]>[0][] = [];
     onDiscovery = () => {};
     offlineDeviceIds = new Set<string>();
     onOfflineProbe = () => {};
@@ -59,6 +60,7 @@ function harness() {
       options: BootedDeviceDiscoveryOptions = {},
     ) {
       this.calls.push(options);
+      this.platforms.push(platform);
       this.onDiscovery();
       return super.getBootedDevicesDetailed(platform);
     }
@@ -91,6 +93,9 @@ function harness() {
     offlineRecoveryAttemptedIncarnations: new Map(),
     deferredSessionRecoverySweeps: new Set(),
     devicePool: {
+      reconcileDiscoveryObservation: async () => {
+        throw new Error("Plan discovery must remain presence-only");
+      },
       getAllDevices: () => [...devices.values()],
       getDevice: (id: string) => devices.get(id) ?? null,
       isDeviceLeasedForAndroidStartup: () => leased,
@@ -169,7 +174,9 @@ describe("confirmed plan device loss", () => {
   test("repeated checks cannot confirm before the named window elapses", async () => {
     const h = harness();
     const plan = h.start("executePlan");
-    const check = h.daemon["createPlanDeviceLossCheck"](h.manager);
+    const check = h.daemon["createPlanDeviceLossCheck"](h.manager, () =>
+      h.manager.getBootedDevicesDetailed("android", { bypassAndroidDeviceListCache: true }),
+    );
     const missing = {
       disconnected: [],
       missed: [{ deviceId: h.device.id, misses: 1 }],
@@ -264,6 +271,7 @@ describe("confirmed plan device loss", () => {
         { bypassAndroidDeviceListCache: false },
         { bypassAndroidDeviceListCache: true },
       ]);
+      expect(h.manager.platforms.slice(0, 4)).toEqual(["either", "android", "either", "android"]);
       expect(h.daemon["deviceDisconnectMisses"].get(h.device.id)).toBe(1);
       expect(h.daemon["confirmedDisconnectedDeviceIds"].size).toBe(0);
       // A fresh presence observation ends the episode even without replacing the object.

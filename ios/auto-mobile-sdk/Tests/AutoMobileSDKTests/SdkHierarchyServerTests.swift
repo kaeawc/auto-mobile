@@ -46,6 +46,7 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /db/table-data", .dbTableData),
             ("POST /db/table-structure", .dbTableStructure),
             ("POST /preferences", .preferences),
+            ("POST /trigger", .trigger),
         ]
         for (request, route) in routes {
             XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"), .matched(route), request)
@@ -74,7 +75,9 @@ final class SdkHierarchyServerTests: XCTestCase {
     }
 
     func testRequestLineReportsAllowedMethod() {
-        let requests = [("POST /health", "GET"), ("GET /db/execute", "POST"), ("POST /hierarchy", "GET")]
+        let requests = [
+            ("POST /health", "GET"), ("GET /db/execute", "POST"), ("POST /hierarchy", "GET"), ("GET /trigger", "POST"),
+        ]
         for (request, method) in requests {
             XCTAssertEqual(
                 SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"),

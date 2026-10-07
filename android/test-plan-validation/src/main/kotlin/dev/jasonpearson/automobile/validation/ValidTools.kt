@@ -5,23 +5,26 @@ package dev.jasonpearson.automobile.validation
  * `schemas/tool-definitions.json` (and legacy aliases still used in plans).
  */
 object ValidTools {
+  /**
+   * Legacy tool names that `PlanMigrator` rewrites to `sendKeys`, so plans using them still run. All
+   * other names must exist in `schemas/tool-definitions.json` (enforced by `ValidToolsTest`).
+   */
+  val MIGRATED_LEGACY_TOOLS = setOf("clearText", "imeAction", "inputText")
+
   val TOOLS =
-    setOf(
+    MIGRATED_LEGACY_TOOLS +
+      setOf(
       "accessibility",
       "accessibilityFocus",
       "barrier",
       "biometricAuth",
-      "captureDeviceSnapshot",
       "changeLocalization",
       "clearKeyValueFile",
       "clearMockNetwork",
-      "clearText",
       "clipboard",
       "crashApp",
       "criticalSection",
-      "deleteSnapshot",
       "deviceSnapshot",
-      "doctor",
       "dragAndDrop",
       "executePlan",
       "explore",
@@ -35,8 +38,6 @@ object ValidTools {
       "highlight",
       "homeScreen",
       "identifyInteractions",
-      "imeAction",
-      "inputText",
       "installApp",
       "keyboard",
       "killDevice",
@@ -44,7 +45,6 @@ object ValidTools {
       "listApps",
       "listDeviceImages",
       "listDevices",
-      "listSnapshots",
       "mockNetwork",
       "navigateTo",
       "network",
@@ -53,12 +53,10 @@ object ValidTools {
       "pinchOn",
       "postNotification",
       "pressButton",
-      "pressKey",
       "provisionDevice",
       "recentApps",
       "recordSteps",
       "removeKeyValue",
-      "restoreDeviceSnapshot",
       "rotate",
       "selectAllText",
       "sendKeys",
@@ -70,7 +68,6 @@ object ValidTools {
       "setUIState",
       "shake",
       "sqlQuery",
-      "startDevice",
       "putAppFile",
       "startTestRecording",
       "swipeOn",
@@ -80,6 +77,29 @@ object ValidTools {
       "terminateApp",
       "uninstallApp",
       "videoRecording",
+      "appLifecycle",
+      "displayConfig",
+      "getAndroid",
+      "getApple",
+      "getDataStore",
+      "getIosSimulatorCapabilities",
+      "getPreference",
+      "hitTest",
+      "listDataStores",
+      "overlay",
+      "phoneCall",
+      "resetAppLogs",
+      "resetKeychain",
+      "sendSms",
+      "setDeviceResources",
+      "setPosture",
+      "setPreference",
+      "setToolEnabled",
+      "snapshotOf",
+      "stageSessionDownloads",
+      "tapAny",
+      "tapAt",
+      "wakeAndUnlock",
     )
 
   val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")

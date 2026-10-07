@@ -20,6 +20,20 @@ public enum CommandError: LocalizedError, Sendable {
     case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
 
+    /// Machine-readable code for the wire's additive `errorCode` field; `nil` for errors the host
+    /// tells apart by wording alone. The host reads the code first and matches the wording only
+    /// for older runners that omit it. Both values are pinned against the TypeScript constants in
+    /// `src/features/observe/ios/runnerErrorCodes.ts` by `runnerErrorCodes.contract.test.ts`.
+    public var wireCode: String? {
+        switch self {
+        case let .deadlineExceeded(_, _, gestureCompleted):
+            return gestureCompleted ? "deadline_completed_late" : "deadline_not_started"
+        case .unknownCommand, .missingParameter, .invalidParameter, .executionFailed,
+             .gestureBoundExceeded:
+            return nil
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case let .unknownCommand(cmd):

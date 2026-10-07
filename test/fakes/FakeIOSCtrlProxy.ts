@@ -751,18 +751,9 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
-    // Mirrors the real `sendCommand`'s pre-dispatch abort check (#6306
-    // review): an already-expired caller deadline must never reach the
-    // device.
-    if (signal?.aborted) {
-      return {
-        success: false,
-        totalTimeMs: 0,
-        error: "Request aborted before dispatch",
-        dispatched: false,
-        acknowledged: false,
-      };
-    }
+    // Mirrors `sendIOSPressCommand`: an already-expired caller deadline never reaches the
+    // device and surfaces as the abort reason, not as a failed result.
+    signal?.throwIfAborted();
 
     await this.applyDelay("tap");
     this.checkFailure("tap");
@@ -775,6 +766,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         totalTimeMs: 50,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -790,6 +782,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
+    signal?.throwIfAborted();
     await this.applyDelay("swipe");
     this.checkFailure("swipe");
 
@@ -802,6 +795,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         gestureTimeMs: duration,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -856,6 +850,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    signal?.throwIfAborted();
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
 
@@ -879,6 +874,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
         gestureTimeMs: resolvedDuration,
       },
       onDispatch,
+      signal,
     );
   }
 
@@ -890,10 +886,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private settleDispatch<T extends BaseResult>(
     result: IOSDispatchResult<T>,
     onDispatch?: () => void,
+    signal?: AbortSignal,
   ): IOSDispatchResult<T> {
     const dispatched = result.dispatched ?? true;
     if (dispatched) {
       onDispatch?.();
+    } else {
+      // The real helper preserves cancellation even when a never-sent request returns a failure.
+      signal?.throwIfAborted();
     }
     return {
       ...result,

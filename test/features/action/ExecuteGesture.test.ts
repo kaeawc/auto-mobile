@@ -42,6 +42,47 @@ describe("ExecuteGesture", () => {
     expect(requestSwipe.mock.calls[1]?.[7]).toBeUndefined();
   });
 
+  describe("iOS swipe answered with the runner's deadline error (#10161)", () => {
+    const completedLate =
+      "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)";
+    const notStarted =
+      "Command request_swipe exceeded deadline at 5000ms (gesture was not started)";
+
+    async function swipeWith(reply: { error: string; errorCode?: string }) {
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setSwipeResult({ success: false, totalTimeMs: 5000, ...reply });
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeClient as unknown as IOSCtrlProxyClient,
+      );
+      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
+    }
+
+    test("the typed code marks the acknowledged reply indeterminate", async () => {
+      // The wording is deliberately not the matching text: only the code can decide this.
+      const result = await swipeWith({
+        error: "runner said something else",
+        errorCode: "deadline_completed_late",
+      });
+      expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+      expect(result.error).toContain("Do not retry automatically");
+    });
+
+    test("an older runner's wording still marks it indeterminate", async () => {
+      const result = await swipeWith({ error: completedLate });
+      expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+    });
+
+    test("a gesture the runner never started stays a plain failure", async () => {
+      const typed = await swipeWith({ error: notStarted, errorCode: "deadline_not_started" });
+      const wording = await swipeWith({ error: notStarted });
+      for (const result of [typed, wording]) {
+        expect(result.success).toBe(false);
+        expect(result).not.toHaveProperty("outcomeIndeterminate");
+        expect(result.error).toBe(notStarted);
+      }
+    });
+  });
+
   test("an already aborted gesture dispatches no device command", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();

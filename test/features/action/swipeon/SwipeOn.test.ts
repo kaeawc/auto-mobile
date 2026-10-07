@@ -230,6 +230,7 @@ describe("SwipeOn boomerang", () => {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      timer: fakeTimer,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -280,6 +281,32 @@ describe("SwipeOn boomerang", () => {
     expect(calls[1].y1).toBe(calls[0].y2);
     expect(calls[1].x2).toBe(calls[0].x1);
     expect(calls[1].y2).toBe(calls[0].y1);
+  });
+
+  test("cancelling during the apex pause keeps the forward-delivered note on the abort", async () => {
+    fakeObserveScreen.setObserveResult(createObserveResult());
+    const controller = new AbortController();
+    // The abort lands once the pause has started, after the forward swipe was delivered.
+    spyOn(fakeTimer, "sleep").mockImplementation(() => {
+      queueMicrotask(() => controller.abort());
+      return new Promise<void>(() => {});
+    });
+
+    const error = await createSwipeOn()
+      .execute(
+        { direction: "up", autoTarget: false, boomerang: true, apexPause: 50 },
+        undefined,
+        controller.signal,
+      )
+      .then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+    expect(fakeGesture.getSwipeCalls()).toHaveLength(1);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("Operation cancelled");
+    expect((error as Error).message).toContain("forward swipe was delivered");
   });
 });
 

@@ -1669,6 +1669,13 @@ Failed restores keep the record for retry. The iOS Simulator reset continues to
 restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
 `shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
+On iOS, `match`, `fail`, `cancel` and `error` first arm an `AutoMobileBiometrics`
+override through the app's AutoMobile iOS SDK (DEBUG build, app in the foreground),
+which the app reads with `consumeOverride()`; `ttlMs` and `errorCode` apply as on
+Android. On the Simulator, `match` and `fail` also post the BiometricKit event so a
+pending system prompt completes. Without the SDK, the Simulator falls back to
+BiometricKit events (`match` and `fail` only) and a physical device is unsupported.
+`enroll` and `unenroll` always use the Simulator.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
 bundle ID; required on iOS, while Android defaults to the foreground app if omitted). `actions` supplies

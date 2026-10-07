@@ -1,3 +1,4 @@
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { z } from "zod";
 import { ActionableError } from "../../../models/ActionableError";
 import { logger } from "../../../utils/logger";
@@ -218,6 +219,8 @@ export class CtrlProxyOverlays {
       });
       return settle(result);
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] Overlay asset transport failed", error);
       return failure(errorMessage(error));
     }
@@ -231,6 +234,8 @@ export class CtrlProxyOverlays {
           )
         : await this.context.ensureConnected();
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       logger.warn("[CTRL_PROXY] Overlay asset connection failed", error);
       return false;
     }

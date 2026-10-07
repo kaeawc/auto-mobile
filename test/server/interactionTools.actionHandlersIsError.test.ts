@@ -245,6 +245,21 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
     expect(parsePayload(response).success).toBe(false);
   });
 
+  test("container diagnostics survive the drag MCP failure payload", async () => {
+    const containerFailure = {
+      level: 1,
+      reason: "not-found" as const,
+      selector: { elementId: "missing" },
+    };
+    const error =
+      "Failed to perform drag and drop: dragAndDrop source: Container level 1 not found: missing";
+    setDragAndDropFactory(() => ({ execute: async () => fakeResult({ error, containerFailure }) }));
+    const response = await dragAndDropHandler(fakeDevice, args);
+    expect(response.isError).toBe(true);
+    expect(parsePayload(response)).toMatchObject({ error, containerFailure });
+    expect(parsePayload(response).message).toBe(`Failed to drag element to target: ${error}`);
+  });
+
   test("a success has no isError and the unchanged success message", async () => {
     setDragAndDropFactory(() => ({
       execute: async () => fakeResult({ success: true }),

@@ -46,6 +46,7 @@ final class SdkHierarchyServerTests: XCTestCase {
             ("POST /db/table-data", .dbTableData),
             ("POST /db/table-structure", .dbTableStructure),
             ("POST /preferences", .preferences),
+            ("POST /trigger", .trigger),
         ]
         for (request, route) in routes {
             XCTAssertEqual(SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"), .matched(route), request)
@@ -74,7 +75,9 @@ final class SdkHierarchyServerTests: XCTestCase {
     }
 
     func testRequestLineReportsAllowedMethod() {
-        let requests = [("POST /health", "GET"), ("GET /db/execute", "POST"), ("POST /hierarchy", "GET")]
+        let requests = [
+            ("POST /health", "GET"), ("GET /db/execute", "POST"), ("POST /hierarchy", "GET"), ("GET /trigger", "POST"),
+        ]
         for (request, method) in requests {
             XCTAssertEqual(
                 SdkHierarchyServer.route(forRequestLine: "\(request) HTTP/1.1"),
@@ -246,6 +249,21 @@ final class SdkHierarchyServerTests: XCTestCase {
             let body = try XCTUnwrap(response.components(separatedBy: "\r\n\r\n").last)
             let payload = try JSONDecoder().decode([String: String].self, from: Data(body.utf8))
             XCTAssertEqual(payload, ["error": "wrong_simulator", "expectedUdid": udid, "actualUdid": "wrong"])
+        }
+    }
+
+    func testTriggerRouteThroughListenerReturnsOkAndGatesOnForeground() throws {
+        defer { AutoMobileBiometrics.shared.reset() }
+        let payload = "{\"module\":\"biometrics\",\"trigger\":\"clear\"}"
+        let head = "POST /trigger HTTP/1.1\r\nHost: localhost\r\nContent-Length: \(payload.utf8.count)\r\n\r\n"
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: true)) { port in
+            let response = try roundTrip(port: port, head: head, body: payload)
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 200 OK"), response)
+            XCTAssertTrue(response.contains("\"status\":\"ok\""), response)
+        }
+        try withRunningServer(tracker: FakeHierarchyTracker(isApplicationActive: false)) { port in
+            let response = try roundTrip(port: port, head: head, body: payload)
+            assertErrorResponse(response, status: "409 Conflict", error: "app_not_active")
         }
     }
 

@@ -128,6 +128,26 @@ class WebSocketServer(
     private val overlayRequestTypes =
       setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
 
+    /** Requests whose payload is typed user input, which may be a password. */
+    private val textInputRequestTypes =
+      setOf("request_set_text", "request_insert_text", "request_commit_text")
+
+    /**
+     * Parse-failure log line for a typed-input frame: type, length and exception class only. The
+     * frame and the decoder's message (which quotes its input) may hold a password. Null for other
+     * frames, which keep the full diagnostic.
+     */
+    internal fun textInputParseFailureLogLine(
+      raw: String,
+      type: String?,
+      error: Exception,
+    ): String? =
+      if (type in textInputRequestTypes) {
+        "Failed to parse $type (${raw.length} chars): ${error.javaClass.simpleName}"
+      } else {
+        null
+      }
+
     /** Log only the protocol type and length, never free-form request fields. */
     internal fun inboundFrameLogLine(connectionId: Int, raw: String): String {
       val type =
@@ -290,6 +310,9 @@ class WebSocketServer(
     addAll(registeredRequestTypes)
     add("node_selector_actions")
     add("ime_key_events_v1")
+    add("ime_clear_field_v1")
+    // The IME commits and clears password fields; older APKs refuse them.
+    add("ime_password_commit_v1")
     add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
@@ -1046,7 +1069,9 @@ class WebSocketServer(
               e.javaClass.simpleName,
           )
         } else {
-          Log.w(TAG, "Failed to parse client message: $message", e)
+          val textInputLine = textInputParseFailureLogLine(message, type, e)
+          if (textInputLine != null) Log.w(TAG, textInputLine)
+          else Log.w(TAG, "Failed to parse client message: $message", e)
         }
         sendErrorResponse(
           connection,

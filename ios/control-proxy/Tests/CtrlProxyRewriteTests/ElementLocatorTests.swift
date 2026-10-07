@@ -1447,7 +1447,8 @@ final class ElementLocatorTests: XCTestCase {
             XCTAssertEqual(
                 ElementLocator.keyboardFocusDecision(
                     textInputCandidates: inputs.map { (frame: $0.frame, hasFocus: $0.hasFocus) },
-                    keyboardVisibleInSnapshot: walk()
+                    keyboardVisibleInSnapshot: walk(),
+                    keyboardVisibleInSpringBoard: false
                 ),
                 testCase.expected
             )
@@ -1536,7 +1537,8 @@ final class ElementLocatorTests: XCTestCase {
                 XCTAssertEqual(
                     ElementLocator.keyboardFocusDecision(
                         textInputCandidates: testCase.inputs,
-                        keyboardVisibleInSnapshot: walk()
+                        keyboardVisibleInSnapshot: walk(),
+                        keyboardVisibleInSpringBoard: false
                     ),
                     testCase.expected
                 )
@@ -1545,11 +1547,61 @@ final class ElementLocatorTests: XCTestCase {
         }
     }
 
+    // Hardware and iPad floating/undocked keyboards can be absent from the app tree (#9290).
+    func testKeyboardFocusDecision_queriesWhenOnlySpringBoardHostsKeyboard() {
+        XCTAssertEqual(
+            ElementLocator.keyboardFocusDecision(
+                textInputCandidates: [(frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false)],
+                keyboardVisibleInSnapshot: false,
+                keyboardVisibleInSpringBoard: true
+            ),
+            .liveQuery
+        )
+    }
+
+    func testKeyboardFocusDecision_consultsSpringBoardOnlyWhenSnapshotHasNoKeyboard() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        struct Case {
+            let inputs: [(frame: CGRect, hasFocus: Bool)]
+            let snapshotKeyboard: Bool
+            let expected: KeyboardFocusDecision
+            let springBoardQueries: Int
+        }
+        let cases = [
+            Case(inputs: [], snapshotKeyboard: false, expected: .skip, springBoardQueries: 0),
+            Case(
+                inputs: [(frame, true)],
+                snapshotKeyboard: false,
+                expected: .useSnapshotFrame(frame),
+                springBoardQueries: 0
+            ),
+            Case(inputs: [(frame, false)], snapshotKeyboard: true, expected: .liveQuery, springBoardQueries: 0),
+            Case(inputs: [(frame, false)], snapshotKeyboard: false, expected: .skip, springBoardQueries: 1),
+        ]
+        for testCase in cases {
+            var springBoardQueries = 0
+            func querySpringBoard() -> Bool {
+                springBoardQueries += 1
+                return false
+            }
+            XCTAssertEqual(
+                ElementLocator.keyboardFocusDecision(
+                    textInputCandidates: testCase.inputs,
+                    keyboardVisibleInSnapshot: testCase.snapshotKeyboard,
+                    keyboardVisibleInSpringBoard: querySpringBoard()
+                ),
+                testCase.expected
+            )
+            XCTAssertEqual(springBoardQueries, testCase.springBoardQueries)
+        }
+    }
+
     func testKeyboardFocusDecision_skipsWhenNoInputsPresent() {
         for keyboardVisible in [false, true] {
             XCTAssertEqual(
                 ElementLocator.keyboardFocusDecision(
-                    textInputCandidates: [], keyboardVisibleInSnapshot: keyboardVisible
+                    textInputCandidates: [], keyboardVisibleInSnapshot: keyboardVisible,
+                    keyboardVisibleInSpringBoard: false
                 ),
                 .skip
             )
@@ -1563,7 +1615,8 @@ final class ElementLocatorTests: XCTestCase {
                     (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
                     (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
                 ],
-                keyboardVisibleInSnapshot: false
+                keyboardVisibleInSnapshot: false,
+                keyboardVisibleInSpringBoard: false
             ),
             .skip
         )
@@ -1577,7 +1630,8 @@ final class ElementLocatorTests: XCTestCase {
                     (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
                     (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: false),
                 ],
-                keyboardVisibleInSnapshot: true
+                keyboardVisibleInSnapshot: true,
+                keyboardVisibleInSpringBoard: false
             ),
             .liveQuery
         )
@@ -1592,7 +1646,8 @@ final class ElementLocatorTests: XCTestCase {
                         (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
                         (frame: focusedFrame, hasFocus: true),
                     ],
-                    keyboardVisibleInSnapshot: keyboardVisible
+                    keyboardVisibleInSnapshot: keyboardVisible,
+                    keyboardVisibleInSpringBoard: false
                 ),
                 .useSnapshotFrame(focusedFrame)
             )
@@ -1606,7 +1661,8 @@ final class ElementLocatorTests: XCTestCase {
                     (frame: .zero, hasFocus: true),
                     (frame: CGRect(x: 10, y: 20, width: 100, height: 40), hasFocus: false),
                 ],
-                keyboardVisibleInSnapshot: true
+                keyboardVisibleInSnapshot: true,
+                keyboardVisibleInSpringBoard: false
             ),
             .liveQuery
         )
@@ -1620,7 +1676,8 @@ final class ElementLocatorTests: XCTestCase {
                     (frame: firstFrame, hasFocus: true),
                     (frame: CGRect(x: 10, y: 80, width: 100, height: 40), hasFocus: true),
                 ],
-                keyboardVisibleInSnapshot: false
+                keyboardVisibleInSnapshot: false,
+                keyboardVisibleInSpringBoard: false
             ),
             .useSnapshotFrame(firstFrame)
         )
@@ -1634,7 +1691,8 @@ final class ElementLocatorTests: XCTestCase {
                         (frame: .zero, hasFocus: true),
                         (frame: CGRect(x: 10, y: 20, width: 0, height: 40), hasFocus: false),
                     ],
-                    keyboardVisibleInSnapshot: keyboardVisible
+                    keyboardVisibleInSnapshot: keyboardVisible,
+                    keyboardVisibleInSpringBoard: false
                 ),
                 .skip
             )
@@ -1649,7 +1707,8 @@ final class ElementLocatorTests: XCTestCase {
                     (frame: .zero, hasFocus: true),
                     (frame: focusedFrame, hasFocus: true),
                 ],
-                keyboardVisibleInSnapshot: false
+                keyboardVisibleInSnapshot: false,
+                keyboardVisibleInSpringBoard: false
             ),
             .useSnapshotFrame(focusedFrame)
         )

@@ -21,6 +21,10 @@ import { ActionableError } from "../../models/ActionableError";
 import { isWithin, promoteClickableAncestor } from "./ElementResolver";
 import { SearchableHierarchy } from "./SearchableNode";
 import { compareSelectionRank } from "./selectionRank";
+import {
+  ambiguousStableViewIdMessage,
+  legacyBareStableViewIdMessage,
+} from "./StableViewIdGuidance";
 
 /**
  * `assignStableViewIds` disambiguates structural duplicates with a descendant
@@ -743,11 +747,7 @@ export class DefaultElementFinder implements ElementFinder {
       return;
     }
     if (id === base && this.hasLegacyBareStableViewIdFamily(fullCaptureRoots, base)) {
-      throw new ActionableError(
-        `Skeleton element id "${id}" uses the legacy bare duplicate encoding in this capture. ` +
-          "Re-observe the screen and use a current selector; legacy bare stable ids cannot safely " +
-          "identify a content-identical element.",
-      );
+      throw new ActionableError(legacyBareStableViewIdMessage(id));
     }
     const matchingViewIds = this.stableViewIdsSharingBase(fullCaptureRoots, base);
     const exactMatches = matchingViewIds.filter((viewId) => viewId === id).length;
@@ -762,16 +762,8 @@ export class DefaultElementFinder implements ElementFinder {
     const duplicateCount = matchingViewIds.length;
     if (duplicateCount > 1) {
       const suffixedIds = [...new Set(matchingViewIds.filter((viewId) => viewId !== base))];
-      const idHint =
-        suffixedIds.length > 0
-          ? ` Current capture suffixed ids: ${suffixedIds.map((viewId) => `"${viewId}"`).join(", ")}.`
-          : "";
       throw new ActionableError(
-        `Skeleton element id "${id}" is ambiguous in the current capture: ${duplicateCount} ` +
-          `elements share structural stable id "${base}". A bare id cannot select a peer, ` +
-          "and a positional -N suffix can shift after an insert or reorder. Use text or " +
-          "textAny (with index when multiple text matches) instead." +
-          idHint,
+        ambiguousStableViewIdMessage(id, base, duplicateCount, suffixedIds),
       );
     }
   }

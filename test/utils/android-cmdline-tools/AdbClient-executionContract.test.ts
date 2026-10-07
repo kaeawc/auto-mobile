@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import {
   AdbClient,
   AdbCommandTimeoutError,
@@ -1180,4 +1181,51 @@ describe("AdbClient alias missing-device attribution", () => {
       }
     },
   );
+});
+
+// #9888: password-field key events pass `logLabel`; no log line or error may carry the command.
+describe("AdbClient logLabel redaction", () => {
+  const secret = "input keyevent KEYCODE_Z";
+  // Only the typed command fails; adb path discovery and other probes succeed.
+  const failingExec = (...invocation: unknown[]): Promise<ExecResult> =>
+    JSON.stringify(invocation).includes("KEYCODE_Z")
+      ? Promise.reject(
+          Object.assign(new Error(`Command failed: adb -s emulator-5554 shell ${secret}`), {
+            cmd: `adb -s emulator-5554 shell ${secret}`,
+          }),
+        )
+      : Promise.resolve(ok(""));
+
+  for (const noRetry of [true, false]) {
+    test(`keeps the command out of logs and the error (noRetry=${noRetry})`, async () => {
+      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+        spyOn(logger, level).mockImplementation(() => {}),
+      );
+      try {
+        const client = new AdbClient(DEVICE, failingExec, null, ...autoRetrySeam());
+        const error = await client
+          .execute(["shell", secret], { noRetry, logLabel: "<password key event>" })
+          .then(
+            () => undefined,
+            (caught: unknown) => caught,
+          );
+
+        expect(error).toBeInstanceOf(Error);
+        const failure = error as Error & { cmd?: string };
+        expect(failure.message).toContain("<password key event>");
+        const surfaced = [
+          failure.message,
+          failure.stack ?? "",
+          failure.cmd ?? "",
+          JSON.stringify(spies.map((spy) => spy.mock.calls.map((call) => call.map(String)))),
+        ].join("\n");
+        expect(surfaced).not.toContain("KEYCODE");
+        expect(surfaced).toContain("<password key event>");
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    });
+  }
 });

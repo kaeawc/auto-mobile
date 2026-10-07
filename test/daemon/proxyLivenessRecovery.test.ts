@@ -242,6 +242,23 @@ describe("LivenessRecovery attempts", () => {
 });
 
 describe("LivenessRecovery states", () => {
+  test("sessions joining a running recovery share its busy episode; the next recovery gets a new one", async () => {
+    const h = harness({ outcomeFor: (session) => (session === "b" ? "hang" : "acknowledged") });
+    const idle = h.recovery.busyEpisode();
+    h.recovery.begin("b", DAEMON_STALLED_CODE);
+    const first = h.recovery.busyEpisode();
+    expect(first).not.toBe(idle);
+    h.recovery.begin("a", PROXY_STALLED_CODE);
+    expect(h.recovery.busyEpisode()).toBe(first);
+    await h.timer.advanceTimeAsync(20_000);
+    expect(h.recovered.map((r) => r.sessionUuid)).toEqual(["a"]);
+    expect(h.recovery.isRecovering("b")).toBe(false);
+    expect(h.recovery.busyEpisode()).toBe(first);
+
+    h.recovery.begin("a", DAEMON_STALLED_CODE);
+    expect(h.recovery.busyEpisode()).not.toBe(first);
+  });
+
   test("daemon_stalled: a session the daemon says is gone is dropped, not handed over", async () => {
     const h = harness({
       outcomeFor: (session) => (session === "gone" ? "session-gone" : "acknowledged"),

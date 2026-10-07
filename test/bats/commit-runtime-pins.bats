@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 # All mutations are confined to BATS_TEST_TMPDIR; no serial tag is needed.
 
 setup() {

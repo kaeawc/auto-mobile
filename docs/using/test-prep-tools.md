@@ -86,7 +86,7 @@ the existing shell/push mechanism is retained. See
 - `setDeviceState` configures supported system state such as biometric
   enrollment.
 - `biometricAuth` simulates a match or failure on supported emulators and iOS
-  simulators.
+  simulators, and every result in apps that embed the AutoMobile SDK.
 - `wakeAndUnlock` wakes an Android device and unlocks it with an optional PIN.
 - `postNotification` creates a notification for notification-flow tests.
 - `clipboard` sets, reads, pastes, or clears clipboard content.

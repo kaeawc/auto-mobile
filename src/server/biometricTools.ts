@@ -34,7 +34,7 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(
       action: z
         .enum(["match", "fail", "cancel", "error", "enroll", "unenroll"])
         .describe(
-          "match/fail/enroll/unenroll on iOS Simulator; cancel/error require Android SDK hook",
+          "match/fail/enroll/unenroll on iOS Simulator; cancel/error need the AutoMobile SDK in the app",
         ),
       modality: z
         .enum(["any", "fingerprint", "face"])
@@ -161,7 +161,7 @@ export function registerBiometricTools() {
   // Register the tool
   ToolRegistry.registerDeviceAware(
     "biometricAuth",
-    "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
+    "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     biometricAuthSchema,
     biometricAuthHandler,
     { defaultEnabled: false, supportsProgress: true },

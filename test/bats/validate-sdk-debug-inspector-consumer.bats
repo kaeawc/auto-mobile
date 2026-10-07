@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Unit coverage for the parsing helpers in
 # scripts/android/validate-sdk-debug-inspector-consumer.sh (issue #5714).

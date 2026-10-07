@@ -775,7 +775,7 @@ function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
 }
 
 /**
- * A rawValue is "explicitly decoded" when the switch has a dedicated case that
+ * A rawValue is "explicitly decoded" when a dedicated decoder
  * reshapes it into a fresh result object. The default branch, by contrast,
  * resolves the message verbatim (`result === message` by identity), so identity
  * equality is a precise, source-parsing-free probe for the default fall-through.
@@ -785,6 +785,56 @@ function isExplicitlyDecoded(rawValue: string): boolean {
   const decoded = decodeCtrlProxyMessage(message);
   return decoded !== null && decoded.result !== message;
 }
+
+// The reviewed Swift/TS contract: main added magic_tap_result (#10328), while
+// this branch added set_network_mock_rules_result (#10101). Pin the set as well
+// as its size so a dropped decoder cannot be hidden by another addition.
+const EXPECTED_RESHAPED_RESPONSE_TYPES = [
+  "action_result",
+  "append_text_result",
+  "clear_preferences_result",
+  "clear_text_result",
+  "clipboard_result",
+  "drag_result",
+  "execute_sql_result",
+  "get_preference_result",
+  "hierarchy_update",
+  "highlight_response",
+  "hinge_angle_result",
+  "ime_action_result",
+  "keyboard_result",
+  "launch_app_result",
+  "list_databases_result",
+  "list_tables_result",
+  "magic_tap_result",
+  "multi_finger_swipe_result",
+  "pinch_result",
+  "preference_files",
+  "preferences",
+  "press_back_result",
+  "press_button_result",
+  "press_home_result",
+  "press_key_result",
+  "recent_apps_result",
+  "remove_preference_result",
+  "reset_permissions_result",
+  "rotate_result",
+  "screenshot",
+  "sdk_capabilities_result",
+  "select_all_result",
+  "set_network_error_simulation_result",
+  "set_network_fault_rules_result",
+  "set_network_mock_rules_result",
+  "set_preference_result",
+  "set_text_result",
+  "storage_capabilities_result",
+  "swipe_result",
+  "table_data_result",
+  "table_structure_result",
+  "tap_coordinates_result",
+  "voiceover_set_result",
+  "voiceover_state_result",
+];
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
   const swiftSource = readFileSync(
@@ -813,7 +863,6 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "current_focus_result",
     "traversal_order_result",
     "connected",
-    "set_network_fault_rules_result",
   ];
 
   test("Swift ResponseType declares exactly 50 rawValues", () => {
@@ -830,8 +879,10 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 43 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(43);
+  test("the decoder explicitly reshapes exactly the 44 expected response types", () => {
+    const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
+    expect(reshaped.length).toBe(44);
+    expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -950,7 +1001,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 41 rows = the 41 explicitly-decoded ResponseTypes.
+  // message omits it. Keep this table aligned with the exact parity set above.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
     { type: "screenshot", expected: true },
@@ -974,6 +1025,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "hinge_angle_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
+    { type: "magic_tap_result", expected: false },
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
@@ -1047,8 +1099,10 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 43 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(43);
+  test("the default table covers all 44 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
+      EXPECTED_RESHAPED_RESPONSE_TYPES,
+    );
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -1086,8 +1140,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 42 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(42);
+  test("the passthrough set is the 43 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(43);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

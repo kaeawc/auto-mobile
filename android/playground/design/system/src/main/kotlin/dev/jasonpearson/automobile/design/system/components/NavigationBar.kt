@@ -30,8 +30,8 @@ fun AutoMobileNavigationBar(
 }
 
 /**
- * A tab inside [AutoMobileNavigationBar]. Icon and label slots stay with the caller so the
- * content descriptions and test tags that automation plans select on are unchanged.
+ * A tab inside [AutoMobileNavigationBar]. Icon and label slots stay with the caller so the content
+ * descriptions and test tags that automation plans select on are unchanged.
  */
 @Composable
 fun RowScope.AutoMobileNavigationBarItem(

@@ -170,6 +170,33 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.overlayResult;
   }
 
+  private inspectReply: { events: OverlayEvent[]; result: OverlayResult } = {
+    events: [],
+    result: { success: true, overlays: [], droppedEvents: 0 },
+  };
+  private inspectCount = 0;
+
+  /** What the next inspect delivers: `events` first (as the device replays), then `result`. */
+  setInspectReply(result: OverlayResult, events: OverlayEvent[] = []): void {
+    this.inspectReply = { events, result };
+  }
+
+  getInspectCount(): number {
+    return this.inspectCount;
+  }
+
+  async requestInspectOverlays(
+    _timeoutMs = 5000,
+    _perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestInspectOverlays");
+    this.inspectCount++;
+    for (const event of this.inspectReply.events) {
+      this.emitOverlayEvent(event);
+    }
+    return this.inspectReply.result;
+  }
+
   private overlayAssetResult: OverlayAssetResult = {
     success: true,
     dispatched: true,

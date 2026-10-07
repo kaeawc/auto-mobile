@@ -448,6 +448,15 @@ export type UpdateOverlayMessage = { type: "update_overlay"; requestId: string }
 export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
 export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
 /**
+ * `@SerialName("inspect_overlays")` → `InspectOverlays`. Answered by one `overlay_result` carrying
+ * `overlays`; events the device buffered while no host was connected arrive first, as ordinary
+ * `overlay_event` frames. Only sent to a device advertising `overlay_persistence_replay_v1`.
+ */
+export interface InspectOverlaysMessage {
+  type: "inspect_overlays";
+  requestId: string;
+}
+/**
  * `@SerialName("put_overlay_asset")` → `PutOverlayAsset`. `dataBase64` is the encoded image file
  * (PNG, JPEG or WebP) in standard base64 without line breaks, sent in the one JSON text frame like
  * screenshots. Replaces any asset with the same id. Answered by one `overlay_result`.
@@ -478,6 +487,21 @@ export interface OverlayResult {
    * host can re-upload them. Absent when nothing is missing and on devices that predate it.
    */
   missingAssets?: string[];
+  /** Only the reply to `inspect_overlays`: the overlays the device is showing right now. */
+  overlays?: OverlayStatusEntry[];
+  /** Only with `overlays`: events the device dropped from its offline buffer since it started. */
+  droppedEvents?: number;
+}
+
+/** One overlay the device reported to `inspect_overlays`. `id` is the overlay id (its spec id). */
+export interface OverlayStatusEntry {
+  id: string;
+  /** True for `window.persistence: "device"`. */
+  persistent: boolean;
+  state: OverlayState;
+  pages: Record<string, number>;
+  /** Highest `overlay_event` sequence the device allocated for this overlay; no rewind. */
+  lastSequence: number;
 }
 
 /**
@@ -785,6 +809,7 @@ export type CtrlProxyRequest =
   | ShowOverlayMessage
   | UpdateOverlayMessage
   | DismissOverlayMessage
+  | InspectOverlaysMessage
   | PutOverlayAssetMessage
   | RemoveOverlayAssetMessage
   | AddHighlightMessage
@@ -854,6 +879,12 @@ export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
  */
 export const OVERLAY_WINDOW_OPTIONS_CAPABILITY = "overlay_window_options_v1";
 
+/**
+ * Advertised by a CtrlProxy that buffers a device-persistent overlay's events while no host is
+ * connected, replays them on the next connection, and answers `inspect_overlays`.
+ */
+export const OVERLAY_PERSISTENCE_REPLAY_CAPABILITY = "overlay_persistence_replay_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -864,6 +895,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "tap_double_v1",
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
 ] as const;
 
 /** The supportedCommands list is authoritative for every request when this marker is present. */
@@ -1008,6 +1040,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   show_overlay: true,
   update_overlay: true,
   dismiss_overlay: true,
+  inspect_overlays: true,
   put_overlay_asset: true,
   remove_overlay_asset: true,
   list_preference_files: true,
@@ -1291,6 +1324,10 @@ export const ctrlProxyRequests = {
     return args.spec !== undefined
       ? { type: "update_overlay", requestId: args.requestId, id: args.id, spec: args.spec }
       : { type: "update_overlay", requestId: args.requestId, id: args.id, state: args.state };
+  },
+
+  inspectOverlays(args: { requestId: string }): InspectOverlaysMessage {
+    return { type: "inspect_overlays", requestId: args.requestId };
   },
 
   dismissOverlay(args: { requestId: string } & OverlayDismiss): DismissOverlayMessage {

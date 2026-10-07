@@ -77,6 +77,26 @@ export class OverlayEventCoordinator {
     this.subscribe(scope.deviceId, client);
   }
 
+  /**
+   * Takes over an overlay the device reported (`inspect`) that this host did not show, for example
+   * after a session release. `replayed` are the events the device had buffered while no host was
+   * connected, in wire order; `lastSequence` is the device ledger's high-water mark, so sequences
+   * continue from it with no rewind.
+   */
+  adopt(
+    scope: OverlayScope,
+    id: string,
+    client: OverlayEventSource,
+    replayed: readonly OverlayEvent[],
+    lastSequence: number,
+  ): void {
+    this.show(scope, id, client);
+    for (const event of replayed) {
+      this.receive(scope.deviceId, event);
+    }
+    this.entries.get(scopeKey(scope, id))?.buffer.advanceTo(lastSequence);
+  }
+
   isDismissed(scope: OverlayScope, id: string): boolean {
     return this.entries.get(scopeKey(scope, id))?.terminal ?? false;
   }

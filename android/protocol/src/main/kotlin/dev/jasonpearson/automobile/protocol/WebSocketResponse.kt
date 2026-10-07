@@ -719,7 +719,25 @@ data class OverlayResult(
   val success: Boolean,
   val error: String? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val missingAssets: List<String>? = null,
+  /** Only the reply to `inspect_overlays`: what the device is showing right now. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val overlays: List<OverlayStatusEntry>? = null,
+  /** Only with [overlays]: events dropped from the offline buffer since the service started. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val droppedEvents: Long? = null,
 ) : WebSocketResponse()
+
+/**
+ * One overlay the device is showing. [id] is the overlay id, which is its spec id. [lastSequence]
+ * is the highest `overlay_event` sequence allocated for it, so a host resumes from there without a
+ * rewind. [persistent] is true for `window.persistence: "device"`.
+ */
+@Serializable
+data class OverlayStatusEntry(
+  val id: String,
+  val persistent: Boolean,
+  val state: Map<String, OverlayScalar>,
+  val pages: Map<String, Int> = emptyMap(),
+  val lastSequence: Long,
+)
 
 @Serializable
 enum class OverlayEventKind {

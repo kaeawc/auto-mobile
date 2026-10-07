@@ -164,6 +164,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {}
 
+  override fun inspectOverlays(requestId: String?) {}
+
   override fun putOverlayAsset(
     requestId: String?,
     id: String,
@@ -521,6 +523,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
     record("dismissOverlay", requestId, id, all)
+
+  override fun inspectOverlays(requestId: String?) = record("inspectOverlays", requestId)
 
   override fun putOverlayAsset(
     requestId: String?,

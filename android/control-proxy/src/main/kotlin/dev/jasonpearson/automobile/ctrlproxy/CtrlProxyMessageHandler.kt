@@ -13,6 +13,7 @@ import dev.jasonpearson.automobile.protocol.GetPermission
 import dev.jasonpearson.automobile.protocol.GetPreference
 import dev.jasonpearson.automobile.protocol.GetPreferences
 import dev.jasonpearson.automobile.protocol.GetTraversalOrder
+import dev.jasonpearson.automobile.protocol.InspectOverlays
 import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
@@ -508,6 +509,7 @@ class CtrlProxyMessageHandler(
         }
         actions.dismissOverlay(request.requestId, request.id, request.all)
       }
+      is InspectOverlays -> actions.inspectOverlays(request.requestId)
       is PutOverlayAsset ->
         actions.putOverlayAsset(request.requestId, request.id, request.mimeType, request.dataBase64)
       is RemoveOverlayAsset -> actions.removeOverlayAsset(request.requestId, request.id)

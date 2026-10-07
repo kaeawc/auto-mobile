@@ -17,6 +17,8 @@ import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
+  type InspectOverlaysMessage,
   type ShowOverlayMessage,
   type UpdateOverlayMessage,
   type DismissOverlayMessage,
@@ -32,6 +34,11 @@ import {
 /** Shared by the client transport guard and the tool-level refusal. */
 export function overlayDisplayUnsupportedMessage(displayId: number): string {
   return `show_overlay: the connected CtrlProxy does not advertise ${OVERLAY_DISPLAY_CAPABILITY}, so it cannot show an overlay on display ${displayId} and would place it on the default display; update the connected CtrlProxy or omit display.`;
+}
+
+/** Shared by the client transport guard and the tool-level refusal. */
+export function overlayInspectUnsupportedMessage(): string {
+  return `inspect_overlays: the connected CtrlProxy does not advertise ${OVERLAY_PERSISTENCE_REPLAY_CAPABILITY}, so it cannot report the overlays it is showing or replay events buffered while no host was connected; update the connected CtrlProxy.`;
 }
 
 /** Transport controls shared by asset upload and removal. */
@@ -113,6 +120,15 @@ export class CtrlProxyOverlays {
       timeoutMs,
       perf,
     );
+  }
+
+  /**
+   * Asks the device which overlays it is showing. The device first delivers any events it buffered
+   * while no host was connected (through [onOverlayEvent]), then answers with `overlays`. Throws
+   * before sending when the device does not advertise `overlay_persistence_replay_v1`.
+   */
+  requestInspectOverlays(timeoutMs = 5000, perf?: PerformanceTracker): Promise<OverlayResult> {
+    return this.request(ctrlProxyRequests.inspectOverlays({ requestId: "" }), timeoutMs, perf);
   }
 
   /**
@@ -263,7 +279,11 @@ export class CtrlProxyOverlays {
   }
 
   private async request(
-    message: ShowOverlayMessage | UpdateOverlayMessage | DismissOverlayMessage,
+    message:
+      | ShowOverlayMessage
+      | UpdateOverlayMessage
+      | DismissOverlayMessage
+      | InspectOverlaysMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult> {
@@ -278,6 +298,12 @@ export class CtrlProxyOverlays {
       throw new ActionableError(
         `${type}: this CtrlProxy build does not support overlays; update the connected CtrlProxy.`,
       );
+    }
+    if (
+      message.type === "inspect_overlays" &&
+      this.context.isCommandSupported?.(OVERLAY_PERSISTENCE_REPLAY_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(overlayInspectUnsupportedMessage());
     }
     if (
       message.type === "show_overlay" &&

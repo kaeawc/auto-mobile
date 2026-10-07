@@ -95,6 +95,10 @@ class OverlayWindowOptionsTest {
       controller.onClientCountChanged(0)
       host.requests.last().onHostDismiss()
       assertFalse(host.isShowing)
+      // With no host attached the terminal event waits for the next one to connect.
+      assertNull(lastDismissReason())
+      clients = 1
+      controller.onClientConnected()
       assertEquals("""{"reason":"user"}""", lastDismissReason())
       assertEquals(1, assetClears)
 

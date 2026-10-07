@@ -570,7 +570,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `showVariants`, `update`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
@@ -592,9 +592,20 @@ assets. `setPage`, `setState`, text fields and the `dismiss` action keep working
 offline. It goes away only through its own close control (the fullscreen dismiss
 row, or a Close button on sheet and floating windows), an explicit `dismiss`, a
 replacing `show`, or the CtrlProxy service stopping. Host-side status and event
-buffers are still cleared on session release, and events emitted while no host
-is connected are not replayed. `showVariants` accepts top-level `layer` and
-`persistence` for the carousel window.
+buffers are still cleared on session release. `showVariants` accepts top-level
+`layer` and `persistence` for the carousel window.
+
+With no host connected, a persisted overlay's events (tap `emit`s, page changes,
+text input, a close) are kept on the device, the most recent 200, dropping the
+oldest and counting what it dropped. They are delivered, oldest first, when a
+host connects or on `inspect`, and sequences continue from the device's ledger
+with no rewind. `status` is host memory, so after a session release it shows
+nothing; `inspect` asks the device which overlays it is showing and adopts them
+(`adopted: true`, with the last known `pages` and `state`), so `status`,
+`update`, `dismiss` and `awaitEvent` work again. It also returns
+`deviceDroppedEvents`. `inspect` needs a CtrlProxy advertising
+`overlay_persistence_replay_v1` and is refused with an error naming the flag
+otherwise.
 
 `showVariants` requires `id` and a nonempty `variants` array (maximum 12).
 Each variant is `{ label?, image: { asset, contentScale? } }` or

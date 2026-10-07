@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.protocol.OverlayEvent
 import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -146,6 +147,21 @@ internal fun overlayResultFrame(
       success = success,
       error = error,
       missingAssets = missingAssets.ifEmpty { null },
+    )
+  )
+
+internal fun overlayStatusFrame(
+  requestId: String?,
+  overlays: List<OverlayStatusEntry>,
+  droppedEvents: Long,
+): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    OverlayResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = true,
+      overlays = overlays,
+      droppedEvents = droppedEvents,
     )
   )
 

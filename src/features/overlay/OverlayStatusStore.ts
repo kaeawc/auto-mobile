@@ -7,6 +7,8 @@ export interface OverlayLastResult {
   id?: string;
   all?: true;
   lastAction: OverlayMutation;
+  /** Reported by the device through `inspect`, not shown by this host. */
+  adopted?: true;
   /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
   displayId?: number;
   success: boolean;
@@ -19,6 +21,11 @@ export interface OverlayEventState {
   state: OverlayEvent["state"];
   lastKnown: true;
 }
+export interface AdoptedOverlay {
+  id: string;
+  pages: OverlayEvent["pages"];
+  state: OverlayEvent["state"];
+}
 export interface OverlayStatus {
   overlays: (OverlayLastResult & Partial<OverlayEventState>)[];
   lastResult?: OverlayLastResult;
@@ -30,6 +37,11 @@ export interface OverlayScope {
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
   startShow(scope: OverlayScope): void;
+  /**
+   * The device reported this overlay as showing (`inspect`). Presence and its last known
+   * pages/state come from the device, replacing whatever the host remembered for the device.
+   */
+  adopt(scope: OverlayScope, overlay: AdoptedOverlay): void;
   recordEvent(scope: OverlayScope, event: OverlayEvent): void;
   /** The device reported a terminal dismissal for this overlay; its presence is gone. */
   dismissed(scope: OverlayScope, id: string): void;
@@ -90,6 +102,33 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     if (stored) {
       stored.pendingSnapshot = undefined;
     }
+  }
+
+  adopt(scope: OverlayScope, overlay: AdoptedOverlay): void {
+    const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
+    const stored = this.scopes.get(key) ?? {
+      ...scope,
+      shown: new Map<string, OverlayLastResult>(),
+    };
+    // The device holds one overlay; what it reports replaces every session's presence.
+    this.clearShown(scope.deviceId);
+    const entry: OverlayLastResult = {
+      id: overlay.id,
+      lastAction: "show",
+      adopted: true,
+      success: true,
+      timestamp: this.clock.now(),
+    };
+    stored.lastResult = entry;
+    stored.shown.set(overlay.id, entry);
+    stored.pendingSnapshot = undefined;
+    stored.snapshot = {
+      id: overlay.id,
+      pages: { ...overlay.pages },
+      state: { ...overlay.state },
+      lastKnown: true,
+    };
+    this.remember(key, stored);
   }
 
   /** Accepted pushes may precede the successful show acknowledgement. */

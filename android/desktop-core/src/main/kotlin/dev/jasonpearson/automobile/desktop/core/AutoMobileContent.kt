@@ -76,6 +76,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotConfigClien
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
@@ -1277,9 +1278,11 @@ fun AutoMobileContent(
   // Streaming failures data source for real-time failure notifications
   // Only created in Real mode when the Failures panel is expanded
   val streamingFailuresDataSource =
-    remember(dataSourceMode, isFailuresPanelCollapsed) {
+    remember(dataSourceMode, isFailuresPanelCollapsed, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real && !isFailuresPanelCollapsed)
-        StreamingFailuresDataSource()
+        StreamingFailuresDataSource(
+          FailuresStreamSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider)
+        )
       else null
     }
 

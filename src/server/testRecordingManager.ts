@@ -1,6 +1,7 @@
 import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep, type Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
@@ -50,7 +51,9 @@ interface RecordingSession {
 
 const STOP_RECORDING_TIMEOUT_MS = 10_000;
 
-type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount">;
+type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount"> &
+  /** Steps captured so far; lets a stop that failed or timed out still return them. */
+  Partial<Pick<DualTrackRecorder, "capturedSteps">>;
 type RecorderFactory = (device: BootedDevice) => TestRecorder;
 
 let activeRecording: RecordingSession | null = null;
@@ -248,25 +251,48 @@ export async function stopTestRecording(
   return promise;
 }
 
-async function stopAndBuildResult(
-  session: RecordingSession,
-  planName: string | undefined,
-  timer: Timer,
-): Promise<TestRecordingStopResult> {
-  let steps: PlanStep[];
-  let touchTrackFailure: TouchTrackFailure | undefined;
+interface RecorderStopOutcome {
+  steps: PlanStep[];
+  touchTrackFailure?: TouchTrackFailure;
+  geometryWarnings?: string[];
+  /** Why the recorder's stop did not finish, when the captured steps were returned anyway. */
+  salvagedAfter?: string;
+}
+
+/**
+ * Stop the recorder under the stop deadline. The session is already released, so a
+ * failed or timed-out stop must not also throw away what was captured: the recorder
+ * collects its steps before it does any device work, so they are returned with a
+ * warning whenever it can still hand them over.
+ */
+async function stopRecorder(session: RecordingSession, timer: Timer): Promise<RecorderStopOutcome> {
   try {
-    ({ steps, touchTrackFailure } = await raceWithDeadline(() => session.recorder.stop(), {
+    return await raceWithDeadline(() => session.recorder.stop(), {
       timer,
       timeoutMs: STOP_RECORDING_TIMEOUT_MS,
       label: "Stopping test recording",
       timeoutError: () =>
         new Error(`Test recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
-    }));
+    });
   } catch (error) {
     logger.warn(`[TestRecording] Failed to stop recording ${session.recordingId}`, error);
-    throw toActionableError(error, "Failed to stop test recording");
+    const captured = session.recorder.capturedSteps ?? [];
+    if (captured.length === 0) {
+      throw toActionableError(error, "Failed to stop test recording");
+    }
+    return { steps: [...captured], salvagedAfter: errorMessage(error) };
   }
+}
+
+async function stopAndBuildResult(
+  session: RecordingSession,
+  planName: string | undefined,
+  timer: Timer,
+): Promise<TestRecordingStopResult> {
+  const { steps, touchTrackFailure, geometryWarnings, salvagedAfter } = await stopRecorder(
+    session,
+    timer,
+  );
 
   const touchTrackMessage = touchTrackFailure
     ? `Touch track (getevent) stopped ${touchTrackFailure.failedAt - session.startedAt} ms after recording start: ${touchTrackFailure.error.message}. Later taps may be missing.`
@@ -282,6 +308,23 @@ async function stopAndBuildResult(
   if (touchTrackMessage) {
     logger.warn(`[TestRecording] ${touchTrackMessage}`);
   }
+  // A rotation or display size change (or an unreadable rotation) can leave tapAt/swipeOn
+  // steps at the wrong coordinates or direction (#10174); never report that as a clean plan.
+  const geometryMessage = geometryWarnings?.length
+    ? `Display geometry changed or was unreadable during recording: ${geometryWarnings.join("; ")}. Steps labelled "Warning:" may be recorded at the wrong coordinates or direction.`
+    : undefined;
+  if (geometryMessage) {
+    logger.warn(`[TestRecording] ${geometryMessage}`);
+  }
+  const salvageMessage = salvagedAfter
+    ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
+    : undefined;
+  if (salvageMessage) {
+    logger.warn(`[TestRecording] ${salvageMessage}`);
+  }
+  const warningMessage = [touchTrackMessage, geometryMessage, salvageMessage]
+    .filter(Boolean)
+    .join(" ");
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);
@@ -304,7 +347,7 @@ async function stopAndBuildResult(
     planName: resolvedPlanName,
     planContent,
     stepCount,
-    ...(touchTrackMessage ? { error: `Warning: ${touchTrackMessage}` } : {}),
+    ...(warningMessage ? { error: `Warning: ${warningMessage}` } : {}),
     deviceId: session.deviceId,
     platform: session.platform,
   };

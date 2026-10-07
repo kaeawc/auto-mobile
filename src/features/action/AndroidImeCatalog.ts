@@ -1,3 +1,5 @@
+import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
+import { defaultRetryExecutor, type RetryExecutor } from "../../utils/retry/RetryExecutor";
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
@@ -7,6 +9,7 @@ import { clearAndroidImeQuarantine, withAndroidImeLock } from "./androidImeLock"
 /** `ime set` normally completes well under 1s; bound the post-dispatch
  * window while the per-device IME lock is held. */
 const IME_SET_COMMAND_TIMEOUT_MS = 5_000;
+const IME_READ_COMMAND_TIMEOUT_MS = 3_000;
 
 export interface InstalledIme {
   id: string;
@@ -115,6 +118,7 @@ export class AndroidImeCatalog {
   constructor(
     private readonly adb: Pick<AdbExecutor, "execute">,
     private readonly deviceId: string,
+    private readonly retry: RetryExecutor = defaultRetryExecutor,
   ) {}
 
   async list(signal?: AbortSignal): Promise<ImeCatalogState> {
@@ -136,9 +140,9 @@ export class AndroidImeCatalog {
   }
 
   async readSubtype(imeId: string, signal?: AbortSignal): Promise<ImeSubtypeSnapshot> {
-    const selected = await this.adb.execute(
+    const selected = await this.readCommand(
       ["shell", "settings", "get", "secure", "selected_input_method_subtype"],
-      { signal },
+      signal,
     );
     if (selected.stderr.trim()) {
       throw new Error(`Failed to read IME subtype: ${selected.stderr.trim()}`);
@@ -170,11 +174,11 @@ export class AndroidImeCatalog {
             "selected_input_method_subtype",
             String(snapshot.id),
           ];
-    const result = await this.adb.execute(args);
+    const result = await this.adb.execute(args, { noRetry: true });
     if (result.stderr.trim()) {
       throw new Error(`Failed to restore IME subtype: ${result.stderr.trim()}`);
     }
-    const after = await this.adb.execute([
+    const after = await this.readCommand([
       "shell",
       "settings",
       "get",
@@ -258,6 +262,7 @@ export class AndroidImeCatalog {
       result = await this.adb.execute(["shell", "ime", "set", id], {
         signal: commandController?.signal,
         timeoutMs: IME_SET_COMMAND_TIMEOUT_MS,
+        noRetry: true,
         waitForProcessSettlementAfterAbort: true,
         beforeDispatch: async () => {
           signal?.throwIfAborted();
@@ -281,8 +286,22 @@ export class AndroidImeCatalog {
     return after;
   }
 
+  /** Only idempotent IME/settings reads belong here; mutations are dispatched once. */
+  private readCommand(args: string[], signal?: AbortSignal) {
+    return this.retry.executeOrThrow(
+      () =>
+        this.adb.execute(args, { signal, timeoutMs: IME_READ_COMMAND_TIMEOUT_MS, noRetry: true }),
+      {
+        maxAttempts: 2,
+        delays: 0,
+        signal,
+        shouldRetry: (error) => error instanceof AdbCommandTimeoutError,
+      },
+    );
+  }
+
   private async readImeIds(args: string[], signal?: AbortSignal): Promise<string[]> {
-    const result = await this.adb.execute(args, { signal });
+    const result = await this.readCommand(args, signal);
     if (result.stderr.trim()) {
       throw new Error(`Failed to list Android IMEs: ${result.stderr.trim()}`);
     }
@@ -299,9 +318,9 @@ export class AndroidImeCatalog {
   }
 
   private async readActiveIme(signal?: AbortSignal): Promise<string | null> {
-    const result = await this.adb.execute(
+    const result = await this.readCommand(
       ["shell", "settings", "get", "secure", "default_input_method"],
-      { signal },
+      signal,
     );
     if (result.stderr.trim()) {
       throw new Error(`Failed to read active IME: ${result.stderr.trim()}`);

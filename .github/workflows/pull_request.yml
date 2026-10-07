@@ -1375,6 +1375,19 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      - name: "Measure cold module imports (advisory, #10429)"
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          mkdir -p scratch
+          bash scripts/measure-cold-imports.sh | tee scratch/cold-imports.md
+          {
+            echo "### Cold module import (Linux)"
+            cat scratch/cold-imports.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: "Upload Node Unit Timing Reports"
         if: success() && runner.os == 'Linux'
         uses: actions/upload-artifact@v6

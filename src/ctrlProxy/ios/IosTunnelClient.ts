@@ -8,6 +8,8 @@ import { exponentialBackoff } from "../../utils/Backoff";
 import { runDetachedFromPerf, trackAmbient } from "../../utils/PerfContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {
@@ -135,8 +137,20 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         { stdio: ["ignore", "pipe", "pipe"] },
       ),
     );
+    const spawnFailure = Promise.withResolvers<Error>();
+    const captureSpawnError = (error: Error) => spawnFailure.resolve(error);
+    child.on("error", captureSpawnError);
     if (!child.pid) {
-      throw new Error("Failed to start iproxy tunnel (no PID)");
+      // Node reports failed spawns asynchronously. Yield one timer turn before
+      // falling back to no PID, and keep the listener for any later error event.
+      const error = await raceWithDeadline<Error | undefined>(
+        [spawnFailure.promise, this.timer.sleep(0).then(() => undefined)],
+        { timer: this.timer, label: "iproxy spawn" },
+      );
+      if (error) {
+        throw toActionableError(error, "Failed to start iproxy tunnel");
+      }
+      throw new ActionableError("Failed to start iproxy tunnel (no PID)");
     }
 
     this.iproxyProcess = child;
@@ -144,7 +158,21 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     this.iproxyLocalPort = this.options.getServicePort();
     this.captureOutput(child);
     this.watchChild(child);
-    await trackAmbient("iproxy startup", () => this.waitForStartup());
+    try {
+      const error = await raceWithDeadline<Error | undefined>(
+        [
+          spawnFailure.promise,
+          trackAmbient("iproxy startup", () => this.waitForStartup()).then(() => undefined),
+        ],
+        { timer: this.timer, label: "iproxy startup" },
+      );
+      if (error) {
+        throw toActionableError(error, "Failed to start iproxy tunnel");
+      }
+    } finally {
+      // watchChild owns resident errors once startup has finished.
+      child.removeListener("error", captureSpawnError);
+    }
     if (options.supervise !== false) {
       await this.iproxySupervisor.start();
     }

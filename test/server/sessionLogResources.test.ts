@@ -193,6 +193,21 @@ describe("session log resources (#7006)", () => {
     expect(service.collects).toEqual([]);
   });
 
+  test("reports a malformed percent-escape in appId as INVALID_REQUEST without touching the device (#10117)", async () => {
+    const { service } = harness();
+
+    const content = await read(
+      `automobile:device-session/${sessionUuid}/apps/com.example%zz/logs?${appLogPathsQuery}`,
+    );
+
+    const body = JSON.parse(content.text!);
+    expect(body.code).toBe("INVALID_REQUEST");
+    expect(body.error).toBe(
+      "Malformed resource URI: a path segment is not valid percent-encoding.",
+    );
+    expect(service.collects).toEqual([]);
+  });
+
   test("turns a whole-collection failure into a JSON error, not a thrown read", async () => {
     const { service } = harness();
     service.failure = new Error("Session logs are not supported on tvos.");

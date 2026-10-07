@@ -2,6 +2,8 @@ import type { PerformanceAuditHistoryEntry } from "../db/performanceAuditReposit
 import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
 export interface PerformanceStreamSocketRequest extends SocketRequest {
+  /** Live device or observer session UUID; required unless stream auth is disabled. */
+  sessionUuid?: string;
   command: "poll";
   sinceTimestamp?: string;
   sinceId?: number;

@@ -113,6 +113,34 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     }
   });
 
+  test("focused input click settles when an old runner rejects it without a requestId", async () => {
+    let socket!: FakeWebSocket;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      (url) => (socket = new FakeWebSocket(url, "none", 0, fakeTimer)),
+      fakeTimer,
+    );
+    await client.ensureConnected();
+    const send = spyOn(socket, "send").mockImplementation(() => {
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "error",
+          error: "Unknown command type: request_click_focused_input",
+        }),
+      );
+    });
+    try {
+      const result = await client.requestClickFocusedInput();
+      expect(result).toMatchObject({ success: false, action: "click", acknowledged: true });
+      expect(result.error).toBe("Unknown command type: request_click_focused_input");
+      expect(client["requestManager"].getPendingCount()).toBe(0);
+    } finally {
+      send.mockRestore();
+      await client.close();
+    }
+  });
+
   test("requestAction reports no dispatch when connection is unavailable", async () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       testDevice,

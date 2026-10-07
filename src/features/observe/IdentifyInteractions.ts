@@ -2,6 +2,10 @@ import { Element } from "../../models/Element";
 import { ObserveResult } from "../../models/ObserveResult";
 import { ElementBounds } from "../../models/ElementBounds";
 import { DefaultElementFinder } from "../utility/ElementFinder";
+import type {
+  ClickableElementsQuery,
+  ScrollableElementsQuery,
+} from "../../utils/interfaces/ElementTraitQueries";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { NavigationEdge } from "../../utils/interfaces/NavigationGraph";
@@ -72,7 +76,8 @@ interface InteractionCandidate {
 }
 
 export class IdentifyInteractions {
-  private readonly elementFinder = new DefaultElementFinder();
+  private readonly elementFinder: ScrollableElementsQuery & ClickableElementsQuery =
+    new DefaultElementFinder();
   private readonly elementParser = new DefaultElementParser();
   private readonly geometry = new DefaultElementGeometry();
 

@@ -5,6 +5,7 @@
  * via the iOS CtrlProxy WebSocket API.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, CtrlProxyClipboardResult } from "./types";
 import { ActionableError } from "../../../models/ActionableError";
@@ -77,6 +78,8 @@ export class CtrlProxyClipboard {
       // Runner replies acknowledge even refusals; timeout factories explicitly do not.
       return { ...result, acknowledged: result.acknowledged ?? dispatched };
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       // Structured runner refusals acknowledge the request; caller cancellation does not.
       if (dispatched && error instanceof ActionableError && error !== signal?.reason) {
         logger.warn("[CtrlProxyClipboard] Runner refused clipboard operation", error);

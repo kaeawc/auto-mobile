@@ -4642,7 +4642,18 @@ export type DevicePreparationBudgets = {
   stableTarget?: StableDeviceTarget;
   /** Android `avdName` + `deviceId` pair, validated before and after discovery. */
   requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
+  /** Running preparation stage, named when the acquisition deadline backstop fires (#6034). */
+  stage?: AcquisitionStage;
 };
+
+/** Mutable holder for the acquisition stage currently in flight. */
+export type AcquisitionStage = { current: string };
+
+export function setAcquisitionStage(budgets: DevicePreparationBudgets, stage: string): void {
+  if (budgets.stage) {
+    budgets.stage.current = stage;
+  }
+}
 
 /**
  * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the

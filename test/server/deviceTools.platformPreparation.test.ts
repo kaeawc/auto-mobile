@@ -192,7 +192,9 @@ describe("platform device preparation tools", () => {
     ]);
     const stalledCoordinator: VirtualDeviceLifecycleCoordinator = {
       reserve: async () => {
-        timer.advanceTime(10_000);
+        // Past the 6s budget but inside the acquisition backstop grace (#6034),
+        // so the reservation's own labelled timeout is what the caller sees.
+        timer.advanceTime(7_000);
         throw new Error("lifecycle reservation aborted");
       },
     };

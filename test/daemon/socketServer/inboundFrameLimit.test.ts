@@ -266,16 +266,29 @@ describe("per-server inbound frame limits", () => {
   it("accepts a failures-stream acknowledge frame larger than the 1 MiB default", async () => {
     const repository = new FakeFailuresRepository();
     const socket = new FlushingSocket();
+    const authorizedSessions: Array<string | undefined> = [];
     const server = new FailuresStreamSocketServer(
       "/fake/failures.sock",
       new FakeTimer(),
       repository,
+      {
+        authenticator: {
+          authorize({ sessionUuid }) {
+            authorizedSessions.push(sessionUuid);
+          },
+        },
+      },
     );
     (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
       socket.asSocket(),
     );
     const ids = Array.from({ length: 250_000 }, (_, index) => index);
-    const frame = JSON.stringify({ id: "1", command: "acknowledge", notificationIds: ids });
+    const frame = JSON.stringify({
+      id: "1",
+      command: "acknowledge",
+      sessionUuid: "frame-test-session",
+      notificationIds: ids,
+    });
     expect(Buffer.byteLength(frame)).toBeGreaterThan(AUX_SOCKET_MAX_FRAME_BYTES);
 
     socket.emit("data", Buffer.from(`${frame}\n`));
@@ -283,6 +296,10 @@ describe("per-server inbound frame limits", () => {
 
     expect(socket.destroyed).toBe(false);
     expect(repository.acknowledgedIds).toHaveLength(ids.length);
+    expect(authorizedSessions).toEqual(["frame-test-session"]);
+    expect(socket.writes.map((write) => JSON.parse(write))).toEqual([
+      { success: true, acknowledgedCount: ids.length },
+    ]);
   });
 
   it("rejects a failures-stream frame over its own 8 MiB limit", async () => {

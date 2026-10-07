@@ -648,7 +648,7 @@ export class ElementResolver {
         result.error = `Target not found${result.scope ? " within container" : ""}: index ${selector.index} is out of range or ineligible`;
       }
     } else if (selector.selectionStrategy === "unique") {
-      this.chooseUnique(result, actionable);
+      this.chooseUnique(result, actionable, selector);
     } else if (selector.selectionStrategy === "random") {
       result.chosen =
         actionable[
@@ -665,7 +665,11 @@ export class ElementResolver {
     return result;
   }
 
-  private chooseUnique(result: ElementResolution, candidates: SearchableEntry[]): void {
+  private chooseUnique(
+    result: ElementResolution,
+    candidates: SearchableEntry[],
+    selector: ResolverSelector,
+  ): void {
     // Scoped uniqueness belongs to the matched nodes, even if two of them
     // share one clickable owner. Promotion must not erase ambiguity.
     if (result.scope && result.candidates.length > 1) {
@@ -678,7 +682,11 @@ export class ElementResolver {
     result.failureReason = candidates.length === 0 ? "not-found" : "ambiguous";
     result.error =
       candidates.length === 0
-        ? `Target not found${result.scope ? " within container" : ""}`
+        ? `Target not found${result.scope ? " within container" : ""}${
+            selector.elementId !== undefined && syntheticNodeKey.test(selector.elementId)
+              ? ": stale element id from an earlier observation. s2- ids are valid only for the observation that returned them. Re-observe and use the new id."
+              : ""
+          }`
         : `Target ambiguous: ${candidates.length} matches; ${this.candidateDetails(candidates)}`;
   }
 

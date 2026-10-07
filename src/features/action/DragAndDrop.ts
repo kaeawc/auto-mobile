@@ -277,10 +277,7 @@ export class DragAndDrop extends BaseVisualChange {
           throw error;
         }
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(
-          { success: false, duration: 0, distance: 0, error: errorMessage(error) },
-          error,
-        );
+        return withStaleDisplay(this.failureResult(error, errorMessage(error)), error);
       }
     }
     return undefined;
@@ -456,8 +453,20 @@ export class DragAndDrop extends BaseVisualChange {
       }
 
       throwIfAborted(signal);
-      return { success: false, duration: 0, distance: 0, error: finalErrorMessage };
+      return this.failureResult(error, finalErrorMessage);
     }
+  }
+
+  private failureResult(error: unknown, message: string): DragAndDropResult {
+    return {
+      success: false,
+      duration: 0,
+      distance: 0,
+      error: message,
+      ...(error instanceof ActionableError && error.containerFailure
+        ? { containerFailure: error.containerFailure }
+        : {}),
+    };
   }
 
   private isSourceResolutionError(message: string): boolean {
@@ -577,6 +586,7 @@ export class DragAndDrop extends BaseVisualChange {
     ) {
       throw new ActionableError(
         `Container level 1 not found: ${target.container.elementId ?? target.container.text}`,
+        { containerFailure: { level: 1, reason: "not-found", selector: target.container } },
       );
     }
     if (target.elementId) {

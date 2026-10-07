@@ -1,10 +1,8 @@
-import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 
-interface AxisRanges {
+export interface AxisRanges {
   xMin: number;
   xMax: number;
   yMin: number;
@@ -19,6 +17,17 @@ interface AxisRanges {
 export interface CoordScaler {
   toScreenPoint(rawX: number, rawY: number): { x: number; y: number };
 }
+
+/**
+ * A scaler whose rotation and display size depend on when a touch happened.
+ * The gesture classifier resolves it once per contact, at the contact's DOWN
+ * frame, so a rotation mid-recording only affects touches that start after it.
+ */
+export interface TimedCoordScaler {
+  scalerAt(time: number): CoordScaler;
+}
+
+export type GestureScaler = CoordScaler | TimedCoordScaler;
 
 /**
  * Build a coordinate scaler that maps raw sensor values to logical display pixels.
@@ -56,58 +65,20 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
  * Parse the physical display size from `adb shell wm size` output.
  * Returns { width, height } in physical pixels (before rotation).
  */
-async function queryDisplaySize(adb: AdbExecutor): Promise<{ width: number; height: number }> {
-  const { stdout } = await adb.executeCommand("shell wm size");
+export async function queryDisplaySize(
+  adb: AdbExecutor,
+  options: { timeoutMs?: number } = {},
+): Promise<{ width: number; height: number }> {
+  // An explicit timeout also disables the adb client's retry, so it bounds the whole read.
+  const { stdout } =
+    options.timeoutMs === undefined
+      ? await adb.executeCommand("shell wm size")
+      : await adb.executeCommand("shell wm size", options.timeoutMs, undefined, true);
   const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
   if (!match) {
     throw new Error(`Could not parse display size from wm size output: ${stdout}`);
   }
   return { width: parseInt(match[1], 10), height: parseInt(match[2], 10) };
-}
-
-/**
- * Query the current display rotation from `adb shell dumpsys window displays`.
- * Returns 0 (portrait) if the rotation cannot be determined.
- *
- * Android reports rotation as named constants whose suffix is either the
- * 0-3 index (older devices/emulators) or the degree value (90/180/270).
- * Both forms are normalized to the 0-3 index expected by buildScaler.
- */
-export async function queryRotation(adb: AdbExecutor): Promise<number> {
-  try {
-    const { stdout } = await adb.executeCommand(
-      "shell dumpsys window displays",
-      undefined,
-      DUMPSYS_MAX_BUFFER,
-    );
-    const match = stdout.match(/mCurrentRotation=ROTATION_(\d+)/);
-    if (match) {
-      return normalizeDumpsysRotation(parseInt(match[1], 10));
-    }
-  } catch (error) {
-    logger.warn(
-      `[AxisRanges] Failed to query rotation; using portrait: ${errorMessage(error)}`,
-      error,
-    );
-  }
-  return 0;
-}
-
-/**
- * Maps dumpsys rotation suffix to a 0-3 index.
- * Handles both index form (0/1/2/3) and degree form (0/90/180/270).
- */
-function normalizeDumpsysRotation(value: number): number {
-  switch (value) {
-    case 90:
-      return 1;
-    case 180:
-      return 2;
-    case 270:
-      return 3;
-    default:
-      return value <= 3 ? value : 0;
-  }
 }
 
 /**
@@ -128,25 +99,4 @@ export async function queryDensity(adb: AdbExecutor): Promise<number> {
     );
   }
   return 2.75;
-}
-
-/**
- * Build AxisRanges from the touch node axis info + current display size + rotation.
- * @param rotation 0-3 from AccessibilityHierarchy.rotation
- */
-export async function buildAxisRanges(
-  adb: AdbExecutor,
-  node: TouchInputNode,
-  rotation: number,
-): Promise<AxisRanges> {
-  const { width, height } = await queryDisplaySize(adb);
-  return {
-    xMin: node.axisXMin,
-    xMax: node.axisXMax,
-    yMin: node.axisYMin,
-    yMax: node.axisYMax,
-    displayWidth: width,
-    displayHeight: height,
-    rotation,
-  };
 }

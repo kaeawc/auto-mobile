@@ -432,6 +432,13 @@ if [[ "${#recheck_files[@]}" -gt 0 ]]; then
       fi
       if [[ -f "$recheck_report" ]]; then
         testcase_rows "$recheck_report" > "$recheck_dir/run-recheck.tsv"
+        # Log each isolated sample as it lands: the final verdict prints only
+        # after every file is rechecked, and a job whose log is lost (#9751)
+        # would otherwise show no trace that the median check ran at all.
+        awk -F"$field_sep" -v file="$file" -v run="$((run + 1))" -v runs="$recheck_runs" '
+          NR == 1 || $4 + 0 > worst { worst = $4 + 0 }
+          END { if (NR > 0) printf "Recheck run %d/%d of %s: slowest testcase %.2fms.\n", run, runs, file, worst }
+        ' "$recheck_dir/run-recheck.tsv" >&2 || true
         cat "$recheck_dir/run-recheck.tsv" >> "$recheck_rows"
         cat "$recheck_dir/run-recheck.tsv" >> "$file_recheck_rows"
         if (( recheck_runs % 2 == 1 && run + 1 < recheck_runs )); then

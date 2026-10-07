@@ -1,10 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandIn
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -97,8 +93,8 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
     AnimatedVisibility(
       visible = node.visible,
-      enter = fadeIn() + expandIn(),
-      exit = fadeOut() + shrinkOut(),
+      enter = overlayEnterTransition(node.source.transition),
+      exit = overlayExitTransition(node.source.transition),
     ) {
       RenderOverlayNodeContent(node, interact)
     }
@@ -113,14 +109,16 @@ private fun RenderOverlayNodeContent(
   interact: (OverlayInteraction) -> Unit,
 ) {
   val modifier = overlayNodeModifier(node, interact)
+  // Containers whose children can appear, disappear or change animate their size with them.
+  val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
     "box" ->
-      Box(modifier, contentAlignment = node.style.alignment) {
+      Box(containerModifier, contentAlignment = node.style.alignment) {
         node.children.forEach { RenderOverlayNode(it, interact) }
       }
     "row" ->
       Row(
-        modifier,
+        containerModifier,
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
@@ -128,7 +126,7 @@ private fun RenderOverlayNodeContent(
       }
     "column" ->
       Column(
-        modifier,
+        containerModifier,
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {

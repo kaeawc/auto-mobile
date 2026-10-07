@@ -104,6 +104,7 @@ Every node has required `type`. All other common properties are optional:
 | `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
 | `visibleWhen`     | `{key, equals}`; equals is a scalar. Missing key or unequal value means hidden.                    |
+| `transition`      | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
 
@@ -277,8 +278,17 @@ animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
 read when the spec changes. Only nodes with `visibleWhen` get an animation
-wrapper. Size-change animation, `transition` variants and `pressScale` are
-follow-ups.
+wrapper.
+
+`box`, `row` and `column` containers animate their size when their children
+appear, disappear or change (`animateContentSize`), gated by the same
+motion-enabled check, so a sibling slides into the freed space instead of
+jumping.
+
+A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+(instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
+fade). Absent keeps the default fade + expand. It has no effect on nodes
+without `visibleWhen`, or when motion is off. `pressScale` is a follow-up.
 
 ## Actions and state
 

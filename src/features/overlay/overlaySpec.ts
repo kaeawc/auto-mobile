@@ -261,6 +261,7 @@ const commonNodeShape = {
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
   visibleWhen: conditionSchema.optional(),
+  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };

@@ -752,6 +752,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -826,6 +833,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -906,6 +920,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -983,6 +1004,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -1052,6 +1080,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -1130,6 +1165,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -1242,6 +1284,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -1304,6 +1353,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -1382,6 +1438,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -1464,6 +1527,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -1538,6 +1608,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -1638,6 +1715,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -1726,6 +1810,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },

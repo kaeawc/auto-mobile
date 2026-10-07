@@ -210,6 +210,35 @@ function refreshFailureContext(failure: string | Error | undefined): string {
 }
 
 /**
+ * Why the last round of a multi-device allocation did not complete:
+ * `queued` \u2014 an earlier conflicting request was still waiting (no attempt made);
+ * `busy` \u2014 too few matching devices were idle to claim (no attempt made);
+ * `contention` \u2014 an attempt was made and released its claims to retry.
+ */
+type MultiDeviceAllocationBlock = "queued" | "busy" | "contention";
+
+interface MultiDeviceAllocationOutcome<T> {
+  success: boolean;
+  value?: T;
+  attempts: number;
+  lastBlock?: MultiDeviceAllocationBlock;
+}
+
+/** Attempt count for a timeout message, with why no attempt was made when zero (#9950). */
+function describeMultiDeviceAllocationAttempts(
+  outcome: Pick<MultiDeviceAllocationOutcome<unknown>, "attempts" | "lastBlock">,
+): string {
+  const count = `${outcome.attempts} attempts`;
+  if (outcome.lastBlock === "queued") {
+    return `${count}; still queued behind an earlier multi-device request that was waiting for devices`;
+  }
+  if (outcome.lastBlock === "busy") {
+    return `${count}; too few matching devices were idle to attempt allocation`;
+  }
+  return count;
+}
+
+/**
  * Pooled Device Status
  */
 export type DeviceStatus = "idle" | "busy" | "error";
@@ -2185,6 +2214,11 @@ export class DevicePool {
             while (assigned.size < requiredCount) {
               const sessionId = sessionIds[assigned.size];
 
+              if (this.recordHeldAssignment(sessionId, assignments)) {
+                assigned.add(sessionId);
+                continue;
+              }
+
               const assignResult = await this.tryAssignDevice(sessionId, platform);
               if (assignResult.refreshCompleted) {
                 refreshFailure = assignResult.refreshFailure;
@@ -2261,7 +2295,8 @@ export class DevicePool {
         const elapsed = this.timer.now() - startTime;
         const currentStats = this.getStatsForPlatform(platform);
         throw new ActionableError(
-          `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${result.attempts} attempts).\n` +
+          `Timed out allocating devices after ${Math.round(elapsed / 1000)}s ` +
+            `(${describeMultiDeviceAllocationAttempts(result)}).\n` +
             refreshFailureContext(refreshFailure) +
             `Required: ${requiredCount} devices\n` +
             `Device pool status:\n` +
@@ -2380,6 +2415,9 @@ export class DevicePool {
               if (assignments.has(request.sessionId)) {
                 continue;
               }
+              if (this.recordHeldAssignment(request.sessionId, assignments)) {
+                continue;
+              }
 
               const result = await this.tryAssignDeviceWithCriteria(
                 request.sessionId,
@@ -2426,7 +2464,8 @@ export class DevicePool {
         if (!result.success) {
           const elapsed = this.timer.now() - startTime;
           throw new ActionableError(
-            `Timed out allocating devices after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
+            `Timed out allocating devices after ${Math.round(elapsed / 1000)}s ` +
+              `(${describeMultiDeviceAllocationAttempts(result)}).\n` +
               refreshFailureContext(refreshFailure) +
               `Required: ${requiredCount} devices\n` +
               `Suggestions:\n` +
@@ -2454,7 +2493,39 @@ export class DevicePool {
     }
   }
 
-  private canClaimMultiDeviceAllocation(
+  /**
+   * The device an existing session already owns in this pool, if any. Such a
+   * session takes no new claim, so a multi-device request counts that device
+   * toward its total instead of waiting for an idle device it will not use.
+   */
+  private deviceHeldByExistingSession(sessionId: string): string | undefined {
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      return undefined;
+    }
+    const device = this.devices.get(session.assignedDevice);
+    return device?.sessionId === sessionId ? device.id : undefined;
+  }
+
+  /**
+   * Records the device an existing session (e.g. an executePlan base session)
+   * already holds (#10153). It needs no idle device and is never rolled back.
+   */
+  private recordHeldAssignment(sessionId: string, assignments: Map<string, string>): boolean {
+    const heldDeviceId = this.deviceHeldByExistingSession(sessionId);
+    if (heldDeviceId) {
+      assignments.set(sessionId, heldDeviceId);
+    }
+    return heldDeviceId !== undefined;
+  }
+
+  private multiDeviceAllocationBlock(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): MultiDeviceAllocationBlock {
+    return this.isQueuedBehindConflictingRequest(ticket) ? "queued" : "busy";
+  }
+
+  private isQueuedBehindConflictingRequest(
     ticket: (typeof this.multiDeviceAllocationQueue)[number],
   ): boolean {
     const earlier = this.multiDeviceAllocationQueue.slice(
@@ -2463,18 +2534,22 @@ export class DevicePool {
     );
     // Comparing live candidate IDs alone misses devices joining later. Use a
     // conservative platform-disjoint rule across both APIs, including wildcards.
-    if (
-      earlier.some((waiter) =>
-        waiter.requests.some((prior) =>
-          ticket.requests.some(
-            (request) =>
-              !prior.criteria?.platform ||
-              !request.criteria?.platform ||
-              prior.criteria.platform === request.criteria.platform,
-          ),
+    return earlier.some((waiter) =>
+      waiter.requests.some((prior) =>
+        ticket.requests.some(
+          (request) =>
+            !prior.criteria?.platform ||
+            !request.criteria?.platform ||
+            prior.criteria.platform === request.criteria.platform,
         ),
-      )
-    ) {
+      ),
+    );
+  }
+
+  private canClaimMultiDeviceAllocation(
+    ticket: (typeof this.multiDeviceAllocationQueue)[number],
+  ): boolean {
+    if (this.isQueuedBehindConflictingRequest(ticket)) {
       return false;
     }
     const available = new Set<string>();
@@ -2517,9 +2592,10 @@ export class DevicePool {
     deadlineMs: number,
     setRefreshFailure: (failure: string | undefined) => void,
     allocate: () => Promise<T>,
-  ): Promise<{ success: boolean; value?: T; attempts: number; error?: DevicePoolError }> {
+  ): Promise<MultiDeviceAllocationOutcome<T>> {
     let attempts = 0;
     let waited = false;
+    let lastBlock: MultiDeviceAllocationBlock | undefined;
     while (true) {
       if (waited) {
         await this.waitForMultiDeviceRetry(deadlineMs);
@@ -2530,16 +2606,18 @@ export class DevicePool {
       }
       throwIfRequestAborted();
       if (this.timer.now() >= deadlineMs && waited) {
-        return { success: false, attempts };
+        return { success: false, attempts, lastBlock };
       }
       waited = true;
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
+        lastBlock = this.multiDeviceAllocationBlock(ticket);
         if (this.timer.now() >= deadlineMs) {
-          return { success: false, attempts };
+          return { success: false, attempts, lastBlock };
         }
         continue;
       }
       attempts++;
+      lastBlock = "contention";
       try {
         return { success: true, value: await allocate(), attempts };
       } catch (error) {

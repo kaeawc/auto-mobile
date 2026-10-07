@@ -150,6 +150,7 @@ import {
 import { isTruthyFlag } from "../features/utility/elementProperties";
 import {
   createElementIdTextSelectorSchema,
+  hierarchyTargetSchema,
   tapOnSelectorSchema,
   resolverSelectionStrategySchema,
   nestedElementContainerSchema,
@@ -423,6 +424,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       .object({
         selector: tapOnSelectorSchema,
         display: z.string().optional().describe("Target panel key, role, or active"),
+        target: hierarchyTargetSchema.optional(),
         sibling: z
           .boolean()
           .optional()
@@ -557,6 +559,7 @@ export const tapOnSchema = withJsonSchemaOverride(
       ["ensureChecked"],
     );
     addIssue(value.searchUntil, "semantic link activation cannot use searchUntil", ["searchUntil"]);
+    addIssue(value.target !== undefined, "semantic link activation cannot use target", ["target"]);
     addIssue(
       value.subtext && value.index !== undefined,
       "owner-scoped semantic link activation cannot use index; use a unique owner selector",
@@ -722,6 +725,7 @@ export const tapAnySchema = withJsonSchemaOverride(
           .boolean()
           .optional()
           .describe("Search only scrollable containers/lists"),
+        target: hierarchyTargetSchema.optional(),
         action: z
           .enum(["tap", "doubleTap", "longPress"])
           .default("tap")
@@ -1216,6 +1220,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
           .describe(
             "Selection strategy: first (default), random, or unique. Unique requires exactly one match at every unindexed scope and target. Requires a selector naming the field to focus.",
           ),
+        target: hierarchyTargetSchema.optional(),
         commands: z
           .array(sendKeysCommandSchema)
           .min(1)
@@ -1232,7 +1237,7 @@ export const sendKeysSchema = withJsonSchemaOverride(
     if (value.selector !== undefined) {
       return;
     }
-    for (const field of ["container", "selectionStrategy"] as const) {
+    for (const field of ["container", "selectionStrategy", "target"] as const) {
       if (value[field] !== undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -1243,7 +1248,11 @@ export const sendKeysSchema = withJsonSchemaOverride(
     }
   }),
   (jsonSchema) => {
-    jsonSchema.dependentRequired = { container: ["selector"], selectionStrategy: ["selector"] };
+    jsonSchema.dependentRequired = {
+      container: ["selector"],
+      selectionStrategy: ["selector"],
+      target: ["selector"],
+    };
   },
 );
 
@@ -2170,6 +2179,7 @@ export async function tapOnHandler(
       ensureTap: args.ensureTap,
       ensureChecked: args.ensureChecked,
       subtext: args.subtext,
+      target: args.target,
     },
     progress,
     signal,
@@ -2300,6 +2310,7 @@ export async function tapAnyHandler(
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,
+      target: args.target,
     },
     progress,
     signal,
@@ -3333,7 +3344,7 @@ export function registerInteractionTools() {
       progress,
       signal,
       args.display,
-      { container: args.container, selectionStrategy: args.selectionStrategy },
+      { container: args.container, selectionStrategy: args.selectionStrategy, target: args.target },
     );
     const dismissal = await dismissKeyboardAfterSendKeys(
       device,

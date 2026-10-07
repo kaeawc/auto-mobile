@@ -3247,6 +3247,11 @@
           "type": "string",
           "enum": ["first", "random", "unique"]
         },
+        "target": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -9116,6 +9121,11 @@
             }
           },
           "additionalProperties": false
+        },
+        "target": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -25596,6 +25606,11 @@
           "type": "string",
           "enum": ["first", "random", "unique"]
         },
+        "target": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "commands": {
           "description": "One to 100 commands executed serially; execution stops on the first failure",
           "minItems": 1,
@@ -25737,7 +25752,8 @@
       "additionalProperties": false,
       "dependentRequired": {
         "container": ["selector"],
-        "selectionStrategy": ["selector"]
+        "selectionStrategy": ["selector"],
+        "target": ["selector"]
       },
       "$defs": {
         "__schema0": {
@@ -28685,6 +28701,11 @@
           "description": "Search only scrollable containers/lists",
           "type": "boolean"
         },
+        "target": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "action": {
           "description": "Action type (default: tap)",
           "default": "tap",
@@ -29192,6 +29213,11 @@
         "display": {
           "description": "Target panel key, role, or active",
           "type": "string"
+        },
+        "target": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",

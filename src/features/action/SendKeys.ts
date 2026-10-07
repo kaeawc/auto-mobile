@@ -16,6 +16,7 @@ import { selectablePanels } from "../../models/DisplayPanel";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
+import type { HierarchyTarget } from "../../models/HierarchyTarget";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
@@ -279,6 +280,8 @@ export interface SendKeysSelector {
 export interface SendKeysFocusOptions {
   container?: ElementContainerSelector;
   selectionStrategy?: ElementSelectionStrategy;
+  /** Resolve the field in the app or the AutoMobile overlay only (issue #9305). */
+  target?: HierarchyTarget;
 }
 
 export interface SendKeysTypeCommand {
@@ -3367,7 +3370,7 @@ export class SendKeys {
     if (selector) {
       return undefined;
     }
-    for (const field of ["container", "selectionStrategy"] as const) {
+    for (const field of ["container", "selectionStrategy", "target"] as const) {
       if (options[field] !== undefined) {
         return `${field} requires a selector naming the field to focus`;
       }
@@ -3653,6 +3656,7 @@ export class SendKeys {
     const result = await this.focusSelector(selector, signal, routing.display, {
       container: routing.container,
       selectionStrategy: routing.selectionStrategy,
+      target: routing.target,
     });
     return result.success
       ? undefined

@@ -1,5 +1,6 @@
 import type { ElementContainerSelector } from "./PinchOnOptions";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+import type { HierarchyTarget } from "./HierarchyTarget";
 
 export interface TapOnSubtextTarget {
   /** Exact visible text of a semantic link inside the selected owner element. */
@@ -62,4 +63,7 @@ export interface TapOnElementOptions {
 
   /** Semantic accessibility link inside the element selected by the outer selector. */
   subtext?: TapOnSubtextTarget;
+
+  /** Resolve against the app or the AutoMobile overlay only (issue #9305). */
+  target?: HierarchyTarget;
 }

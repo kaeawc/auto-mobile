@@ -439,6 +439,8 @@ export const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
  * a second device) can starve the heartbeat past the session's
  * heartbeat-timeout and get it reaped (issue #6135).
  */
+export const DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD = "daemon/releaseLivenessOwnership";
+
 export const DAEMON_HEARTBEAT_METHOD = "daemon/heartbeat";
 
 /**
@@ -478,6 +480,16 @@ export const CLI_SESSION_LIVENESS_POLICY = "cli";
  * daemon restores strict liveness for that backward-compatible wire shape too.
  */
 export const HEARTBEAT_SESSION_LIVENESS_POLICY = "heartbeat";
+
+/**
+ * Optional `daemon/heartbeat` parameter naming the kind of liveness owner behind the request.
+ *
+ * The external `--daemon heartbeat` keeper sends {@link CLI_KEEPER_LIVENESS_OWNER_KIND} so the
+ * daemon can tell it apart from a one-shot `--cli` proxy, whose declaration carries the same
+ * `cli` policy, token and claim (#10054). A keeper is for one-shot CLI sessions only and is
+ * refused a session a stdio/HTTP proxy owns. Absent for every proxy.
+ */
+export const CLI_KEEPER_LIVENESS_OWNER_KIND = "cli-keeper";
 
 /**
  * Default wall-clock idle timeout for a CLI-owned session (issue #6870).

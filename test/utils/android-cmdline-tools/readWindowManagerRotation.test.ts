@@ -35,12 +35,12 @@ describe("readWindowManagerRotation", () => {
       expect(await readWindowManagerRotation(adb, { signal })).toBe(rotation);
       expect(WINDOW_MANAGER_ROTATION_COMMAND).toBe("shell dumpsys window displays");
       expect(WINDOW_MANAGER_ROTATION_TIMEOUT_MS).toBe(5_000);
-      expect(WINDOW_MANAGER_ROTATION_MAX_BUFFER).toBe(4 * 1024 * 1024);
+      expect(WINDOW_MANAGER_ROTATION_MAX_BUFFER).toBe(16 * 1024 * 1024);
       expect(adb.getCommandCalls()).toEqual([
         {
           command: "shell dumpsys window displays",
           timeoutMs: 5_000,
-          maxBuffer: 4 * 1024 * 1024,
+          maxBuffer: 16 * 1024 * 1024,
           noRetry: undefined,
           signal,
           waitForProcessSettlementAfterAbort: undefined,
@@ -146,7 +146,7 @@ describe("readWindowManagerRotation", () => {
           (command) => ({
             command,
             timeoutMs: 5_000,
-            maxBuffer: 4 * 1024 * 1024,
+            maxBuffer: 16 * 1024 * 1024,
             noRetry: undefined,
             signal,
             waitForProcessSettlementAfterAbort: undefined,

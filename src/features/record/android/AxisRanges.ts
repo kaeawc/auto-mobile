@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -74,7 +75,11 @@ async function queryDisplaySize(adb: AdbExecutor): Promise<{ width: number; heig
  */
 export async function queryRotation(adb: AdbExecutor): Promise<number> {
   try {
-    const { stdout } = await adb.executeCommand("shell dumpsys window displays");
+    const { stdout } = await adb.executeCommand(
+      "shell dumpsys window displays",
+      undefined,
+      DUMPSYS_MAX_BUFFER,
+    );
     const match = stdout.match(/mCurrentRotation=ROTATION_(\d+)/);
     if (match) {
       return normalizeDumpsysRotation(parseInt(match[1], 10));

@@ -20,7 +20,7 @@ import {
   AccessibilityAuditSummary,
 } from "../../models/AccessibilityAudit";
 import { ContrastChecker } from "./ContrastChecker";
-import { isContrastObservable } from "./ContrastCoverage";
+import { isContrastObservable, isInputMethodElement } from "./ContrastCoverage";
 import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { linkWindowRoots } from "../observe/linkWindowRoots";
@@ -188,6 +188,10 @@ export class WcagAudit {
       typeof densityOrOptions === "number"
         ? { density: densityOrOptions }
         : (densityOrOptions ?? {});
+    // Filter once so every audit check excludes positively identified input-method nodes.
+    elements = elements.filter(
+      (element) => !isInputMethodElement(element, elementWindowIds?.get(element), windows),
+    );
     const violations: WcagViolation[] = [];
 
     // Check for missing content descriptions

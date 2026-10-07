@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -25,6 +24,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 
 /**
  * Video player slide component using ExoPlayer with proper lifecycle management. Auto-pauses when
@@ -56,7 +56,7 @@ fun VideoPlayerSlideItem(
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Video player
-    Card(
+    AutoMobileContentCard(
       modifier = Modifier.weight(1f).fillMaxWidth(),
       shape = RoundedCornerShape(16.dp),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -105,7 +105,7 @@ private fun VideoPlayerPreview(caption: String? = null, modifier: Modifier = Mod
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Video placeholder
-    Card(
+    AutoMobileContentCard(
       modifier = Modifier.weight(1f).fillMaxWidth(),
       shape = RoundedCornerShape(16.dp),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

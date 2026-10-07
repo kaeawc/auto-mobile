@@ -1,5 +1,8 @@
 import { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
-import { DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE } from "../../src/daemon/types";
+import {
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+} from "../../src/daemon/types";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
@@ -46,11 +49,25 @@ export function isLivenessOwnerSuperseded(error: unknown): boolean {
   );
 }
 
+export function isLivenessOwnerConflict(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_LIVENESS_OWNER_CONFLICT_CODE
+  );
+}
+
 /**
  * One-shot CLI clients displace this keeper, then stop heartbeating on exit.
  * Restore ownership in the same tick with a fresh token: repeating a displaced
  * token's claim is an idempotent no-op. Attempt only one re-claim per tick and
  * propagate its failure; lost claim responses and other errors are not retried.
+ *
+ * A re-claim the daemon rejects as `liveness_owner_conflict` means a CLI
+ * invocation is still running with a live lease (#10050). That is not a failure:
+ * the tick is skipped and the next one re-claims once that CLI has handed the
+ * session back to the one-shot policy or its lease has lapsed.
  */
 export function createReclaimingSessionOwnershipRenewal(
   renew: (
@@ -75,7 +92,13 @@ export function createReclaimingSessionOwnershipRenewal(
       // The old token cannot take ownership back; a fresh claim protects the
       // session between CLI invocations without waiting for the next interval.
       livenessOwnerToken = idGenerator.next();
-      await renew(livenessOwnerToken, true, signal);
+      try {
+        await renew(livenessOwnerToken, true, signal);
+      } catch (reclaimError) {
+        if (!isLivenessOwnerConflict(reclaimError)) {
+          throw reclaimError;
+        }
+      }
     }
   };
 }

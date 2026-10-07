@@ -51,6 +51,27 @@ export class FakeKeyboardOpenClient implements KeyboardOpenClient {
     return this.actionResult;
   }
 
+  focusedInputClickCount = 0;
+  focusedInputClickResult: A11yActionResult = {
+    success: false,
+    action: "click",
+    totalTimeMs: 1,
+    error: "Unknown command type: request_click_focused_input",
+    dispatched: true,
+    acknowledged: true,
+  };
+
+  async requestClickFocusedInput(
+    _timeoutMs?: number,
+    _perf?: undefined,
+    signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    this.focusedInputClickCount += 1;
+    this.nodeActionSignals.push(signal);
+    this.onNodeAction?.();
+    return this.focusedInputClickResult;
+  }
+
   async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
     this.caretReadCount += 1;
     this.onCaretRead?.();

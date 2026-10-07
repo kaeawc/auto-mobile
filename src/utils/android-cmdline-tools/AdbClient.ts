@@ -1,3 +1,5 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
+import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
@@ -1007,7 +1009,7 @@ export class AdbClient implements AdbExecutor {
 
   private getAbortError(signal?: AbortSignal): Error {
     const reason = signal?.reason;
-    if (reason instanceof Error && reason.message.startsWith("device-disconnected:")) {
+    if (reason instanceof Error && isDeviceLossCancellationReason(reason.message)) {
       return reason;
     }
     return new Error(OPERATION_CANCELLED_MESSAGE);
@@ -1622,7 +1624,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys power | grep mWakefulness=",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1673,7 +1675,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys window policy",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1717,7 +1719,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys user",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1897,7 +1899,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
         timeoutMs,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );

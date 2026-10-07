@@ -9,11 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -26,6 +23,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTextField
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 internal fun exportIcTrace(recorder: IcTraceRecorder, share: (String) -> Unit) {
@@ -48,7 +48,7 @@ fun IcTraceScreen() {
       modifier = Modifier.fillMaxSize().padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      Card(modifier = Modifier.fillMaxWidth()) {
+      AutoMobileContentCard(modifier = Modifier.fillMaxWidth()) {
         AndroidView(
           factory = { viewContext ->
             IcTraceEditText(viewContext).apply {
@@ -65,7 +65,7 @@ fun IcTraceScreen() {
         )
       }
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextField(
+        AutoMobileTextField(
           value = scenario,
           onValueChange = {
             scenario = it
@@ -87,8 +87,8 @@ fun IcTraceScreen() {
         }
       }
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { recorder.clear() }) { Text("Clear") }
-        Button(
+        AutoMobileContentButton(onClick = { recorder.clear() }) { Text("Clear") }
+        AutoMobileContentButton(
           onClick = {
             exportIcTrace(recorder) { jsonl ->
               val send =
@@ -106,7 +106,7 @@ fun IcTraceScreen() {
       Text("${events.size} events; ${recorder.droppedEventCount()} older events dropped")
       LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(events, key = { it.seq }) { event ->
-          Card(modifier = Modifier.fillMaxWidth()) {
+          AutoMobileContentCard(modifier = Modifier.fillMaxWidth()) {
             Text(
               "${event.seq} +${event.elapsedMs}ms ${event.call}(${event.args})\n" +
                 "selection=${event.selectionStart}..${event.selectionEnd}, " +

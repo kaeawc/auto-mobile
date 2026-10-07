@@ -21,6 +21,7 @@ import {
 import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
@@ -315,6 +316,8 @@ export function convertPerDeviceSkippedStepsToRecords(
  * throws) wrap the whole sequence in {@link execute}.
  */
 export class PlanExecutionOrchestrator {
+  // Capture before planTools installs this invocation's own planRequest context.
+  private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
@@ -472,7 +475,7 @@ export class PlanExecutionOrchestrator {
 
     if (yamlContent.startsWith("base64:")) {
       this.perfLog("Decoding base64 plan content");
-      yamlContent = Buffer.from(yamlContent.substring(7), "base64").toString("utf-8");
+      yamlContent = decodePlanYamlContent(yamlContent);
       this.perfLog(`Base64 content decoded (${yamlContent.length} bytes)`);
     }
 
@@ -498,10 +501,18 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);
+    if (
+      this.nestedInPlan &&
+      (this.request.devices?.length || this.request.device || this.normalizedDevices.labels.length)
+    ) {
+      throw new ActionableError(
+        "Nested executePlan cannot use devices/device labels. Remove the labels; nested plans run on the enclosing plan's session/device.",
+      );
+    }
     this.reconcileDeviceLists();
     return plan;
   }

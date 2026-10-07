@@ -3,7 +3,6 @@ import { SessionToolSelectionService } from "../../../src/features/toolSelection
 import { resolvePutAppFileTargetEnablement } from "../../../src/features/toolSelection/putAppFileTargetPolicy";
 import { isToolEnabledForAnyRoute } from "../../../src/features/toolSelection/toolSelectionPolicy";
 import { registerAppFileTools } from "../../../src/server/appFileTools";
-import { registerSharedStorageTools } from "../../../src/server/sharedStorageTools";
 import { registerDownloadsFixtureTools } from "../../../src/server/downloadsFixtureTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { listEnabledToolNames } from "../../../src/server/toolSelectionTools";
@@ -12,7 +11,6 @@ import { FakeToolSelectionRepository } from "../../fakes/FakeToolSelectionReposi
 beforeEach(() => {
   ToolRegistry.clearTools();
   registerAppFileTools();
-  registerSharedStorageTools();
   registerDownloadsFixtureTools();
 });
 afterEach(() => ToolRegistry.clearTools());
@@ -31,37 +29,16 @@ async function targets(service: SessionToolSelectionService) {
 
 describe("putAppFile target session policy", () => {
   test.each([
-    [[], [false, true, false]],
-    [[["stageSharedStorage", true]], [false, true, false]],
-    [[["stageSharedStorage", false]], [false, false, false]],
-    [
-      [
-        ["stageSharedStorage", false],
-        ["stageSharedStorageFixtures", true],
-      ],
-      [false, true, false],
-    ],
-    [[["stageSharedStorageFixtures", false]], [false, true, false]],
-    [
-      [
-        ["putAppFile", true],
-        ["stageSharedStorage", false],
-      ],
-      [true, true, true],
-    ],
-    [[["putAppFile", false]], [false, true, false]],
+    [[], [true, true, true]],
+    [[["putAppFile", false]], [false, false, false]],
+    [[["putAppFile", true]], [true, true, true]],
+    [[["stageSharedStorage", false]], [true, true, true]],
     [
       [
         ["putAppFile", false],
-        ["stageSharedStorage", false],
+        ["stageSharedStorage", true],
         ["stageSharedStorageFixtures", true],
-      ],
-      [false, true, false],
-    ],
-    [
-      [
         ["stageSessionDownloads", true],
-        ["stageSharedStorage", false],
       ],
       [false, false, false],
     ],
@@ -79,82 +56,55 @@ describe("putAppFile target session policy", () => {
   );
 
   test.each([
-    [[["stageSharedStorage", false]], [false, false, false]],
-    [
-      [
-        ["stageSharedStorage", false],
-        ["stageSharedStorageFixtures", true],
-      ],
-      [false, true, false],
-    ],
+    [[["putAppFile", false]], [false, false, false]],
     [[["putAppFile", true]], [true, true, true]],
+    [[["stageSharedStorage", false]], [true, true, true]],
   ] as Array<[Array<[string, boolean]>, boolean[]]>)(
     "startup defaults %j use the same target mapping",
     async (startup, expected) => {
-      const { service } = selection([], startup);
-      expect(await targets(service)).toEqual(expected);
+      expect(await targets(selection([], startup).service)).toEqual(expected);
     },
   );
 
   test("stored disable beats startup enable and stored enable beats startup disable", async () => {
-    const disabled = selection([["stageSharedStorage", false]], [["stageSharedStorage", true]]);
-    expect(await targets(disabled.service)).toEqual([false, false, false]);
-    const enabled = selection([["stageSharedStorage", true]], [["stageSharedStorage", false]]);
-    expect(await targets(enabled.service)).toEqual([false, true, false]);
+    expect(
+      await targets(selection([["putAppFile", false]], [["putAppFile", true]]).service),
+    ).toEqual([false, false, false]);
+    expect(
+      await targets(selection([["putAppFile", true]], [["putAppFile", false]]).service),
+    ).toEqual([true, true, true]);
   });
 
-  test("discovery remains exact-name based, with real unchanged registration defaults", async () => {
+  test("discovery enables putAppFile by default and excludes removed registrations", async () => {
     const { service } = selection();
-    expect(ToolRegistry.getRegisteredTool("putAppFile")?.defaultEnabled).toBe(false);
-    expect(ToolRegistry.getRegisteredTool("stageSharedStorage")?.defaultEnabled).toBe(true);
-    expect(ToolRegistry.getRegisteredTool("stageSharedStorageFixtures")?.defaultEnabled).toBe(
-      false,
-    );
+    expect(ToolRegistry.getRegisteredTool("putAppFile")?.defaultEnabled).toBe(true);
+    expect(ToolRegistry.getRegisteredTool("stageSharedStorage")).toBeUndefined();
+    expect(ToolRegistry.getRegisteredTool("stageSharedStorageFixtures")).toBeUndefined();
     expect(ToolRegistry.getRegisteredTool("stageSessionDownloads")?.defaultEnabled).toBe(false);
-    expect(await listEnabledToolNames(service, ["session"])).toEqual(["stageSharedStorage"]);
-    await service.setEnabled("session", "stageSharedStorage", true);
-    expect(await listEnabledToolNames(service, ["session"])).toEqual(["stageSharedStorage"]);
-    expect(await resolvePutAppFileTargetEnablement(service, "session", "app_containers")).toBe(
-      false,
-    );
+    expect(await listEnabledToolNames(service, ["session"])).toEqual(["putAppFile"]);
+    await service.setEnabled("session", "putAppFile", false);
+    expect(await listEnabledToolNames(service, ["session"])).toEqual([]);
   });
 
-  test("real legacy descriptions and registrations remain available through the transition", () => {
-    for (const name of [
-      "stageSharedStorage",
-      "stageSharedStorageFixtures",
-      "stageSessionDownloads",
-    ]) {
-      expect(ToolRegistry.getRegisteredTool(name)?.description).toStartWith(
-        'Deprecated alias of putAppFile with target.domain "user_files"',
-      );
-    }
-  });
-
-  test("connection and routing profiles retain the documented union and explicit precedence", async () => {
-    const { repository, service } = selection([["stageSharedStorage", false]]);
-    repository.rows.set("connection", new Map([["stageSharedStorage", true]]));
-    const enabled = (name: string) =>
-      isToolEnabledForAnyRoute(
-        name,
-        ToolRegistry.getRegisteredTool(name)!.defaultEnabled,
-        [["session"]],
-        service,
-        "connection",
-      );
-    expect(await enabled("stageSharedStorage")).toBe(true);
-    expect(await enabled("putAppFile")).toBe(false);
-    expect(await listEnabledToolNames(service, ["session"], "connection")).toEqual([
-      "stageSharedStorage",
+  test("removed-name stored grants cannot restore discovery", async () => {
+    const { service } = selection([
+      ["putAppFile", false],
+      ["stageSharedStorage", true],
     ]);
-    repository.rows.set("connection", new Map([["stageSharedStorage", false]]));
-    expect(await enabled("stageSharedStorage")).toBe(false);
-    repository.rows.set("session", new Map([["stageSharedStorage", true]]));
-    expect(await enabled("stageSharedStorage")).toBe(true);
+    expect(await listEnabledToolNames(service, ["session"])).toEqual([]);
+  });
+
+  test("connection and routing profiles retain union and explicit precedence", async () => {
+    const { repository, service } = selection([["putAppFile", false]]);
     repository.rows.set("connection", new Map([["putAppFile", true]]));
-    expect(await enabled("putAppFile")).toBe(true);
-    expect(await resolvePutAppFileTargetEnablement(service, "session", "app_containers")).toBe(
-      false,
-    );
+    const enabled = () =>
+      isToolEnabledForAnyRoute("putAppFile", true, [["session"]], service, "connection");
+    expect(await enabled()).toBe(true);
+    expect(await listEnabledToolNames(service, ["session"], "connection")).toEqual(["putAppFile"]);
+    expect(await targets(service)).toEqual([false, false, false]);
+    repository.rows.set("connection", new Map([["putAppFile", false]]));
+    expect(await enabled()).toBe(false);
+    repository.rows.set("session", new Map([["putAppFile", true]]));
+    expect(await enabled()).toBe(true);
   });
 });

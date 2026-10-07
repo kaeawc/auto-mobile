@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { waitForTimeoutError } from "../utils/plan/waitForTimeout";
+import { unsupportedToolResultError } from "../utils/plan/unsupportedToolResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -229,6 +230,9 @@ async function executeCriticalSectionSteps(
         tool.schema,
         stripUndeclaredDeviceLabel(step.params, tool.schema),
       );
+      if (step.tool === "tapAt" && step.geometry) {
+        params.__tapAtPlanContext = { geometry: step.geometry };
+      }
       const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,
@@ -247,6 +251,12 @@ async function executeCriticalSectionSteps(
       );
       if (timeoutError) {
         throw new ActionableError(timeoutError);
+      }
+      const unsupportedError = unsupportedToolResultError(
+        getStructuredPayload(toolResult) ?? toolResult,
+      );
+      if (unsupportedError) {
+        throw new ActionableError(unsupportedError);
       }
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));

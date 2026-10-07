@@ -1,3 +1,5 @@
+import type { TimingData } from "../utils/PerformanceTracker";
+import { isDeviceLossCancellationReason } from "./emulatorLossIncident";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
@@ -48,7 +50,17 @@ import {
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import { Mutex } from "async-mutex";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  effectiveLastHeartbeat,
+  isLivenessOwnerLeaseLive,
+  livenessLeaseState,
+  sessionLeaseSnapshot,
+  sessionOwnerLeaseSnapshot,
+  suspectGraceMsFor,
+  type LivenessLeaseState,
+} from "./livenessOwnerLease";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -209,6 +221,7 @@ export interface NetworkConditionRestorer {
  * cross-tool session state gets its own typed slot here, not an untyped bag.
  */
 export interface SessionCacheData {
+  pendingSetupTiming?: TimingData; // Consumed once by this session; discarded with its cache.
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastActionMetadata?: { deviceId: string; blocks: Record<string, unknown> };
@@ -253,6 +266,20 @@ export interface Session {
   expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number; // Timestamp of last heartbeat
+  /**
+   * The last time the session's liveness OWNER was alive: its own heartbeats, a recorded
+   * ownership claim, or the restore of a persisted owner. Unlike `lastHeartbeat` it is not advanced
+   * by tool activity, so a non-owner that merely uses the session cannot keep the owner's lease live
+   * (#10050). Unset until an owner exists; the lease then falls back to `lastHeartbeat`.
+   */
+  lastOwnerHeartbeat?: number;
+  /**
+   * The daemon's own resume point after it detected a stall of its event loop
+   * (#10051). Not persisted: the daemon cannot have received heartbeats while it
+   * was stalled, so the lease is judged from this point when it is later than
+   * `lastHeartbeat`.
+   */
+  stallForgivenAt?: number;
   sessionTimeoutMs: number; // Idle timeout used when extending this session
   heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
@@ -326,6 +353,19 @@ export interface PreCliLivenessSnapshot {
  *   period measured in minutes, and never for a missing first heartbeat.
  */
 export type SessionLivenessPolicy = "heartbeat" | "cli-idle";
+
+/** Result of an explicit owner-authorized liveness release. */
+export type LivenessReleaseOutcome = "released" | "already-unowned" | "not-owner" | "not-found";
+
+/**
+ * Result of an explicit liveness-ownership claim (#10050).
+ *
+ * - `claimed`: the token now owns (or already owned) the session.
+ * - `conflict`: a different token owns it and that owner's lease is live; nothing changed.
+ * - `superseded`: this token already claimed and was displaced; it cannot reclaim an owned session.
+ * - `not-found`: the session is unknown or was replaced while the claim waited.
+ */
+export type LivenessClaimOutcome = "claimed" | "conflict" | "superseded" | "not-found";
 
 function persistedHeartbeatTimeoutSource(value: string | null | undefined): "default" | "custom" {
   return value === "custom" ? "custom" : "default";
@@ -425,6 +465,28 @@ export class TerminalSessionError extends Error {
   }
 }
 
+/**
+ * A tool call reached a session whose owner's lease expired and that is held
+ * inside its suspect window (#10051). Nothing runs against it until its owner
+ * restores it with a heartbeat from the owner token.
+ */
+export class SessionSuspectError extends ActionableError {
+  /** Travels on the socket response so a proxy can tell "restorable" from "gone" (#10053). */
+  readonly code = DAEMON_SESSION_SUSPECT_CODE;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly remainingMs: number,
+  ) {
+    super(
+      `Session ${sessionUuid} is suspect: its owner's heartbeat lapsed and the session is held ` +
+        `for ${Math.ceil(remainingMs / 1000)}s more with its device reserved. Resume heartbeats ` +
+        `from the owner to restore it, or retry after the window if the owner is gone.`,
+    );
+    this.name = "SessionSuspectError";
+  }
+}
+
 /** A new session cannot be published after the daemon has begun shutdown. */
 export class DaemonSessionCreationRejectedError extends ActionableError {
   constructor(
@@ -436,11 +498,19 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
   }
 }
 
+/** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
+export interface SessionReleaseOptions {
+  expiryOrigin?: "lazy-expiry" | "cleanup-expired";
+  /** Set by the expiry handler when it owns the ordered device return after release. */
+  deviceReleaseManaged?: boolean;
+}
+
 export type SessionReleaseCallback = (
   sessionId: string,
   deviceId: string,
   releaseReason: string,
   snapshot: SessionReleaseSnapshot,
+  options: SessionReleaseOptions,
 ) => void;
 export type SessionCreatedCallback = (session: Session) => void;
 export interface SessionExecutionMetadata {
@@ -713,6 +783,7 @@ export interface RecoveryExpiryReleaseHandler {
     sessionId: string,
     releaseReason: string,
     attempt: () => Promise<string | null>,
+    options: SessionReleaseOptions,
   ): Promise<string | null> | undefined;
 }
 
@@ -737,7 +808,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
     releaseReason === "device-killed" ||
     releaseReason === "session-creation-cancelled" ||
     releaseReason.startsWith("identity-recovery-") ||
-    releaseReason.startsWith("device-disconnected:")
+    isDeviceLossCancellationReason(releaseReason)
   );
 }
 
@@ -1573,7 +1644,13 @@ export class SessionManager {
         return null;
       }
       logger.info(`Session ${sessionId} has expired, releasing`);
-      const release = this.releaseSession(sessionId, "lazy-expiry", true);
+      const release = this.releaseSession(
+        sessionId,
+        this.expiredSessionReleaseReason(session, "lazy-expiry"),
+        true,
+        undefined,
+        { expiryOrigin: "lazy-expiry" },
+      );
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>
@@ -1697,6 +1774,7 @@ export class SessionManager {
       logger.info(
         `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
       );
+      this.assertSessionNotSuspect(existing);
       await this.refreshExistingSessionForAccess(existing, access);
       return existing;
     }
@@ -1915,6 +1993,7 @@ export class SessionManager {
         // acquisition semantics promote awaiting-owner to owned.
         const observed = this.getSessionInternal(sessionId, true, execution, false);
         if (observed) {
+          this.assertSessionNotSuspect(observed);
           return observed;
         }
         if (this.sessions.has(sessionId)) {
@@ -2184,7 +2263,10 @@ export class SessionManager {
 
   private recoverySessionFields(
     persisted: DeviceSession | undefined,
-  ): Pick<Session, "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims"> {
+  ): Pick<
+    Session,
+    "persistenceMetadata" | "livenessOwnerToken" | "livenessOwnershipClaims" | "lastOwnerHeartbeat"
+  > {
     if (!persisted) {
       return {};
     }
@@ -2199,6 +2281,7 @@ export class SessionManager {
         ? {
             livenessOwnerToken: persisted.liveness_owner_token,
             livenessOwnershipClaims: new Set([persisted.liveness_owner_token]),
+            lastOwnerHeartbeat: this.timer.now(),
           }
         : {}),
     };
@@ -2387,8 +2470,16 @@ export class SessionManager {
     // for this session — it must not later fire against the now-released old
     // device (issue #6085 item 2).
     this.cancelNetworkConditionExpiry(existing.sessionId);
-    const pendingNetworkRestoration = existing.cacheData.networkCondition
-      ? (await this.restoreNetworkConditionBestEffort(existing)).pending
+    const networkTarget = this.networkConditionRestoreTarget(existing);
+    const pendingNetworkRestoration = networkTarget
+      ? ((
+          await this.runUnderTeardownShield(async () => [
+            {
+              ...(await this.restoreNetworkConditionBestEffort(existing)),
+              abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+            },
+          ])
+        )[0] ?? null)
       : null;
 
     const pendingClockRestoration = existing.cacheData.clock
@@ -2589,14 +2680,23 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
     allowExpired: boolean = false,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
+    const releaseOptions = { ...options };
     const attempt = () =>
-      this.releaseSessionAttempt(sessionId, releaseReason, allowExpired, shouldCommit);
+      this.releaseSessionAttempt(
+        sessionId,
+        releaseReason,
+        allowExpired,
+        shouldCommit,
+        releaseOptions,
+      );
     if (EXPIRY_RELEASE_REASONS.has(releaseReason)) {
       const recoveryRelease = this.recoveryExpiryReleaseHandler?.release(
         sessionId,
         releaseReason,
         attempt,
+        releaseOptions,
       );
       if (recoveryRelease) {
         return await recoveryRelease;
@@ -2610,6 +2710,7 @@ export class SessionManager {
     releaseReason: string,
     allowExpired: boolean,
     shouldCommit?: ReleaseCommitFence,
+    options: SessionReleaseOptions = {},
   ): Promise<string | null> {
     const session =
       allowExpired || this.terminalReleaseSnapshots.has(sessionId)
@@ -2631,10 +2732,10 @@ export class SessionManager {
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
-            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
+            () => this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options),
           )
-        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit);
+        : this.releaseSessionInternal(sessionId, session, reason, shouldCommit, options);
     const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -2968,7 +3069,8 @@ export class SessionManager {
     sessionId: string,
     session: Session,
     reason: ReleaseReasonState,
-    shouldCommit?: ReleaseCommitFence,
+    shouldCommit: ReleaseCommitFence | undefined,
+    options: SessionReleaseOptions,
   ): Promise<string | null> {
     try {
       // Release restores the device to `none` itself, so a standalone TTL is now
@@ -3046,7 +3148,7 @@ export class SessionManager {
         this.terminalReleaseReasonStates.delete(sessionId);
       }
 
-      this.notifySessionRelease(releaseSnapshot);
+      this.notifySessionRelease(releaseSnapshot, options);
       let persistedSnapshot: SessionReleaseSnapshot;
       try {
         persistedSnapshot = await this.completeReleasePersistence(releaseSnapshot, reason, session);
@@ -3059,7 +3161,7 @@ export class SessionManager {
       }
       this.recordFinalizedSessionRelease(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
-        this.notifySessionRelease(persistedSnapshot);
+        this.notifySessionRelease(persistedSnapshot, options);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -3094,15 +3196,20 @@ export class SessionManager {
     if (!this.releaseNeedsTeardown(session)) {
       return [];
     }
+    return this.runUnderTeardownShield(() => this.startReleaseTeardown(sessionId, session));
+  }
+
+  /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
+  private async runUnderTeardownShield(
+    start: () => Promise<readonly ReleaseTeardownStage[]>,
+  ): Promise<readonly Promise<void>[]> {
     const shield = new AbortController();
     const startedAtMs = this.timer.now();
     const capHandle = this.timer.setTimeout(() => {
       shield.abort(new ActionableError("Session release teardown exceeded its budget"));
     }, SESSION_RELEASE_TEARDOWN_CAP_MS);
     try {
-      const stages = await runWithAbortSignal(shield.signal, () =>
-        this.startReleaseTeardown(sessionId, session),
-      );
+      const stages = await runWithAbortSignal(shield.signal, start);
       const cleanups = stages.flatMap((stage) => {
         const bounded = this.boundTeardownStage(stage, startedAtMs);
         return bounded ? [bounded] : [];
@@ -3436,10 +3543,13 @@ export class SessionManager {
     this.latestFinalizedSessionIdentities.delete(sessionId);
   }
 
-  private notifySessionRelease(snapshot: SessionReleaseSnapshot): void {
+  private notifySessionRelease(
+    snapshot: SessionReleaseSnapshot,
+    options: SessionReleaseOptions = {},
+  ): void {
     for (const callback of this.releaseCallbacks) {
       try {
-        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot);
+        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot, options);
       } catch (error) {
         logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
       }
@@ -4704,7 +4814,14 @@ export class SessionManager {
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
     this.trackPendingDeviceCleanup(target.deviceId, [
-      this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
+      this.runUnderTeardownShield(async () => [
+        {
+          pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
+          abandon: () => this.abandonCappedRestore(target, "network-condition"),
+        },
+      ]).then(async (cleanups) => {
+        await Promise.all(cleanups);
+      }),
     ]);
   }
 
@@ -5311,12 +5428,15 @@ export class SessionManager {
     const previousActivity = {
       lastUsedAt: session.lastUsedAt,
       lastHeartbeat: session.lastHeartbeat,
+      lastOwnerHeartbeat: session.lastOwnerHeartbeat,
       expiresAt: session.expiresAt,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
       ownership: session.ownership,
       awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
+    // Only a heartbeat advances the owner lease; the handler admits one only from the owner.
+    session.lastOwnerHeartbeat = now;
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.activityGeneration++;
@@ -5340,24 +5460,67 @@ export class SessionManager {
   }
 
   /**
-   * Make `ownerToken` the current liveness owner for a session.
+   * Make `ownerToken` the current liveness owner for a session, unless another
+   * token owns it with a live lease (#10050).
    *
    * This intentionally does not record activity. The request handler claims
    * ownership before applying the requested policy and recording its heartbeat,
-   * so a stale token can be rejected without changing any liveness deadline.
+   * so a rejected or stale token can be refused without changing any liveness
+   * deadline, and a rejected claim leaves the session's owner and policy intact.
    */
-  async claimLivenessOwnership(sessionId: string, ownerToken: string): Promise<boolean> {
+  async claimLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessClaimOutcome> {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
-      return false;
+      return "not-found";
     }
     const mutex = this.livenessOwnershipClaimMutexFor(session);
     return await mutex.runExclusive(async () => {
       if (this.getSession(sessionId) !== session) {
-        return false;
+        return "not-found";
       }
       return await this.claimLivenessOwnershipForSession(session, ownerToken);
+    });
+  }
+
+  /** Clear only the owner token; preserve the device, policy and existing lease/grace deadline. */
+  async releaseLivenessOwnership(
+    sessionId: string,
+    ownerToken: string,
+  ): Promise<LivenessReleaseOutcome> {
+    const session = this.getSession(sessionId);
+    if (!session || !this.isAdmittedForAutomation(session)) {
+      return "not-found";
+    }
+    return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
+      if (this.getSession(sessionId) !== session || !this.isAdmittedForAutomation(session)) {
+        return "not-found";
+      }
+      if (session.livenessOwnerToken === undefined) {
+        return "already-unowned";
+      }
+      if (session.livenessOwnerToken !== ownerToken) {
+        return "not-owner";
+      }
+      // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
+      session.livenessOwnershipClaims ??= new Set<string>();
+      session.livenessOwnershipClaims.add(ownerToken);
+      session.livenessOwnerToken = undefined;
+      // Fence an older heartbeat write's failure rollback across the handoff.
+      session.activityGeneration++;
+      try {
+        await this.deviceSessionRepository.recordLivenessOwnership?.(sessionId, null);
+      } catch (error) {
+        session.livenessOwnerToken = ownerToken;
+        if (!this.isAdmittedForAutomation(session)) {
+          return "not-found";
+        }
+        throw error;
+      }
+      return "released";
     });
   }
 
@@ -5374,39 +5537,128 @@ export class SessionManager {
   private async claimLivenessOwnershipForSession(
     session: Session,
     ownerToken: string,
-  ): Promise<boolean> {
+  ): Promise<LivenessClaimOutcome> {
     const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
     session.livenessOwnershipClaims = processedClaims;
-    if (processedClaims.has(ownerToken)) {
-      return session.livenessOwnerToken === ownerToken;
+    if (session.livenessOwnerToken !== undefined && processedClaims.has(ownerToken)) {
+      // A retried claim whose token has since been displaced must never take
+      // the session back, whatever the new owner's lease says.
+      return session.livenessOwnerToken === ownerToken ? "claimed" : "superseded";
     }
-    processedClaims.add(ownerToken);
     const previousOwnerToken = session.livenessOwnerToken;
+    if (this.isForeignLiveOwner(session, ownerToken)) {
+      logger.warn(
+        `Rejected liveness ownership claim for session ${session.sessionId}: another owner holds a live lease`,
+      );
+      return "conflict";
+    }
+    const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
+    const alreadyProcessed = processedClaims.has(ownerToken);
+    processedClaims.add(ownerToken);
     session.livenessOwnerToken = ownerToken;
-    return await this.persistNewLivenessOwnershipClaim(
-      session,
-      ownerToken,
-      previousOwnerToken,
-      processedClaims,
+    // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
+    // request handler records the claimant's heartbeat several awaits later; until then a second
+    // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
+    session.lastOwnerHeartbeat = this.timer.now();
+    try {
+      await this.persistNewLivenessOwnershipClaim(
+        session,
+        ownerToken,
+        { previousOwnerToken, previousOwnerHeartbeat },
+        processedClaims,
+      );
+    } catch (error) {
+      if (alreadyProcessed) {
+        processedClaims.add(ownerToken);
+      }
+      throw error;
+    }
+    return "claimed";
+  }
+
+  /** Whether a different token owns `session` and its lease is still live. */
+  private isForeignLiveOwner(session: Session, ownerToken: string): boolean {
+    if (session.livenessOwnerToken === undefined || session.livenessOwnerToken === ownerToken) {
+      return false;
+    }
+    // The owner's own heartbeats decide this, not tool activity by whoever else names the session.
+    return isLivenessOwnerLeaseLive(sessionOwnerLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /**
+   * Whether the session's owner lease is live or inside its suspect window, and
+   * how long until that phase ends. Undefined for an unknown session and for a
+   * `cli-idle` session, which has no lease.
+   */
+  getSessionLeaseState(sessionId: string): LivenessLeaseState | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.livenessPolicy === "cli-idle") {
+      return undefined;
+    }
+    return livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+  }
+
+  /** Whether the session is inside its suspect window (lease expired, grace running). */
+  private isSessionSuspect(session: Session): boolean {
+    return (
+      session.livenessPolicy === "heartbeat" &&
+      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "suspect"
     );
+  }
+
+  /** Reject a tool call against a suspect session; only its owner's heartbeat restores it. */
+  private assertSessionNotSuspect(session: Session): void {
+    if (this.isSessionSuspect(session)) {
+      const { remainingMs } = livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now()));
+      throw new SessionSuspectError(session.sessionId, remainingMs);
+    }
+  }
+
+  /**
+   * Do not hold the daemon's own stall against any session (#10051).
+   *
+   * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
+   * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
+   * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
+   * time is not counted against the owner while time the owner genuinely missed before the stall
+   * still is. Returns how many sessions were extended.
+   */
+  forgiveDaemonStall(resumedAt: number, lostMs: number): number {
+    let forgiven = 0;
+    for (const session of this.sessions.values()) {
+      if (session.livenessPolicy === "cli-idle") {
+        continue;
+      }
+      const leaseStart = effectiveLastHeartbeat(session);
+      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
+      session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
+      if (session.awaitingOwnerSince !== undefined) {
+        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
+      }
+      forgiven++;
+    }
+    return forgiven;
   }
 
   private async persistNewLivenessOwnershipClaim(
     session: Session,
     ownerToken: string,
-    previousOwnerToken: string | undefined,
+    previous: {
+      previousOwnerToken: string | undefined;
+      previousOwnerHeartbeat: number | undefined;
+    },
     processedClaims: Set<string>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     try {
       if (this.deviceSessionRepository.recordLivenessOwnership) {
         await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
       } else {
         await this.recordSessionActivity(session);
       }
-      return true;
     } catch (error) {
       processedClaims.delete(ownerToken);
-      session.livenessOwnerToken = previousOwnerToken;
+      session.livenessOwnerToken = previous.previousOwnerToken;
+      session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
       throw error;
     }
   }
@@ -5422,10 +5674,15 @@ export class SessionManager {
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.getSession(sessionId);
-    if (!session || session.livenessOwnerToken !== undefined) {
+    if (
+      !session ||
+      session.livenessOwnerToken !== undefined ||
+      session.livenessOwnershipClaims?.size
+    ) {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
+    session.lastOwnerHeartbeat = this.timer.now();
     return true;
   }
 
@@ -5603,16 +5860,34 @@ export class SessionManager {
     if (session.livenessPolicy === "cli-idle") {
       return false;
     }
+    // A session whose owner has been heartbeating is held a further suspect
+    // window past its deadline (#10051), so an owner that missed a beat can
+    // still restore it.
     return (
-      !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
+      !this.activeSessionExecutionChecker(session.sessionId) &&
+      this.timer.now() > session.expiresAt + suspectGraceMsFor(session)
     );
+  }
+
+  /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
+  private expiredSessionReleaseReason(
+    session: Session,
+    idleReason: "lazy-expiry" | "cleanup-expired",
+  ): string {
+    if (
+      suspectGraceMsFor(session) > 0 &&
+      livenessLeaseState(sessionLeaseSnapshot(session, this.timer.now())).phase === "lapsed"
+    ) {
+      return "heartbeat-timeout";
+    }
+    return idleReason;
   }
 
   private isSessionExpiredForNewExecution(
     session: Session,
     execution?: SessionExecutionMetadata,
   ): boolean {
-    if (this.timer.now() <= session.expiresAt) {
+    if (this.timer.now() <= session.expiresAt + suspectGraceMsFor(session)) {
       return false;
     }
     return execution?.startTime === undefined || execution.startTime > session.expiresAt;
@@ -5704,7 +5979,13 @@ export class SessionManager {
       if (!session) {
         continue;
       }
-      const release = this.releaseSession(sessionId, "cleanup-expired", true);
+      const release = this.releaseSession(
+        sessionId,
+        this.expiredSessionReleaseReason(session, "cleanup-expired"),
+        true,
+        undefined,
+        { expiryOrigin: "cleanup-expired" },
+      );
       void this.getBarrier()
         .trackExisting(release)
         .catch((error) =>

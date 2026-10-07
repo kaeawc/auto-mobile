@@ -71,7 +71,7 @@ object ValidTools {
       "shake",
       "sqlQuery",
       "startDevice",
-      "stageSharedStorage",
+      "putAppFile",
       "startTestRecording",
       "swipeOn",
       "systemTray",

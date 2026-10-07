@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import { parseAndroidRuntimePermissions } from "./parseAndroidRuntimePermissions";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -478,7 +479,7 @@ export class AppPermissions {
       const result = await adb.executeCommand(
         `shell dumpsys package ${shellQuote(normalizedAppId)}`,
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
       );
       const stdout = result.stdout;

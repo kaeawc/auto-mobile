@@ -12,7 +12,7 @@
  * ratios. (A raster smaller than the capture no longer yields measurements:
  * bounds outside the image are not evaluated, #10220.)
  */
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import path from "path";
 import {
@@ -44,11 +44,28 @@ function readFixture<T>(relativePath: string): T {
   return JSON.parse(readFileSync(path.join(fixtures, relativePath), "utf8")) as T;
 }
 
-/** A bare hierarchy capture (Playground with Gboard open) wrapped as an observation. */
-function gboardObservation(observationId: string): ObserveResult {
-  const hierarchy = readFixture<ViewHierarchyResult>(
+let gboardHierarchy: ViewHierarchyResult;
+let imageBackend: FakeImageBackend;
+
+beforeAll(() => {
+  gboardHierarchy = readFixture<ViewHierarchyResult>(
     "android-ime-window/playground-gboard-api36.json",
   );
+  // Three copies are needed to exceed the cap only when contrast is included.
+  gboardHierarchy.density = 1600;
+  const nodes = gboardHierarchy.hierarchy.node ?? [];
+  gboardHierarchy.hierarchy.node = Array.from({ length: 3 }, () => structuredClone(nodes)).flat();
+  imageBackend = new FakeImageBackend();
+  imageBackend.setRawPixelsResult({
+    width: 1080,
+    height: 2400,
+    data: Buffer.alloc(1080 * 2400 * 4, 0x80),
+  });
+});
+
+/** A bare hierarchy capture (Playground with Gboard open) wrapped as an observation. */
+function gboardObservation(observationId: string): ObserveResult {
+  const hierarchy = gboardHierarchy;
   return {
     observationId,
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -79,16 +96,10 @@ function auditorWithCaptureFor(capturedObservationId: string): AccessibilityAudi
   const store = new InMemoryScreenshotStateStore(new FakeTimer());
   store.update(androidDevice.deviceId, screenshot);
   store.updateForObservation(androidDevice.deviceId, capturedObservationId, screenshot);
-  const backend = new FakeImageBackend();
-  backend.setRawPixelsResult({
-    width: 1080,
-    height: 2400,
-    data: Buffer.alloc(1080 * 2400 * 4, 0x80),
-  });
   return new AccessibilityAuditor({
     device: androidDevice,
     getConfig: () => config,
-    contrastChecker: new ContrastChecker({}, new FakeTimer(), backend, {
+    contrastChecker: new ContrastChecker({}, new FakeTimer(), imageBackend, {
       readFile: async () => Buffer.from("synthetic screenshot"),
     }),
     screenshotPathResolver: (observationId) =>
@@ -163,12 +174,12 @@ describe("contrast violations feed the cap, and summary counts reconcile", () =>
     expect(truncated.total).toBe(
       Object.values(result.summary.byType).reduce((sum, n) => sum + n, 0),
     );
-    // The capped list never claims a clean pass the full set would not: the seven app labels
+    // The capped list never claims a clean pass the full set would not: the repeated app labels
     // under the open keyboard are reported as not evaluated, not measured against keyboard pixels.
     expect(result.summary.notEvaluated).toEqual([
       {
         check: "insufficient-contrast",
-        reason: expect.stringMatching(/^7 text elements are covered by the keyboard/),
+        reason: expect.stringMatching(/^21 text elements are covered by the keyboard/),
       },
     ]);
   });

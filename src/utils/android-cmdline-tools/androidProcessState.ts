@@ -1,3 +1,5 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
+import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { fixedBackoff } from "../Backoff";
 import { DefaultRetryExecutor } from "../retry/RetryExecutor";
@@ -23,12 +25,17 @@ export async function readAndroidPackageProcesses(
       adb.executeCommand(
         "shell dumpsys activity processes",
         5_000,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         options.signal,
       ),
     {
       maxAttempts: 2,
+      expectedFailure: {
+        reason: "Process-table reads propagate caller cancellation without a failure warning",
+        matches: (error) =>
+          error.name === "AbortError" || error.message === OPERATION_CANCELLED_MESSAGE,
+      },
       delays: fixedBackoff(200),
       signal: options.signal,
       shouldRetry: (error) => /device offline/i.test(error.message),

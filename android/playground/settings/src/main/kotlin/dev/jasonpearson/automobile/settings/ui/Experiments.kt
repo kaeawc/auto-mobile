@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Science
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -31,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.experimentation.Experiment
 import dev.jasonpearson.automobile.experimentation.Treatment
 import dev.jasonpearson.automobile.experimentation.experiments.MoodExperiment
@@ -74,7 +74,7 @@ fun ExperimentsCard(
   experiments: List<Experiment<*>>,
   onExperimentClicked: (Experiment<*>) -> Unit,
 ) {
-  Card(
+  AutoMobileContentCard(
     modifier = Modifier.fillMaxWidth(),
     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     shape = RoundedCornerShape(12.dp),

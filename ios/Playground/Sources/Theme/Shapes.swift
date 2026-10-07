@@ -12,6 +12,12 @@ struct PlaygroundShapes {
     let large: CGFloat = 26
     let extraLarge: CGFloat = 40
 
+    // Existing fixture radii: route through tokens without resizing their frames.
+    let swatch: CGFloat = 4
+    let thumbnail: CGFloat = 8
+    let gestureTarget: CGFloat = 16
+    let layeredBackdrop: CGFloat = 20
+
     // Component-specific radii
     let button: CGFloat = 14
     let card: CGFloat = 18

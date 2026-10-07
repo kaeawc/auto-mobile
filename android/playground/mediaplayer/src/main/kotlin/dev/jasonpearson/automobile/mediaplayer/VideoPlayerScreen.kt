@@ -25,9 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -62,6 +60,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 sealed class VideoResource {
@@ -179,7 +179,7 @@ fun VideoNotFound(videoId: String, onNavigateBack: () -> Unit, modifier: Modifie
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.padding(vertical = 16.dp),
       )
-      Button(
+      AutoMobileContentButton(
         onClick = onNavigateBack,
         modifier =
           Modifier.testTag(VideoNotFoundSemantics.BACK_BUTTON_TAG).semantics {
@@ -343,7 +343,7 @@ fun ExoPlayerView(
 /** Error message component with retry functionality. */
 @Composable
 fun ErrorMessage(error: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-  Card(
+  AutoMobileContentCard(
     modifier = modifier,
     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
   ) {
@@ -362,7 +362,7 @@ fun ErrorMessage(error: String, onRetry: () -> Unit, modifier: Modifier = Modifi
         modifier = Modifier.padding(vertical = 8.dp),
       )
 
-      Button(
+      AutoMobileContentButton(
         onClick = onRetry,
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
       ) {

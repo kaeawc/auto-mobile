@@ -68,7 +68,10 @@ export interface StorageCapabilityUserResolver {
 
 export interface StorageCapabilityDependencies {
   appFileCoverage?: AppFileProviderCoverageReader;
-  sharedStorageReadCoverage?: (platform: Platform) => SharedStorageReadCoverage;
+  sharedStorageReadCoverage?: (
+    platform: Platform,
+    domain?: "user_files" | "media_library",
+  ) => SharedStorageReadCoverage;
   adbFactory?: AdbClientFactory;
   probeDebuggableBuild?: (adb: AdbExecutor, appId: string) => Promise<boolean | undefined>;
   createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
@@ -179,10 +182,11 @@ function resolveProviderCoverage(dependencies: StorageCapabilityDependencies) {
 function resolveSharedReadCoverage(
   dependencies: StorageCapabilityDependencies,
   platform: Platform,
+  domain: "user_files" | "media_library" = "user_files",
 ) {
   return dependencies.sharedStorageReadCoverage
-    ? dependencies.sharedStorageReadCoverage(platform)
-    : getSharedStorageReadService().describeReadCoverage?.(platform);
+    ? dependencies.sharedStorageReadCoverage(platform, domain)
+    : getSharedStorageReadService().describeReadCoverage?.(platform, domain);
 }
 
 /**
@@ -229,6 +233,11 @@ export async function getStorageCapabilitiesResource(
     );
     context.providerCoverage = resolveProviderCoverage(dependencies);
     context.sharedStorageReadCoverage = resolveSharedReadCoverage(dependencies, device.platform);
+    context.mediaLibraryReadCoverage = resolveSharedReadCoverage(
+      dependencies,
+      device.platform,
+      "media_library",
+    );
     if (device.platform === "android" && appId && context.embeddedSdk) {
       context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
     }

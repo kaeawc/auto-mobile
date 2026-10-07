@@ -19,6 +19,18 @@ export const CANONICAL_USER_FILES_RESOURCE_TEMPLATES = {
   FILE: "automobile:devices/{deviceId}/storage-domains/user_files/{namespace}/{path}",
 } as const;
 
+export const CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES = {
+  NAMESPACE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}",
+  FILE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}/{path}",
+} as const;
+
+export function buildCanonicalMediaLibraryResourceUri(parts: SharedStorageResourceParts): string {
+  return buildCanonicalUserFilesResourceUri(parts).replace(
+    "/storage-domains/user_files/",
+    "/storage-domains/media_library/",
+  );
+}
+
 /** How completely a namespace or file could be observed on the device. */
 export type SharedStorageObservation = "complete" | "missing" | "unavailable" | "unsupported";
 

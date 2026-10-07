@@ -117,7 +117,7 @@ describe("AC2: platform-qualified domains", () => {
         }
       }
       for (const operation of ["list", "read"] as const) {
-        expect(findOperationCapability(report, "user_files", operation)?.state).toBe("unavailable");
+        expect(findOperationCapability(report, "user_files", operation)?.state).toBe("supported");
       }
       expect(findOperationCapability(report, "user_files", "media_indexing")?.state).toBe(
         "unsupported",
@@ -316,11 +316,22 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
     expect(read.state).toBe("unavailable");
   });
 
-  it("media_library browse/read is unavailable — no backing tool is exposed", () => {
-    const report = computeStorageCapabilities(ctx());
-    expect(findOperationCapability(report, "media_library", "list")?.state).toBe("unavailable");
-    expect(findOperationCapability(report, "media_library", "read")?.state).toBe("unavailable");
-    expect(isStorageOperationAvailable(report, "media_library", "list")).toBe(false);
+  it("Android media reads are supported with an active profile and gated by registration", () => {
+    const report = computeStorageCapabilities(ctx({ activeUserProfile: true }));
+    for (const operation of ["list", "read"] as const) {
+      expect(findOperationCapability(report, "media_library", operation)?.state).toBe("supported");
+      const absent = computeStorageCapabilities(
+        ctx({ activeUserProfile: true, mediaLibraryReadCoverage: { list: false, read: false } }),
+      );
+      expect(findOperationCapability(absent, "media_library", operation)?.state).toBe(
+        "unavailable",
+      );
+      const ios = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
+      expect(findOperationCapability(ios, "media_library", operation)?.state).toBe("unavailable");
+      expect(findOperationCapability(ios, "media_library", operation)?.reason).toContain(
+        "simctl addmedia",
+      );
+    }
   });
 
   it("advertises Android media_library writes only when an active profile is available", () => {

@@ -1,5 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
+import { propertyParams } from "../helpers/fastCheckConfig";
 import {
   selectTopContributors,
   TOP_CONTRIBUTOR_WEIGHT_THRESHOLD,
@@ -7,7 +8,7 @@ import {
 } from "../../src/utils/topContributors";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
-const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
+const RUN_OPTIONS = propertyParams({ numRuns: 300 });
 
 // Weights live in [0, 1] per the audit contract. Each violation is a distinct
 // object so subset membership can be checked by reference.

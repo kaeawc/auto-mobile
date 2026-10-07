@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -604,7 +605,7 @@ export class GetBackStack implements BackStack {
         this.adb.executeCommand(
           "shell dumpsys activity activities",
           undefined,
-          undefined,
+          DUMPSYS_MAX_BUFFER,
           undefined,
           signal,
         ),

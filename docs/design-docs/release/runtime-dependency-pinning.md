@@ -60,16 +60,39 @@ small `bundledDependencies` set for the conflicting Jimp paths:
 The selected bundle adds about 17 MiB to the package. Source maps no longer embed
 sources by default; opt out for local debugging with
 `AUTOMOBILE_SOURCEMAP_STRIP_SOURCES=false bun run build`.
-The unpacked-size guard is 26 MiB (27,262,976 bytes): the 2026-10-04 measurement of
-23,707,712 bytes plus 3 MiB, rounded up to a whole MiB (#9571).
+The unpacked-size guard assumes trimming is enabled: 21 MiB (22,020,096 bytes).
+On 2026-10-05, staged `npm pack --dry-run --json` measured 18,345,761 trimmed
+bytes; adding 3 MiB and rounding up to a whole MiB sets the cap (#9571).
+The same staging copy measured 23,838,787 bytes untrimmed for reference. It used
+the worktree's existing `dist/`, schemas, package metadata, README, pack hooks,
+and complete bundled dependency closure; the worktree's `node_modules` was untouched.
 
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:
 
-| Guard                            | Where                                 | What it proves                                                                                      |
-| -------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)                               |
-| `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **packed** artifact reproduces every exact and bundled runtime version |
+| Guard                            | Where                                 | What it proves                                                                                                                        |
+| -------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)                                                                 |
+| `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **trimmed packed** artifact reproduces every runtime version and imports each importable bundled package |
+
+## CI pack trimming
+
+The prepack hook moves unused sources, declarations, maps, tests, docs and
+verified browser-only files out of the bundled production dependency closure.
+Runtime entry points, wildcard export prefixes, package metadata, README and
+license files stay intact. Postpack restores the original bytes; the next enabled
+prepack also restores any backup left by an interrupted pack.
+
+`AUTOMOBILE_TRIM_BUNDLED_DEPS=true` enables trimming; `false` disables it.
+Otherwise trimming runs only with `CI=true` or `CI=1`. Local `npm pack` is
+untrimmed by default. The unpacked-size benchmark and clean-room graph gate
+explicitly enable trimming, including locally, so they enforce the same trimmed
+cap and runtime imports as CI. The import smoke resolves each dependency by name
+beside its own installed directory under Bun's export conditions, including
+nested duplicate versions. Packages with no runtime entry or only a bin and no
+importable entry are skipped by metadata/file rules, and every skip is printed.
+AutoMobile's own server entry point is never imported. All hook diagnostics go
+to stderr to preserve pack JSON.
 
 ## Refreshing the graph (dependency / security updates)
 

@@ -66,7 +66,11 @@ describe("registered storage provider coverage", () => {
           present ? "supported" : "unavailable",
         );
       }
-      expect(describeDefaultSharedStorageReadCoverage("ios")).toEqual({ list: false, read: false });
+      expect(describeDefaultSharedStorageReadCoverage("ios")).toEqual({ list: true, read: true });
+      expect(describeDefaultSharedStorageReadCoverage("ios", "media_library")).toEqual({
+        list: false,
+        read: false,
+      });
     },
   );
 
@@ -78,12 +82,13 @@ describe("registered storage provider coverage", () => {
         platform,
         deviceType: platform === "ios" ? ("simulator" as const) : ("emulator" as const),
         providerCoverage: describeProviderCoverage([writeProvider("media_library", platform)]),
+        mediaLibraryReadCoverage: { list: false, read: false },
       };
       expect(state("media_library", "write", ctx)?.state).toBe("supported");
       for (const operation of ["list", "read"] as const) {
         expect(state("media_library", operation, ctx)?.state).toBe("unavailable");
         expect(state("media_library", operation, ctx)?.reason).toContain(
-          `No ${operation} provider`,
+          `No SharedStorageReadService ${operation} provider`,
         );
       }
       expect(state("media_library", "write", { ...ctx, providerCoverage: [] })?.state).toBe(

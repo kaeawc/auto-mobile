@@ -14,6 +14,35 @@ internal data class RememberedCaret(
   val reportedEnd: Int,
 )
 
+private const val INSERT_TEXT_MUTATION_TIMEOUT_MS = 200L
+private const val INSERT_TEXT_MUTATION_POLL_MS = 25L
+
+/** Hint text is not the inserted value; a missing/unsafe node ends the wait immediately. */
+internal fun shouldPollInsertTextMutation(
+  plan: InsertTextPlan,
+  snapshot: InsertTextSnapshot?,
+  elapsedMs: Long,
+): Boolean =
+  snapshot != null &&
+    (snapshot.isShowingHintText || snapshot.text != plan.updatedText) &&
+    elapsedMs < INSERT_TEXT_MUTATION_TIMEOUT_MS
+
+/** Returns the latest snapshot even on timeout, preserving the existing caret outcome rules. */
+internal fun awaitInsertTextMutation(
+  plan: InsertTextPlan,
+  readSnapshot: () -> InsertTextSnapshot?,
+  nowMs: () -> Long,
+  pause: (Long) -> Unit,
+): InsertTextSnapshot? {
+  val start = nowMs()
+  while (true) {
+    val snapshot = readSnapshot()
+    val elapsedMs = nowMs() - start
+    if (!shouldPollInsertTextMutation(plan, snapshot, elapsedMs)) return snapshot
+    pause(minOf(INSERT_TEXT_MUTATION_POLL_MS, INSERT_TEXT_MUTATION_TIMEOUT_MS - elapsedMs))
+  }
+}
+
 /** Plans a text insertion from the selection reported by an editable accessibility node. */
 internal fun planInsertText(
   currentText: String?,
@@ -56,6 +85,21 @@ internal data class InsertTextOutcome(
   val caretPlaced: Boolean?,
   val partialApplication: Boolean,
 )
+
+internal fun insertTextSelectionSucceeded(
+  setTextSucceeded: Boolean,
+  selectionAttempted: Boolean,
+  selectionReturned: Boolean,
+  plan: InsertTextPlan,
+  observed: InsertTextSnapshot?,
+): Boolean =
+  setTextSucceeded &&
+    ((selectionAttempted && selectionReturned) ||
+      observed != null &&
+        // A rejected action needs matching text; preserve the no-action offset-only rule.
+        (!selectionAttempted || observed.text == plan.updatedText) &&
+        observed.selectionStart == plan.caret &&
+        observed.selectionEnd == plan.caret)
 
 internal fun insertTextOutcome(
   setTextSucceeded: Boolean,

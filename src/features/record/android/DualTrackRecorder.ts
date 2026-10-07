@@ -522,12 +522,24 @@ export class DualTrackRecorder {
     const ranges = await buildAxisRanges(adb, node, rotation);
     const scaler = buildScaler(ranges);
 
-    return new GetEventReader({
+    const reader = new GetEventReader({
       adb,
       touchNode: node,
       scaler,
       density,
     });
+    const rotated = ranges.rotation % 2 !== 0;
+    const geometry = {
+      platform: "android" as const,
+      deviceWidth: rotated ? ranges.displayHeight : ranges.displayWidth,
+      deviceHeight: rotated ? ranges.displayWidth : ranges.displayHeight,
+      orientation: ranges.rotation,
+    };
+    return {
+      start: (onGesture, onError) =>
+        reader.start((event) => onGesture({ ...event, geometry }), onError),
+      stop: () => reader.stop(),
+    };
   }
 }
 
@@ -697,7 +709,13 @@ function buildCoordinateTapStep(gesture: GestureEvent): PlanStep | null {
       Math.max(LONG_PRESS_MIN_MS, gesture.durationMs),
     );
   }
-  return { tool: "tapAt", params };
+  return {
+    tool: "tapAt",
+    params,
+    ...(gesture.geometry
+      ? { geometry: { ...gesture.geometry, x: gesture.screenX, y: gesture.screenY } }
+      : {}),
+  };
 }
 
 function warnUnknownGesture(gesture: GestureEvent): void {

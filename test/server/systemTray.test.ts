@@ -4556,11 +4556,11 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       const swipes = () =>
         adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
       observer.setObserveResult(() =>
-        createObservation(
-          timer.now() >= readyAfterMs && swipes().length === 0
-            ? headerlessTwoNotificationGroups.expanded
-            : undefined,
-        ),
+        timer.now() < readyAfterMs
+          ? createObservation()
+          : swipes().length === 0
+            ? createObservation(headerlessTwoNotificationGroups.expanded)
+            : createEmptyTrayObservation(),
       );
       setSystemTrayDependencies({
         timer,
@@ -4570,14 +4570,18 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       registerInteractionTools();
 
       const handler = ToolRegistry.getTool("systemTray")!.deviceAwareHandler!;
-      const result = await handler(device, {
+      const result = handler(device, {
         action: "clearAll",
         notification: { title: "Delta" },
         awaitTimeout,
       });
 
+      if (expectedSwipes === 0) {
+        await expect(result).rejects.toThrow("shade not readable");
+      } else {
+        expect(JSON.parse((await result).content[0].text).dismissedCount).toBe(expectedSwipes);
+      }
       expect(swipes()).toHaveLength(expectedSwipes);
-      expect(JSON.parse(result.content[0].text).dismissedCount).toBe(expectedSwipes);
       // Later no-match iterations retain the short drain budget rather than
       // paying the full caller timeout after the notification has gone.
       expect(timer.now()).toBeLessThan(2000);

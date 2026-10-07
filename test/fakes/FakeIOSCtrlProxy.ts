@@ -23,6 +23,7 @@ import {
   CtrlProxyPerfTiming,
 } from "../../src/features/observe/ios";
 import type {
+  CtrlProxyMagicTapResult,
   CtrlProxyVoiceOverResult,
   CtrlProxyHingeAngleResult,
   CtrlProxyActionResult,
@@ -1320,6 +1321,26 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       success: true,
       action,
       totalTimeMs: 50,
+    };
+  }
+
+  async requestMagicTap(
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    signal?.throwIfAborted();
+    await this.applyDelay("magicTap");
+    this.checkFailure("magicTap");
+    signal?.throwIfAborted();
+    this.actionHistory.push({ action: "magic_tap" });
+    return {
+      success: true,
+      available: true,
+      handled: true,
+      unsupported: false,
+      requiresVoiceOver: false,
+      totalTimeMs: 0,
     };
   }
 

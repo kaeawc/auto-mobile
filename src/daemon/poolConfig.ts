@@ -21,7 +21,7 @@ export interface DeviceRecoveryPolicyParseResult {
   warnings: string[];
 }
 
-type Environment = Record<string, string | undefined>;
+export type Environment = Record<string, string | undefined>;
 
 const DEVICE_RECOVERY_ON_LOSS_KEYS = [
   "AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS",

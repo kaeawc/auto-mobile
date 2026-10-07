@@ -5,7 +5,7 @@ import { formatCommandError, wrapCommandError } from "../../src/utils/CommandErr
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
-const MAX = 4000;
+const MAX = 300;
 // Newline-free tokens so the structured, line-per-field output stays parseable.
 const safe = fc.string({
   unit: fc.constantFrom("a", "b", "/", ".", "-", "_", " ", "1"),
@@ -32,7 +32,7 @@ const errorValue = fc.anything();
 
 const excerpt = (v: string): string => {
   const t = v.trim();
-  return t.length <= MAX ? t : `...${t.slice(-MAX)}`;
+  return t.length <= MAX ? t : `...[truncated]${t.slice(-(MAX - "...[truncated]".length))}`;
 };
 
 describe("formatCommandError (property-based)", () => {
@@ -102,13 +102,13 @@ describe("formatCommandError (property-based)", () => {
     );
   });
 
-  test("bounds each output excerpt to at most MAX+3 chars and reproduces the excerpt oracle", () => {
+  test("bounds each output excerpt to at most MAX chars and reproduces the excerpt oracle", () => {
     const maybeLong = fc.string({ maxLength: 4300 });
     fc.assert(
       fc.property(maybeLong, (opts) => {
         const out = formatCommandError(new Error("x"), { command: "cmd", stdout: opts });
         const ex = excerpt(opts);
-        return ex.length <= MAX + 3 && (ex.length === 0 || out.includes(ex));
+        return ex.length <= MAX && (ex.length === 0 || out.includes(ex));
       }),
       RUN_OPTIONS,
     );
@@ -122,7 +122,7 @@ describe("formatCommandError (property-based)", () => {
     for (const error of [undefined, null]) {
       const out = formatCommandError(error, { command: "x" });
       expect(out.startsWith("Command failed: x")).toBe(true);
-      expect(out).toContain(`raw error: (last ${MAX} chars) ${String(error)}`);
+      expect(out).toContain(`raw error: (last 4000 chars) ${String(error)}`);
     }
   });
 });

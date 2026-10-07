@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { DeviceSessionManager } from "../devices/DeviceSessionManager";
@@ -253,25 +254,16 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: TestRecordingSocketServer | null = null;
+const socketServer = new SocketServerSingleton<TestRecordingSocketServer>();
 
 export function getTestRecordingSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(TEST_RECORDING_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(TEST_RECORDING_SOCKET_CONFIG);
 }
 
 export async function startTestRecordingSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new TestRecordingSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new TestRecordingSocketServer());
 }
 
 export async function stopTestRecordingSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

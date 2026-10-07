@@ -1118,3 +1118,17 @@ test("observe advertises an optional boolean for a service started by a device r
     false,
   );
 });
+
+describe("observe synthetic id lifetime", () => {
+  test("advertises capture-local ids in the schema and tool description", () => {
+    const description = skeletonElementSchema.shape.elementId.description;
+    expect(description).toContain("s2-");
+    expect(description).toContain("valid only for the observation that returned them");
+    expect(elementSchema.shape["view-id"].description).toBe(description);
+    expect(JSON.stringify(toJSONSchema(viewHierarchyNodeSchema))).toContain(description!);
+    registerObserveTools();
+    expect(ToolRegistry.getTool("observe")?.description).toContain(
+      "valid only for the observation that returned them",
+    );
+  });
+});

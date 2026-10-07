@@ -17,7 +17,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -32,7 +34,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.dp
-import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
@@ -73,7 +74,8 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
           text = "Intentional contrast failures for auditing.",
           style = MaterialTheme.typography.bodyLarge,
         )
-        AutoMobileContentCard(
+        // Raw Material card: crayon overlays would change what a contrast audit measures.
+        Card(
           modifier = Modifier.fillMaxWidth().semantics { testTag = "contrast_low_card" },
           colors = CardDefaults.cardColors(containerColor = LowContrastSurface),
         ) {
@@ -91,7 +93,8 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
             )
           }
         }
-        AutoMobileContentButton(
+        // Raw Material button: crayon overlays would change what a contrast audit measures.
+        Button(
           onClick = {},
           modifier = Modifier.semantics { testTag = "contrast_low_button" },
           colors =

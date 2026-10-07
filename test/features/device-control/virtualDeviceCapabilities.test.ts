@@ -17,6 +17,11 @@ describe("virtual device capability inventories", () => {
     ).toEqual({
       schemaVersion: 1,
       capabilities: [
+        {
+          id: "android.emulator.cameraPoster",
+          state: "available",
+          source: "platform",
+        },
         { id: "android.hardware.camera", state: "available", source: "avd_config" },
         { id: "android.hardware.camera.front", state: "available", source: "avd_config" },
         { id: "android.hardware.fingerprint", state: "available", source: "avd_config" },
@@ -26,7 +31,7 @@ describe("virtual device capability inventories", () => {
     });
   });
 
-  test("returns an empty inventory when an AVD exposes no mapped or recognized hardware features", () => {
+  test("reports poster control independently of unrecognized AVD hardware features", () => {
     expect(
       buildAndroidAvdCapabilityInventory({
         "hw.camera.back": "webcam999",
@@ -34,7 +39,16 @@ describe("virtual device capability inventories", () => {
         "hw.gps": "corrupted",
         "hw.ramSize": "2048",
       }),
-    ).toEqual({ schemaVersion: 1, capabilities: [] });
+    ).toEqual({
+      schemaVersion: 1,
+      capabilities: [
+        {
+          id: "android.emulator.cameraPoster",
+          state: "available",
+          source: "platform",
+        },
+      ],
+    });
   });
 
   test("reports supported and unsupported iOS Simulator capabilities with stable identifiers", () => {
@@ -42,6 +56,12 @@ describe("virtual device capability inventories", () => {
       schemaVersion: 1,
       capabilities: [
         { id: "ios.simulator.biometric", state: "available", source: "platform" },
+        {
+          id: "ios.simulator.cameraPoster",
+          state: "unsupported",
+          source: "platform",
+          reason: "Camera posters are only supported at Android emulator boot.",
+        },
         {
           id: "ios.simulator.nfc",
           state: "unsupported",
@@ -83,6 +103,12 @@ describe("virtual device capability inventories", () => {
           state: "unsupported",
           source: "platform",
           reason: "Biometric controls are only supported for iOS Simulator runtimes.",
+        },
+        {
+          id: "ios.simulator.cameraPoster",
+          state: "unsupported",
+          source: "platform",
+          reason: "Camera posters are only supported at Android emulator boot.",
         },
         {
           id: "ios.simulator.nfc",

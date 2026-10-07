@@ -687,6 +687,40 @@ describe("MultiPlatformDeviceManager", () => {
     expect(runningStateProbed).toBe(false);
   });
 
+  test("startDevice forwards the poster option to the Android launcher", async () => {
+    let received: string | undefined;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => {
+          received = request.cameraPosterPath;
+          return { process: null };
+        },
+      }),
+    );
+    await manager.startDevice({ name: "Pixel", platform: "android", isRunning: false }, undefined, {
+      cameraPosterPath: "/poster.png",
+    });
+    expect(received).toBe("/poster.png");
+  });
+
+  test("startDevice rejects physical Android poster requests before probing or launching", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      createFakeAndroidEmulator(),
+    );
+    await expect(
+      manager.startDevice(
+        { name: "Pixel", platform: "android", deviceId: "physical-serial", isRunning: true },
+        undefined,
+        { cameraPosterPath: "/poster.png" },
+      ),
+    ).rejects.toBeInstanceOf(ActionableError);
+  });
+
   test("startDevice does not probe or launch an Android AVD with unknown running state", async () => {
     let runningStateProbed = false;
     let launched = false;

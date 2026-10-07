@@ -1,7 +1,14 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
+import type { DateRangePreset, TimeAggregation } from "../daemon/failuresStreamSocketTypes";
+import {
+  getDateRangeDurationMs,
+  normalizeAggregation,
+  normalizeDateRange,
+} from "../daemon/streamQueryNormalizers";
 
 const FAILURES_RESOURCE_URIS = {
   BASE: "automobile:failures",
@@ -130,9 +137,12 @@ interface TimelineResponse {
   previousPeriodTotals: PeriodTotals;
 }
 
-async function getFailuresResource(uri: string): Promise<ResourceContent> {
+async function getFailuresResource(
+  uri: string,
+  repository: FailuresResourceRepository,
+): Promise<ResourceContent> {
   try {
-    const groups = await failureAnalyticsRepository.getFailureGroups();
+    const groups = await repository.getFailureGroups();
 
     const response: FailuresResponse = {
       groups,
@@ -154,41 +164,70 @@ async function getFailuresResource(uri: string): Promise<ResourceContent> {
   }
 }
 
-function getDateRangeDuration(preset: string): number {
-  switch (preset) {
-    case "1h":
-      return 60 * 60 * 1000;
-    case "24h":
-      return 24 * 60 * 60 * 1000;
-    case "3d":
-      return 3 * 24 * 60 * 60 * 1000;
-    case "7d":
-      return 7 * 24 * 60 * 60 * 1000;
-    case "30d":
-      return 30 * 24 * 60 * 60 * 1000;
-    default:
-      return 24 * 60 * 60 * 1000;
+/** Narrow view of the repository: only the queries these resources issue. */
+type FailuresResourceRepository = Pick<
+  FailureAnalyticsRepository,
+  "getFailureGroups" | "getTimelineData"
+>;
+
+const TIMELINE_QUERY_KEYS = ["dateRange", "aggregation"] as const;
+// RFC 6570 `{?...}` makes both parameters optional and order-independent, so the
+// bare URI, either parameter alone, and `aggregation=...&dateRange=...` all match
+// (the ordered `?dateRange={dateRange}&aggregation={aggregation}` form required
+// both, in that order — #10119, same shape as #6133).
+const TIMELINE_QUERY_TEMPLATE = `${FAILURES_RESOURCE_URIS.TIMELINE}{?${TIMELINE_QUERY_KEYS.join(",")}}`;
+const TIMELINE_QUERY_PARAM_KEYS = new Set<string>(TIMELINE_QUERY_KEYS);
+const DEFAULT_TIMELINE_DATE_RANGE: DateRangePreset = "24h";
+
+function parseTimelineParams(params: Record<string, string>): {
+  dateRange: DateRangePreset;
+  aggregation: TimeAggregation;
+} {
+  const unknownKeys = Object.keys(params).filter((key) => !TIMELINE_QUERY_PARAM_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `Unknown query parameters: ${unknownKeys.join(", ")}. Supported: ${TIMELINE_QUERY_KEYS.join(", ")}`,
+    );
   }
+  // The same validators the `poll_timeline` socket route uses; an absent value
+  // takes the documented default, an unknown one is an error rather than a
+  // silent fallback to a different range.
+  return {
+    dateRange: normalizeDateRange(params.dateRange) ?? DEFAULT_TIMELINE_DATE_RANGE,
+    aggregation: normalizeAggregation(params.aggregation),
+  };
+}
+
+function errorContent(uri: string, message: string): ResourceContent {
+  return {
+    uri,
+    mimeType: "application/json",
+    text: JSON.stringify({ error: message }, null, 2),
+  };
 }
 
 async function getTimelineResource(
   params: Record<string, string>,
-  timer: Timer = defaultTimer,
+  repository: FailuresResourceRepository,
+  timer: Timer,
 ): Promise<ResourceContent> {
+  let query: ReturnType<typeof parseTimelineParams>;
   try {
-    const dateRange = params.dateRange || "24h";
-    const aggregation = (params.aggregation || "hour") as "minute" | "hour" | "day" | "week";
+    query = parseTimelineParams(params);
+  } catch (error) {
+    logger.warn(`[FailuresResources] Invalid timeline query: ${errorMessage(error)}`);
+    return errorContent(
+      getRequestedResourceUri(params) ?? FAILURES_RESOURCE_URIS.TIMELINE,
+      errorMessage(error),
+    );
+  }
 
-    const now = timer.now();
-    const duration = getDateRangeDuration(dateRange);
-    const startTime = now - duration;
-    const endTime = now;
+  try {
+    const { dateRange, aggregation } = query;
+    const endTime = timer.now();
+    const startTime = endTime - getDateRangeDurationMs(dateRange);
 
-    const result = await failureAnalyticsRepository.getTimelineData({
-      startTime,
-      endTime,
-      aggregation,
-    });
+    const result = await repository.getTimelineData({ startTime, endTime, aggregation });
 
     const response: TimelineResponse = {
       dataPoints: result.dataPoints,
@@ -197,40 +236,37 @@ async function getTimelineResource(
       previousPeriodTotals: result.previousPeriodTotals,
     };
 
-    const uri = `${FAILURES_RESOURCE_URIS.TIMELINE}?dateRange=${dateRange}&aggregation=${aggregation}`;
-
     return {
-      uri,
+      uri: `${FAILURES_RESOURCE_URIS.TIMELINE}?dateRange=${dateRange}&aggregation=${aggregation}`,
       mimeType: "application/json",
       text: JSON.stringify(response, null, 2),
     };
   } catch (error) {
     logger.error(`[FailuresResources] Failed to get timeline: ${error}`);
-    return {
-      uri: FAILURES_RESOURCE_URIS.TIMELINE,
-      mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to retrieve timeline: ${error}` }, null, 2),
-    };
+    return errorContent(FAILURES_RESOURCE_URIS.TIMELINE, `Failed to retrieve timeline: ${error}`);
   }
 }
 
-export function registerFailuresResources(): void {
+export function registerFailuresResources(
+  repository: FailuresResourceRepository = failureAnalyticsRepository,
+  timer: Timer = defaultTimer,
+): void {
   // Register base failures resource
   ResourceRegistry.register(
     FAILURES_RESOURCE_URIS.BASE,
     "Failures",
     "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
     "application/json",
-    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE),
+    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE, repository),
   );
 
   // Register timeline resource template
   ResourceRegistry.registerTemplate(
-    `${FAILURES_RESOURCE_URIS.TIMELINE}?dateRange={dateRange}&aggregation={aggregation}`,
+    TIMELINE_QUERY_TEMPLATE,
     "Failures Timeline",
-    "Get timeline data for failures with configurable date range and aggregation.",
+    "Get timeline data for failures. Optional dateRange (1h, 24h, 3d, 7d, 30d; default 24h) and aggregation (minute, hour, day, week; default hour). Buckets and labels are UTC; weeks start Monday 00:00 UTC.",
     "application/json",
-    getTimelineResource,
+    (params) => getTimelineResource(params, repository, timer),
   );
 
   logger.info("[FailuresResources] Registered failures resources");

@@ -501,19 +501,96 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected override pushEventKey(event: TelemetryEvent): string | null {
-    if (event.data === null || typeof event.data !== "object") {
-      return null;
-    }
-    const data = event.data as Record<string, unknown>;
-    const id = data.id ?? data.occurrenceId ?? data.sequenceNumber ?? data.requestId;
-    if (typeof id !== "string" && typeof id !== "number") {
-      return null;
-    }
-    if (event.category === "overlay" && typeof data.sequence === "number") {
-      return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
-    }
-    return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
+    return telemetryEventIdentityKey(event);
   }
+}
+
+type KeyPart = string | number | null;
+
+function asKeyId(value: unknown): string | number | null {
+  return typeof value === "string" || typeof value === "number" ? value : null;
+}
+
+function keyOf(event: TelemetryEvent, namespace: string, ...identity: KeyPart[]): string {
+  return JSON.stringify([event.category, event.deviceId, event.sessionId, namespace, ...identity]);
+}
+
+/**
+ * Network identity shared by the stored row and the live recorder input, which
+ * is pushed BEFORE it is persisted and so never carries the row id (#10118).
+ * The SDK `sequenceNumber` is a per-app-process counter that restarts at launch
+ * and can repeat across apps on one device, so it is scoped by `applicationId`
+ * and the event `timestamp` (a restarted app re-using a number has a different
+ * timestamp). Without a sequence number, `requestId` alone is shared by several
+ * lifecycle records of one request, so it is only used together with the
+ * fields that tell those records apart.
+ */
+function networkIdentityKey(event: TelemetryEvent, data: Record<string, unknown>): string | null {
+  const scope: KeyPart[] = [asKeyId(data.applicationId), asKeyId(data.timestamp)];
+  const sequenceNumber = asKeyId(data.sequenceNumber);
+  if (typeof sequenceNumber === "number") {
+    return keyOf(event, "seq", ...scope, sequenceNumber);
+  }
+  const requestId = asKeyId(data.requestId);
+  if (requestId === null) {
+    return null;
+  }
+  return keyOf(
+    event,
+    "req",
+    ...scope,
+    requestId,
+    asKeyId(data.direction),
+    asKeyId(data.connectionId),
+    asKeyId(data.method),
+    asKeyId(data.statusCode),
+  );
+}
+
+function defaultIdentityKey(event: TelemetryEvent, data: Record<string, unknown>): string | null {
+  const id = asKeyId(data.id ?? data.occurrenceId ?? data.sequenceNumber ?? data.requestId);
+  if (id === null) {
+    return null;
+  }
+  if (event.category === "overlay" && typeof data.sequence === "number") {
+    return JSON.stringify([event.category, event.deviceId, event.sessionId, id, data.sequence]);
+  }
+  return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
+}
+
+/**
+ * Identity under which a live event and the backfilled copy of the same event
+ * collide, or null when the two paths share no stable identity (then the event
+ * is never deduplicated, so an unrelated event is never dropped).
+ *
+ * Network and failure id sources have their own namespaces so a DB row id can
+ * never equal an SDK sequence number: crash/anr/nonfatal use the failure
+ * `occurrenceId` both paths carry; network uses {@link networkIdentityKey}.
+ * Their bare row `id` is namespaced `row` for repeated backfill rows. Other
+ * categories retain their existing id fallbacks and serialization; overlay
+ * sequences distinguish interactions with the same overlay id. log/os/
+ * navigation/storage/layout rows and live inputs carry no id, so have no key.
+ */
+export function telemetryEventIdentityKey(event: TelemetryEvent): string | null {
+  if (event.data === null || typeof event.data !== "object") {
+    return null;
+  }
+  const data = event.data as Record<string, unknown>;
+  if (!["network", "crash", "anr", "nonfatal"].includes(event.category)) {
+    return defaultIdentityKey(event, data);
+  }
+  const occurrenceId = asKeyId(data.occurrenceId);
+  if (occurrenceId !== null) {
+    return keyOf(event, "occ", occurrenceId);
+  }
+  if (event.category === "network") {
+    const networkKey = networkIdentityKey(event, data);
+    if (networkKey !== null) {
+      return networkKey;
+    }
+  }
+  const rowId = asKeyId(data.id);
+  return rowId === null ? null : keyOf(event, "row", rowId);
 }
 
 // Singleton instance

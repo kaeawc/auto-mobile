@@ -9,12 +9,13 @@ import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
 import type {
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse,
-  DateRangePreset,
-  TimeAggregation,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
+  getDateRangeDurationMs as getDateRangeDuration,
+  normalizeAggregation,
+  normalizeDateRange,
   normalizeStreamLimit,
   normalizeStreamSinceId,
   normalizeStreamTimestampMs,
@@ -33,58 +34,6 @@ export type FailuresStreamRepository = Pick<
   FailureAnalyticsRepository,
   "getNotificationsSince" | "getAggregatedGroups" | "getTimelineData" | "acknowledgeNotifications"
 >;
-
-/**
- * Get duration in ms for a date range preset
- */
-function getDateRangeDuration(preset: DateRangePreset): number {
-  switch (preset) {
-    case "1h":
-      return 60 * 60 * 1000;
-    case "24h":
-      return 24 * 60 * 60 * 1000;
-    case "3d":
-      return 3 * 24 * 60 * 60 * 1000;
-    case "7d":
-      return 7 * 24 * 60 * 60 * 1000;
-    case "30d":
-      return 30 * 24 * 60 * 60 * 1000;
-  }
-}
-
-/**
- * Validate aggregation value
- */
-function normalizeAggregation(value: unknown): TimeAggregation {
-  if (value === undefined || value === null) {
-    return "hour";
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Invalid aggregation: ${String(value)}`);
-  }
-  const valid: TimeAggregation[] = ["minute", "hour", "day", "week"];
-  if (!valid.includes(value as TimeAggregation)) {
-    throw new Error(`Invalid aggregation: ${value}. Must be one of: ${valid.join(", ")}`);
-  }
-  return value as TimeAggregation;
-}
-
-/**
- * Validate date range preset
- */
-function normalizeDateRange(value: unknown): DateRangePreset | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Invalid dateRange: ${String(value)}`);
-  }
-  const valid: DateRangePreset[] = ["1h", "24h", "3d", "7d", "30d"];
-  if (!valid.includes(value as DateRangePreset)) {
-    throw new Error(`Invalid dateRange: ${value}. Must be one of: ${valid.join(", ")}`);
-  }
-  return value as DateRangePreset;
-}
 
 /**
  * Socket server for failures stream.

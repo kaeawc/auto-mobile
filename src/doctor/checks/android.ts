@@ -13,6 +13,7 @@ import {
   getAndroidSdkFromEnvironment,
   getBestAndroidToolsLocation,
   getCmdlineToolsRoot,
+  getToolPathFromPath,
   getTypicalAndroidSdkPaths,
   isHomebrewToolsPath,
 } from "../../utils/android-cmdline-tools/detection";
@@ -99,6 +100,8 @@ export interface AndroidDoctorDependencies {
   getCmdlineToolsVersion?: CmdlineToolsVersionReader;
   listAvds?: (probe?: DoctorProbeOptions) => Promise<Array<{ name: string }>>;
   readAvdConfig?: AvdConfigReader;
+  /** Host seam for SDK-location fallbacks; defaults to the live host. */
+  systemDetection?: SystemDetection;
 }
 
 const listAvdsWithEmulator = async (probe?: DoctorProbeOptions) =>
@@ -188,57 +191,114 @@ export async function checkAndroidCommandLineTools(
   };
 }
 
+const ANDROID_HOME_EXPORT_HINT =
+  "Set ANDROID_HOME to your Android SDK installation path. " +
+  "Example: export ANDROID_HOME=$HOME/Library/Android/sdk";
+
+interface ResolvedSdk {
+  /** SDK root when one was found; absent when only adb on PATH was found. */
+  root?: string;
+  /** Human-readable description of how the runtime resolvers found it. */
+  how: string;
+}
+
 /**
- * Check ANDROID_HOME environment variable
+ * Resolve the SDK the same ways the runtime does when the environment
+ * variables are unset: the typical SDK locations, then the cmdline-tools
+ * detection (Homebrew, PATH), then `adb` on PATH (see `AdbClient.getAdbPath`).
  */
+async function resolveSdkWithoutEnvironment(
+  dependencies: AndroidDoctorDependencies,
+  probe: DoctorProbeOptions,
+): Promise<ResolvedSdk | null> {
+  const detection = dependencies.systemDetection ?? new DefaultSystemDetection();
+  const typicalRoot = getTypicalAndroidSdkPaths(detection).find((path) =>
+    detection.fileExistsSync(path),
+  );
+  if (typicalRoot) {
+    return { root: typicalRoot, how: "typical SDK location" };
+  }
+
+  const locations = await awaitDoctorProbe(probe, () =>
+    dependencies.detectAndroidCommandLineTools(detection),
+  );
+  const best = dependencies.getBestAndroidToolsLocation(locations);
+  if (best) {
+    return { root: getCmdlineToolsRoot(best.path), how: `${best.source} command line tools` };
+  }
+
+  const adbPath = await awaitDoctorProbe(probe, () => getToolPathFromPath("adb", detection));
+  return adbPath ? { how: `adb on PATH at ${adbPath}` } : null;
+}
+
+/**
+ * Check the Android SDK location. A missing ANDROID_HOME is only a failure
+ * when the SDK cannot be located any other way, because adb/emulator
+ * resolution does not require the variable.
+ */
+export function checkAndroidHome(systemDetection: SystemDetection): Promise<CheckResult>;
+export function checkAndroidHome(
+  options?: DoctorProbeOptions,
+  dependencies?: AndroidDoctorDependencies,
+): Promise<CheckResult>;
 export async function checkAndroidHome(
-  systemDetection: SystemDetection = new DefaultSystemDetection(),
+  optionsOrDetection: DoctorProbeOptions | SystemDetection = {},
+  dependencies: AndroidDoctorDependencies = createAndroidDoctorDependencies(),
 ): Promise<CheckResult> {
+  let options: DoctorProbeOptions = {};
+  let systemDetection = dependencies.systemDetection ?? new DefaultSystemDetection();
+  if ("getCurrentPlatform" in optionsOrDetection) {
+    systemDetection = optionsOrDetection;
+  } else {
+    options = optionsOrDetection;
+  }
+  dependencies = { ...dependencies, systemDetection };
+  const name = "ANDROID_HOME";
   const androidHome = getAndroidSdkFromEnvironment(systemDetection);
+  const homeStatus = systemDetection.getEnvVar("ANDROID_HOME") ? "invalid" : "unset";
 
   if (androidHome) {
+    return { name, status: "pass", message: `Android SDK found`, value: androidHome };
+  }
+
+  let resolved: ResolvedSdk | null;
+  try {
+    resolved = await resolveSdkWithoutEnvironment(
+      dependencies,
+      remainingDoctorProbe(probeOptions(options)),
+    );
+  } catch (error) {
+    dependencies.logger.warn(
+      `Android SDK fallback detection failed: ${errorMessage(error)}`,
+      error,
+    );
     return {
-      name: "ANDROID_HOME",
-      status: "pass",
-      message: `Android SDK found`,
-      value: androidHome,
+      name,
+      status: "warn",
+      message: `ANDROID_HOME is ${homeStatus} and SDK detection did not finish: ${errorMessage(error)}`,
+      recommendation: ANDROID_HOME_EXPORT_HINT,
     };
   }
 
-  let sdkRoot = getTypicalAndroidSdkPaths(systemDetection).find((path) =>
-    systemDetection.fileExistsSync(path),
-  );
-  if (!sdkRoot) {
-    try {
-      const location = getBestAndroidToolsLocation(
-        await detectAndroidCommandLineTools(systemDetection),
-      );
-      if (location) {
-        sdkRoot = getCmdlineToolsRoot(location.path);
-      }
-    } catch (error) {
-      logger.warn(`Android SDK discovery failed: ${errorMessage(error)}`, error);
-    }
-  }
-
-  if (sdkRoot) {
-    const homeStatus = systemDetection.getEnvVar("ANDROID_HOME") ? "invalid" : "unset";
+  if (resolved) {
     return {
-      name: "ANDROID_HOME",
+      name,
       status: "warn",
-      message: `ANDROID_HOME is ${homeStatus}; Android SDK found at ${sdkRoot}`,
-      value: sdkRoot,
-      recommendation: `export ANDROID_HOME=${sdkRoot}`,
+      message: resolved.root
+        ? `ANDROID_HOME is ${homeStatus}; Android SDK found at ${resolved.root} via ${resolved.how}`
+        : `ANDROID_HOME is ${homeStatus}; Android tooling was found via ${resolved.how}`,
+      recommendation: resolved.root
+        ? `export ANDROID_HOME=${resolved.root}`
+        : ANDROID_HOME_EXPORT_HINT,
+      ...(resolved.root ? { value: resolved.root } : {}),
     };
   }
 
   return {
-    name: "ANDROID_HOME",
+    name,
     status: "fail",
     message: "ANDROID_HOME or ANDROID_SDK_ROOT not set or path does not exist",
-    recommendation:
-      "Set ANDROID_HOME to your Android SDK installation path. " +
-      "Example: export ANDROID_HOME=$HOME/Library/Android/sdk",
+    recommendation: ANDROID_HOME_EXPORT_HINT,
   };
 }
 
@@ -594,7 +654,7 @@ export async function runAndroidChecks(options: DoctorOptions = {}): Promise<Che
   };
 
   // Run checks sequentially to avoid overwhelming the system
-  results.push(await checkAndroidHome());
+  await run(() => checkAndroidHome(options));
   await run(() => checkAndroidCommandLineTools(options));
   results.push(await checkJavaHome());
   await run(() => checkAdbInstallation(defaultAdbClientFactory, options));

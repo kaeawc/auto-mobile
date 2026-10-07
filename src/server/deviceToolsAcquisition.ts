@@ -34,9 +34,11 @@ import {
   reserveStableDeviceLifecycle,
   resolveAndroidStartStableDeviceLifecycleTarget,
   runWithinShutdownDeadline,
+  setAcquisitionStage,
   validateRequestedAndroidIdentifiersBeforeBoot,
 } from "./deviceTools";
 import type {
+  AcquisitionStage,
   DevicePreparationBudgets,
   DeviceToolsDependencies,
   GetAndroidArgs,
@@ -64,52 +66,101 @@ export function acquisitionDeadlineMs(rawArgs: unknown, requestedDeadlineMs: num
   );
 }
 
-/** Keep in-flight acquisition cancellation aligned with progress extensions. */
+/**
+ * Last-resort bound past the acquisition deadline (#6034). Inner phases fail at
+ * the deadline with their own structured errors, then may spend one settlement
+ * grace draining a cancelled step and one more on failed-acquisition cleanup;
+ * the backstop fires only after both, so it replaces nothing that would settle.
+ */
+const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE_MS;
+
+/**
+ * Keep in-flight acquisition cancellation aligned with progress extensions, and
+ * never let a step that ignores cancellation hold the response past the deadline.
+ * The backstop rejects with the running stage while the preparation keeps its
+ * reservations until it settles; it cannot bind a session after the deadline.
+ */
 export async function runWithAcquisitionDeadline<T>(
   rawArgs: unknown,
   requestedDeadlineMs: number,
   signal: AbortSignal | undefined,
   operationName: string,
-  operation: (deadlineMs: number, signal?: AbortSignal) => Promise<T>,
+  operation: (deadlineMs: number, signal: AbortSignal, stage: AcquisitionStage) => Promise<T>,
 ): Promise<T> {
-  const getLiveDeadline = resolveLiveTransportDeadlineGetter(rawArgs);
-  if (getLiveDeadline?.() === undefined) {
-    return await operation(acquisitionDeadlineMs(rawArgs, requestedDeadlineMs), signal);
-  }
+  const live = resolveLiveTransportDeadlineGetter(rawArgs)?.() !== undefined;
   const timer = getDeviceToolsDependencies().timer;
+  const stage: AcquisitionStage = { current: "starting acquisition" };
+  // Cancels the preparation; `expired` ends the caller's wait on it.
   const controller = new AbortController();
-  let timeout: NodeJS.Timeout | undefined;
-  const armDeadline = (): void => {
-    if (timeout !== undefined) {
-      timer.clearTimeout(timeout);
+  const expired = new AbortController();
+  let abortTimeout: NodeJS.Timeout | undefined;
+  let backstopTimeout: NodeJS.Timeout | undefined;
+  const clearTimeouts = (): void => {
+    for (const handle of [abortTimeout, backstopTimeout]) {
+      if (handle !== undefined) {
+        timer.clearTimeout(handle);
+      }
     }
-    const remainingMs = acquisitionDeadlineMs(rawArgs, requestedDeadlineMs) - timer.now();
-    const expire = (): void =>
-      controller.abort(
-        new ActionableError(
-          `${operationName} timed out at the live MCP request deadline. Retry device acquisition.`,
-        ),
-      );
-    if (remainingMs <= 0) {
-      expire();
-    } else {
-      timeout = timer.setTimeout(expire, remainingMs);
-    }
+    abortTimeout = undefined;
+    backstopTimeout = undefined;
   };
-  const unsubscribe = resolveLiveTransportDeadlineSubscriber(rawArgs)?.(armDeadline);
+  const abortAtLiveDeadline = (): void =>
+    controller.abort(
+      new ActionableError(
+        `${operationName} timed out at the live MCP request deadline. Retry device acquisition.`,
+      ),
+    );
+  const expire = (): void => {
+    const error = new ActionableError(
+      `${operationName} did not finish by its MCP request deadline; the ${stage.current} stage ` +
+        `ignored cancellation and is still running. The device stays reserved until that stage ` +
+        `settles. Retry device acquisition.`,
+    );
+    logger.warn(`[DeviceTools] ${error.message}`);
+    controller.abort(error);
+    expired.abort(error);
+  };
+  const armDeadline = (): void => {
+    clearTimeouts();
+    const remainingMs = acquisitionDeadlineMs(rawArgs, requestedDeadlineMs) - timer.now();
+    if (!Number.isFinite(remainingMs)) {
+      return;
+    }
+    if (live) {
+      if (remainingMs <= 0) {
+        abortAtLiveDeadline();
+      } else {
+        abortTimeout = timer.setTimeout(abortAtLiveDeadline, remainingMs);
+      }
+    }
+    backstopTimeout = timer.setTimeout(
+      expire,
+      Math.max(0, remainingMs) + ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS,
+    );
+  };
+  const unsubscribe = live
+    ? resolveLiveTransportDeadlineSubscriber(rawArgs)?.(armDeadline)
+    : undefined;
   armDeadline();
   try {
-    // Internal phase budgets stay fixed; this signal enforces the moving transport
-    // cap across boot, readiness, and binding without freezing a phase's timer.
-    return await operation(
-      requestedDeadlineMs,
-      signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    // Internal phase budgets stay fixed under a live deadline; the signal enforces
+    // the moving transport cap across boot, readiness, and binding without
+    // freezing a phase's timer. An anchored deadline caps the phase budgets.
+    const operationSignal = signal
+      ? AbortSignal.any([signal, controller.signal])
+      : controller.signal;
+    return await raceWithDeadline(
+      () =>
+        operation(
+          live ? requestedDeadlineMs : acquisitionDeadlineMs(rawArgs, requestedDeadlineMs),
+          operationSignal,
+          stage,
+        ),
+      { timer, signal: expired.signal, label: operationName },
     );
   } finally {
     unsubscribe?.();
-    if (timeout !== undefined) {
-      timer.clearTimeout(timeout);
-    }
+    clearTimeouts();
   }
 }
 
@@ -385,6 +436,7 @@ async function prepareDevice(
   let lifecycleReservations:
     | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
     | undefined;
+  setAcquisitionStage(budgets, "reserving the device lifecycle");
   try {
     // Scope the pre-boot lifecycle reservation (runs `getDeviceImagesDetailed`
     // → `simctl list` discovery) so its commands attribute into perfTiming,
@@ -401,6 +453,7 @@ async function prepareDevice(
     );
     const coordinatedSignal =
       coordinatedSignals.length === 1 ? coordinatedSignals[0] : AbortSignal.any(coordinatedSignals);
+    setAcquisitionStage(budgets, "validating the requested device identifiers");
     // Reject a contradictory Android avdName + deviceId pair before booting,
     // so a stopped AVD is not cold-booted and killed just to report it. Run
     // after its lifecycle lease, however, so a serial not yet visible during
@@ -419,6 +472,7 @@ async function prepareDevice(
         },
       ),
     );
+    setAcquisitionStage(budgets, "booting the device");
     return await getBootAndPrepareDevice()(args, budgets, deps, deviceUtils, {
       autolockEnabled,
       deviceMatcher: deviceMatcher,
@@ -567,13 +621,14 @@ async function getAndroidHandler(
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
     "getAndroid",
-    (deadlineMs, requestSignal) =>
+    (deadlineMs, requestSignal, stage) =>
       prepareDevice(
         target,
         {
           bootTimeoutMs,
           automationReadyTimeoutMs,
           automationDeadlineMs: deadlineMs,
+          stage,
           operationName: "getAndroid",
           ...(args.avdName
             ? {
@@ -617,7 +672,7 @@ async function getAppleHandler(
     startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
     signal,
     "getApple",
-    (deadlineMs, requestSignal) =>
+    (deadlineMs, requestSignal, stage) =>
       prepareDevice(
         {
           platform: "ios",
@@ -631,6 +686,7 @@ async function getAppleHandler(
           bootTimeoutMs,
           automationReadyTimeoutMs,
           automationDeadlineMs: deadlineMs,
+          stage,
           operationName: "getApple",
           stableTarget: { platform: "ios", stableId: udid },
         },

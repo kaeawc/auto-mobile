@@ -54,6 +54,7 @@ import {
   reserveInitialDeviceForReadiness,
   resolveRunnerReadinessTimeoutMs,
   runOperationWithinDeadline,
+  setAcquisitionStage,
   startDeviceSchema,
   validateBootIdentity,
   validatePooledDeviceMapping,
@@ -251,6 +252,7 @@ const bootAndPrepareDevice = async (
     state.boot.device.deviceId,
   );
   const sessionId = await trackDeviceAcquisitionReadiness(acquisitionReadinessKey, async () => {
+    setAcquisitionStage(budgets, "preparing the automation runner");
     const readinessResult = await prepareStartDeviceRunnerReadiness({
       autolockEnabled: options.autolockEnabled,
       boot: state.boot!,
@@ -313,6 +315,7 @@ async function waitForBootedIosRunnerCleanup(
   deps: DeviceToolsDependencies,
   { state, signal, requestedIdentity }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "waiting for iOS runner removal cleanup");
   IOSCtrlProxyClient.resumeAfterDeviceStart(state.boot!.device.deviceId);
   // Removal cleanup can still be draining after simctl reports the new boot.
   await waitForDevicePreparation(
@@ -341,6 +344,7 @@ async function reserveBootReadiness(
   daemonState: DaemonState,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
+  setAcquisitionStage(budgets, "reserving the device for readiness");
   const initialReservations: DeviceReadinessReservation[] = [];
   let reservationAccepted = false;
   let reservationAbandoned = false;
@@ -417,6 +421,7 @@ async function bindPreparedDevice(
     acquisitionReadinessKey: string;
   },
 ): Promise<string> {
+  setAcquisitionStage(budgets, "binding the device session");
   try {
     state.boot = readinessResult.boot;
     preparation.recovered = readinessResult.recovered;
@@ -757,13 +762,14 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
       "startDevice",
-      (deadlineMs, requestSignal) =>
+      (deadlineMs, requestSignal, stage) =>
         prepareDevice(
           target,
           {
             bootTimeoutMs: totalTimeoutMs,
             automationReadyTimeoutMs: resolveRunnerReadinessTimeoutMs(args),
             automationDeadlineMs: deadlineMs,
+            stage,
             operationName: "startDevice",
             stableTarget:
               args.platform === "android" && target.name && !args.deviceId

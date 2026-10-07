@@ -877,4 +877,82 @@ describe("device acquisition wait deadlines", () => {
       });
     }
   }
+
+  // #6034: a signal-ignoring readiness step must not hold the response past the
+  // acquisition deadline, and a late success must neither bind a session nor
+  // strand the device's reservations.
+  for (const platform of ["android", "ios"] as const) {
+    for (const deadlineKind of ["live", "anchored"] as const) {
+      for (const mode of ["wedged", "in-time"] as const) {
+        const operationName = platform === "android" ? "getAndroid" : "getApple";
+        test(`${operationName} ${deadlineKind} deadline with ${mode} readiness`, async () => {
+          const device = platform === "android" ? android : ios;
+          await pool.addDevice(device);
+          const readiness = Promise.withResolvers<void>();
+          let readinessSignal: AbortSignal | undefined;
+          setDeviceToolsDependencies({
+            ensureCtrlProxyReady: async (request) => {
+              readinessSignal = request.signal;
+              // Deliberately ignores cancellation, modelling an unbounded inner await.
+              await readiness.promise;
+            },
+          });
+          const key = `wedged-readiness-${platform}-${deadlineKind}`;
+          if (deadlineKind === "live") {
+            registerLiveDeadline(key, new ProgressExtendableDeadline(0, 500));
+          }
+          const outcome = observe(
+            acquire(device, undefined, {
+              __mcpRequestDeadlineMs: 500,
+              ...(deadlineKind === "live" ? { __mcpLiveDeadlineKey: key } : {}),
+            }),
+          );
+          try {
+            await flushMicrotasks();
+            expect(readinessSignal).toBeDefined();
+            expect(reservations.isReservedForReadiness(device.deviceId)).toBe(true);
+            if (mode === "in-time") {
+              timer.advanceTime(499);
+              readiness.resolve();
+              await flushMicrotasks();
+              expect(outcome.settled).toBe(true);
+              expect(outcome.error).toBeUndefined();
+              expect(readinessSignal?.aborted).toBe(false);
+              expect(sessionManager.getAllSessionIds()).toHaveLength(1);
+              expect(timer.getPendingTimeoutCount()).toBe(0);
+              return;
+            }
+            timer.advanceTime(500);
+            await flushMicrotasks();
+            // Inner structured errors keep precedence during the settlement grace.
+            expect(outcome.settled).toBe(false);
+            timer.advanceTime(3_000);
+            await flushMicrotasks();
+            expect(outcome.settled).toBe(true);
+            expect(outcome.error).toBeInstanceOf(ActionableError);
+            const message = (outcome.error as Error).message;
+            expect(message).toContain(operationName);
+            expect(message).toContain("preparing the automation runner");
+            expect(readinessSignal?.aborted).toBe(true);
+            expect(sessionManager.getAllSessionIds()).toEqual([]);
+            // The wedged step still runs, so its reservations stay held.
+            expect(reservations.isReservedForReadiness(device.deviceId)).toBe(true);
+            expect(lifecycleReleases).toBe(0);
+            expect(timer.getPendingTimeoutCount()).toBe(0);
+            // A late inner success binds nothing and releases once settled.
+            readiness.resolve();
+            await flushMicrotasks();
+            expect(sessionManager.getAllSessionIds()).toEqual([]);
+            expect(reservations.isReservedForReadiness(device.deviceId)).toBe(false);
+            expect(lifecycleReleases).toBe(1);
+            expect(timer.getSleepHistory()).toEqual([]);
+          } finally {
+            readiness.resolve();
+            unregisterLiveDeadline(key);
+            await flushMicrotasks();
+          }
+        });
+      }
+    }
+  }
 });

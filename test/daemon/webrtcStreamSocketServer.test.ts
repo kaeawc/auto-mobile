@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { WEBRTC_ENV } from "../../src/features/webrtc/webrtcStreamingConfig";
 import {
@@ -651,6 +652,7 @@ describe("WebRtcStreamSocketServer", () => {
     const posts: RecordedWhipRequest[] = [];
     const sources: FakeH264Source[] = [];
     setWebRtcStreamManagerDependencies({
+      captureRegistry: createDeviceCaptureRegistry(),
       createPublisher: (config, deps) =>
         new WebRtcPublisher(config, {
           ...deps,

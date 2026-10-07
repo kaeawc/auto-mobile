@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -113,6 +114,7 @@ function installFakes(firstMode: "reject-now" | "gated") {
   const sources: CountingSource[] = [];
   const timer = new FakeTimer();
   setWebRtcStreamManagerDependencies({
+    captureRegistry: createDeviceCaptureRegistry(),
     idGenerator: new CountingIdGenerator("id"),
     createPublisher: (config) => {
       const publisher = new ScriptedPublisher(

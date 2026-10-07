@@ -8106,6 +8106,12 @@
                     "type": "null"
                   }
                 ]
+              },
+              "transportAliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { daemonOptionsSchema } from "./client";
+import { recordedProcessGenerationToken } from "./processGenerationFields";
 import type { DaemonStatus, PidFileData } from "./types";
 
 /** Stronger than legacy discovery: mutation requires a complete generation tuple. */
@@ -9,6 +10,7 @@ export const recoveryOwnerSchema = z.object({
   startedAt: z.number().positive(),
   processStartedAt: z.number().positive().optional(),
   processGenerationToken: z.string().min(1).optional(),
+  processGenerationTokenUtc: z.string().min(1).optional(),
   version: z.string().min(1),
   buildId: z.string().min(1),
   entryScript: z.string().min(1),
@@ -71,7 +73,7 @@ export interface IdentityPublisherIO {
 /** The incumbent owns the complete writer; callers never reconstruct its PID record. */
 export async function republishOwnedIdentity(
   ready: boolean,
-  owner: Pick<PidFileData, "pid" | "startedAt" | "processGenerationToken">,
+  owner: Pick<PidFileData, "pid" | "startedAt"> & { processGenerationToken?: string },
   io: IdentityPublisherIO,
   reportedSockets: Record<string, string>,
 ): Promise<boolean> {
@@ -83,7 +85,7 @@ export async function republishOwnedIdentity(
     isCompleteRecoveryRecord(record, reportedSockets) &&
     record.pid === owner.pid &&
     record.startedAt === owner.startedAt &&
-    record.processGenerationToken === owner.processGenerationToken
+    recordedProcessGenerationToken(record) === owner.processGenerationToken
   ) {
     return true;
   }

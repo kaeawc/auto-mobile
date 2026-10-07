@@ -1,3 +1,5 @@
+import { buildSimctlArgs } from "../../../utils/ios-cmdline-tools/simctlArgs";
+import { shellQuote } from "../../../utils/shellQuote";
 /**
  * Tiny iOS-specific helpers shared between `SystemConfigurationManager`
  * (for its iOS-only public methods like `restartSpringBoard`) and
@@ -16,7 +18,12 @@ export function isIosSimulator(deviceId: string): boolean {
 
 /** Compose an `xcrun simctl spawn <udid> <command>` shell line. */
 export function iosSpawnCommand(deviceId: string, command: string): string {
-  return `xcrun simctl spawn ${deviceId} ${command}`;
+  const args = buildSimctlArgs(["spawn", deviceId]);
+  // Preserve the existing shell fragment; quote only the newly injected path.
+  if (args[1] === "--set") {
+    args[2] = shellQuote(args[2]);
+  }
+  return `xcrun ${args.join(" ")} ${command}`;
 }
 
 /**

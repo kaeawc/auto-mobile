@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +24,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 
 /**
  * Visualization slide component for displaying images with loading states. Supports both local and
@@ -44,7 +44,7 @@ fun VisualizationSlideItem(
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     // Image display
-    Card(
+    AutoMobileContentCard(
       modifier = Modifier.weight(1f).fillMaxWidth(),
       shape = RoundedCornerShape(16.dp),
       colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),

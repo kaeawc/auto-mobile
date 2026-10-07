@@ -2412,7 +2412,14 @@ class TestPlanValidatorTest {
             permissions:
               - camera
         - tool: provisionDevice
-        - tool: stageSharedStorage
+        - tool: putAppFile
+          params:
+            target:
+              domain: user_files
+              namespace: fixtures
+            files:
+              - destinationPath: fixture.txt
+                contentText: fixture
         - tool: deleteDevice
       """
         .trimIndent()

@@ -13,6 +13,10 @@ test("one removed-tool table supplies the same replacement sentence to all paths
     clearText: "sendKeys",
     imeAction: "sendKeys",
     debugSearch: "observe to see elements, and the diagnostics returned by tapOn/waitFor failures",
+    stageSharedStorage:
+      "putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)",
+    stageSharedStorageFixtures:
+      "putAppFile with target.domain user_files (move namespace/reset/indexMedia into target; set indexMedia true to keep the old default)",
   });
   for (const [tool, replacement] of Object.entries(REMOVED_TOOLS)) {
     const sentence = `${tool} was removed; use ${replacement}`;

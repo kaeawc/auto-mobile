@@ -18,6 +18,10 @@ import {
   testTagRows,
 } from "../talkback/capturedTestTagTargets";
 
+import scrollCapture from "../../fixtures/observe/diff/scroll-before.json";
+import { assignStableViewIds } from "../../../src/features/observe/android/StableNodeIdentity";
+import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
     {
@@ -866,5 +870,65 @@ describe("TapOnElement extended selectors", () => {
         }
       },
     );
+  });
+});
+
+describe("capture-local synthetic element ids", () => {
+  test("a sibling leaving the capture makes the old id stale and requires re-observe", async () => {
+    const before = structuredClone(scrollCapture.viewHierarchy);
+    const mapping = assignStableViewIds(before.hierarchy);
+    const oldId = "s2-3340048129449c01-2";
+    const removedUuid = [...mapping].find(([, id]) => id === "s2-3340048129449c01-1")?.[0];
+    expect(removedUuid).toBeDefined();
+
+    // No captured pair has this suffix disappearance. Remove only a sibling
+    // subtree from the real scroll capture, then run the unchanged generator.
+    const after = structuredClone(scrollCapture.viewHierarchy);
+    const removeSibling = (node: Record<string, unknown>): void => {
+      if (Array.isArray(node.node)) {
+        node.node = node.node.filter((child) => child["view-id"] !== removedUuid);
+        for (const child of node.node as Record<string, unknown>[]) {
+          removeSibling(child);
+        }
+      } else if (node.node && typeof node.node === "object") {
+        removeSibling(node.node as Record<string, unknown>);
+      }
+    };
+    removeSibling(after.hierarchy);
+    const afterMapping = assignStableViewIds(after.hierarchy);
+    const survivorUuid = [...mapping].find(([, id]) => id === oldId)?.[0];
+    expect(survivorUuid).toBeDefined();
+    expect(afterMapping.get(survivorUuid!)).toBe("s2-3340048129449c01");
+
+    const finder = new DefaultElementFinder();
+    expect(finder.findElementByResourceId(before, oldId)).not.toBeNull();
+    expect(finder.findElementByResourceId(after, oldId)).toBeNull();
+    expect(finder.findElementByResourceId(after, "s2-3340048129449c01")).not.toBeNull();
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"]({ action: "tap", elementId: oldId }),
+    ).rejects.toThrow(
+      `Element id '${oldId}' is stale; re-observe and use the id from the new observation.`,
+    );
+  });
+
+  test("plain element-id not-found wording is unchanged", async () => {
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"]({ action: "tap", elementId: "example:id/missing" }),
+    ).rejects.toThrow("Element not found with provided elementId 'example:id/missing'");
+  });
+});
+
+describe("capture-local container ids", () => {
+  test("a missing synthetic container id requires re-observe", async () => {
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"](
+        { action: "tap", text: "Discover", container: { elementId: "s2-3340048129449c01-2" } },
+        undefined,
+        false,
+      ),
+    ).rejects.toThrow("Container element id 's2-3340048129449c01-2' is stale; re-observe");
   });
 });

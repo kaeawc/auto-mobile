@@ -1,10 +1,14 @@
+import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
-import { previewHierarchyHitTest } from "../../../src/features/observe/HierarchyHitTest";
+import {
+  applicationWindowSafeTapPoint,
+  previewHierarchyHitTest,
+} from "../../../src/features/observe/HierarchyHitTest";
 import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
@@ -144,4 +148,32 @@ describe("hierarchy hitTest preview", () => {
     expect(ios.point).toEqual({ x: 1.6, y: 2.5 });
     expect(ios.reference.unit).toBe("points");
   });
+});
+
+// Inline model tree: there is no existing capture of overlapping application dialogs.
+test("application fallback avoids multiple covering windows and the IME", () => {
+  const row = { text: "Row", bounds: { left: 0, top: 0, right: 400, bottom: 100 } };
+  const dialog = { text: "Dialog", bounds: { left: 40, top: 0, right: 360, bottom: 100 } };
+  const popup = { text: "Popup", bounds: { left: 0, top: 0, right: 40, bottom: 100 } };
+  const hierarchy: ViewHierarchyResult = {
+    hierarchy: { node: [row, dialog, popup] },
+    windows: [
+      { type: 1, windowLayer: 0, hierarchy: row },
+      { type: 1, windowLayer: 2, hierarchy: dialog },
+      { type: 1, windowLayer: 1, hierarchy: popup },
+    ],
+  };
+  const target = new DefaultElementParser().parseNodeBounds(row)!;
+  expect(
+    applicationWindowSafeTapPoint(hierarchy, target, row.bounds, { x: 200, y: 50 }).point,
+  ).toEqual({ x: 380, y: 50 });
+  expect(
+    applicationWindowSafeTapPoint(
+      hierarchy,
+      target,
+      row.bounds,
+      { x: 200, y: 50 },
+      { left: 360, top: 0, right: 400, bottom: 100 },
+    ),
+  ).toEqual({ point: null, coveredBy: "Dialog" });
 });

@@ -8,6 +8,15 @@ final class ContractFixtureTests: XCTestCase {
 
         let fixtures: [(String, SdkEventEnvelope)] = try [
             (
+                "frame-metrics",
+                SdkEventEnvelope(SdkFrameMetricsEvent(
+                    timestamp: 1_700_000_000_004,
+                    fps: 55,
+                    frameTimeMs: 18,
+                    jankFrames: 2
+                ))
+            ),
+            (
                 "navigation",
                 SdkEventEnvelope(SdkNavigationEvent(
                     timestamp: 1_700_000_000_001,

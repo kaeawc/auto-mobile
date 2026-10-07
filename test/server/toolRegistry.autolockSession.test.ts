@@ -12,18 +12,20 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
-const AUTOLOCK_ENV_KEYS = [
-  "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
-  "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
-] as const;
-
+let policyReads = 0;
+const env = new Proxy<Record<string, string | undefined>>(
+  {},
+  {
+    get(target, key, receiver) {
+      if (key === "AUTOMOBILE_DEVICE_POOL_AUTOLOCK") {
+        policyReads += 1;
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  },
+);
 function setAutolock(enabled: boolean): void {
-  for (const key of AUTOLOCK_ENV_KEYS) {
-    delete process.env[key];
-  }
-  if (enabled) {
-    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
-  }
+  env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = enabled ? "1" : "0";
 }
 
 describe("ToolRegistry autolock session enforcement", () => {
@@ -67,6 +69,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
     Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      env,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
   });
@@ -80,6 +83,59 @@ describe("ToolRegistry autolock session enforcement", () => {
     daemonSessionManager?.stopCleanupTimer();
     setAutolock(false);
   });
+
+  for (const initiallyEnabled of [true, false]) {
+    test(`keeps access policy ${initiallyEnabled} across discovery and refreshes next call`, async () => {
+      setAutolock(initiallyEnabled);
+      const timer = new FakeTimer();
+      daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const deviceUtils = new FakeDeviceUtils();
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon", {
+          env,
+          timer,
+          deviceManager: deviceUtils,
+        }),
+      );
+      await pool.initializeWithDevices([androidA]);
+      pool.getDevice(androidA.deviceId)!.autolockSessionId = "other-owner";
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      fakeDeviceSessionManager.setConnectedDevices([androidA]);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const ensureReady = fakeDeviceSessionManager.ensureDeviceReady.bind(fakeDeviceSessionManager);
+      fakeDeviceSessionManager.ensureDeviceReady = async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return ensureReady(...args);
+      };
+      const tool = registerTool("snapshotAccess");
+      policyReads = 0;
+      const pending = tool.handler({ deviceId: androidA.deviceId });
+      const first = pending.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await entered.promise;
+      setAutolock(!initiallyEnabled);
+      release.resolve();
+      const outcome = await first;
+      if (initiallyEnabled) {
+        expect(outcome).toBeInstanceOf(ActionableError);
+        expect(String(outcome)).toContain("locked to another session");
+      } else {
+        expect(outcome).toBeUndefined();
+      }
+      expect(policyReads).toBe(1);
+      const next = tool.handler({ deviceId: androidA.deviceId });
+      if (initiallyEnabled) {
+        await expect(next).resolves.toBeDefined();
+      } else {
+        await expect(next).rejects.toThrow("locked to another session");
+      }
+      expect(policyReads).toBe(2);
+    });
+  }
 
   test("the always-on Android ambiguity guard takes precedence when autolock is on", async () => {
     setAutolock(true);
@@ -306,6 +362,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -347,6 +404,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -391,6 +449,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),
@@ -435,6 +494,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
       createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env,
         timer: timer,
         deviceManager: fakeDeviceUtils,
       }),

@@ -323,8 +323,13 @@ run_unit_shards() {
   local changed_ref="${2:-}"
   local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
   local file index shard shard_number worker_count rc pid shard_status timing_log report_name
+  local lane_start lane_elapsed shard_elapsed physical_cores
   local test_files=()
   local pids=()
+  local shard_starts=()
+  local shard_elapsed_seconds=()
+  local shard_statuses=()
+  lane_start=$(date +%s)
   local chunk_deadline=""
   if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" && -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
     validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
@@ -446,6 +451,7 @@ run_unit_shards() {
       exit "$shard_status"
     ) > "$shard_root/shard-${shard}.log" 2>&1 3>&- &
     pids+=("$!")
+    shard_starts+=("$(date +%s)")
   done
 
   if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
@@ -461,6 +467,9 @@ run_unit_shards() {
     fi
     shard_status=0
     wait "$pid" || shard_status=$?
+    shard_elapsed=$(($(date +%s) - shard_starts[index]))
+    shard_elapsed_seconds+=("$shard_elapsed")
+    shard_statuses+=("$shard_status")
     if [[ "$shard_status" -eq 124 ]]; then
       printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget\n' "$shard_mode" "$shard_number" >&2
       rc=124
@@ -469,6 +478,17 @@ run_unit_shards() {
       rc=1
     fi
   done
+
+  if [[ "$shard_mode" == "unit" ]]; then
+    lane_elapsed=$(($(date +%s) - lane_start))
+    for ((shard = 0; shard < worker_count; shard += 1)); do
+      printf 'test-ts: unit shard %d/%d wall=%ss status=%s\n' \
+        "$((shard + 1))" "$worker_count" \
+        "${shard_elapsed_seconds[$shard]}" "${shard_statuses[$shard]}" >&2
+    done
+    printf 'test-ts: unit shards total wall=%ss status=%s\n' \
+      "$lane_elapsed" "$rc" >&2
+  fi
 
   for ((shard = 0; shard < worker_count; shard += 1)); do
     printf '\n==> TypeScript %s shard %d/%d\n' "$shard_mode" "$((shard + 1))" "$worker_count"
@@ -502,6 +522,12 @@ case "$mode" in
       exit $?
     fi
     printf 'test-ts: unit lane cores=%s workers=%s\n' "$cores" "$unit_workers" >&2
+    physical_cores="$(sysctl -n hw.physicalcpu 2>/dev/null || nproc 2>/dev/null || true)"
+    if ! [[ "$physical_cores" =~ ^[0-9]+$ ]] || [[ "$physical_cores" -lt 1 ]]; then
+      physical_cores=unknown
+    fi
+    printf 'test-ts: unit lane logical_cores=%s physical_cores=%s workers=%s shards=%s\n' \
+      "$cores" "$physical_cores" "$unit_workers" "$unit_workers" >&2
     if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
       echo "Unit test targets cannot include other lanes." >&2
       exit 2

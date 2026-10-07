@@ -29,7 +29,7 @@ fun AutoMobileCard(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   Card(
-    modifier = modifier.crayonBorder(color = MaterialTheme.colorScheme.outline),
+    modifier = modifier.crayonBorder(color = MaterialTheme.colorScheme.outline).crayonGrain(shape),
     shape = shape,
     colors = CardDefaults.cardColors(containerColor = containerColor, contentColor = contentColor),
     elevation = CardDefaults.cardElevation(defaultElevation = elevation),
@@ -49,7 +49,10 @@ fun AutoMobileOutlinedCard(
   content: @Composable ColumnScope.() -> Unit,
 ) {
   OutlinedCard(
-    modifier = modifier.crayonBorder(color = borderColor, width = borderWidth, seed = 23L),
+    modifier =
+      modifier
+        .crayonBorder(color = borderColor, width = borderWidth, seed = 23L)
+        .crayonGrain(shape),
     shape = shape,
     colors =
       CardDefaults.outlinedCardColors(

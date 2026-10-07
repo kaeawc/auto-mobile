@@ -1292,6 +1292,19 @@ jobs:
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh
 
+      - name: "Upload TypeScript Coverage Diagnostics"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-coverage-diagnostics
+          path: |
+            ci-logs/ts-coverage.log
+            coverage/shards/*.ndjson
+            coverage/shards/*.log
+            coverage/shards/*-chunk-*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: "Recover Coverage if needed"
         run: bash scripts/ci/verify-ts-coverage-output.sh
 

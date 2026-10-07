@@ -1619,9 +1619,59 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   private tempIndex = 0;
 
   constructor(
-    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly simctlFactory: (
+      device: BootedDevice,
+    ) => Pick<SimCtlClient, "executeCommandArgs">,
     private readonly fileSystem: AppFileFileSystem,
   ) {}
+
+  /** Read only the same managed namespace used by putAppFile. */
+  async listNamespace(
+    device: BootedDevice,
+    namespace: string,
+    signal?: AbortSignal,
+  ): Promise<LocalFileListEntry[]> {
+    const root = await this.resolveReadPath(device, namespace, undefined, signal);
+    const stats = await this.fileSystem.lstat(root);
+    if (!stats.isDirectory()) {
+      throw new ActionableError("iOS Files namespace is not a directory.");
+    }
+    return (await listLocalFiles(root, this.fileSystem)).filter((entry) => !entry.isDirectory);
+  }
+
+  async readNamespaceFile(
+    device: BootedDevice,
+    namespace: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Buffer> {
+    const target = await this.resolveReadPath(device, namespace, path, signal);
+    const stats = await this.fileSystem.lstat(target);
+    if (!stats.isFile() || stats.size > 64 * 1024 * 1024) {
+      throw new ActionableError("iOS Files reads require a regular file of at most 64 MiB.");
+    }
+    return this.fileSystem.readFileBuffer(target);
+  }
+
+  private async resolveReadPath(
+    device: BootedDevice,
+    namespace: string,
+    path?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    requireIosFilesSimulator(device);
+    const container = await this.resolveContainer({ device, signal });
+    const root = resolve(container, "Documents", "automobile");
+    const managed = resolve(root, normalizeUserFilesNamespace(namespace));
+    this.assertBelow(root, managed);
+    const target =
+      path === undefined ? managed : resolve(managed, normalizeAppFileRelativePath(path));
+    if (path !== undefined) {
+      this.assertBelow(managed, target);
+    }
+    await this.assertNoSymlinks(container, target);
+    return target;
+  }
 
   async stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void> {
     const normalized = requests.map(normalizeIosFilesRequest);
@@ -1700,7 +1750,9 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     }
   }
 
-  private async resolveContainer(request: PutAppFileProviderRequest): Promise<string> {
+  private async resolveContainer(
+    request: Pick<PutAppFileProviderRequest, "device" | "signal">,
+  ): Promise<string> {
     const guidance = `Install the managed iOS Files fixture app (${IOS_FILES_FIXTURE_BUNDLE_ID}) on the booted simulator and retry; no alternate storage path is used.`;
     let output: ExecResult;
     try {

@@ -86,7 +86,7 @@ object ValidTools {
         "getPreference",
         "hitTest",
         "listDataStores",
-        "overlay",
+        "prototype",
         "phoneCall",
         "resetAppLogs",
         "resetKeychain",

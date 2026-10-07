@@ -68,4 +68,22 @@ describe("ElementResolver synthetic id guards (#10476)", () => {
     expect(result.chosen).toBeNull();
     expect(result.candidates).toHaveLength(0);
   });
+
+  test("excludeImeKeys keeps the guard inside the app namespace (bare ids repeat across namespaces)", () => {
+    const capture = snapshot([
+      { "view-id": base, bounds, clickable: true },
+      { "view-id": base, bounds: lower, clickable: true },
+    ]);
+    capture.nodes[1].inputMethod = { package: "ime.pkg" };
+    const withKeys = resolver.resolve(capture, { elementId: base }, tap);
+    expect(withKeys.failureReason).toBe("ambiguous");
+    const appOnly = resolver.resolve(
+      capture,
+      { elementId: base },
+      { ...tap, excludeImeKeys: true },
+    );
+    expect(appOnly.failureReason).toBeUndefined();
+    expect(appOnly.chosen?.nodeKey).toBe(base);
+    expect(appOnly.chosen?.bounds).toEqual(bounds);
+  });
 });

@@ -327,6 +327,17 @@ function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boole
 }
 
 /** Pure selection over projected capture data. No hierarchy acquisition or legacy finder calls. */
+/**
+ * Bare ids are unique per namespace (app vs IME), so when IME keys are excluded
+ * the synthetic-id guard must not count them as family peers.
+ */
+function guardNamespaceNodes(
+  nodes: readonly SearchableEntry[],
+  intent: ResolutionIntent,
+): readonly SearchableEntry[] {
+  return intent.excludeImeKeys ? nodes.filter((node) => !isImeKeyEntry(node)) : nodes;
+}
+
 export class ElementResolver {
   constructor(private readonly random: () => number = () => defaultRandom.next()) {}
 
@@ -988,7 +999,7 @@ export class ElementResolver {
         selector.match ?? "exact",
         intent,
         selector.caseSensitive,
-        snapshot.nodes,
+        guardNamespaceNodes(snapshot.nodes, intent),
       );
     }
     if (selector.testTag !== undefined) {

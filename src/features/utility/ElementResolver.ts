@@ -14,7 +14,7 @@ import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
 import { compareSelectionRank } from "./selectionRank";
-import { isElementCenterOffScreen } from "./ElementGeometry";
+import { hasVisibleScreenPart } from "./ElementGeometry";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
@@ -151,7 +151,7 @@ function centerWithinViewport(
   bounds: ElementBounds,
   viewport: { width: number; height: number },
 ): boolean {
-  return !isElementCenterOffScreen(bounds, viewport);
+  return hasVisibleScreenPart(bounds, viewport);
 }
 
 function hasVisibleBounds(

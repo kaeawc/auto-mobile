@@ -76,6 +76,13 @@ interface DeviceChecker {
 
   /** Get the last error message from device availability check, if any. */
   fun getLastError(): String? = null
+
+  /**
+   * True only when adb was located but the device probe did not complete successfully (non-zero
+   * exits, timeouts, or an unexecutable binary). False when adb ran and listed no devices, and when
+   * no Android SDK is configured: those are deliberate skips, not infrastructure failures.
+   */
+  fun checkFailed(): Boolean = false
 }
 
 /**
@@ -111,6 +118,8 @@ constructor(
   @Volatile private var checkComplete = false
 
   @Volatile private var lastError: String? = null
+
+  @Volatile private var probeFailed = false
 
   companion object {
     private const val MAX_RETRIES = 3
@@ -215,6 +224,7 @@ constructor(
     }
 
     lastError = lastDiagnostic
+    probeFailed = true
     deviceCount = 0
     checkComplete = true
   }
@@ -242,6 +252,7 @@ constructor(
       println("No devices found - AutoMobile tests will be skipped")
     }
     lastError = null
+    probeFailed = false
     checkComplete = true
     return true
   }
@@ -295,6 +306,13 @@ constructor(
 
   /** Get the last error message from device availability check, if any. */
   override fun getLastError(): String? = lastError
+
+  override fun checkFailed(): Boolean {
+    if (!checkComplete) {
+      checkDeviceAvailability()
+    }
+    return probeFailed
+  }
 
   override fun areDevicesAvailable(): Boolean {
     if (!checkComplete) {

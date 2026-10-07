@@ -124,9 +124,15 @@ export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObs
     },
     supportsImeCommit: async () => true,
     supportsImeKeyEvents: async () => true,
+    supportsImeClearField: async () => true,
+    supportsImePasswordCommit: async () => false,
     supportsKeyboardProfiles: async () => true,
     setKeyboardProfile: async () => ({ success: true, previousProfileId: "direct" }),
-    commitViaIme: async (text) => {
+    commitViaIme: async (text, _prior, _signal, delivery) => {
+      if (delivery === "clearField") {
+        clientCalls.push("clearField");
+        return { success: true };
+      }
       committed.push(text);
       clientCalls.push(`commit:${text}`);
       deliveries.push({ kind: "commit", text });

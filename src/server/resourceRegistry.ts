@@ -7,9 +7,11 @@ import {
   ListResourceTemplatesRequestSchema,
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
+import { MALFORMED_URI_SEGMENT_MESSAGE } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
@@ -107,6 +109,39 @@ function computeSubscriptionIdentity(uri: string, paginationParamNames: string[]
   retained.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
   const normalizedQuery = retained.map(([name, value]) => `${name}=${value}`).join("&");
   return `${path}?${normalizedQuery}`;
+}
+
+// JSON-RPC `Invalid params`. The SDK's ErrorCode enum does not resolve under the
+// repo's type-checker, and proxyServer.ts also spells its codes numerically.
+const JSONRPC_INVALID_PARAMS = -32602;
+
+// Whether every percent-escape in the request URI decodes. Only then is a handler's
+// URIError not the client's doing.
+function requestUriIsWellEncoded(uri: string): boolean {
+  try {
+    decodeURIComponent(uri);
+    return true;
+  } catch (error) {
+    // A malformed escape in the client's URI is the expected case this check detects.
+    logger.debug(`[ResourceRegistry] Request URI is not valid percent-encoding: ${error}`);
+    return false;
+  }
+}
+
+// Backstop for a handler that decodes a path capture without guarding it: the
+// registry passes captures through undecoded, so a malformed percent-escape makes
+// `decodeURIComponent` throw a raw `URIError` ("URI malformed") with no hint of
+// which resource was wrong. Surface it as a structured invalid-params error
+// instead (#10117). A URIError is blamed on the client only when the REQUEST URI
+// itself fails to decode: `encodeURIComponent` also throws it (a lone surrogate in a
+// device-reported name) for a well-formed request, and that is a server fault that
+// must stay a server error. Every other handler error is rethrown untouched.
+function malformedUriToMcpError(error: unknown, uri: string): unknown {
+  if (!(error instanceof URIError) || requestUriIsWellEncoded(uri)) {
+    return error;
+  }
+  logger.warn(`[ResourceRegistry] Malformed percent-encoding in resource URI ${uri}: ${error}`);
+  return new McpError(JSONRPC_INVALID_PARAMS, `${MALFORMED_URI_SEGMENT_MESSAGE} (${uri})`);
 }
 
 export function getRequestedResourceUri(params: Record<string, string>): string | undefined {
@@ -401,13 +436,17 @@ class ResourceRegistryClass {
       const templateMatch = this.matchTemplate(uri);
       if (templateMatch) {
         const { template, params } = templateMatch;
-        const content =
-          "handlerWithReadContext" in template
-            ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
-            : await template.handler(params);
-        return {
-          contents: [content],
-        };
+        try {
+          const content =
+            "handlerWithReadContext" in template
+              ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
+              : await template.handler(params);
+          return {
+            contents: [content],
+          };
+        } catch (error) {
+          throw malformedUriToMcpError(error, uri);
+        }
       }
 
       // Provide helpful error message with available resource patterns

@@ -4082,6 +4082,11 @@ describe("IOSCtrlProxyManager", function () {
         }
 
         expect(fakeExecutor.getSpawnedProcesses().length).toBe(2);
+        // Missing PID startup yields a turn to capture an asynchronous spawn error.
+        fakeTimer.advanceTime(0);
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
         expect(fakeTimer.getPendingTimeouts()).toEqual([2000]);
       });
     });

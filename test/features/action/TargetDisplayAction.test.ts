@@ -1807,6 +1807,16 @@ describe("CtrlProxy display-targeted action routing", () => {
             const pinch = spyOn(AndroidCtrlProxyClient.prototype, "requestPinch").mockResolvedValue(
               response,
             );
+            // The real method opens a localhost WebSocket (a host emulator's adb forward can answer
+            // it), so keep the sequential two-tap path under test deterministic and off the network.
+            const doubleTap = spyOn(
+              AndroidCtrlProxyClient.prototype,
+              "requestDoubleTapCoordinates",
+            ).mockResolvedValue({
+              success: false,
+              totalTimeMs: 0,
+              error: "tap_double_v1 is not confirmed by the connected device service",
+            });
             const manager = spyOn(
               AndroidCtrlProxyManager.prototype,
               "isAvailable",
@@ -1966,7 +1976,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                 ).toBe(true);
               }
             } finally {
-              for (const spy of [commands, tap, swipe, drag, pinch, manager]) {
+              for (const spy of [commands, tap, doubleTap, swipe, drag, pinch, manager]) {
                 spy.mockRestore();
               }
             }
@@ -2330,6 +2340,12 @@ describe("post-action screenshot resolved display", () => {
         AndroidCtrlProxyClient.prototype,
         "supportsCommand",
       ).mockResolvedValue(false);
+      // The legacy (no display) route dispatches through CtrlProxy; the real client would try a
+      // localhost WebSocket connect (~270 ms), so answer it in-process.
+      const tap = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestTapCoordinates",
+      ).mockResolvedValue({ success: true, totalTimeMs: 0 });
       const action = new TapAtCoordinate(android, executor, {
         timer,
         lastRenderedObservation: () => screen("external"),
@@ -2417,6 +2433,7 @@ describe("post-action screenshot resolved display", () => {
         serverConfig.setAccessibilityAuditConfig(oldAudit);
         execute.mockRestore();
         capability.mockRestore();
+        tap.mockRestore();
         if (oldPolicy === undefined) {
           delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
         } else {
@@ -2477,6 +2494,16 @@ describe("selected-display double tap delivery", () => {
           }
           tapsDelivered++;
           return { success: true };
+        });
+        // The real method opens a localhost WebSocket (#10470), so keep the sequential two-tap
+        // path under test deterministic and off the network.
+        const doubleTap = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "requestDoubleTapCoordinates",
+        ).mockResolvedValue({
+          success: false,
+          totalTimeMs: 0,
+          error: "tap_double_v1 is not confirmed by the connected device service",
         });
         const sleep = timer.sleep.bind(timer);
         const gap = spyOn(timer, "sleep").mockImplementation((ms) => {
@@ -2569,6 +2596,7 @@ describe("selected-display double tap delivery", () => {
           }
         } finally {
           gap.mockRestore();
+          doubleTap.mockRestore();
           tap.mockRestore();
           capability.mockRestore();
         }

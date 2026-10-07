@@ -4,6 +4,7 @@
  * This delegate handles adding and managing visual highlight overlays on the device.
  */
 
+import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -99,6 +100,8 @@ export class CtrlProxyHighlights {
 
       return result;
     } catch (error) {
+      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
+      rethrowRealCtrlProxyWebSocketInTestError(error);
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Highlight ${type} request failed after ${duration}ms: ${error}`);
       return {

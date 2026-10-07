@@ -8,6 +8,8 @@
  * 1000ms after the epoch (#6677).
  */
 
+import type { DateRangePreset, TimeAggregation } from "./failuresStreamSocketTypes";
+
 /** Upper bound on a single stream page; mirrors the repositories' own clamp. */
 export const STREAM_LIMIT_MAX = 500;
 
@@ -93,4 +95,62 @@ export function normalizeStreamSinceId(value: unknown): number | undefined {
     throw new Error(`Invalid sinceId: ${String(value)}`);
   }
   return parsed;
+}
+
+/**
+ * Failures-timeline query vocabulary, shared by the `poll_timeline` stream route
+ * and the `automobile:failures/timeline` resource so the two cannot drift (#10119).
+ */
+export const TIMELINE_AGGREGATIONS: readonly TimeAggregation[] = ["minute", "hour", "day", "week"];
+export const TIMELINE_DATE_RANGES: readonly DateRangePreset[] = ["1h", "24h", "3d", "7d", "30d"];
+
+const DATE_RANGE_DURATION_MS: Record<DateRangePreset, number> = {
+  "1h": 60 * 60 * 1000,
+  "24h": 24 * 60 * 60 * 1000,
+  "3d": 3 * 24 * 60 * 60 * 1000,
+  "7d": 7 * 24 * 60 * 60 * 1000,
+  "30d": 30 * 24 * 60 * 60 * 1000,
+};
+
+/** Duration in milliseconds of a validated date-range preset. */
+export function getDateRangeDurationMs(preset: DateRangePreset): number {
+  return DATE_RANGE_DURATION_MS[preset];
+}
+
+/**
+ * Validate a timeline aggregation. Absent means the default (`hour`); any other
+ * value must be one of {@link TIMELINE_AGGREGATIONS}.
+ */
+export function normalizeAggregation(value: unknown): TimeAggregation {
+  if (value === undefined || value === null) {
+    return "hour";
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid aggregation: ${String(value)}`);
+  }
+  if (!TIMELINE_AGGREGATIONS.includes(value as TimeAggregation)) {
+    throw new Error(
+      `Invalid aggregation: ${value}. Must be one of: ${TIMELINE_AGGREGATIONS.join(", ")}`,
+    );
+  }
+  return value as TimeAggregation;
+}
+
+/**
+ * Validate a date-range preset. Absent yields undefined so each caller applies
+ * its own default; any other value must be one of {@link TIMELINE_DATE_RANGES}.
+ */
+export function normalizeDateRange(value: unknown): DateRangePreset | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Invalid dateRange: ${String(value)}`);
+  }
+  if (!TIMELINE_DATE_RANGES.includes(value as DateRangePreset)) {
+    throw new Error(
+      `Invalid dateRange: ${value}. Must be one of: ${TIMELINE_DATE_RANGES.join(", ")}`,
+    );
+  }
+  return value as DateRangePreset;
 }

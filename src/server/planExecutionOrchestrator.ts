@@ -53,6 +53,12 @@ import { isDeviceLostError } from "./deviceLossOutcome";
 import { errorMessage } from "../utils/describeUnknownError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import {
+  healthSummaryField,
+  planHealthWriterFromEnv,
+  reportPlanHealth,
+  type PlanHealthWriter,
+} from "./planHealthSummary";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -117,6 +123,8 @@ export interface PlanExecutionDependencies {
   videoRecorder?: VideoRecorder;
   /** Whether the plan's session still holds its device at teardown — replaced by a fake in tests. */
   deviceOwnership?: PlanDeviceOwnership;
+  /** Receives the end-of-run health summary; defaults to the AUTOMOBILE_PLAN_HEALTH_DIR writer. */
+  healthWriter?: PlanHealthWriter;
 }
 
 interface VideoState {
@@ -330,6 +338,7 @@ export class PlanExecutionOrchestrator {
   >;
   private readonly videoRecorder: VideoRecorder;
   private readonly deviceOwnership: PlanDeviceOwnership;
+  private readonly healthWriter?: PlanHealthWriter;
 
   // Set in execute(); used by all phase methods for [PERF +Xms] elapsed-time logs.
   private perfStart = 0;
@@ -345,6 +354,7 @@ export class PlanExecutionOrchestrator {
     this.testExecutionRepository = deps.testExecutionRepository ?? sharedTestExecutionRepository;
     this.createSchemaValidator = deps.createSchemaValidator ?? (() => new PlanSchemaValidator());
     this.deviceOwnership = deps.deviceOwnership ?? daemonPlanDeviceOwnership;
+    this.healthWriter = deps.healthWriter ?? planHealthWriterFromEnv(this.timer);
     this.videoRecorder = deps.videoRecorder ?? {
       startVideoRecording: defaultStartVideoRecording,
       stopVideoRecording: defaultStopVideoRecording,
@@ -414,8 +424,15 @@ export class PlanExecutionOrchestrator {
         videoPath: finalizedVideo.videoFilePaths[0],
       });
 
+      const healthSummary = await reportPlanHealth(
+        this.healthWriter,
+        result,
+        this.timer.now() - startTime,
+      );
+
       const response: ExecutePlanResult = {
         success: result.success,
+        ...healthSummaryField(healthSummary),
         executedSteps: result.executedSteps,
         totalSteps: result.totalSteps,
         failedStep: result.failedStep,
@@ -450,6 +467,11 @@ export class PlanExecutionOrchestrator {
         errorMessage: String(error),
       });
 
+      const failureHealth = await reportPlanHealth(
+        this.healthWriter,
+        undefined,
+        this.timer.now() - startTime,
+      );
       const response: ExecutePlanResult = {
         success: false,
         executedSteps: 0,
@@ -457,6 +479,7 @@ export class PlanExecutionOrchestrator {
         error: `${error}`,
         platform: this.device.platform,
         deviceId: this.device.deviceId,
+        ...healthSummaryField(failureHealth),
       };
 
       logger.info(`[PERF] Returning error from executePlanTool (deviceId=${this.device.deviceId})`);

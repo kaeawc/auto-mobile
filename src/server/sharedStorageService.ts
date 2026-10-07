@@ -15,6 +15,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { errorMessage } from "../utils/describeUnknownError";
 import { truncateBodyText } from "../utils/truncateBodyText";
+import { encodeUriSegment } from "../utils/encodeUriSegment";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { logger } from "../utils/logger";
@@ -827,7 +828,7 @@ async function indexMediaFile(
  */
 function fileUriFor(absolutePath: string): string {
   const segments = absolutePath.split("/");
-  return `file://${segments.map((segment) => encodeURIComponent(segment.toWellFormed())).join("/")}`;
+  return `file://${segments.map(encodeUriSegment).join("/")}`;
 }
 
 function mediaScanCommand(userId: number, destination: string): string {

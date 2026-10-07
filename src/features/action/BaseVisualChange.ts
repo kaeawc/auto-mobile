@@ -249,7 +249,7 @@ export class BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
-    displayFence: DisplayFenceDependencies = {},
+    displayFence: DisplayFenceDependencies & { observeScreen?: ObserveScreen } = {},
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
@@ -269,7 +269,10 @@ export class BaseVisualChange {
       this.adb = this.adbFactory.create(device);
     }
     this.awaitIdle = new AwaitIdle(device, this.adbFactory);
-    this.observeScreen = new RealObserveScreen(device, this.adbFactory);
+    // Honor the observer seam before constructing defaults: RealObserveScreen's
+    // screenshot service starts host filesystem work and retention timers.
+    this.observeScreen =
+      displayFence.observeScreen ?? new RealObserveScreen(device, this.adbFactory);
     // Forward the injected clock so the internal Window shares this instance's
     // timer: home-verification derives its outer deadline from `this.timer`, and
     // Window derives the per-subread budgets from ITS timer — they must be the

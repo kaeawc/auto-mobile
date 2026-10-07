@@ -9,7 +9,7 @@ import {
   resolveSwipeLookFor,
 } from "./swipeSelectorScopes";
 import type { FencedGestureOptions } from "../ExecuteGesture";
-import { unsupportedPlatformError } from "../../../models/ActionableError";
+import { type ContainerFailure, unsupportedPlatformError } from "../../../models/ActionableError";
 import {
   ActionableError,
   BootedDevice,
@@ -28,6 +28,7 @@ import {
   isMissingContainerError,
   matchedSourceNode,
   type ResolutionAction,
+  type ElementResolution,
 } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
@@ -181,16 +182,17 @@ export class ScrollUntilVisible {
     action: ResolutionAction = "inspect",
     preserveMatchedNode = false,
   ): Element | null {
-    const result = this.resolver.resolve(
-      { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
-      selector,
-      { action },
-    );
+    const result: ElementResolution & { containerFailure?: ContainerFailure } =
+      this.resolver.resolve(
+        { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
+        selector,
+        { action },
+      );
     if (isMissingContainerError(result.error)) {
       return null;
     }
     if (result.error) {
-      throw new ActionableError(result.error);
+      throw new ActionableError(result.error, { containerFailure: result.containerFailure });
     }
     return preserveMatchedNode
       ? (matchedSourceNode(result, selector)?.element ?? null)
@@ -201,18 +203,20 @@ export class ScrollUntilVisible {
     hierarchy: ViewHierarchyResult,
     container: NonNullable<SwipeOnOptions["container"]>,
   ): Element {
-    const result = this.resolver.resolve(
-      { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
-      { container },
-      { action: "inspect" },
-    );
+    const result: ElementResolution & { containerFailure?: ContainerFailure } =
+      this.resolver.resolve(
+        { id: String(hierarchy.updatedAt ?? "swipe"), nodes: this.searchable.project(hierarchy) },
+        { container },
+        { action: "inspect" },
+      );
     if (result.error) {
-      throw new ActionableError(result.error);
+      throw new ActionableError(result.error, { containerFailure: result.containerFailure });
     }
     const element = result.scope?.element;
     if (!element) {
       throw new ActionableError(
         `Container level 1 not found: ${container.elementId ?? container.text}`,
+        { containerFailure: { level: 1, reason: "not-found", selector: container } },
       );
     }
     return element;

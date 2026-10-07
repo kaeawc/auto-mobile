@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerSharedStorageResources } from "../../src/server/sharedStorageResources";
 import type { SharedStorageReadService } from "../../src/server/sharedStorageReadService";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const fakeService: SharedStorageReadService = {
   list: async (request) => ({
@@ -101,6 +102,34 @@ describe("Shared-storage read resources", () => {
       resourceUri: "automobile:devices/emulator-5554/downloads/run-42/docs/read%20me.txt",
     });
   });
+
+  test.each([
+    ["list, deviceId", "automobile:devices/emu%/downloads/run-42"],
+    ["list, namespace", "automobile:devices/emulator-5554/downloads/run%zz"],
+    ["read, path", "automobile:devices/emulator-5554/downloads/run-42/docs/a%.txt"],
+    [
+      "canonical read, namespace",
+      "automobile:devices/emulator-5554/storage-domains/user_files/r%/a.txt",
+    ],
+  ])(
+    "rejects a malformed percent-escape in %s with a structured error, not a URIError (#10117)",
+    async (_label, uri) => {
+      registerSharedStorageResources(fakeService);
+      const match = ResourceRegistry.matchTemplate(uri);
+      expect(match).toBeDefined();
+
+      const error = await match!.template.handler(match!.params).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).not.toBeInstanceOf(URIError);
+      expect((error as Error).message).toBe(
+        "Malformed resource URI: a path segment is not valid percent-encoding.",
+      );
+    },
+  );
 
   test("reads a binary file as a lossless MCP blob", async () => {
     registerSharedStorageResources(fakeService);

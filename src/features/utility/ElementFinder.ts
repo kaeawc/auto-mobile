@@ -7,11 +7,12 @@ import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher } from "./TextMatcher";
+import { isClickableElementProperties, isEditableElementProperties } from "./elementProperties";
+import { DefaultFocusedInputQuery } from "./FocusedInput";
 import {
-  ANDROID_INPUT_CLASSES,
-  isClickableElementProperties,
-  isEditableElementProperties,
-} from "./elementProperties";
+  DefaultClickableElementsQuery,
+  DefaultScrollableElementsQuery,
+} from "./InteractiveElementQueries";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
@@ -510,40 +511,6 @@ export class DefaultElementFinder implements ElementFinder {
       });
       if (foundScrollable) {
         return foundScrollable;
-      }
-    }
-
-    return null;
-  }
-
-  private findFocusedTextInputInRoots(
-    rootNodes: ViewHierarchyNode[],
-    ANDROID_INPUT_CLASSES: readonly string[],
-  ): Element | null {
-    for (const rootNode of rootNodes) {
-      let foundElement: Element | null = null;
-      this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundElement) {
-          return;
-        } // Already found one
-
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        // Check for both 'class' and 'className' property names
-        const nodeClass = nodeProperties.class || nodeProperties.className;
-        if (
-          (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-          nodeClass &&
-          ANDROID_INPUT_CLASSES.some((cls) => nodeClass.includes(cls))
-        ) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            foundElement = parsedNode;
-          }
-        }
-      });
-
-      if (foundElement) {
-        return foundElement;
       }
     }
 
@@ -1254,35 +1221,9 @@ export class DefaultElementFinder implements ElementFinder {
     return this.findContainerNodeInternal(viewHierarchy, container);
   }
 
-  /**
-   * Find scrollable elements in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns Array of scrollable elements
-   */
+  /** Delegates to `DefaultScrollableElementsQuery`; new callers should depend on `ScrollableElementsQuery`. */
   findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    if (!viewHierarchy) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const scrollables: Element[] = [];
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            scrollables.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    return scrollables;
+    return new DefaultScrollableElementsQuery(this.parser).findScrollableElements(viewHierarchy);
   }
 
   /**
@@ -1312,35 +1253,9 @@ export class DefaultElementFinder implements ElementFinder {
     return null;
   }
 
-  /**
-   * Find clickable elements in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns Array of clickable elements
-   */
+  /** Delegates to `DefaultClickableElementsQuery`; new callers should depend on `ClickableElementsQuery`. */
   findClickableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    if (!viewHierarchy) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const clickables: Element[] = [];
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (this.isClickableNode(nodeProperties)) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            clickables.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    return clickables;
+    return new DefaultClickableElementsQuery(this.parser).findClickableElements(viewHierarchy);
   }
 
   /**
@@ -1412,46 +1327,9 @@ export class DefaultElementFinder implements ElementFinder {
     return clickables;
   }
 
-  /**
-   * Find a focused text input in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns The focused text input element or null if not found
-   */
-  findFocusedTextInput(viewHierarchy: any): any {
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatch = this.findFocusedTextInputInRoots(rootNodes, ANDROID_INPUT_CLASSES);
-    if (mainMatch) {
-      return mainMatch;
-    }
-
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const windowMatch = this.findFocusedTextInputInRoots(windowRoots, ANDROID_INPUT_CLASSES);
-      if (windowMatch) {
-        return windowMatch;
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Check whether an editable element owns input focus, excluding selection state.
-   * Android control-proxy nodes expose accessibility focus with the serialized
-   * `accessibility-focused` key; accept its raw camelCase spelling as well.
-   */
-  isElementKeyboardFocused(element: any): boolean {
-    const focused = element.focused === "true" || element.focused === true;
-    const isFocused = element.isFocused === "true" || element.isFocused === true;
-    const hasKeyboardFocus =
-      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
-    const accessibilityFocused =
-      element["accessibility-focused"] === "true" ||
-      element["accessibility-focused"] === true ||
-      element.accessibilityFocused === "true" ||
-      element.accessibilityFocused === true;
-
-    return focused || isFocused || hasKeyboardFocus || accessibilityFocused;
+  /** Delegates to `DefaultFocusedInputQuery`; new callers should depend on `FocusedInputQuery`. */
+  findFocusedTextInput(viewHierarchy: ViewHierarchyResult): Element | null {
+    return new DefaultFocusedInputQuery(this.parser).findFocusedTextInput(viewHierarchy);
   }
 
   /**

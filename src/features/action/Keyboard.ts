@@ -16,7 +16,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { FocusedInputQuery } from "../../utils/interfaces/ElementTraitQueries";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -176,7 +176,7 @@ export class Keyboard {
     timer: Timer = defaultTimer,
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: FocusedInputQuery = new DefaultElementFinder(),
+    finder: FocusedInputQuery = new DefaultFocusedInputQuery(),
     openClient?: KeyboardOpenClient,
   ) {
     this.device = device;

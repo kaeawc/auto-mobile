@@ -1,4 +1,4 @@
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
@@ -46,7 +46,7 @@ function harness() {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const voiceOverExecutor = new FakeTalkBackSwipeExecutor();
-  const finder = new FakeElementFinder();
+  const finder = new FakeScrollableElementsQuery();
   const action = new SwipeOn(
     { name: "iOS fake", deviceId: "ios-chrome", platform: "ios" },
     new FakeAdbClient() as unknown as AdbClient,

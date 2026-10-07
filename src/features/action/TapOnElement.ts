@@ -68,10 +68,10 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { isElementKeyboardFocused } from "../utility/FocusedInput";
 import {
   visibleTapBounds,
   DefaultElementGeometry,
@@ -399,7 +399,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     "checkIdentity" | "record"
   >;
   private readonly lastRenderedObservation?: RenderedObservationReader;
-  private finder: ElementFinder;
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
   private accessibilityService: AndroidCtrlProxyClient;
@@ -494,7 +493,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     this.lastRenderedObservation = options.lastRenderedObservation;
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
-    this.finder = new DefaultElementFinder();
     this.geometry = new DefaultElementGeometry();
     this.elementParser = new DefaultElementParser();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
@@ -2128,8 +2126,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         b.element.bounds,
         TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
       ) &&
-      this.finder.isElementKeyboardFocused(a.element) ===
-        this.finder.isElementKeyboardFocused(b.element) &&
+      isElementKeyboardFocused(a.element) === isElementKeyboardFocused(b.element) &&
       (
         [
           "resource-id",
@@ -2153,7 +2150,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       (node) =>
         node.element &&
         isFocusEditableElement(node.properties) &&
-        this.finder.isElementKeyboardFocused(node.element),
+        isElementKeyboardFocused(node.element),
     );
     const distinctFocusedFields = this.distinctFocusFields(focusedFields);
     if (distinctFocusedFields.length !== 1) {
@@ -2377,7 +2374,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         (node) =>
           node.element &&
           isFocusEditableElement(node.properties) &&
-          this.finder.isElementKeyboardFocused(node.element) &&
+          isElementKeyboardFocused(node.element) &&
           this.isSameFocusTarget(selected, node.element, nodes, selectedNode),
       ) &&
       selected[identifier.key] === identifier.value &&
@@ -2443,7 +2440,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return Boolean(
       node.element &&
       isFocusEditableElement(node.properties) &&
-      this.finder.isElementKeyboardFocused(node.element) &&
+      isElementKeyboardFocused(node.element) &&
       this.isSameFocusTarget(target, node.element, nodes),
     );
   }
@@ -2457,7 +2454,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return Boolean(
       candidate &&
       isFocusEditableElement(candidate) &&
-      this.finder.isElementKeyboardFocused(candidate) &&
+      isElementKeyboardFocused(candidate) &&
       this.isSameFocusTarget(target, candidate, new SearchableHierarchy().project(hierarchy)),
     );
   }
@@ -2491,7 +2488,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         (node) =>
           node.element &&
           isFocusEditableElement(node.properties) &&
-          this.finder.isElementKeyboardFocused(node.element) &&
+          isElementKeyboardFocused(node.element) &&
           node.element[identifier.key] === identifier.value &&
           this.isSameFocusTarget(target, node.element, nodes),
       );
@@ -3631,7 +3628,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
         };
       }
-      if (this.finder.isElementKeyboardFocused(element)) {
+      if (isElementKeyboardFocused(element)) {
         return {
           success: true,
           action: options.action,
@@ -4305,7 +4302,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             }
 
             // Check if element is already focused
-            const isFocused = this.finder.isElementKeyboardFocused(element);
+            const isFocused = isElementKeyboardFocused(element);
 
             if (isFocused) {
               logger.info(`Element is already focused, no action needed`);

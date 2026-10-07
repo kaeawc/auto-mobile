@@ -7,7 +7,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { DefaultElementFinder } from "../utility/ElementFinder";
+import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { toSearchable } from "../utility/SearchableNode";
 import {
@@ -25,6 +25,7 @@ const READY_TIMEOUT_MS = 2_000;
 const READY_POLL_MS = 100;
 const OPEN_SETTLE_MS = 500;
 const ENABLED_DRIFT_DIAGNOSTIC_MAX_CHARS = 512;
+const focusedInputQuery = new DefaultFocusedInputQuery();
 
 export class ImeSessionFocusLostError extends ActionableError {
   constructor(readonly reason: "editorFocusLost" | "imeWindowDisappeared") {
@@ -197,7 +198,7 @@ export class InstalledImeKeySession {
     const subtype = await catalog.readSubtype(original, signal);
     const initialHierarchy = await hierarchy.read(signal);
     const editorBefore = initialHierarchy ? focusedEditorEvidence(initialHierarchy) : null;
-    if (!initialHierarchy || !new DefaultElementFinder().findFocusedTextInput(initialHierarchy)) {
+    if (!initialHierarchy || !focusedInputQuery.findFocusedTextInput(initialHierarchy)) {
       throw new Error("Focus a text input before tapping a native IME key.");
     }
     return { before, subtype, editorBefore };
@@ -330,7 +331,7 @@ function observeImeWaitFocus(
   imeId: string,
   seen: { focusedEditor: boolean; imeWindow: boolean },
 ) {
-  const focusedEditor = Boolean(new DefaultElementFinder().findFocusedTextInput(current));
+  const focusedEditor = Boolean(focusedInputQuery.findFocusedTextInput(current));
   const imeWindow = matchingImeWindows(current, imeId).length > 0;
   if (seen.focusedEditor && !focusedEditor) {
     throw new ImeSessionFocusLostError("editorFocusLost");
@@ -349,9 +350,9 @@ interface FocusedEditorEvidence {
   text: string;
 }
 function focusedEditorEvidence(hierarchy: ViewHierarchyResult): FocusedEditorEvidence | null {
-  const editor = new DefaultElementFinder().findFocusedTextInput(hierarchy);
+  const editor = focusedInputQuery.findFocusedTextInput(hierarchy);
   const identity = editor?.["resource-id"] ?? editor?.["view-id"];
-  return typeof identity === "string" && identity && typeof editor.text === "string"
+  return typeof identity === "string" && identity && typeof editor?.text === "string"
     ? { identity, text: editor.text }
     : null;
 }

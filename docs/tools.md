@@ -18,10 +18,10 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`, `overlay`,
+`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
-`postNotification`, `pressButton`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
+`postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
@@ -563,13 +563,14 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>overlay</code>              | Shows, updates, dismisses, awaits events, or reports Android overlays.    |
+| 🪟 <code>prototype</code>            | Shows, updates, dismisses, awaits events, or reports Android prototypes.  |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
-### overlay
+### prototype
 
-The Android-only `overlay` tool is omitted from discovery by default. Enable it
-with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
+The Android-only `prototype` tool (formerly `overlay`, which remains a hidden
+deprecated alias for one release) is omitted from discovery by default. Enable it
+with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
@@ -614,7 +615,7 @@ with no selection. Cancellation and progress notifications match `awaitEvent`.
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing overlay schema and limits
-before contacting CtrlProxy. Verify rendering with `observe`; overlay returns
+before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
 no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).

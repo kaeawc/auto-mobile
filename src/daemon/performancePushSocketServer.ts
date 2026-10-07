@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
@@ -288,30 +289,20 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
 }
 
 // Singleton instance
-let socketServer: PerformancePushSocketServer | null = null;
+const socketServer = new SocketServerSingleton<PerformancePushSocketServer>();
 
 export function getPerformancePushServer(): PerformancePushSocketServer | null {
-  return socketServer;
+  return socketServer.instance;
 }
 
 export function getPerformancePushSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG);
 }
 
 export async function startPerformancePushSocketServer(): Promise<PerformancePushSocketServer> {
-  if (!socketServer) {
-    socketServer = new PerformancePushSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
-  return socketServer;
+  return await socketServer.start(() => new PerformancePushSocketServer());
 }
 
 export async function stopPerformancePushSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

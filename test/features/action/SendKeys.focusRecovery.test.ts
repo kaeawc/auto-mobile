@@ -57,7 +57,7 @@ describe("sendKeys selector focus recovery", () => {
     const swipe = spyOn(SwipeOn.prototype, "execute").mockResolvedValue({ success: true });
     try {
       const error =
-        "Failed to perform tap on element: Element not found with provided elementId 's2-stale'";
+        "Failed to perform tap on element: Element id 's2-stale' is stale; re-observe and use the id from the new observation.";
       h.replies.push({ ...missing, error });
       expect((await h.action.execute(commands, { elementId: "s2-stale" })).error).toBe(
         `${error} ${hint}`,

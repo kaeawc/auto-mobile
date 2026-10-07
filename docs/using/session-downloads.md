@@ -9,9 +9,32 @@ remain attached to this exact name; it does not grant unified private writes.
 Stage the files a system picker (documents, gallery, media) would open from the
 device's shared **Downloads** tree, bound to the caller's device session. The
 `stageSessionDownloads` tool is the session-scoped companion to
-`stageSharedStorage`: instead of targeting a device by serial, every operation
+`putAppFile` with `target.domain: "user_files"`: every operation
 is scoped to the live session that owns the device, and the tool refuses before
 touching the device when that session is missing or no longer active.
+
+**Breaking change:** `stageSharedStorage` and `stageSharedStorageFixtures` have been removed.
+Replace either call with default-enabled `putAppFile`:
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "target": {
+      "domain": "user_files",
+      "namespace": "fixtures",
+      "reset": false,
+      "indexMedia": true
+    },
+    "files": [{ "destinationPath": "fixture.txt", "contentText": "fixture" }]
+  }
+}
+```
+
+Move `namespace`, `reset`, and `indexMedia` into `target`; keep `files` and device/session
+options at the top level. Each file requires `destinationPath` and exactly one of
+`sourcePath`, `contentText`, or `contentBase64`. Set `indexMedia: true` to preserve the
+removed tools' Android indexing default; `putAppFile` defaults it to false.
 
 ## Tool
 

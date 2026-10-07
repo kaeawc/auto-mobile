@@ -24,6 +24,7 @@ import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { getAbortSignal } from "../../utils/AbortContext";
 import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
@@ -285,17 +286,28 @@ export abstract class DeviceServiceClient {
    * Keep a caller's interest in a pending connection attempt until it settles.
    */
   protected acquirePendingConnectInterest(): { release: () => void } {
+    const signal = this.backgroundConnectRequested ? undefined : getAbortSignal();
+    signal?.throwIfAborted();
     this.pendingConnectJoiners++;
     let released = false;
-    return {
-      release: () => {
-        if (released) {
-          return;
-        }
-        released = true;
-        this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
-      },
+    const release = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      signal?.removeEventListener("abort", onAbort);
+      this.pendingConnectJoiners = Math.max(0, this.pendingConnectJoiners - 1);
     };
+    const onAbort = () => {
+      release();
+      // A shared dial belongs to every live waiter; only the last cancelled
+      // caller may stop its platform commands and pending socket.
+      if (this.pendingConnectJoiners === 0) {
+        this.abortPendingConnect();
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    return { release };
   }
 
   /**
@@ -352,9 +364,15 @@ export abstract class DeviceServiceClient {
     maxAttempts: number = 10,
     delayMs: number = 300,
   ): Promise<boolean> {
+    const signal = getAbortSignal();
+    signal?.throwIfAborted();
     const result = await this.retryExecutor.execute(
       async (attempt) => {
-        const connected = await this.ensureConnected();
+        const connected = await raceWithDeadline(() => this.ensureConnected(), {
+          timer: this.timer,
+          signal,
+          label: "CtrlProxy WebSocket connect",
+        });
         if (connected) {
           logger.info(
             `[${this.logTag}] WebSocket connected after ${attempt} attempt(s) (${(attempt - 1) * delayMs}ms)`,
@@ -366,6 +384,7 @@ export abstract class DeviceServiceClient {
       },
       {
         maxAttempts,
+        signal,
         delays: delayMs,
         onRetry: (_error, attempt) => {
           logger.debug(
@@ -374,6 +393,7 @@ export abstract class DeviceServiceClient {
         },
       },
     );
+    signal?.throwIfAborted();
 
     if (!result.success) {
       logger.warn(
@@ -925,6 +945,9 @@ export abstract class DeviceServiceClient {
     );
     try {
       await perf.track("platformSetup", () => this.setupBeforeConnect(perf, setupAbort.signal));
+      // An abort-ignoring platform command must not open a socket after its
+      // last acquisition caller has already left.
+      setupAbort.signal.throwIfAborted();
     } finally {
       this.timer.clearTimeout(setupTimeout);
       if (this.pendingPlatformSetupAbort === setupAbort) {

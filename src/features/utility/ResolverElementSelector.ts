@@ -13,14 +13,21 @@ import {
   matchedSourceNode,
   type ElementResolution,
   type ResolutionAction,
+  type ResolutionIntent,
+  type ResolverSnapshot,
 } from "./ElementResolver";
-import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
+import { SearchableHierarchy, isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import {
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
+
+/** A text selector, the kind a client copies from an observed label. */
+function selectsByText(selector: ResolverSelector): boolean {
+  return selector.text !== undefined || selector.sibling?.text !== undefined;
+}
 
 interface SelectionOptions {
   container?: ElementContainerSelector | null;
@@ -34,6 +41,26 @@ interface SelectionOptions {
   intentAction?: ResolutionAction;
   scrollableContainer?: boolean;
   screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
+}
+
+function resolutionIntent(
+  selector: ResolverSelector,
+  options: SelectionOptions,
+  viewport: ResolutionIntent["viewport"],
+): ResolutionIntent {
+  return {
+    viewport,
+    action:
+      options.intentAction ?? (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),
+    allowHintFallback: options.allowHintFallback,
+    preferToggle: options.selectionIntent === "toggle",
+    preferTap:
+      options.intentAction === "inspect" &&
+      (options.selectionIntent === "tap" || options.selectionIntent === "toggle"),
+    requireBounds: options.intentAction === "inspect",
+    // The client picked this label from `observe`, which folds the keyboard into one row.
+    excludeImeKeys: selectsByText(selector),
+  };
 }
 
 /** Compatibility at the injected selector boundary; all matching belongs to ElementResolver. */
@@ -170,37 +197,46 @@ export class ResolverElementSelector implements ElementSelector {
     selector: ResolverSelector,
     options: SelectionOptions,
   ): ElementSelectionResult {
-    const nodes = this.selectionNodes(capture, options);
-    const result = this.resolver.resolve(
-      {
-        id: this.snapshotId(capture),
-        nodes,
-      },
-      {
-        ...selector,
-        index: options.index,
-        selectionStrategy: options.strategy,
-        caseSensitive: options.caseSensitive,
-        container: options.container ?? undefined,
-      },
-      {
-        viewport: this.viewport(capture, options.screenSizeOptions),
-        action:
-          options.intentAction ??
-          (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),
-        allowHintFallback: options.allowHintFallback,
-        preferToggle: options.selectionIntent === "toggle",
-        preferTap:
-          options.intentAction === "inspect" &&
-          (options.selectionIntent === "tap" || options.selectionIntent === "toggle"),
-        requireBounds: options.intentAction === "inspect",
-      },
+    const snapshot = { id: this.snapshotId(capture), nodes: this.selectionNodes(capture, options) };
+    const resolverSelector: ResolverSelector = {
+      ...selector,
+      index: options.index,
+      selectionStrategy: options.strategy,
+      caseSensitive: options.caseSensitive,
+      container: options.container ?? undefined,
+    };
+    const intent = resolutionIntent(
+      selector,
+      options,
+      this.viewport(capture, options.screenSizeOptions),
     );
+    const result = this.resolver.resolve(snapshot, resolverSelector, intent);
     this.checkResolutionError(result, options);
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
       return this.select(capture, selector, { ...options, intentAction: "tap" });
     }
-    return this.selectionResult(result, capture, options.strategy ?? "first", selector);
+    const selection = this.selectionResult(result, capture, options.strategy ?? "first", selector);
+    return intent.excludeImeKeys && !result.error && !result.chosen
+      ? this.flagKeyboardOnlyMatch(selection, snapshot, resolverSelector, intent)
+      : selection;
+  }
+
+  /** Mark a miss whose only match is a keyboard key, so the caller can say so (issue #10225). */
+  private flagKeyboardOnlyMatch(
+    selection: ElementSelectionResult,
+    snapshot: ResolverSnapshot,
+    selector: ResolverSelector,
+    intent: ResolutionIntent,
+  ): ElementSelectionResult {
+    const withKeys = this.resolver.resolve(snapshot, selector, {
+      ...intent,
+      excludeImeKeys: false,
+    });
+    // An out-of-range `index` would also pick a key once the keys are counted; only a
+    // key the selector would have tapped makes the keyboard the reason for the miss.
+    return withKeys.chosen && isImeKeyEntry(withKeys.chosen)
+      ? { ...selection, onlyKeyboardKeyMatch: true }
+      : selection;
   }
 
   // Accept the additive field from dependency PR #10292 before its resolver lands here.

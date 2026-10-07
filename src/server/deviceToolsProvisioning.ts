@@ -1,3 +1,4 @@
+import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { observeConfiguredDeviceResources } from "./deviceResourceTools";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -118,6 +119,7 @@ type ProvisioningHooks = {
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
     options?: {
+      autolockEnabled?: boolean;
       readinessReservationOwners?: ReadonlySet<symbol>;
       verifiedAndroidAvdIdentity?: DeviceInfo;
       achievedReadiness?: DeviceReadinessLevel;
@@ -2219,6 +2221,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         ? new Set([readinessReservation.owner])
         : undefined,
       verifiedAndroidAvdIdentity: undefined,
+      autolockEnabled: captureAutolockPolicy(getDeviceToolsDependencies().env),
       achievedReadiness: resolveProvisionDeviceAchievedReadiness(args.readiness),
       collectCancellationSettlement: (settlement: Promise<void>) => {
         settlementState.bindingSettlements.push(settlement);
@@ -2713,5 +2716,8 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     };
   }
 
-  return provisionDeviceHandler;
+  return (input: ProvisionDeviceArgs, progress?: ProgressCallback, signal?: AbortSignal) =>
+    runWithAutolockPolicy(getDeviceToolsDependencies().env, () =>
+      provisionDeviceHandler(input, progress, signal),
+    );
 }

@@ -22,7 +22,8 @@ import { createStructuredToolResponse, getStructuredPayload } from "../../../src
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import {
   CARET_UNKNOWN_WARNING,
   SEND_KEYS_MAX_COMMANDS,
@@ -555,6 +556,70 @@ describe("SendKeys", () => {
     return { executor, timer, textClient, adb };
   }
 
+  test.each([false, true])(
+    "default replace reads a hinted empty field as empty with focusedElement=%s",
+    async (withFocusedElement) => {
+      const fixture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+        readFileSync(
+          resolve("test/fixtures/android-focus/playground-text-field-post-tap.json"),
+          "utf8",
+        ),
+      );
+      const parser = new DefaultElementParser();
+      const observation: ObserveResult = { timestamp: 0, viewHierarchy: fixture.viewHierarchy };
+      let fields = 0;
+      for (const root of [
+        ...parser.extractRootNodes(fixture.viewHierarchy),
+        ...parser.extractWindowRootNodes(fixture.viewHierarchy),
+      ]) {
+        parser.traverseNode(root, (node) => {
+          const properties = nodeAttributes(node);
+          if (properties.class === "android.widget.EditText" && properties.focused === "true") {
+            // Typed fake state, not a new or modified device capture.
+            properties.text = "Search settings";
+            properties["hint-text"] = "Search settings";
+            fields++;
+            if (withFocusedElement) {
+              observation.focusedElement = {
+                ...properties,
+                bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
+              };
+            }
+          }
+        });
+      }
+      expect(fields).toBeGreaterThan(0);
+      if (withFocusedElement) {
+        expect(observation.focusedElement?.text).toBe("Search settings");
+      }
+      const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+      const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedUnits: 1,
+        resolvedMode: "ime",
+      });
+      expect(result.error).toContain('the focused field holds ""');
+      expect(result.error).not.toContain("Search settings");
+      expect(textClient.calls).toContain("clear");
+      expect(textClient.commitViaImeCalls).toHaveLength(1);
+      expect(timer.getSleepHistory()).toEqual([150, 150]);
+    },
+  );
+
+  test("default replace still verifies non-hint replacement content", async () => {
+    const observation = focusedAndroidObservation("Q", { "hint-text": "Search settings" }, 0);
+    const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+    expect(await executor.type({ action: "type", text: "Q", operation: "replace" })).toMatchObject({
+      success: true,
+      resolvedMode: "ime",
+      committedUnits: 1,
+    });
+    expect(textClient.commitViaImeCalls).toHaveLength(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
   test.each([
     ["default type", undefined],
     ["explicit insert/append", "insert"],
@@ -752,7 +817,13 @@ describe("SendKeys", () => {
     ).toMatchObject({ success: true });
     expect(observer.options).toEqual([
       { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -797,7 +868,13 @@ describe("SendKeys", () => {
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
     ).toEqual([
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -2442,6 +2519,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         signal: undefined,
         freshness: "fresh",
         skipScreenshot: true,
+        hierarchyOnly: true,
       });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
       expect(textClient.calls.includes("clear")).toBe(operation === "replace");
@@ -2516,6 +2594,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       signal: undefined,
       freshness: "fresh",
       skipScreenshot: true,
+      hierarchyOnly: true,
     });
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);

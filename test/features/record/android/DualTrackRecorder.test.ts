@@ -1650,3 +1650,53 @@ describe("resolveSwipeDirection (scroll-delta axis mapping)", () => {
     expect(resolveSwipeDirection(dx, dy)).toBe(expected);
   });
 });
+
+test("coordinate fallback without geometry records a legacy tap and warns", async () => {
+  const emitter = new FakeGestureEmitter();
+  const recorder = new DualTrackRecorder(
+    fakeDevice,
+    emitter,
+    new FakeA11ySource(),
+    new FakeTimer(),
+  );
+  const warning = spyOn(logger, "warn");
+  try {
+    await recorder.start();
+    emitter.emit({ type: "tap", arrivedAt: 0, screenX: 123, screenY: 456 });
+    const { steps } = await recorder.stop();
+    expect(steps).toEqual([{ tool: "tapAt", params: { x: 123, y: 456, action: "tap" } }]);
+    expect(steps[0]).not.toHaveProperty("geometry");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("recorded tapAt fallback"));
+  } finally {
+    warning.mockRestore();
+  }
+});
+
+test("coordinate fallback carries the same native provenance as MCP recording", async () => {
+  const emitter = new FakeGestureEmitter();
+  const timer = new FakeTimer();
+  const recorder = new DualTrackRecorder(fakeDevice, emitter, new FakeA11ySource(), timer);
+  await recorder.start();
+  emitter.emit({
+    type: "tap",
+    arrivedAt: 0,
+    screenX: 123,
+    screenY: 456,
+    geometry: { platform: "android", deviceWidth: 1080, deviceHeight: 1920, orientation: 0 },
+  });
+  const { steps } = await recorder.stop();
+  expect(steps).toEqual([
+    {
+      tool: "tapAt",
+      params: { x: 123, y: 456, action: "tap" },
+      geometry: {
+        platform: "android",
+        deviceWidth: 1080,
+        deviceHeight: 1920,
+        orientation: 0,
+        x: 123,
+        y: 456,
+      },
+    },
+  ]);
+});

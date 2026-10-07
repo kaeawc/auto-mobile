@@ -67,6 +67,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
   "get_current_focus",
   "get_traversal_order",
   "add_highlight",
+  "request_magic_tap",
   "get_voiceover_state",
   "set_voiceover_state",
 

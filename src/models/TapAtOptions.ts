@@ -1,7 +1,11 @@
 import type { ImageRelativePoint } from "./ImageRelativePoint";
 
+import type { TapAtPlanContext } from "./TapAtGeometry";
+
 /** One screen point, resolved to the platform-native observe coordinate space. */
 interface TapAtGestureOptions {
+  /** Internal replay/recording context; absent from the public tool schema. */
+  planContext?: TapAtPlanContext;
   display?: string;
   /** Optional observe snapshot reference; stale geometry or frame context rejects the gesture. */
   snapshotId?: string;

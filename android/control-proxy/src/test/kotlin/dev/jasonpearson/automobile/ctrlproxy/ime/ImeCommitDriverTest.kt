@@ -482,7 +482,13 @@ class ImeCommitDriverTest {
     val driver = ImeCommitDriver(sink)
     val results = mutableListOf<ImeCommitResult>()
 
-    driver.commit("`a` after", PRIOR_IME_ID) { results.add(it) }
+    driver.commit(
+      "`a` after",
+      PRIOR_IME_ID,
+      deadlineMs = sink.nowMs() + CtrlProxyIme.commitTimeoutMs(24_500L, 9),
+    ) {
+      results.add(it)
+    }
     assertEquals("`a`", sink.committedChars.joinToString(""))
     driver.cancel()
     sink.drain()

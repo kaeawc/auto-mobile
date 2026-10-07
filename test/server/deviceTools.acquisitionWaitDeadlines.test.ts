@@ -1,4 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { EventEmitter } from "events";
+import type { ChildProcess } from "child_process";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -10,6 +12,7 @@ import { DeviceShutdownReservations } from "../../src/daemon/deviceShutdownReser
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { createStartDeviceHandlers } from "../../src/server/deviceToolsStartDevice";
+import { ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS } from "../../src/server/deviceToolsAcquisition";
 import {
   registerDeviceTools,
   resetDeviceToolsDependencies,
@@ -17,7 +20,10 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessError,
+  SystemUiAnrRecoveryRequiredError,
+} from "../../src/ctrlProxy/RunnerReadinessService";
 import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -926,7 +932,10 @@ describe("device acquisition wait deadlines", () => {
             await flushMicrotasks();
             // Inner structured errors keep precedence during the settlement grace.
             expect(outcome.settled).toBe(false);
-            timer.advanceTime(3_000);
+            timer.advanceTime(ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS - 1);
+            await flushMicrotasks();
+            expect(outcome.settled).toBe(false);
+            timer.advanceTime(1);
             await flushMicrotasks();
             expect(outcome.settled).toBe(true);
             expect(outcome.error).toBeInstanceOf(ActionableError);
@@ -955,4 +964,104 @@ describe("device acquisition wait deadlines", () => {
       }
     }
   }
+
+  // #6034 review: System UI ANR recovery reuses the preserved session without
+  // `runOperationWithinDeadline`, so binding must check cancellation itself.
+  test("a late System UI ANR recovery after the backstop binds nothing and retires the replacement", async () => {
+    const recoveryImage = {
+      platform: "android" as const,
+      name: android.name,
+      deviceId: "emulator-5556",
+      isRunning: false,
+    };
+    const replacementProcess = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      exitCode: null,
+      signalCode: null,
+      killed: false,
+      kill() {
+        replacementProcess.killed = true;
+        return true;
+      },
+    });
+    deviceUtils.setBootedDevices("android", [android]);
+    await pool.initializeWithDevices([android]);
+    await pool.bindOrReuseDeviceSession(
+      "owner-session",
+      android.deviceId,
+      "android",
+      recoveryImage,
+    );
+    deviceUtils.setDeviceImages("android", [recoveryImage]);
+    deviceUtils.setMockChildProcess(
+      recoveryImage.name,
+      replacementProcess as unknown as ChildProcess,
+    );
+    const killDevice = deviceUtils.killDevice.bind(deviceUtils);
+    deviceUtils.killDevice = async (device) => {
+      await killDevice(device);
+      deviceUtils.setBootedDevices("android", []);
+    };
+    const matcher = new FakeDeviceMatcher();
+    matcher.setBootedResult(android);
+    matcher.setImageResult(recoveryImage);
+    const recoveredReadiness = Promise.withResolvers<void>();
+    let readinessAttempts = 0;
+    let recoverySignal: AbortSignal | undefined;
+    setDeviceToolsDependencies({
+      env: {},
+      deviceMatcherFactory: () => matcher,
+      ensureCtrlProxyReady: async (request) => {
+        readinessAttempts++;
+        if (readinessAttempts === 1) {
+          throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+        }
+        recoverySignal = request.signal;
+        // Ignores cancellation, then reports the replacement ready after the deadline.
+        await recoveredReadiness.promise;
+      },
+    });
+    const notifyDeviceReady = spyOn(pool, "notifyDeviceReady");
+    const outcome = observe(
+      ToolRegistry.getTool("startDevice")!.handler({
+        platform: "android",
+        __mcpRequestDeadlineMs: 500,
+      }),
+    );
+    try {
+      for (let pass = 0; pass < 20 && recoverySignal === undefined; pass++) {
+        await flushMicrotasks();
+      }
+      expect(recoverySignal).toBeDefined();
+      timer.advanceTime(500 + ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS - 1);
+      await flushMicrotasks();
+      expect(outcome.settled).toBe(false);
+      timer.advanceTime(1);
+      await flushMicrotasks();
+      expect(outcome.error).toBeInstanceOf(ActionableError);
+      expect((outcome.error as Error).message).toContain("preparing the automation runner");
+      expect(replacementProcess.killed).toBe(false);
+      // The pool's own handoff already announced the replacement; binding adds nothing.
+      const readyNotifications = notifyDeviceReady.mock.calls.length;
+
+      recoveredReadiness.resolve();
+      await flushMicrotasks();
+      expect(recoverySignal?.aborted).toBe(true);
+      expect(replacementProcess.killed).toBe(true);
+      expect(pool.getDevice(recoveryImage.deviceId)).toBeNull();
+      expect(sessionManager.getSession("owner-session")).toBeNull();
+      expect(sessionManager.getDeviceReadiness("owner-session")).toBeUndefined();
+      expect(notifyDeviceReady).toHaveBeenCalledTimes(readyNotifications);
+      // The AVD lease stays held until the retired replacement process exits.
+      expect(lifecycleReleases).toBe(0);
+      replacementProcess.emit("exit", null, "SIGKILL");
+      await flushMicrotasks();
+      expect(lifecycleReleases).toBe(1);
+      expect(reservations.isReservedForReadiness(recoveryImage.deviceId)).toBe(false);
+    } finally {
+      recoveredReadiness.resolve();
+      notifyDeviceReady.mockRestore();
+      await flushMicrotasks();
+    }
+  });
 });

@@ -72,13 +72,15 @@ export function acquisitionDeadlineMs(rawArgs: unknown, requestedDeadlineMs: num
  * grace draining a cancelled step and one more on failed-acquisition cleanup;
  * the backstop fires only after both, so it replaces nothing that would settle.
  */
-const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE_MS;
+export const ACQUISITION_DEADLINE_BACKSTOP_GRACE_MS = 3 * ABORT_SETTLEMENT_GRACE_MS;
 
 /**
  * Keep in-flight acquisition cancellation aligned with progress extensions, and
  * never let a step that ignores cancellation hold the response past the deadline.
  * The backstop rejects with the running stage while the preparation keeps its
- * reservations until it settles; it cannot bind a session after the deadline.
+ * reservations until it settles. It also aborts the preparation's signal, and
+ * session binding checks that signal before it commits (#6034), so a step that
+ * succeeds late does not bind a session.
  */
 export async function runWithAcquisitionDeadline<T>(
   rawArgs: unknown,

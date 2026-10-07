@@ -423,6 +423,9 @@ async function bindPreparedDevice(
 ): Promise<string> {
   setAcquisitionStage(budgets, "binding the device session");
   try {
+    // The System UI ANR recovery branch below skips `runOperationWithinDeadline`,
+    // so check cancellation before any binding side effect (#6034).
+    await throwIfBindingAborted(signal, readinessResult);
     state.boot = readinessResult.boot;
     preparation.recovered = readinessResult.recovered;
     validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
@@ -494,6 +497,8 @@ async function bindPreparedDevice(
             },
           );
     if (readinessResult.preservedSessionId && !autolockEnabled) {
+      // Preserved-session validation can outlast the deadline; recheck before committing.
+      await throwIfBindingAborted(signal, readinessResult);
       // #6227 round 7: without autolock, System UI ANR recovery bypasses
       // `bindBootedDeviceSession` (and therefore its own
       // `recordAcquiredSessionReadiness` call) entirely when a preserved
@@ -521,6 +526,28 @@ async function bindPreparedDevice(
   } finally {
     readinessResult.releaseRecoveryRouteLease?.();
   }
+}
+
+/**
+ * Reject a binding whose acquisition was already cancelled, retiring a System UI
+ * ANR replacement the same way a failed recovered-readiness check does.
+ */
+async function throwIfBindingAborted(
+  signal: AbortSignal | undefined,
+  readinessResult: Awaited<ReturnType<typeof prepareStartDeviceRunnerReadiness>>,
+): Promise<void> {
+  if (!signal?.aborted) {
+    return;
+  }
+  try {
+    await readinessResult.retireReplacement?.();
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed to retire System UI recovery replacement after cancellation: ${errorMessage(error)}`,
+      error,
+    );
+  }
+  signal.throwIfAborted();
 }
 
 async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {

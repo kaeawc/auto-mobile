@@ -141,27 +141,67 @@ describe("overlay display targeting", () => {
     expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
   });
 
-  test("a session pin never injects display into update, dismiss or status", async () => {
+  test("a session pin never injects display into dismiss or status", async () => {
     expect((await callPinned({ action: "show", spec }, "inner")).success).toBe(true);
-    for (const input of [
-      { action: "update", id: "panel", state: { label: "x" } },
-      { action: "status" },
-      { action: "dismiss", all: true },
-    ]) {
+    for (const input of [{ action: "status" }, { action: "dismiss", all: true }]) {
       const payload = await callPinned(input, "inner");
       expect(payload.error).toBeUndefined();
       expect(payload.success).toBe(true);
     }
   });
 
-  test("update and dismiss echo the display the overlay was shown on", async () => {
+  test("a same-id show and a dismiss echo the display the overlay was shown on", async () => {
     await call({ action: "show", spec, display: "inner" });
-    const update = await call({ action: "update", id: "panel", state: { label: "x" } });
-    expect(update.lastResult?.displayId).toBe(2);
+    const again = await call({ action: "show", spec });
+    expect(again.lastResult?.displayId).toBe(2);
+    expect(again.warning).toBeUndefined();
+    const elsewhere = await call({ action: "show", spec, display: "cover" });
+    expect(elsewhere.lastResult?.displayId).toBe(2);
+    expect(elsewhere.warning).toContain("display was ignored");
+    expect(elsewhere.warning).toContain("logical display 2");
     expect((await call({ action: "status" })).overlays).toMatchObject([
-      { id: "panel", lastAction: "update", displayId: 2 },
+      { id: "panel", lastAction: "show", displayId: 2 },
     ]);
     expect((await call({ action: "dismiss", id: "panel" })).lastResult?.displayId).toBe(2);
+  });
+
+  test("a same-id show on the same display carries no warning", async () => {
+    await call({ action: "show", spec, display: "inner" });
+    const again = await call({ action: "show", spec, display: "inner" });
+    expect(again.success).toBe(true);
+    expect(again.warning).toBeUndefined();
+    expect(client.getOverlayHistory()).toMatchObject([{ displayId: 2 }, { displayId: 2 }]);
+  });
+
+  test("a same-id show under the pin it was shown with carries no warning", async () => {
+    await callPinned({ action: "show", spec }, "inner");
+    const again = await callPinned({ action: "show", spec }, "inner");
+    expect(again.warning).toBeUndefined();
+    expect(again.lastResult?.displayId).toBe(2);
+  });
+
+  test("a same-id show asking for another display keeps the shown one and warns", async () => {
+    await call({ action: "show", spec });
+    const moved = await call({ action: "show", spec, display: "inner" });
+    expect(moved.success).toBe(true);
+    expect(moved.warning).toContain("already shown on the default display");
+    expect(moved.warning).toContain("reset: true");
+    expect(Object.hasOwn(moved.lastResult ?? {}, "displayId")).toBe(false);
+  });
+
+  test("reset: true moves a same-id show to the requested display without a warning", async () => {
+    await call({ action: "show", spec });
+    const moved = await call({ action: "show", spec, display: "inner", reset: true });
+    expect(moved.warning).toBeUndefined();
+    expect(moved.lastResult?.displayId).toBe(2);
+    expect(client.getOverlayHistory()[1]).toMatchObject({ displayId: 2, reset: true });
+  });
+
+  test("a show of another id is never in place and never warns about display", async () => {
+    await call({ action: "show", spec });
+    const other = await call({ action: "show", spec: { ...spec, id: "other" }, display: "inner" });
+    expect(other.warning).toBeUndefined();
+    expect(other.lastResult?.displayId).toBe(2);
   });
 
   test("a disconnected panel is refused with posture guidance and nothing is sent", async () => {
@@ -200,7 +240,6 @@ describe("overlay display targeting", () => {
 
   test("display is a show-only argument", () => {
     for (const input of [
-      { action: "update", id: "panel", state: { a: 1 }, display: "inner" },
       { action: "dismiss", all: true, display: "inner" },
       { action: "status", display: "inner" },
     ]) {

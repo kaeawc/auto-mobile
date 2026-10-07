@@ -30,7 +30,7 @@ class OverlayTextFieldSyncTest {
     val sync = OverlayTextFieldSync("")
     sync.edit("a")
     sync.edit("ab")
-    // update_overlay sets the key to "a" while both reports are still queued (they will be stale).
+    // An authoritative replacement sets the key to "a" while both reports are still queued.
     assertTrue(sync.observe("a", 1))
     assertEquals("a", sync.text)
     assertEquals(1, sync.epoch)

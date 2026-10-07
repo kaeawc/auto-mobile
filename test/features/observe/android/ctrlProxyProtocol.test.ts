@@ -174,7 +174,6 @@ test("Keystore discovery is an optional advertised Android capability", () => {
  */
 const KOTLIN_SERIAL_NAMES = [
   "show_overlay",
-  "update_overlay",
   "dismiss_overlay",
   "put_overlay_asset",
   "remove_overlay_asset",
@@ -332,26 +331,22 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"displayId":2}',
     },
     {
-      builder: "updateOverlay",
-      name: "replacement (shared Kotlin literal)",
+      builder: "showOverlay",
+      name: "reset (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.updateOverlay({ requestId: "r2", id: "panel", spec: overlaySpec }),
+        ctrlProxyRequests.showOverlay({ requestId: "r2", spec: overlaySpec, reset: true }),
       ),
       expected:
-        '{"type":"update_overlay","requestId":"r2","id":"panel","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
+        '{"type":"show_overlay","requestId":"r2","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"reset":true}',
     },
     {
-      builder: "updateOverlay",
-      name: "state patch (shared Kotlin literal)",
+      builder: "showOverlay",
+      name: "reset false sends nothing",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.updateOverlay({
-          requestId: "r3",
-          id: "panel",
-          state: { label: "Next", enabled: true, count: 2.5 },
-        }),
+        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec, reset: false }),
       ),
       expected:
-        '{"type":"update_overlay","requestId":"r3","id":"panel","state":{"label":"Next","enabled":true,"count":2.5}}',
+        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
     },
     {
       builder: "dismissOverlay",
@@ -1031,9 +1026,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 47", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 46", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(47);
+    expect(builderNames.length).toBe(46);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });
@@ -1046,10 +1041,8 @@ describe("overlay builders enforce either/or types", () => {
     root: { type: "text" as const, text: "Hello" },
   };
   const invalidBuilders = () => {
-    // @ts-expect-error update requires exactly one source
-    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel" });
-    // @ts-expect-error update cannot combine replacement and patch
-    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel", spec, state: {} });
+    // @ts-expect-error update_overlay was removed; a same-id show replaces in place
+    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel", spec });
     // @ts-expect-error dismiss requires exactly one target
     ctrlProxyRequests.dismissOverlay({ requestId: "r" });
     // @ts-expect-error dismiss cannot combine id and all

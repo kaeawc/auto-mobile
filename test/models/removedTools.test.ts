@@ -1,6 +1,8 @@
 import { expect, test } from "bun:test";
 import {
   REMOVED_TOOLS,
+  REMOVED_TOOL_ACTIONS,
+  getRemovedToolActionHint,
   getRemovedToolHint,
   getRemovedToolReplacement,
 } from "../../src/models/removedTools";
@@ -28,4 +30,19 @@ test("one removed-tool table supplies the same replacement sentence to all paths
   }
   expect(getRemovedToolReplacement("missing-tool")).toBeUndefined();
   expect(getRemovedToolHint("missing-tool")).toBeUndefined();
+});
+
+test("removed tool actions name the replacement and ignore live or unknown actions", () => {
+  for (const [tool, actions] of Object.entries(REMOVED_TOOL_ACTIONS)) {
+    for (const [action, replacement] of Object.entries(actions)) {
+      expect(getRemovedToolActionHint(tool, action)).toBe(
+        `${tool} action ${action} was removed; use ${replacement}`,
+      );
+    }
+  }
+  expect(Object.keys(REMOVED_TOOL_ACTIONS.overlay)).toEqual(["showVariants", "update"]);
+  expect(getRemovedToolActionHint("overlay", "show")).toBeUndefined();
+  expect(getRemovedToolActionHint("overlay", "toString")).toBeUndefined();
+  expect(getRemovedToolActionHint("overlay", 3)).toBeUndefined();
+  expect(getRemovedToolActionHint("missing-tool", "update")).toBeUndefined();
 });

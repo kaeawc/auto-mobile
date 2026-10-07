@@ -700,8 +700,8 @@ class WebSocketRequestTest {
     val literals =
       listOf(
         """{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
-        """{"type":"update_overlay","requestId":"r2","id":"panel","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}""",
-        """{"type":"update_overlay","requestId":"r3","id":"panel","state":{"label":"Next","enabled":true,"count":2.5}}""",
+        // Same literal as the TypeScript "reset" wire fixture in ctrlProxyProtocol.test.ts.
+        """{"type":"show_overlay","requestId":"r2","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"reset":true}""",
         """{"type":"dismiss_overlay","requestId":"r4","id":"panel"}""",
         """{"type":"dismiss_overlay","requestId":"r5","all":true}""",
       )
@@ -714,8 +714,11 @@ class WebSocketRequestTest {
     assertEquals("panel", show.spec.id)
     assertEquals(OverlayTextNode(text = "Hello"), show.spec.root)
     assertTrue(json.encodeToString<WebSocketRequest>(show).contains("\"spec\":{"))
-    val patch = assertIs<UpdateOverlay>(json.decodeFromString<WebSocketRequest>(literals[2]))
-    assertEquals(OverlayScalar.Numeric(2.5), patch.state?.get("count"))
+    assertEquals(false, show.reset)
+    assertEquals(
+      true,
+      assertIs<ShowOverlay>(json.decodeFromString<WebSocketRequest>(literals[1])).reset,
+    )
     assertIs<DismissOverlay>(json.decodeFromString<WebSocketRequest>(literals.last()))
   }
 

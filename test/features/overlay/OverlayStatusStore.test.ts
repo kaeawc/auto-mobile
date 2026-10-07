@@ -25,7 +25,7 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
       snapshot.pages.pager = 7;
       snapshot.state.title = "caller mutation";
     }
-    store.record(scope, "update", { id: "panel" }, { success: false });
+    store.record(scope, "show", { id: "panel" }, { success: false });
     expect(store.status(scope).overlays[0]).toMatchObject({
       pages: { pager: 2 },
       state: { title: "Hello" },
@@ -67,7 +67,7 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
     const store = new InMemoryOverlayStatusStore(new FakeTimer(), 2);
     store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
     store.record({ sessionUuid: "b", deviceId: "dev-b" }, "show", { id: "b" }, ok);
-    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "update", { id: "a" }, ok);
+    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
     store.record({ sessionUuid: "c", deviceId: "dev-c" }, "show", { id: "c" }, ok);
     expect(store.status({ sessionUuid: "a", deviceId: "dev-a" }).overlays).toHaveLength(1);
     expect(store.status({ sessionUuid: "b", deviceId: "dev-b" }).overlays).toEqual([]);

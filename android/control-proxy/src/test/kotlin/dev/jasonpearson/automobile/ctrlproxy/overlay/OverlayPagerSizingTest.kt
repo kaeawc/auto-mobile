@@ -19,7 +19,7 @@ class OverlayPagerSizingTest {
 
   @Test
   fun `a pager that is explicitly wrap tall lets pages take their content height`() {
-    // showVariants floating: a full-height page made the window span the screen (#10086).
+    // A floating wrap pager: a full-height page made the window span the screen (#10086).
     val style = OverlayStyle(width = OverlayDimension.Wrap, height = OverlayDimension.Wrap)
     assertEquals(OverlayPageFill(width = false, height = false), overlayPageFill(style))
   }

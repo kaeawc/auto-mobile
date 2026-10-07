@@ -226,10 +226,10 @@ describe("uploadOverlayAssets", () => {
       dispatched: true,
       acknowledged: false,
     });
-    const outcome = await uploadOverlayAssets(client, assets("a"), { action: "update" });
+    const outcome = await uploadOverlayAssets(client, assets("a"), { action: "show" });
     expect(outcome.error).toContain("Outcome is indeterminate");
     expect(outcome.error).toContain("No assets were uploaded.");
-    expect(outcome.error).toContain("The overlay was not updated.");
+    expect(outcome.error).toContain("The overlay was not shown.");
   });
 
   test("an old device's actionable error fails the call with nothing uploaded", async () => {

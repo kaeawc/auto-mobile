@@ -38,8 +38,8 @@ sealed interface OverlayInteraction {
 
   /**
    * [epoch] is the key's [OverlayRuntimeSnapshot.textEpochs] entry the editing field last rendered.
-   * An edit typed against text an authoritative `update_overlay` has since replaced is stale and is
-   * dropped, so the external value wins over reports still in flight.
+   * An edit typed against text an authoritative [OverlayRuntime.replace] has since replaced is
+   * stale and is dropped, so the external value wins over reports still in flight.
    */
   data class TextChange(val key: String, val value: String, val epoch: Int = 0) : OverlayInteraction
 

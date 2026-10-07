@@ -563,53 +563,35 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>overlay</code>              | Shows, updates, dismisses, awaits events, or reports Android overlays.    |
+| 🪟 <code>overlay</code>              | Shows, dismisses, awaits events, or reports Android overlays.             |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### overlay
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
-window, optional state, root); `update` requires `id` and exactly one of `spec`
-or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
+`show`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+window, optional state, root) and always renders the whole spec. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
-percentage from 0 to 100, default 100; use a replacement spec to change it.
+percentage from 0 to 100, default 100; show the spec again to change it.
 
-`showVariants` requires `id` and a nonempty `variants` array (maximum 12).
-Each variant is `{ label?, image: { asset, contentScale? } }` or
-`{ label?, spec: OverlayNode }`, with exactly one content field. Labels are
-limited to 256 characters; image scale is `fit`, `crop`, or `fill`. An image
-variant names an opaque asset ID that already exists on the device or that the
-same call uploads through `assets` (below); a variant never carries a file path,
-URL or screenshot reference itself. Repeated asset IDs are allowed; each image
-use counts toward the contract image limit.
+A `show` whose `spec.id` is the overlay already on screen replaces it in place:
+it stays on the display it is on, and each pager keeps its current page (matched
+by pager id, clamped to the new page count). The new spec's `state` is
+authoritative: values the user changed by tapping or typing are not carried
+over unless the spec includes them, and the rebuilt tree starts any text field
+from the spec's value. `reset: true` starts it fresh instead: pages come from
+the spec and `display` is resolved again. A show with a different id, or with
+nothing on screen, replaces any other overlay as before. A CtrlProxy that
+predates in-place replacement ignores `reset` and always starts fresh.
 
-`presentation` defaults to `fullscreen`, showing each alternative with controls.
-`floating` shows only controls over the live app; it does not apply the variant
-content. All supplied content is validated before floating omission. Floating-only
-`gravity` and `offset` default to `bottomCenter` and `{ x: 0, y: 0 }`. Optional
-integer `opacity` (0–100) passes to `window.opacity`; omission uses the spec
-default. The generated horizontal pager has controls inside each page:
-`◀ {page}/{pageCount} ▶ ✓`. Pick emits `selected` with static zero-based
-`{ index, label? }`, without dismissing the overlay. The carousel is shown through
-the normal `show` path, so like any show it replaces another shown overlay on the
-device and starts a fresh event sequence.
-
-By default `showVariants` returns the normal show result immediately. Then use
-`awaitEvent` with `id` and `eventName: "selected"`, or set `waitForSelection: true`
-to wait after a successful show. `timeoutMs` bounds the show request only; the
-selection wait uses the existing 30000 ms event-wait default. The MCP request
-deadline for such a call is the show stage (the request's `timeoutMs`, default
-5000 ms; with `assets`, the upload-and-send budget described under `assets` below),
-plus that 30000 ms wait, plus 30 s of headroom. The wait is the
-`awaitEvent` wait, so cancellation, timeout, session release, device removal and a
-device-side dismissal all settle it. The combined result
-retains `lastResult` and event/count fields, and adds `selection: { index, label? }`
-only on a valid pick. The payload index and label must match a shown variant;
-malformed payloads return `success: false` with a clear error. Timeout and dismissal
-without a pick retain `timedOut: true` and `reason: "dismissed"`, respectively,
-with no selection. Cancellation and progress notifications match `awaitEvent`.
+The `showVariants` and `update` actions were removed (#10489, #10490); calling
+either returns an error naming `show` as the replacement. To present
+alternatives, `show` one design, describe it and the others in the conversation
+(what each is, what changed between them, which you recommend), and `show` the
+next on request. Or `show` one spec whose `pager` holds every design, with a
+visible label on each page. Either way, ask the user in chat which they prefer;
+never wait on the device for a choice.
 
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
@@ -619,7 +601,7 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
-`show` (and `showVariants`) accepts the same optional `display` selector as the tap tools (a panel
+`show` accepts the same optional `display` selector as the tap tools (a panel
 key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
@@ -628,24 +610,18 @@ CtrlProxy advertising `overlay_display_id_v1`; an older APK is refused with an
 error rather than showing the overlay on the default display. An unknown or
 disconnected panel is refused with the usual disconnected-panel guidance. If the
 panel disappears while the overlay is up (fold), the device dismisses it with
-reason `teardown`; it is never moved to another display. `update` and `dismiss`
-act on the overlay where it is shown and do not take `display`.
-
-`showVariants` accepts `display` and `assets` and treats them exactly like `show`: it
-is a show of the composed carousel, so the same display resolution and refusals, the
-same asset staging and the same single missing-asset re-send apply (the re-send carries
-the same composed spec to the same resolved display). Image variants may reference ids
-uploaded in the same call; uploads happen before the carousel is shown. The same field
-restrictions as `show` apply (`state`, `all`, `eventName`, `kind`, `afterSequence` and
-`spec` are rejected), and, like `show`, it takes the session display pin when `display`
-is omitted.
+reason `teardown`; it is never moved to another display. `dismiss` acts on the
+overlay where it is shown and does not take `display`. A same-id `show` without
+`reset` keeps the display the overlay is on: a `display` (explicit or from the
+session pin) that resolves elsewhere is ignored, and the result carries a
+`warning` saying so; pass `reset: true` to move it.
 
 `display` and `assets` combine on `show`: the display is resolved and checked first, so a
 refused display uploads nothing; assets are then uploaded and the overlay is shown on that
 display. The one missing-asset re-send goes to the same resolved display without re-reading the
-display inventory. `update` with `assets` stays on the display the overlay is already on.
+display inventory. A same-id `show` with `assets` stays on the display the overlay is already on.
 
-`show`, `showVariants`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
+`show` accepts `assets`: an array of `{ id, path }`
 or `{ id, observation }` that uploads images before the overlay is sent, so no
 separate upload step is needed. `path` is an absolute path the daemon can read
 (relative paths are rejected); `observation` is an
@@ -662,11 +638,11 @@ unreadable file, unsupported format or exceeded cap fails the call with nothing
 sent. Uploads then run one at a time. Any failure (a device refusal, an old
 CtrlProxy without asset support, a cancelled request, or a write that was never
 answered, reported as indeterminate) fails the call before the overlay is shown
-or updated; the error and `uploadedAssets` name the assets already stored, which
+or replaced; the error and `uploadedAssets` name the assets already stored, which
 stay on the device until the overlay session ends and are replaced if the call is
 repeated. On success `uploadedAssets` lists each `{ id, mimeType, bytes }`.
 
-When the device accepts a `show` or `update` but lists referenced asset ids it has
+When the device accepts a `show` but lists referenced asset ids it has
 no copy of, the result stays successful and adds `missingAssets` (the ids; absent
 when none) and a `warning` naming what to upload. If the same call supplied
 `assets` for some of those ids (the upload-then-cleared race), they are
@@ -682,14 +658,14 @@ shown by this host in the current session and device, with their last action,
 result, and host timestamp in milliseconds, plus the logical `displayId` when a
 display was requested. It also returns the last attempted
 mutation as `lastResult`, including a failed show without claiming it is shown.
-Failed updates or dismissals retain known presence. Successful dismissal removes
+A failed same-id show or dismissal retains known presence. Successful dismissal removes
 the id from that device's host records; successful dismiss-all clears that device's entries across host sessions.
 After an event arrives, each shown entry also reports `pendingCount`, `lastSequence`
 (the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
 event, these optional fields are omitted to preserve existing responses.
 Each shown entry also includes `pages` (pager id to zero-based page index), flat
 `state`, and `lastKnown: true` from its latest accepted `overlay_event`. These
-snapshots survive event consumption, host updates, and failed show attempts; a successful new show clears them
+snapshots survive event consumption and failed show attempts; a successful show (same id or not) clears them
 until another event arrives. Requested state is never reported as observed state.
 Accepted events are pushed once to telemetry under category `overlay`, with
 owning device/session ids, event id, kind, name, sequence, pages and state. This
@@ -727,7 +703,7 @@ awaiting that id from another scope is rejected until it is shown in that scope.
 Awaiting an unknown id can establish ownership without a show; an unused scope is
 removed on timeout/abort. Multiple overlays on a device share one subscription.
 Explicit successful dismiss (id or all) clears buffers across that device's host
-sessions. Each show starts a fresh sequence epoch for that id: pending events and the
+sessions. Each show, including a same-id show, starts a fresh sequence epoch for that id: pending events and the
 sequence high-water mark are cleared (the device's sequence ledger is in memory, so a
 CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCount`
 is kept until explicit dismiss or scope release. Events carry only id, sequence and

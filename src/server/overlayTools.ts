@@ -21,23 +21,8 @@ import type { BootedDevice } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { overlayDisplayUnsupportedMessage } from "../features/observe/android/CtrlProxyOverlays";
 import { OVERLAY_DISPLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
-import type {
-  OverlayDismiss,
-  OverlayResult,
-  OverlayUpdate,
-} from "../features/observe/android/ctrlProxyProtocol";
-import {
-  overlaySpecSchema,
-  placementSchema,
-  type OverlaySpec,
-} from "../features/overlay/overlaySpec";
-import {
-  composeVariantCarousel,
-  parseVariantSelection,
-  variantListSchema,
-  MAX_VARIANTS,
-  MAX_VARIANT_LABEL_LENGTH,
-} from "../features/overlay/overlayVariants";
+import type { OverlayDismiss, OverlayResult } from "../features/observe/android/ctrlProxyProtocol";
+import { overlaySpecSchema, type OverlaySpec } from "../features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
 import {
   resolveOverlayDisplayId,
@@ -45,6 +30,7 @@ import {
 } from "../features/overlay/overlayDisplay";
 import {
   InMemoryOverlayStatusStore,
+  type OverlayLastResult,
   type OverlayStatusStore,
   type OverlayScope,
 } from "../features/overlay/OverlayStatusStore";
@@ -57,6 +43,7 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { deleteInternalToolParams } from "../daemon/constants";
+import { getRemovedToolActionHint } from "../models/removedTools";
 import {
   nodeOverlayAssetFileReader,
   prepareOverlayAssets,
@@ -84,29 +71,21 @@ const convertSpec = toJsonSchemaCompat as unknown as (
   schema: ZodTypeAny,
 ) => Record<string, unknown>;
 const advertisedSpec = convertSpec(overlaySpecSchema);
-function rehomeSpecReferences(value: unknown, property = "spec"): void {
+function rehomeSpecReferences(value: unknown): void {
   if (!value || typeof value !== "object") {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
     if (key === "$ref" && typeof child === "string" && child.startsWith("#")) {
-      (value as Record<string, unknown>)[key] = `#/properties/${property}${child.slice(1)}`;
+      (value as Record<string, unknown>)[key] = `#/properties/spec${child.slice(1)}`;
     } else {
-      rehomeSpecReferences(child, property);
+      rehomeSpecReferences(child);
     }
   }
 }
 rehomeSpecReferences(advertisedSpec);
 delete advertisedSpec.$schema;
-const advertisedVariants = convertSpec(variantListSchema);
-rehomeSpecReferences(advertisedVariants, "variants");
-delete advertisedVariants.$schema;
-// Advertise the public variant vocabulary; composeVariantCarousel validates in context.
-const variantsInput = withJsonSchemaOverride(z.unknown(), (jsonSchema) =>
-  Object.assign(jsonSchema, advertisedVariants),
-);
 const specDetailsSchema = specZ.object({ spec: overlaySpecSchema });
-const stateDetailsSchema = overlaySpecSchema.pick({ state: true });
 
 function specError(spec: unknown): string | undefined {
   const validated = validateOverlaySpec(spec);
@@ -135,19 +114,6 @@ const specInput = withJsonSchemaOverride(
   }),
   (jsonSchema) => Object.assign(jsonSchema, advertisedSpec),
 );
-const stateInput = z
-  .record(z.string(), z.union([z.string(), z.number().finite(), z.boolean()]))
-  .superRefine((value, ctx) => {
-    const external = { state: value };
-    deleteInternalToolParams(external);
-    if (!stateDetailsSchema.safeParse(external).success) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "Invalid overlay at state: use flat string, number or boolean values and keys matching [A-Za-z_][A-Za-z0-9_]{0,63}",
-      });
-    }
-  });
 
 const assetsInput = z
   .array(
@@ -182,63 +148,37 @@ const assetsInput = z
 export const overlaySchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]),
+      action: z.enum(["show", "dismiss", "status", "awaitEvent"], {
+        error: (issue) =>
+          getRemovedToolActionHint("overlay", issue.input) ??
+          "action must be one of show, dismiss, status or awaitEvent",
+      }),
       spec: specInput
         .optional()
         .describe(
-          "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative.",
         ),
       display: z
         .string()
         .optional()
         .describe(
-          "show or showVariants: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
+          "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the overlay is on.",
+        ),
+      reset: z
+        .boolean()
+        .optional()
+        .describe(
+          "show only: when the overlay with spec.id is already shown, start it fresh (pager pages from the spec, display re-resolved) instead of replacing it in place",
         ),
       id: z
         .string()
         .min(1)
         .optional()
-        .describe(
-          "Overlay id required for update, dismiss, awaitEvent or showVariants; must equal spec.id on update",
-        ),
-      variants: variantsInput
-        .optional()
-        .describe(
-          `showVariants only: 1-${MAX_VARIANTS} alternatives, each {label?, image:{asset,contentScale?}} or {label?, spec:OverlayNode}. Image assets are ids uploaded in the same call through assets, or already on the device.`,
-        ),
-      presentation: z
-        .enum(["fullscreen", "floating"])
-        .optional()
-        .describe("showVariants only: fullscreen (default) or floating controls over the live app"),
-      opacity: z
-        .number()
-        .int()
-        .min(0)
-        .max(100)
-        .optional()
-        .describe("showVariants only: window opacity percentage; omitted uses the spec default"),
-      gravity: z
-        .enum(placementSchema.options[2].shape.gravity.options)
-        .optional()
-        .describe("showVariants floating only: default bottomCenter"),
-      offset: z
-        .object({ x: z.number().finite(), y: z.number().finite() })
-        .strict()
-        .optional()
-        .describe("showVariants floating only: offset in dp, default {x:0,y:0}"),
-      waitForSelection: z
-        .boolean()
-        .optional()
-        .describe(
-          `showVariants only: after a successful show, wait for the user's pick and return selection {index, label?}; the wait is ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms (timedOut:true on expiry), independent of the show timeoutMs`,
-        ),
-      state: stateInput
-        .optional()
-        .describe("Flat state patch for update; use either spec or state"),
+        .describe("Overlay id required for dismiss (unless all: true) and awaitEvent"),
       assets: assetsInput
         .optional()
         .describe(
-          "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "show only: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
         ),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
@@ -259,7 +199,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .positive()
         .optional()
         .describe(
-          `Device request timeout; awaitEvent defaults to ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms, maximum ${MAX_OVERLAY_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result. showVariants timeoutMs bounds only the show; waitForSelection uses the default event wait`,
+          `Device request timeout; awaitEvent defaults to ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms, maximum ${MAX_OVERLAY_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result.`,
         ),
     })
     .strict(),
@@ -267,34 +207,16 @@ export const overlaySchema = addDeviceTargetingToSchema(
   const fields = [
     "spec",
     "id",
-    "state",
     "all",
     "display",
+    "reset",
     "eventName",
     "kind",
     "afterSequence",
     "assets",
-    "variants",
-    "presentation",
-    "opacity",
-    "gravity",
-    "offset",
-    "waitForSelection",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "display", "assets"],
-    showVariants: [
-      "id",
-      "display",
-      "assets",
-      "variants",
-      "presentation",
-      "opacity",
-      "gravity",
-      "offset",
-      "waitForSelection",
-    ],
-    update: ["id", "spec", "state", "assets"],
+    show: ["spec", "display", "reset", "assets"],
     dismiss: ["id", "all"],
     status: [],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
@@ -308,17 +230,11 @@ export const overlaySchema = addDeviceTargetingToSchema(
       });
     }
   }
-  if (value.action === "showVariants") {
-    validateShowVariantsInput(value, ctx);
-  }
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
   }
   if (value.action === "show" && value.spec === undefined) {
     ctx.addIssue({ code: "custom", path: ["spec"], message: "show requires spec" });
-  }
-  if (value.action === "update") {
-    validateUpdateInput(value, ctx);
   }
   if (value.action === "dismiss" && (value.id === undefined) === (value.all === undefined)) {
     ctx.addIssue({
@@ -328,32 +244,6 @@ export const overlaySchema = addDeviceTargetingToSchema(
     });
   }
 });
-
-function validateShowVariantsInput(
-  value: z.infer<typeof overlaySchema>,
-  ctx: z.RefinementCtx,
-): void {
-  if (value.id === undefined) {
-    ctx.addIssue({ code: "custom", path: ["id"], message: "showVariants requires id" });
-  }
-  if (value.variants === undefined) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["variants"],
-      message: "showVariants requires variants",
-    });
-  }
-  if (
-    value.presentation !== "floating" &&
-    (value.gravity !== undefined || value.offset !== undefined)
-  ) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["presentation"],
-      message: "gravity and offset require showVariants presentation: floating",
-    });
-  }
-}
 
 function validateAwaitEventInput(value: z.infer<typeof overlaySchema>, ctx: z.RefinementCtx): void {
   if (value.id === undefined) {
@@ -365,30 +255,6 @@ function validateAwaitEventInput(value: z.infer<typeof overlaySchema>, ctx: z.Re
       path: ["timeoutMs"],
       message: `awaitEvent timeoutMs must not exceed ${MAX_OVERLAY_EVENT_TIMEOUT_MS}`,
     });
-  }
-}
-
-function validateUpdateInput(value: z.infer<typeof overlaySchema>, ctx: z.RefinementCtx): void {
-  if (!value.id || (value.spec === undefined) === (value.state === undefined)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["id"],
-      message: "update requires id and exactly one of spec or state",
-    });
-  }
-  if (value.assets !== undefined && value.spec === undefined) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["assets"],
-      message: "update accepts assets only together with spec",
-    });
-  }
-  if (value.spec === undefined) {
-    return;
-  }
-  const validated = validateOverlaySpec(value.spec);
-  if (validated.success && validated.data.id !== value.id) {
-    ctx.addIssue({ code: "custom", path: ["spec", "id"], message: "spec.id must equal update id" });
   }
 }
 
@@ -404,7 +270,7 @@ function overlayScope(device: BootedDevice, args: z.infer<typeof overlaySchema>)
 const lastResultSchema = z.object({
   id: z.string().optional(),
   all: z.literal(true).optional(),
-  lastAction: z.enum(["show", "update", "dismiss"]),
+  lastAction: z.enum(["show", "dismiss"]),
   displayId: z
     .number()
     .int()
@@ -446,14 +312,6 @@ const overlayEventOutputSchema = z.object({
   pages: z.record(z.string(), z.number().int().nonnegative()),
   timestamp: z.number(),
 });
-const selectionOutputSchema = z.object({
-  index: z
-    .number()
-    .int()
-    .nonnegative()
-    .max(MAX_VARIANTS - 1),
-  label: z.string().max(MAX_VARIANT_LABEL_LENGTH).optional(),
-});
 export const overlayOutputSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
@@ -473,11 +331,6 @@ export const overlayOutputSchema = z.object({
     .optional(),
   lastResult: lastResultSchema.optional(),
   event: overlayEventOutputSchema.optional(),
-  selection: selectionOutputSchema
-    .optional()
-    .describe(
-      "showVariants waitForSelection only: the picked zero-based index and the label it was shown with, if any",
-    ),
   timedOut: z
     .literal(true)
     .optional()
@@ -490,18 +343,20 @@ export const overlayOutputSchema = z.object({
     .array(z.object({ id: z.string(), mimeType: z.string(), bytes: z.number().int().positive() }))
     .optional()
     .describe(
-      "show/update with assets: assets the device confirmed, also present on failure. They stay on the device until the overlay session ends.",
+      "show with assets: assets the device confirmed, also present on failure. They stay on the device until the overlay session ends.",
     ),
   missingAssets: z
     .array(z.string())
     .optional()
     .describe(
-      "show/update: asset ids the overlay references that the device has no copy of; the overlay is shown with placeholders. Absent when none. Upload them with assets on a show or update with spec.",
+      "show: asset ids the overlay references that the device has no copy of; the overlay is shown with placeholders. Absent when none. Upload them with assets on a show.",
     ),
   warning: z
     .string()
     .optional()
-    .describe("show/update succeeded but needs attention; names what to do about missingAssets"),
+    .describe(
+      "show succeeded but needs attention: names what to do about missingAssets, or that display was ignored by a same-id show",
+    ),
   ...eventCountsSchema.shape,
 });
 
@@ -516,7 +371,6 @@ export interface OverlayEventLifecycle {
 type OverlayClient = Pick<
   AndroidCtrlProxyClient,
   | "requestShowOverlay"
-  | "requestUpdateOverlay"
   | "requestDismissOverlay"
   | "requestPutOverlayAsset"
   | "onOverlayEvent"
@@ -552,14 +406,8 @@ async function mutate(
       args.timeoutMs,
       undefined,
       displayId,
+      args.reset,
     );
-  }
-  if (args.action === "update") {
-    const update: OverlayUpdate =
-      args.spec !== undefined
-        ? { id: args.id!, spec: args.spec as OverlaySpec }
-        : { id: args.id!, state: args.state! };
-    return client.requestUpdateOverlay(update, args.timeoutMs);
   }
   const target: OverlayDismiss = args.all ? { all: true } : { id: args.id! };
   return client.requestDismissOverlay(target, args.timeoutMs);
@@ -623,10 +471,7 @@ async function stageAssets(
   if ("error" in prepared) {
     return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
   }
-  const outcome = await uploadOverlayAssets(client, prepared.assets, {
-    signal,
-    action: args.action === "show" ? "show" : "update",
-  });
+  const outcome = await uploadOverlayAssets(client, prepared.assets, { signal, action: "show" });
   return {
     uploaded: outcome.uploaded,
     prepared: prepared.assets,
@@ -653,7 +498,7 @@ interface MissingAssetRetry {
 }
 
 /**
- * The upload-then-cleared race: the device finished the show/update but lists assets this same
+ * The upload-then-cleared race: the device finished the show but lists assets this same
  * call uploaded as missing. Re-uploads those once and re-sends once. Bounded: never loops, honours
  * the abort signal, and keeps the first (successful) result when the repair cannot complete.
  */
@@ -793,7 +638,8 @@ async function performMutation(
     ? { all: true as const }
     : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
   const client = clientFactory(device);
-  const previouslyShown = store.status(scope).overlays.some((entry) => entry.id === target.id);
+  const shown = store.status(scope).overlays.find((entry) => entry.id === target.id);
+  const previouslyShown = shown !== undefined;
   if (args.action === "show") {
     events.show(scope, target.id!, client);
   }
@@ -807,7 +653,8 @@ async function performMutation(
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const lastResult = store.record(scope, args.action, target, result, displayId);
+  const placed = placedDisplay(args, shown, displayId, result.success);
+  const lastResult = store.record(scope, args.action, target, result, placed.displayId);
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);
   }
@@ -816,14 +663,40 @@ async function performMutation(
     ...(result.error ? { error: result.error } : {}),
     lastResult,
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
-    ...missingAssetsOutput(result, warning),
+    ...missingAssetsOutput(result, [warning, placed.warning]),
+  };
+}
+
+/**
+ * The display an accepted mutation leaves the overlay on. A same-id show without reset is replaced
+ * in place on the device, on the display it is already on, so a different requested display is
+ * ignored and the caller is told so.
+ */
+function placedDisplay(
+  args: Pick<z.infer<typeof overlaySchema>, "action" | "reset" | "display">,
+  shown: OverlayLastResult | undefined,
+  displayId: number | undefined,
+  success: boolean,
+): { displayId?: number; warning?: string } {
+  if (args.action !== "show" || shown?.id === undefined || args.reset === true) {
+    return { displayId };
+  }
+  if (!success || args.display === undefined || displayId === shown.displayId) {
+    return { displayId: shown.displayId };
+  }
+  const where =
+    shown.displayId === undefined ? "the default display" : `logical display ${shown.displayId}`;
+  return {
+    displayId: shown.displayId,
+    warning: `display was ignored: overlay ${shown.id} is already shown on ${where}, and a show with the same id replaces it in place there. Pass reset: true to show it fresh on the requested display.`,
   };
 }
 
 function missingAssetsOutput(
   result: OverlayResult,
-  warning: string | undefined,
+  warnings: readonly (string | undefined)[],
 ): { missingAssets?: string[]; warning?: string } {
+  const warning = warnings.filter((entry) => entry !== undefined).join(" ");
   return {
     ...(result.success && result.missingAssets?.length
       ? { missingAssets: result.missingAssets }
@@ -877,60 +750,6 @@ async function waitForOverlayEvent(
   } finally {
     notifyOverlayWaitProgress(context.progress, true);
   }
-}
-
-async function showVariants(
-  dependencies: OverlayHandlerDependencies,
-  device: BootedDevice,
-  args: z.infer<typeof overlaySchema>,
-  scope: OverlayScope,
-  context: { progress?: ProgressCallback; signal?: AbortSignal },
-): Promise<OverlayOutput> {
-  let spec: OverlaySpec;
-  try {
-    spec = composeVariantCarousel({
-      id: args.id,
-      variants: args.variants,
-      presentation: args.presentation,
-      opacity: args.opacity,
-      gravity: args.gravity,
-      offset: args.offset,
-    });
-  } catch (error) {
-    logger.warn("[overlay] showVariants input rejected", error);
-    return {
-      success: false,
-      error: toActionableError(error, "Invalid showVariants input").message,
-    };
-  }
-  // The carousel goes through the normal show path so the event subscription, sequence epoch,
-  // shown-overlay replacement, display resolution, asset upload and the missing-asset retry
-  // behave exactly as for `show`.
-  const shown = await performMutation(
-    dependencies,
-    device,
-    { ...args, action: "show", spec },
-    scope,
-    combineWithAmbientAbort(context.signal),
-  );
-  if (!shown.success || !args.waitForSelection) {
-    return shown;
-  }
-  // The wait is the default event wait, deliberately not the show request's timeoutMs.
-  const waited = await waitForOverlayEvent(
-    dependencies.events,
-    scope,
-    dependencies.clientFactory(device),
-    { id: args.id, eventName: "selected", kind: "emit" },
-    context,
-  );
-  if (!waited.event) {
-    return { ...shown, ...waited };
-  }
-  const picked = parseVariantSelection(spec, waited.event.payload);
-  return "selection" in picked
-    ? { ...shown, ...waited, selection: picked.selection }
-    : { ...shown, ...waited, success: false, error: picked.error };
 }
 
 function defaultOverlayLifecycle(): OverlayEventLifecycle {
@@ -1038,11 +857,6 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
     };
-    if (args.action === "showVariants") {
-      return responseFor(
-        await showVariants(handlerDependencies, device, args, scope, { progress, signal }),
-      );
-    }
     return responseFor(
       await performMutation(
         handlerDependencies,
@@ -1055,7 +869,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     "overlay",
-    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
+    'Show (always a full spec), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

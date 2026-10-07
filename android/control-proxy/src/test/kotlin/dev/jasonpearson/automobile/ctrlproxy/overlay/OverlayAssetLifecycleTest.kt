@@ -127,8 +127,7 @@ class OverlayAssetLifecycleTest {
   fun `show and replacement keep assets because the overlay uses them`() = runTest {
     showWithAssets()
     controller.show(null, spec())
-    controller.update(null, "panel", spec(), null)
-    controller.update(null, "panel", null, mapOf("x" to OverlayScalar.Text("y")))
+    controller.show(null, spec(), reset = true)
     assertKept()
   }
 

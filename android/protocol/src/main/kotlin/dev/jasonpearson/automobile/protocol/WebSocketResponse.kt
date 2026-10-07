@@ -727,10 +727,10 @@ data class HighlightResponse(
 ) : WebSocketResponse()
 
 /**
- * [missingAssets] is a warning, not a failure: after a successful `show_overlay` or
- * `update_overlay` it lists the asset ids the spec references that the device has no copy of (never
- * uploaded, or cleared since), so the host can re-upload them. It is omitted from the frame when
- * empty or absent, so peers that predate it see exactly the frame they always did.
+ * [missingAssets] is a warning, not a failure: after a successful `show_overlay` it lists the asset
+ * ids the spec references that the device has no copy of (never uploaded, or cleared since), so the
+ * host can re-upload them. It is omitted from the frame when empty or absent, so peers that predate
+ * it see exactly the frame they always did.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable

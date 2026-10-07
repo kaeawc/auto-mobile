@@ -18,13 +18,11 @@ import {
   ctrlProxyRequests,
   OVERLAY_DISPLAY_CAPABILITY,
   type ShowOverlayMessage,
-  type UpdateOverlayMessage,
   type DismissOverlayMessage,
   type OverlayAssetResult,
   type OverlayDismiss,
   type OverlayEvent,
   type OverlayResult,
-  type OverlayUpdate,
   type PutOverlayAssetMessage,
   type RemoveOverlayAssetMessage,
 } from "./ctrlProxyProtocol";
@@ -63,41 +61,20 @@ export class CtrlProxyOverlays {
 
   /**
    * [displayId] is the Android logical display; undefined and 0 both mean the default display and
-   * keep the wire byte-identical to a request from before display targeting existed.
+   * keep the wire byte-identical to a request from before display targeting existed. [reset] true
+   * starts a same-id show fresh instead of replacing it in place; false/undefined send nothing.
    */
   async requestShowOverlay(
     spec: OverlaySpec,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
     displayId?: number,
+    reset?: boolean,
   ): Promise<OverlayResult> {
     this.validateSpec(spec);
     const target = displayId === undefined || displayId === 0 ? undefined : displayId;
     return this.request(
-      ctrlProxyRequests.showOverlay({ requestId: "", spec, displayId: target }),
-      timeoutMs,
-      perf,
-    );
-  }
-
-  async requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs = 5000,
-    perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    if (update.spec !== undefined) {
-      this.validateSpec(update.spec);
-      if (update.id !== update.spec.id) {
-        throw new ActionableError("Invalid overlay at spec.id: must equal update_overlay id");
-      }
-    } else {
-      const state = overlaySpecSchema.shape.state.safeParse(update.state);
-      if (!state.success) {
-        throw new ActionableError(`Invalid overlay at state: ${state.error.message}`);
-      }
-    }
-    return this.request(
-      ctrlProxyRequests.updateOverlay({ requestId: "", ...update }),
+      ctrlProxyRequests.showOverlay({ requestId: "", spec, displayId: target, reset }),
       timeoutMs,
       perf,
     );
@@ -263,7 +240,7 @@ export class CtrlProxyOverlays {
   }
 
   private async request(
-    message: ShowOverlayMessage | UpdateOverlayMessage | DismissOverlayMessage,
+    message: ShowOverlayMessage | DismissOverlayMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult> {

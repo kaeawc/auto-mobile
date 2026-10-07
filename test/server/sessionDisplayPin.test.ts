@@ -1353,8 +1353,6 @@ test("registered tapAny missing pin reports typed details without dispatch", asy
 
 test.each([
   ["show", "inside"],
-  ["showVariants", "inside"],
-  ["update", undefined],
   ["dismiss", undefined],
   ["awaitEvent", undefined],
   ["status", undefined],

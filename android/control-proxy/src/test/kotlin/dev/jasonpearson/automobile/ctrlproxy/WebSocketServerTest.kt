@@ -1117,7 +1117,7 @@ class WebSocketServerTest {
           "root" to
             """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"text":"Missing type"}}""",
         )
-      for (command in listOf("show_overlay", "update_overlay")) {
+      for (command in listOf("show_overlay")) {
         for ((index, case) in cases.withIndex()) {
           val (field, spec) = case
           val requestId = "$command-$index"

@@ -186,7 +186,6 @@ function describeUploaded(uploaded: readonly UploadedOverlayAsset[]): string {
 
 const OUTCOME_AFTER_STOP = {
   show: "The overlay was not shown.",
-  update: "The overlay was not updated.",
   resend: "The overlay stays as first sent, with placeholders for the missing assets.",
 } as const;
 
@@ -198,7 +197,7 @@ const OUTCOME_AFTER_STOP = {
 export async function uploadOverlayAssets(
   client: OverlayAssetPutClient,
   assets: readonly OverlayAssetUpload[],
-  options: { signal?: AbortSignal; action: "show" | "update" | "resend" },
+  options: { signal?: AbortSignal; action: "show" | "resend" },
 ): Promise<OverlayAssetUploadOutcome> {
   const uploaded: UploadedOverlayAsset[] = [];
   const stop = (reason: string): OverlayAssetUploadOutcome => ({

@@ -36,8 +36,7 @@ import { FakeOverlayEventLifecycle } from "../fakes/FakeOverlayEventLifecycle";
 import { event } from "../helpers/overlayTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { OVERLAY_EVENT_BUFFER_CAPACITY } from "../../src/features/overlay/OverlayEventBuffer";
-import { composeVariantCarousel } from "../../src/features/overlay/overlayVariants";
-import { DEFAULT_OVERLAY_EVENT_TIMEOUT_MS } from "../../src/features/overlay/overlayEventTimeout";
+import { getRemovedToolActionHint } from "../../src/models/removedTools";
 
 const device: BootedDevice = { deviceId: "fake-overlay", platform: "android", name: "Fake" };
 const spec = {
@@ -70,90 +69,35 @@ describe("overlay MCP tool", () => {
     return { response, payload };
   }
 
-  const variants = [
-    { image: { asset: "first" } },
-    { image: { asset: "second" }, label: "Second" },
-    { spec: { type: "text" as const, text: "Third" } },
-  ];
-  const carousel = { action: "showVariants", id: "panel", variants };
-  const waiting = { ...carousel, waitForSelection: true };
-  const selected = (
-    payload: Parameters<FakeCtrlProxy["emitOverlayEvent"]>[0]["payload"] = {
-      index: 1,
-      label: "Second",
-    },
-  ) => ({ ...event(1, "panel", "emit", "selected"), payload, pages: { variants: 1 } });
-  // Runs `act` once the selection wait has started (progress start is reported after the
-  // coordinator registered its waiter), so events and aborts land during the wait.
-  const duringWait = (input: unknown, act: () => void, signal?: AbortSignal) =>
-    ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
-      device,
-      input,
-      async (amount: number) => {
-        if (amount === 0) {
-          act();
-        }
-      },
-      signal,
-    );
-
-  test("showVariants forwards exactly the composed spec and normal show response", async () => {
-    const count = ToolRegistry.getToolDefinitions().length;
-    const { payload } = await call({ ...carousel, opacity: 40, timeoutMs: 12 });
-    expect(client.getOverlayHistory()).toEqual([
-      {
-        method: "show",
-        spec: composeVariantCarousel({ id: "panel", variants, opacity: 40 }),
-        timeoutMs: 12,
-        perf: undefined,
-      },
-    ]);
-    expect(payload).toEqual({
-      success: true,
-      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 0 },
-    });
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(ToolRegistry.getToolDefinitions()).toHaveLength(count);
-    expect(ToolRegistry.getTool("showVariants")).toBeUndefined();
+  test.each([
+    ["showVariants", { action: "showVariants", id: "panel", variants: [] }],
+    ["update", { action: "update", id: "panel", state: { title: "x" } }],
+  ])("removed %s action is refused with the replacement before dispatch", async (action, input) => {
+    expect(overlaySchema.safeParse(input).success).toBe(false);
+    const { response, payload } = await call(input);
+    expect(response.isError).toBe(true);
+    expect(payload.error).toContain(getRemovedToolActionHint("overlay", action)!);
+    expect(payload.error).toContain("use show");
+    expect(client.getOverlayHistory()).toEqual([]);
   });
 
-  test("showVariants accepts floating placement through the tool", async () => {
-    await call({
-      ...carousel,
-      presentation: "floating",
-      gravity: "topCenter",
-      offset: { x: 2, y: 3 },
-    });
-    expect(client.getOverlayHistory()[0].spec).toEqual(
-      composeVariantCarousel({
-        id: "panel",
-        variants,
-        presentation: "floating",
-        gravity: "topCenter",
-        offset: { x: 2, y: 3 },
-      }),
-    );
+  test("an unknown action names the supported actions", async () => {
+    const { payload } = await call({ action: "explode" });
+    expect(payload.error).toContain("show, dismiss, status or awaitEvent");
   });
 
   test.each([
-    [{ action: "showVariants", variants }, "showVariants requires id"],
-    [{ action: "showVariants", id: "panel" }, "showVariants requires variants"],
-    [{ ...carousel, spec }, "showVariants allows"],
-    [{ ...carousel, state: {} }, "showVariants allows"],
-    [{ ...carousel, eventName: "selected" }, "showVariants allows"],
-    [{ ...carousel, gravity: "center" }, "require showVariants presentation: floating"],
-    [{ ...carousel, waitForSelection: "yes" }, "boolean"],
-    [{ ...carousel, unknown: true }, "Unrecognized key"],
-    [{ action: "show", spec, variants }, "show allows spec"],
-    [{ action: "show", spec, waitForSelection: true }, "show allows spec"],
-    [{ action: "update", id: "panel", state: {}, variants }, "update allows id, spec, state"],
-    [{ action: "dismiss", id: "panel", waitForSelection: false }, "dismiss allows id, all"],
-    [{ action: "status", variants }, "status allows no mutation fields"],
+    [{ action: "show", spec, variants: [] }, "Unrecognized key"],
+    [{ action: "show", spec, waitForSelection: true }, "Unrecognized key"],
+    [{ action: "show", spec, state: {} }, "Unrecognized key"],
+    [{ action: "show", spec, reset: "yes" }, "boolean"],
+    [{ action: "dismiss", id: "panel", reset: true }, "dismiss allows id, all"],
+    [{ action: "status", reset: false }, "status allows no mutation fields"],
     [
-      { action: "awaitEvent", id: "panel", waitForSelection: true },
+      { action: "awaitEvent", id: "panel", display: "inner" },
       "awaitEvent allows id, eventName, kind, afterSequence",
     ],
-  ])("showVariants action contract rejects %j", async (input, message) => {
+  ])("action contract rejects %j", async (input, message) => {
     expect(overlaySchema.safeParse(input).success).toBe(false);
     const result = await call(input);
     expect(result.response.isError).toBe(true);
@@ -161,194 +105,34 @@ describe("overlay MCP tool", () => {
     expect(client.getOverlayHistory()).toEqual([]);
   });
 
-  test("showVariants rejects an inline file path before dispatch", async () => {
-    const result = await call({ ...carousel, variants: [{ image: { filePath: "mock.png" } }] });
-    expect(result.response.isError).toBe(true);
-    expect(result.payload.error).toContain("not accepted inside a variant");
-    expect(client.getOverlayHistory()).toEqual([]);
-  });
-
-  test("showVariants ignores canonical internal request metadata", async () => {
-    const metadata = Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true]));
-    const result = await call({ ...carousel, ...metadata });
-    expect(result.payload.success).toBe(true);
-    expect(client.getOverlayHistory()[0].spec).toEqual(
-      composeVariantCarousel({ id: "panel", variants }),
-    );
-  });
-
-  test("showVariants returns the pick that was acknowledged in flight", async () => {
-    const show = spyOn(client, "requestShowOverlay").mockImplementation(async () => {
-      client.emitOverlayEvent(selected());
-      return { success: true };
-    });
-    try {
-      const result = await call(waiting);
-      expect(result.payload.selection).toEqual({ index: 1, label: "Second" });
-      expect(result.payload.event).toMatchObject({
-        name: "selected",
-        payload: { index: 1, label: "Second" },
-        pages: { variants: 1 },
-      });
-      expect(result.payload.pendingCount).toBe(0);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    } finally {
-      show.mockRestore();
-    }
-  });
-
-  test("showVariants returns the pick made during the wait and reports progress", async () => {
-    const progress = mock(async (amount: number) => {
-      if (amount === 0) {
-        client.emitOverlayEvent({
-          ...event(1, "panel", "page_changed", "selected"),
-          pages: { variants: 2 },
-        });
-        client.emitOverlayEvent({ ...selected({ index: 2 }), sequence: 2 });
-      }
-    });
-    const result = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
-      device,
-      waiting,
-      progress,
-    );
-    const payload = overlayOutputSchema.parse(result.structuredContent);
-    expect(payload.selection).toEqual({ index: 2 });
-    expect(payload.lastResult?.lastAction).toBe("show");
-    // The page change is still buffered: only the selected emit was consumed.
-    expect(payload.pendingCount).toBe(1);
-    expect(progress.mock.calls.map(([amount]) => amount)).toEqual([0, 1]);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("showVariants dismissal without a pick settles with reason dismissed", async () => {
-    const result = await duringWait(waiting, () =>
-      client.emitOverlayEvent(event(1, "panel", "dismissed")),
-    );
-    expect(overlayOutputSchema.parse(result.structuredContent)).toMatchObject({
+  test("a same-id show is forwarded as a show and keeps one shown entry", async () => {
+    await call({ action: "show", spec });
+    timer.advanceTime(5);
+    const replacement = { ...spec, window: { ...spec.window, opacity: 30 } };
+    const { payload } = await call({ action: "show", spec: replacement });
+    expect(payload).toEqual({
       success: true,
-      reason: "dismissed",
+      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 5 },
     });
-    expect(result.structuredContent).not.toHaveProperty("selection");
-    expect((await call({ action: "status" })).payload.overlays).toEqual([]);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("showVariants selection timeout is the default wait, independent of show timeoutMs", async () => {
-    const result = await duringWait({ ...waiting, timeoutMs: 5 }, () => {
-      expect(timer.getPendingTimeouts()).toEqual([DEFAULT_OVERLAY_EVENT_TIMEOUT_MS]);
-      timer.advanceTime(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS);
-    });
-    expect(overlayOutputSchema.parse(result.structuredContent)).toMatchObject({
-      success: true,
-      timedOut: true,
-    });
-    expect(result.structuredContent).not.toHaveProperty("selection");
-    expect(client.getOverlayHistory()[0].timeoutMs).toBe(5);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test.each(["explicit", "ambient"])(
-    "showVariants %s abort rejects with the reason and removes timers",
-    async (source) => {
-      const controller = new AbortController();
-      const reason = new DOMException("Selection cancelled", "AbortError");
-      const abort = () => controller.abort(reason);
-      const pending =
-        source === "explicit"
-          ? duringWait(waiting, abort, controller.signal)
-          : runWithAbortSignal(controller.signal, () => duringWait(waiting, abort));
-      await expect(pending).rejects.toBe(reason);
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-    },
-  );
-
-  test("showVariants wait settles as dismissed on session release", async () => {
-    const result = await duringWait({ ...waiting, sessionUuid: "pick" }, () =>
-      SessionReleaseBroadcaster.emit("pick", "released"),
-    );
-    expect(overlayOutputSchema.parse(result.structuredContent)).toMatchObject({
-      success: true,
-      reason: "dismissed",
-    });
-    expect(client.getOverlayListenerCount()).toBe(0);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("showVariants wait settles as dismissed on device removal", async () => {
-    const result = await duringWait(waiting, () =>
-      getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(device.deviceId),
-    );
-    expect(overlayOutputSchema.parse(result.structuredContent)).toMatchObject({
-      success: true,
-      reason: "dismissed",
-    });
-    expect(client.getOverlayListenerCount()).toBe(0);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("showVariants replaces another shown overlay and settles its waiter", async () => {
-    await call({ action: "show", spec: { ...spec, id: "older" } });
-    const older = call({ action: "awaitEvent", id: "older" });
-    await call(carousel);
-    expect((await older).payload).toMatchObject({ success: true, reason: "dismissed" });
-    expect((await call({ action: "status" })).payload.overlays?.map((entry) => entry.id)).toEqual([
-      "panel",
+    expect(client.getOverlayHistory()).toEqual([
+      { method: "show", spec, timeoutMs: 5000, perf: undefined },
+      { method: "show", spec: replacement, timeoutMs: 5000, perf: undefined },
+    ]);
+    expect((await call({ action: "status" })).payload.overlays).toEqual([
+      { id: "panel", lastAction: "show", success: true, timestamp: 5 },
     ]);
   });
 
-  test("re-showing a carousel starts a fresh sequence epoch", async () => {
-    await call(carousel);
-    client.emitOverlayEvent({ ...selected(), sequence: 7 });
-    await call({ action: "awaitEvent", id: "panel", eventName: "selected" });
-    await call(carousel);
-    const result = await duringWait(waiting, () => client.emitOverlayEvent(selected()));
-    expect(overlayOutputSchema.parse(result.structuredContent).selection).toEqual({
-      index: 1,
-      label: "Second",
+  test.each([true, false])("reset %p is forwarded only as the caller wrote it", async (reset) => {
+    await call({ action: "show", spec });
+    await call({ action: "show", spec, reset });
+    expect(client.getOverlayHistory()[1]).toEqual({
+      method: "show",
+      spec,
+      timeoutMs: 5000,
+      perf: undefined,
+      reset,
     });
-  });
-
-  test("showVariants failed show never waits", async () => {
-    client.setOverlayResult({ success: false, error: "Refused" });
-    const result = await call(waiting);
-    expect(result.payload).toMatchObject({ success: false, error: "Refused" });
-    expect(result.payload).not.toHaveProperty("selection");
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-    expect(client.getOverlayListenerCount()).toBe(0);
-  });
-
-  test.each(
-    [
-      null,
-      [],
-      "pick",
-      {},
-      { index: -1 },
-      { index: 1.5 },
-      { index: 3 },
-      { index: 1, label: 3 },
-      { index: 1, label: "wrong" },
-      { index: 1 },
-      { index: 0, label: "unexpected" },
-      { index: 1, label: "Second", extra: true },
-    ].map((payload) => ({ payload })),
-  )("showVariants malformed selected payload fails clearly: %j", async ({ payload: invalid }) => {
-    const result = await duringWait(waiting, () => client.emitOverlayEvent(selected(invalid)));
-    expect(result.isError).toBe(true);
-    const payload = overlayOutputSchema.parse(result.structuredContent);
-    expect(payload.error).toContain("Invalid selected payload");
-    expect(payload.selection).toBeUndefined();
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  });
-
-  test("showVariants without waiting supports a subsequent selected awaitEvent", async () => {
-    await call(carousel);
-    client.emitOverlayEvent(selected());
-    expect(
-      (await call({ action: "awaitEvent", id: "panel", eventName: "selected" })).payload.event,
-    ).toMatchObject({ payload: { index: 1, label: "Second" } });
-    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("awaitEvent returns a buffered event immediately without a device request", async () => {
@@ -473,7 +257,7 @@ describe("overlay MCP tool", () => {
     });
   });
 
-  test("status retains the latest event snapshot across consumption and updates without device requests", async () => {
+  test("status retains the latest event snapshot across consumption without device requests", async () => {
     await call({ action: "show", spec });
     const pushed = {
       ...event(2),
@@ -485,14 +269,13 @@ describe("overlay MCP tool", () => {
     pushed.pages.carousel = 99;
     pushed.state.title = "mutated";
     await call({ action: "awaitEvent", id: "panel" });
-    await call({ action: "update", id: "panel", state: { title: "requested" } });
     const history = client.getOverlayHistory();
     const snapshot = (await call({ action: "status" })).payload.overlays?.[0];
     expect(snapshot).toMatchObject({
       pages: { carousel: 1, nested: 2 },
       state: { title: "Chosen", enabled: true, count: 3 },
       lastKnown: true,
-      lastAction: "update",
+      lastAction: "show",
     });
     expect(client.getOverlayHistory()).toEqual(history);
     await call({ action: "show", spec });
@@ -598,11 +381,6 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).response.content[0].text).toBe(
       '{"success":true,"overlays":[{"id":"panel","lastAction":"show","success":true,"timestamp":0}],"lastResult":{"id":"panel","lastAction":"show","success":true,"timestamp":0}}',
     );
-    expect(
-      (await call({ action: "update", id: "panel", state: {} })).response.content[0].text,
-    ).toBe(
-      '{"success":true,"lastResult":{"id":"panel","lastAction":"update","success":true,"timestamp":0}}',
-    );
     expect((await call({ action: "dismiss", all: true })).response.content[0].text).toBe(
       '{"success":true,"lastResult":{"all":true,"lastAction":"dismiss","success":true,"timestamp":0}}',
     );
@@ -618,7 +396,7 @@ describe("overlay MCP tool", () => {
     { action: "awaitEvent", id: "panel", state: {} },
     { action: "status", afterSequence: 0 },
     { action: "show", spec, eventName: "save" },
-    { action: "update", id: "panel", state: {}, kind: "emit" },
+    { action: "show", spec, kind: "emit" },
     { action: "dismiss", id: "panel", eventName: "save" },
   ])("rejects invalid wait fields %j", async (input) => {
     expect(overlaySchema.safeParse(input).success).toBe(false);
@@ -894,9 +672,7 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "show", spec: authored, ...metadata })).payload.success).toBe(
       true,
     );
-    await call({ action: "update", id: "panel", state, ...metadata });
     expect(client.getOverlayHistory()[0].spec).toEqual(authored);
-    expect(client.getOverlayHistory()[1].update).toEqual({ id: "panel", state });
     expect(state).toEqual(
       Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "authored"])),
     );
@@ -922,7 +698,7 @@ describe("overlay MCP tool", () => {
 
   test("a reserved name in authored state is still validated", async () => {
     const state = { [INTERNAL_TOOL_PARAM_NAMES[0]]: { invalid: true } };
-    expect((await call({ action: "update", id: "panel", state })).response.isError).toBe(true);
+    expect((await call({ action: "show", spec: { ...spec, state } })).response.isError).toBe(true);
     expect(client.getOverlayHistory()).toEqual([]);
   });
 
@@ -939,22 +715,10 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).payload).toEqual({ success: true, overlays: [] });
   });
 
-  test("update spec and state, dismiss id and all update local status", async () => {
+  test("dismiss id and all update local status", async () => {
     await call({ action: "show", spec });
-    timer.advanceTime(5);
-    const replacement = { ...spec, window: { ...spec.window, opacity: 30 } };
-    await call({ action: "update", id: "panel", spec: replacement });
-    expect(client.getOverlayHistory()[1].update).toEqual({ id: "panel", spec: replacement });
-    await call({ action: "update", id: "panel", state: { title: "Updated", enabled: true } });
-    expect(client.getOverlayHistory()[2].update).toEqual({
-      id: "panel",
-      state: { title: "Updated", enabled: true },
-    });
-    expect((await call({ action: "status" })).payload.overlays).toEqual([
-      { id: "panel", lastAction: "update", success: true, timestamp: 5 },
-    ]);
     await call({ action: "dismiss", id: "panel" });
-    expect(client.getOverlayHistory()[3].target).toEqual({ id: "panel" });
+    expect(client.getOverlayHistory()[1].target).toEqual({ id: "panel" });
     expect((await call({ action: "status" })).payload.overlays).toEqual([]);
     await call({ action: "show", spec });
     await call({ action: "show", spec: { ...spec, id: "second" } });
@@ -963,7 +727,7 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).payload.overlays).toEqual([]);
   });
 
-  test("status isolates device and session and never invents shows on update", async () => {
+  test("status isolates device and session and never invents shows on dismiss", async () => {
     await call({ action: "show", spec, sessionUuid: "one" });
     expect((await call({ action: "status", sessionUuid: "two" })).payload.overlays).toEqual([]);
     expect(
@@ -977,7 +741,8 @@ describe("overlay MCP tool", () => {
       (await call({ action: "status", sessionUuid: "one" }, { ...device, deviceId: "other" }))
         .payload.overlays,
     ).toHaveLength(1);
-    await call({ action: "update", id: "unknown", state: {} });
+    client.setOverlayResult({ success: false, error: "Unknown overlay id: unknown" });
+    await call({ action: "dismiss", id: "unknown" });
     expect((await call({ action: "status" })).payload.overlays).toEqual([]);
   });
 
@@ -994,19 +759,17 @@ describe("overlay MCP tool", () => {
     ).toHaveLength(1);
   });
 
-  test.each(["show", "update", "dismiss", "status", "awaitEvent"])(
+  test.each(["show", "dismiss", "status", "awaitEvent"])(
     "iOS %s fails with Android-only guidance",
     async (action) => {
       const input =
         action === "show"
           ? { action, spec }
-          : action === "update"
-            ? { action, id: "panel", state: {} }
-            : action === "dismiss"
-              ? { action, all: true }
-              : action === "awaitEvent"
-                ? { action, id: "panel" }
-                : { action };
+          : action === "dismiss"
+            ? { action, all: true }
+            : action === "awaitEvent"
+              ? { action, id: "panel" }
+              : { action };
       const { response, payload } = await call(input, { ...device, platform: "ios" });
       expect(response.isError).toBe(true);
       expect(payload.error).toContain("Android only");
@@ -1032,10 +795,7 @@ describe("overlay MCP tool", () => {
   test.each([
     { action: "show" },
     { action: "show", spec, state: {} },
-    { action: "update", id: "panel" },
-    { action: "update", id: "panel", spec, state: {} },
-    { action: "update", id: "different", spec },
-    { action: "update", id: "panel", state: { nested: {} } },
+    { action: "show", spec, id: "panel" },
     { action: "dismiss", id: "panel", all: true },
     { action: "dismiss" },
     { action: "status", id: "panel" },
@@ -1045,7 +805,7 @@ describe("overlay MCP tool", () => {
     expect(client.getOverlayHistory()).toEqual([]);
   });
 
-  test("failed show has lastResult but is not shown; failed update/dismiss preserve presence", async () => {
+  test("failed show has lastResult but is not shown; failed same-id show/dismiss preserve presence", async () => {
     client.setOverlayResult({ success: false, error: "Permission denied; enable accessibility" });
     const failed = await call({ action: "show", spec });
     expect(failed.response.isError).toBe(true);
@@ -1057,10 +817,10 @@ describe("overlay MCP tool", () => {
     client.setOverlayResult({ success: true });
     await call({ action: "show", spec });
     client.setOverlayResult({ success: false, error: "Service refused" });
-    await call({ action: "update", id: "panel", state: {} });
+    await call({ action: "show", spec });
     status = (await call({ action: "status" })).payload;
     expect(status.overlays![0]).toMatchObject({
-      lastAction: "update",
+      lastAction: "show",
       success: false,
       error: "Service refused",
     });

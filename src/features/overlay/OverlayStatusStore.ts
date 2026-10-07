@@ -2,12 +2,15 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { OverlayEvent, OverlayResult } from "../observe/android/ctrlProxyProtocol";
 
-export type OverlayMutation = "show" | "update" | "dismiss";
+export type OverlayMutation = "show" | "dismiss";
 export interface OverlayLastResult {
   id?: string;
   all?: true;
   lastAction: OverlayMutation;
-  /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
+  /**
+   * Android logical display the overlay is on: the one requested for a fresh show; a same-id show
+   * without reset and a dismiss echo the shown overlay's.
+   */
   displayId?: number;
   success: boolean;
   error?: string;
@@ -120,7 +123,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   ): OverlayLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
-    // An update or dismiss acts on the overlay already shown, wherever it was shown.
+    // A dismiss acts on the overlay already shown, wherever it was shown.
     const shownDisplay =
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId

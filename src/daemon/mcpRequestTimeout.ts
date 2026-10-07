@@ -397,7 +397,7 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
-/** Default device request timeout of a show/update, mirrored from the overlay tool. */
+/** Default device request timeout of a show, mirrored from the overlay tool. */
 const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
 
 function countObservationAssets(assets: readonly unknown[], count: number): number {
@@ -412,8 +412,8 @@ function countObservationAssets(assets: readonly unknown[], count: number): numb
 }
 
 /**
- * Worst-case time of a show/update before any wait: the asset uploads and the send, or the send
- * alone. Uploads run one at a time, each with its own transport timeout, before the show/update
+ * Worst-case time of a show before any wait: the asset uploads and the send, or the send
+ * alone. Uploads run one at a time, each with its own transport timeout, before the show
  * request itself. `assetCount` is the number of entries the tool will process (<= its maximum).
  */
 function resolveOverlayStageBudgetMs(args: Record<string, unknown>, assetCount: number): number {
@@ -446,34 +446,12 @@ function resolveOverlayAssetUploadBudgetMs(args: Record<string, unknown>): numbe
       );
 }
 
-/**
- * showVariants is a show followed by an optional selection wait: the show stage (uploads, send
- * and the single missing-asset retry, as for `show`) plus the default event wait, plus headroom.
- * The wait is always the default one, independent of the show's `timeoutMs`.
- */
-function resolveOverlayVariantsBudgetMs(args: Record<string, unknown>): number {
-  const count = overlayAssetCount(args);
-  const waitMs = args.waitForSelection === true ? DEFAULT_OVERLAY_EVENT_TIMEOUT_MS : 0;
-  if (count === 0 && waitMs === 0) {
-    return 0;
-  }
-  return resolveArgumentTimeoutBudgetMs(
-    resolveOverlayStageBudgetMs(args, count) + waitMs,
-    DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
-    WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS,
-  );
-}
-
 function resolveOverlayAwaitBudgetMs(args: Record<string, unknown>): number {
-  // Only `awaitEvent` waits, `showVariants` with `waitForSelection: true` waits after its show,
-  // and only `show`/`update`/`showVariants` with `assets` upload; every other overlay action
+  // Only `awaitEvent` waits, and only `show` with `assets` uploads; every other overlay action
   // keeps the default deadline. The tool's own maximum bounds the wait, so a larger value
   // (rejected by its schema anyway) cannot inflate the deadline past that maximum plus headroom.
-  if (args.action === "show" || args.action === "update") {
+  if (args.action === "show") {
     return resolveOverlayAssetUploadBudgetMs(args);
-  }
-  if (args.action === "showVariants") {
-    return resolveOverlayVariantsBudgetMs(args);
   }
   if (args.action !== "awaitEvent") {
     return 0;

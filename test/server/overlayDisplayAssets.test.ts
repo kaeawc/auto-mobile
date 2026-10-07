@@ -162,26 +162,14 @@ describe("overlay display together with assets", () => {
     expect(payload.lastResult && Object.hasOwn(payload.lastResult, "displayId")).toBe(false);
   });
 
-  test("update with a spec and assets stays on the display the overlay was shown on", async () => {
+  test("a same-id show with assets stays on the display the overlay was shown on", async () => {
     await call({ action: "show", spec, assets, display: "inner" });
-    const { payload } = await call({ action: "update", id: "panel", spec, assets });
+    const { payload } = await call({ action: "show", spec, assets });
     expect(payload.success).toBe(true);
     expect(payload.lastResult?.displayId).toBe(2);
-    const update = client.getOverlayHistory().find((entry) => entry.method === "update");
-    expect(update).toBeDefined();
-    expect(Object.hasOwn(update ?? {}, "displayId")).toBe(false);
+    expect(payload.warning).toBeUndefined();
+    const again = client.getOverlayHistory()[1];
+    expect(Object.hasOwn(again ?? {}, "displayId")).toBe(false);
     expect(inventoryReads()).toBe(1);
-  });
-
-  test("display is still refused on update even with assets", async () => {
-    await call({ action: "show", spec, display: "inner" });
-    const { response } = await call({
-      action: "update",
-      id: "panel",
-      spec,
-      assets,
-      display: "inner",
-    });
-    expect(response.isError).toBe(true);
   });
 });

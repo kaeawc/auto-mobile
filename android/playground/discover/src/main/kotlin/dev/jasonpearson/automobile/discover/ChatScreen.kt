@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +49,7 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentBut
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileOutlinedTextField
+import dev.jasonpearson.automobile.design.system.components.AutoMobileSurface
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
@@ -245,7 +245,7 @@ fun AnimatedChatInput(
       label = "send_button_alpha",
     )
 
-  Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface) {
+  AutoMobileSurface(modifier = modifier, color = MaterialTheme.colorScheme.surface) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(16.dp),
       verticalAlignment = Alignment.Bottom,

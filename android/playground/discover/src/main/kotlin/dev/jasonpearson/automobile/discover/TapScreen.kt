@@ -26,7 +26,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -60,6 +59,7 @@ import dev.jasonpearson.automobile.design.system.components.AutoMobileContentTon
 import dev.jasonpearson.automobile.design.system.components.AutoMobileExtendedFloatingActionButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFloatingActionButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.storage.AnalyticsRepository
@@ -322,7 +322,7 @@ fun TapScreen() {
           )
 
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -333,7 +333,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Edit, contentDescription = "Edit")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -344,7 +344,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Delete, contentDescription = "Delete")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -355,7 +355,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Favorite, contentDescription = "Favorite")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {
@@ -366,7 +366,7 @@ fun TapScreen() {
               Icon(Icons.Filled.Star, contentDescription = "Star")
             }
 
-            IconButton(
+            AutoMobileIconButton(
               onClick = trackTap,
               modifier =
                 Modifier.semantics {

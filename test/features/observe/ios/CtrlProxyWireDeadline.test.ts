@@ -22,6 +22,9 @@ describe("iOS wire deadline (#10084)", () => {
     "request_action",
     "request_keyboard",
     "set_hinge_angle",
+    "set_preference",
+    "remove_preference",
+    "clear_preferences",
   ])("%s carries the host wait budget as an integer timeoutMs", (type) => {
     expect(iosWireDeadlineParams(type, 5000)).toEqual({ timeoutMs: 5000 });
     expect(iosWireDeadlineParams(type, 4321.6)).toEqual({ timeoutMs: 4322 });
@@ -33,6 +36,8 @@ describe("iOS wire deadline (#10084)", () => {
     "request_swipe",
     "execute_sql",
     "get_preferences",
+    "get_preference",
+    "list_preference_files",
     "not_a_request",
   ])("%s does not get a generic deadline", (type) => {
     expect(iosWireDeadlineParams(type, 5000)).toEqual({});

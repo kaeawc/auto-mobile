@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.OverlayEvent
 import dev.jasonpearson.automobile.protocol.OverlayResult
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -151,3 +153,29 @@ internal fun overlayResultFrame(
 
 internal fun overlayEventFrame(event: OverlayEvent): String =
   resultFrameJson.encodeToString<WebSocketResponse>(event)
+
+/**
+ * The `set_network_mock_rules_result` for an app's ordered-broadcast [resultData] (issue #10101).
+ * Null data means no app answered, so the rejection fields stay null and the host reports the rules
+ * as sent but not confirmed; a report, even an empty one, confirms them.
+ */
+internal fun networkMockRulesResult(
+  requestId: String?,
+  resultData: String?,
+): SetNetworkMockRulesResult {
+  val report = NetworkMockRuleReportContract.decode(resultData)
+  return SetNetworkMockRulesResult(
+    timestamp = System.currentTimeMillis(),
+    requestId = requestId,
+    rejectedMockIds = report?.rejected?.map { it.mockId },
+    rejectedReasons = report?.rejected?.associate { it.mockId to it.reason },
+  )
+}
+
+internal fun networkMockRulesFailure(requestId: String?, error: String): SetNetworkMockRulesResult =
+  SetNetworkMockRulesResult(
+    timestamp = System.currentTimeMillis(),
+    requestId = requestId,
+    success = false,
+    error = error,
+  )

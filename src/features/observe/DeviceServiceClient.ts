@@ -29,6 +29,7 @@ import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
+import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { DelegateContext } from "./shared/types";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 
@@ -72,29 +73,6 @@ export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
   }
 }
 
-const TEST_FILE_ENTRYPOINT = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
-
-/** The running script: the current test file under `bun test`, `dist/src/index.js` (or the compiled binary) otherwise. */
-function currentEntrypoint(): string | undefined {
-  // src/ is type-checked without Bun's globals; read `Bun.main` structurally.
-  const bun = (globalThis as { Bun?: { main?: string } }).Bun;
-  return bun?.main ?? process.argv[1];
-}
-
-/**
- * Whether this process is the `bun test` runner itself. `NODE_ENV=test` alone is
- * not enough: it is inherited by every CLI/daemon child a real-device
- * integration test spawns (`execFile`, `daemonProcessEnvironment`), and those
- * children must dial the device. Under `bun test`, `Bun.main` is the test file
- * being run; in a spawned child it is the child's own entrypoint, which no
- * environment inheritance can turn into a test file.
- */
-function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | undefined): boolean {
-  return (
-    env.NODE_ENV === "test" && entrypoint !== undefined && TEST_FILE_ENTRYPOINT.test(entrypoint)
-  );
-}
-
 /**
  * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
  * CtrlProxy socket. On a developer machine with an emulator or simulator running,
@@ -110,7 +88,7 @@ function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | und
 export function assertUnitTestRealWebSocketAllowed(
   url: string,
   env: NodeJS.ProcessEnv = process.env,
-  entrypoint: string | undefined = currentEntrypoint(),
+  entrypoint: string | undefined = currentProcessEntrypoint(),
 ): void {
   if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
     return;

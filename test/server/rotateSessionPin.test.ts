@@ -14,10 +14,7 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 
-// `rotate` writes the device-wide `user_rotation` and reads display 0's rotation, so it has
-// no `display` argument and a session's display pin never reaches it. Its `wm size` probe
-// therefore asks about the default display, the same display every other rotate read and
-// write is about (#10103). Whether `wm size -d <id>` reports another display needs a device.
+// A session display pin never implicitly redirects rotate; callers opt into an explicit ID.
 const windowDump = (name: string): string =>
   readFileSync(join(import.meta.dir, "..", "features", "observe", "windowDumps", name), "utf8");
 
@@ -33,8 +30,10 @@ afterEach(() => {
 });
 
 describe("rotate in a session pinned to a non-default display", () => {
-  test("the schema takes no display, so a pin is never applied", () => {
-    expect(Object.hasOwn(rotateSchema.shape, "display")).toBe(false);
+  test("the schema accepts only non-negative integer display IDs", () => {
+    expect(rotateSchema.safeParse({ orientation: "portrait", display: 3 }).success).toBe(true);
+    expect(rotateSchema.safeParse({ orientation: "portrait", display: -1 }).success).toBe(false);
+    expect(rotateSchema.safeParse({ orientation: "portrait", display: 1.5 }).success).toBe(false);
   });
 
   test("a pinned session's rotate call is passed through unrouted and probes the default display", async () => {

@@ -198,6 +198,7 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
+  setVideoRecordingManagerDependencies,
   stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -800,9 +801,11 @@ export class Daemon {
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
     }
-    if (options.actionsCompactMetadata) {
-      serverConfig.setActionsCompactMetadataEnabled(true);
+    if (options.actionsCompactMetadata !== undefined) {
+      serverConfig.setActionsCompactMetadataEnabled(options.actionsCompactMetadata);
     }
+    // Status/PID records must describe effective behavior, including persisted opt-outs.
+    this.options.actionsCompactMetadata = serverConfig.isActionsCompactMetadataEnabled();
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
     }
@@ -3623,6 +3626,7 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
+      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );

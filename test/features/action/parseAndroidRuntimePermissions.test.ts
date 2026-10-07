@@ -88,3 +88,34 @@ test("multiple users with different captured-derived grant states stay isolated"
     )?.state,
   ).toBe("granted");
 });
+
+// Issue #10189: restricted permissions in a real dump are plain names. Both captures below
+// declare restricted permissions and show them without any `: restricted=true` suffix; the
+// restriction is only visible in the runtime `flags=[ ... RESTRICTION_*]` list.
+test("captured Messaging requested permissions are all clean names, restricted ones included", () => {
+  // The capture is the permissions section only, so prepend the package header it lacks.
+  const requested = parseAndroidRuntimePermissions(
+    `  Package [com.google.android.apps.messaging] (cf3c20c):\n${fixture("dumpsys-package-messaging-permissions-section")}`,
+    "com.google.android.apps.messaging",
+  )!.requestedPermissions;
+  expect(requested.size).toBe(78);
+  for (const name of requested) {
+    expect(name).toMatch(/^[A-Za-z0-9_.]+$/);
+  }
+  for (const restricted of [
+    "android.permission.READ_SMS",
+    "android.permission.READ_CALL_LOG",
+    "android.permission.RECEIVE_SMS",
+    "android.permission.READ_EXTERNAL_STORAGE",
+  ]) {
+    expect(requested.has(restricted)).toBe(true);
+  }
+});
+
+test("captured egg requested set holds the restricted READ_EXTERNAL_STORAGE as a bare name", () => {
+  const requested = parseAndroidRuntimePermissions(egg, "com.android.egg")!.requestedPermissions;
+  expect(requested.has("android.permission.READ_EXTERNAL_STORAGE")).toBe(true);
+  for (const name of requested) {
+    expect(name).not.toMatch(/[:\s]/);
+  }
+});

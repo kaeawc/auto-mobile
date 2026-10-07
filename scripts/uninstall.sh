@@ -69,6 +69,17 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Capture optional command availability without invoking a function in a
+# conditional context, where Bash would suppress its internal errexit behavior.
+command_exists_check() {
+    local caller_options="$-"
+    set +e
+    command_exists "$1"
+    COMMAND_EXISTS_STATUS=$?
+    if [[ "${caller_options}" == *e* ]]; then set -e; fi
+    return 0
+}
+
 desktop_app_is_root() {
     [[ "${EUID}" -eq 0 ]]
 }
@@ -136,7 +147,7 @@ Components that can be removed:
   - Claude Marketplace plugin
   - AutoMobile CLI (auto-mobile command)
   - MCP daemon process
-  - AutoMobile data directory (~/.automobile)
+  - AutoMobile data directories (~/.auto-mobile and ~/.automobile; AUTOMOBILE_DATA_DIR overrides the first)
   - AutoMobile desktop app
 
 Examples:
@@ -521,18 +532,30 @@ config_has_automobile() {
     # Look for actual MCP server entries, not project paths or comments
     case "${format}" in
         json)
-            # Look for "auto-mobile" as a key followed by { (MCP server object)
-            # This matches: "auto-mobile": { or "auto-mobile" : {
-            # But not: "/path/to/auto-mobile/project": {
-            grep -qE '"auto-mobile"\s*:\s*\{' "${path}" 2>/dev/null
+            command_exists_check jq
+            if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+                jq -e '(.mcpServers["auto-mobile"] != null) or ([.projects[]?.mcpServers["auto-mobile"]] | any)' "${path}" >/dev/null 2>&1
+            else
+                command_exists_check python3
+                if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+                python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if ("auto-mobile" in (d.get("mcpServers") or {}) or any("auto-mobile" in ((p.get("mcpServers") or {}) if isinstance(p,dict) else {}) for p in (d.get("projects") or {}).values())) else 1)' "${path}" 2>/dev/null
+                else
+                    grep -qE '"auto-mobile"[[:space:]]*:[[:space:]]*\{' "${path}" 2>/dev/null
+                fi
+            fi
             ;;
         toml)
             # Look for [mcp_servers.auto-mobile] section headers
-            grep -qiE '^\[.*mcp.*auto-?mobile.*\]' "${path}" 2>/dev/null
+            grep -qE '^\[mcp_servers\.auto-mobile(\.|\])' "${path}" 2>/dev/null
             ;;
         yaml)
             # Look for auto-mobile: as a YAML key at root or under mcpServers
-            grep -qE '^[[:space:]]*auto-mobile\s*:' "${path}" 2>/dev/null
+            command_exists_check yq
+            if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+                yq -e '.extensions."auto-mobile" != null' "${path}" >/dev/null 2>&1
+            else
+                grep -qE '^[[:space:]]*extensions:[[:space:]]*$|^[[:space:]]+auto-mobile:[[:space:]]*$' "${path}" 2>/dev/null
+            fi
             ;;
     esac
 }
@@ -794,7 +817,11 @@ detect_daemon() {
 }
 
 detect_data_dir() {
-    if [[ -d "${HOME}/.automobile" ]]; then
+    local configured_data_dir="${AUTOMOBILE_DATA_DIR:-${HOME}/.auto-mobile}"
+    DATA_DIRS_FOUND=()
+    [[ ! -d "${configured_data_dir}" ]] || DATA_DIRS_FOUND+=("${configured_data_dir}")
+    if [[ "${HOME}/.automobile" != "${configured_data_dir}" && -d "${HOME}/.automobile" ]]; then DATA_DIRS_FOUND+=("${HOME}/.automobile"); fi
+    if [[ ${#DATA_DIRS_FOUND[@]} -gt 0 ]]; then
         DATA_DIR_EXISTS=true
     else
         DATA_DIR_EXISTS=false
@@ -814,33 +841,39 @@ remove_from_json_config() {
         return 0
     fi
 
-    # Use jq if available for clean JSON manipulation
-    if command_exists jq; then
-        # Remove any key matching auto-mobile or automobile (case insensitive)
-        jq 'walk(if type == "object" then with_entries(select(.key | test("auto-mobile|automobile"; "i") | not)) else . end)' "${path}" > "${tmp_file}" 2>/dev/null
-        if [[ $? -eq 0 && -s "${tmp_file}" ]]; then
-            mv "${tmp_file}" "${path}"
-            return 0
-        fi
-        rm -f "${tmp_file}"
-    fi
-
-    # Fallback: use sed to remove lines containing auto-mobile
-    # This is less precise but works without jq
     local backup="${path}.bak"
-    cp "${path}" "${backup}"
-
-    # Remove lines containing auto-mobile (case insensitive).
-    # Prefer an in-place edit; fall back to a temp-file rewrite only when the
-    # platform's sed lacks `-i` support. `${tmp_file}` is `${path}.tmp`, which
-    # is also the backup suffix `sed -i.tmp` writes — so the in-place branch
-    # must NOT then `mv` that backup back over the edited file, which reverted
-    # the edit and left auto-mobile entries in place on jq-less machines (#3638).
-    if sed -i.tmp -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" 2>/dev/null; then
-        rm -f "${path}.tmp" 2>/dev/null || true
+    cp "${path}" "${backup}" || return 1
+    command_exists_check jq
+    if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+        jq 'del(.mcpServers["auto-mobile"], .projects[]?.mcpServers["auto-mobile"])' "${path}" > "${tmp_file}" 2>/dev/null || { rm -f "${tmp_file}"; return 1; }
     else
-        sed -E '/"[^"]*[aA]uto-?[mM]obile[^"]*"/d' "${path}" > "${tmp_file}" && mv "${tmp_file}" "${path}"
+        command_exists_check python3
+        if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+        python3 -c 'import json,sys
+with open(sys.argv[1], encoding="utf-8") as f: data=json.load(f)
+def remove(value):
+    if isinstance(value, dict): value.pop("auto-mobile", None)
+remove(data.get("mcpServers"))
+projects=data.get("projects")
+if isinstance(projects, dict):
+    for project in projects.values():
+        if isinstance(project, dict): remove(project.get("mcpServers"))
+json.dump(data, sys.stdout, indent=2, ensure_ascii=False)
+print()' "${path}" > "${tmp_file}" || { rm -f "${tmp_file}"; return 1; }
+        else
+            rm -f "${tmp_file}"
+            log_error "jq or python3 required to safely remove JSON MCP configuration from ${path}; remove the auto-mobile MCP entry manually."
+            return 1
+        fi
     fi
+    command_exists_check jq
+    if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+        jq empty "${tmp_file}" 2>/dev/null || { rm -f "${tmp_file}"; return 1; }
+    elif ! python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "${tmp_file}"; then
+        rm -f "${tmp_file}"
+        return 1
+    fi
+    mv "${tmp_file}" "${path}"
 
     return 0
 }
@@ -856,11 +889,10 @@ remove_from_toml_config() {
     local backup="${path}.bak"
     cp "${path}" "${backup}"
 
-    # Remove TOML sections containing auto-mobile
-    # This removes from [section.auto-mobile] to the next section or end of file
+    # Remove only [mcp_servers.auto-mobile] and its nested sections.
     local tmp_file="${path}.tmp"
     awk '
-        /^\[.*[aA]uto-?[mM]obile.*\]/ { skip=1; next }
+        /^\[mcp_servers\.auto-mobile(\.|\])/ { skip=1; next }
         /^\[/ { skip=0 }
         !skip { print }
     ' "${path}" > "${tmp_file}"
@@ -876,33 +908,18 @@ remove_from_yaml_config() {
         return 0
     fi
 
-    # Use yq if available
-    if command_exists yq; then
-        local tmp_file="${path}.tmp"
-        # Remove keys matching auto-mobile pattern
-        yq 'del(.. | select(key | test("auto-mobile|automobile"; "i")))' "${path}" > "${tmp_file}" 2>/dev/null
-        if [[ $? -eq 0 && -s "${tmp_file}" ]]; then
-            mv "${tmp_file}" "${path}"
-            return 0
-        fi
-        rm -f "${tmp_file}"
-    fi
-
-    # Fallback: use awk to remove YAML blocks
     local backup="${path}.bak"
-    cp "${path}" "${backup}"
-
-    local tmp_file="${path}.tmp"
-    awk '
-        /^[[:space:]]*[aA]uto-?[mM]obile:/ { skip=1; indent=match($0, /[^[:space:]]/)-1; next }
-        skip && /^[[:space:]]*[^[:space:]]/ {
-            current_indent=match($0, /[^[:space:]]/)-1
-            if (current_indent <= indent) { skip=0 }
-        }
-        !skip { print }
-    ' "${path}" > "${tmp_file}"
-    mv "${tmp_file}" "${path}"
-    return 0
+    cp "${path}" "${backup}" || return 1
+    command_exists_check yq
+    if [[ "${COMMAND_EXISTS_STATUS}" -eq 0 ]]; then
+        local tmp_file="${path}.tmp"
+        yq 'del(.extensions."auto-mobile")' "${path}" > "${tmp_file}" 2>/dev/null || { rm -f "${tmp_file}"; return 1; }
+        yq '.' "${tmp_file}" >/dev/null 2>&1 || { rm -f "${tmp_file}"; return 1; }
+        mv "${tmp_file}" "${path}"
+        return 0
+    fi
+    log_error "yq required to safely remove Goose YAML MCP configuration from ${path}; remove .extensions.auto-mobile manually."
+    return 1
 }
 
 remove_mcp_configs() {
@@ -1120,19 +1137,35 @@ stop_daemon() {
 }
 
 remove_data_dir() {
+    local configured_data_dir="${AUTOMOBILE_DATA_DIR:-${HOME}/.auto-mobile}"
+    local -a dirs=("${configured_data_dir}")
+    [[ "${HOME}/.automobile" == "${configured_data_dir}" ]] || dirs+=("${HOME}/.automobile")
     if [[ "${DATA_DIR_EXISTS}" != "true" ]]; then
         log_info "AutoMobile data directory not found"
         return 0
     fi
 
+    local dir
+    for dir in "${dirs[@]}"; do
+        local safe_dir="${dir}" safe_home="${HOME}"
+        while [[ "${safe_dir}" == */ && "${safe_dir}" != / ]]; do safe_dir="${safe_dir%/}"; done
+        while [[ "${safe_home}" == */ && "${safe_home}" != / ]]; do safe_home="${safe_home%/}"; done
+        if [[ -z "${safe_dir}" || "${safe_dir}" == / || "${safe_dir}" == "${safe_home}" ]]; then
+            log_error "Refusing to remove unsafe AutoMobile data path '${dir}'."
+            return 1
+        fi
+    done
+
     if [[ "${DRY_RUN}" == "true" ]]; then
-        log_info "[DRY-RUN] Would remove ${HOME}/.automobile"
+        for dir in "${dirs[@]}"; do [[ -d "${dir}" ]] && log_info "[DRY-RUN] Would remove ${dir}"; done
         return 0
     fi
 
     log_info "Removing AutoMobile data directory..."
-    rm -rf "${HOME}/.automobile"
-    log_info "AutoMobile data directory removed"
+    for dir in "${dirs[@]}"; do
+        if [[ -d "${dir}" ]]; then rm -rf -- "${dir:?}" || return 1; log_info "Removed ${dir}"; fi
+    done
+    log_info "AutoMobile data directories removed"
     CHANGES_MADE=true
 }
 
@@ -1223,7 +1256,7 @@ select_components() {
     fi
 
     if [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
-        options+=("AutoMobile Data (~/.automobile)")
+        options+=("AutoMobile Data (${AUTOMOBILE_DATA_DIR:-${HOME}/.auto-mobile} and ~/.automobile)")
     fi
 
     if [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
@@ -1323,7 +1356,7 @@ confirm_uninstall() {
     fi
 
     if [[ "${UNINSTALL_DATA}" == "true" ]]; then
-        echo "  - AutoMobile Data (~/.automobile)"
+        echo "  - AutoMobile Data (${AUTOMOBILE_DATA_DIR:-${HOME}/.auto-mobile} and ${HOME}/.automobile)"
     fi
 
     if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then

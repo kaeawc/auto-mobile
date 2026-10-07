@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import {
   withAndroidTransportId,
@@ -1641,7 +1642,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys power | grep mWakefulness=",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1692,7 +1693,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys window policy",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1736,7 +1737,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys user",
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );
@@ -1916,7 +1917,7 @@ export class AdbClient implements AdbExecutor {
       const result = await this.executeCommand(
         "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
         timeoutMs,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
         signal,
       );

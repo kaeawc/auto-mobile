@@ -109,7 +109,8 @@ import {
   defaultDisplayInventoryProvider,
   type DisplayInventoryProvider,
 } from "../devices/DisplayInventoryProvider";
-import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import type { Environment } from "../daemon/poolConfig";
+import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import {
   deleteInternalToolParams,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
@@ -1283,6 +1284,7 @@ export function detailedDiscoveryOptions(
 
 export interface DeviceToolsDependencies {
   androidAdbFactory: AdbClientFactory;
+  env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
   deviceResourceObserverFactory: () => DeviceResourceObserver;
   deviceManagerFactory: () => PlatformDeviceManager;
@@ -3579,6 +3581,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
     androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
+    env: deps.env ?? currentDeps.env,
     deviceResourceObserverFactory:
       deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,
     deviceResourceControllerFactory:
@@ -4326,6 +4329,7 @@ export function refreshResourcesAfterCommittedBoot(
 }
 
 interface StartDeviceRunnerReadinessInput {
+  autolockEnabled?: boolean;
   boot: DeviceBootResult;
   args: StartDeviceArgs;
   operationName: string;
@@ -4350,7 +4354,7 @@ export async function prepareStartDeviceRunnerReadiness(
 ): Promise<SystemUiAnrRecoveryResult & { recovered: boolean }> {
   const devicePool = getStartDevicePool(input.daemonState);
   const recoveryAutolockClient =
-    isDevicePoolAutolockEnabled() && devicePool
+    (input.autolockEnabled ?? captureAutolockPolicy(getDeviceToolsDependencies().env)) && devicePool
       ? {
           mcpSessionId: input.args.__mcpSessionId,
           expectedSessionId: devicePool.captureAutolockSessionForMcpSession(

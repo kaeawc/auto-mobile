@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "./android-cmdline-tools/dumpsysLimits";
 import type { DeviceResourceObservationRequest } from "./deviceResourceObserver";
 import type { ConfigurableDeviceResource } from "../models/DeviceResourceConfiguration";
 import type { DeviceResourceStatus } from "../models/DeviceResource";
@@ -79,6 +80,7 @@ export class AndroidDeviceResourceReader {
         throw new Error("Android resource configuration deadline expired");
       }
       const options: AdbExecuteOptions = {
+        maxBuffer: args[0] === "dumpsys" ? DUMPSYS_MAX_BUFFER : undefined,
         timeoutMs,
         signal: request.signal,
         noRetry: true,

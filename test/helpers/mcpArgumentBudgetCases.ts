@@ -7,7 +7,6 @@ import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeou
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../../src/features/observe/waitForTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../../src/features/navigation/exploreTimeout";
 import {
-  SHARED_STORAGE_PUSH_TIMEOUT_MS,
   APP_FILE_PUSH_TIMEOUT_MS,
   FILE_TRANSFER_MCP_TIMEOUT_HEADROOM_MS,
 } from "../../src/features/storage/fileTransferTimeout";
@@ -56,8 +55,6 @@ export const MCP_ARGUMENT_BUDGET_CASES: readonly ArgumentBudgetCase[] = [
   waitCase("barrier", "timeout", BARRIER_TIMEOUT_MS),
   waitCase("criticalSection", "timeout", BARRIER_TIMEOUT_MS),
   waitCase("explore", "timeoutMs", DEFAULT_EXPLORE_TIMEOUT_MS),
-  fileCase("stageSharedStorage", SHARED_STORAGE_PUSH_TIMEOUT_MS),
-  fileCase("stageSharedStorageFixtures", SHARED_STORAGE_PUSH_TIMEOUT_MS),
   fileCase("putAppFile", APP_FILE_PUSH_TIMEOUT_MS),
 ];
 

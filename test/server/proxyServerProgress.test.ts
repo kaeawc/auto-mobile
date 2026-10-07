@@ -28,7 +28,7 @@ describe("Proxy tools/call relays progress tagged with the client's own token (i
     // lands inside whichever test calls `createProxyMcpServer` first. Absorb it
     // here, in setup, rather than letting it push that test over the 100ms/test
     // CI budget (`scripts/validate-bun-test-timings.sh`) — same class of flake
-    // fixed for sharedStorageTools's Ajv2020 cold-start, see #6313.
+    // fixed for the storage tools' Ajv2020 cold-start, see #6313.
     require("@modelcontextprotocol/sdk/types.js");
   });
 

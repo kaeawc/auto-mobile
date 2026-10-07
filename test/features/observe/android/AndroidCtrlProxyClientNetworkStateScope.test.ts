@@ -92,3 +92,69 @@ describe("AndroidCtrlProxyClient network state sync is scoped to its device", ()
     });
   });
 });
+
+/**
+ * Issue #10062: the reconnect re-push carries the time LEFT, which the device times on its own
+ * monotonic clock, so neither clock skew nor the reconnect restarts the original duration.
+ */
+describe("AndroidCtrlProxyClient reconnect sends the remaining error simulation time", () => {
+  let timer: FakeTimer;
+  let getInstanceSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    NetworkState.resetInstance();
+    const state = new NetworkState({ timer });
+    getInstanceSpy = spyOn(NetworkState, "getInstance").mockReturnValue(state);
+  });
+
+  afterEach(() => {
+    getInstanceSpy.mockRestore();
+    NetworkState.resetInstance();
+  });
+
+  function reconnectSimulationMessage(): Record<string, unknown> | undefined {
+    const client = AndroidCtrlProxyClient.createForTesting(
+      DEVICE_A,
+      new FakeAdbExecutor(),
+      () => {
+        throw new Error("no socket in this test");
+      },
+      timer,
+    );
+    const sent: string[] = [];
+    const sendSpy = spyOn(client, "sendMessage").mockImplementation((message: string) => {
+      sent.push(message);
+      return true;
+    });
+    try {
+      client.syncNetworkStateToDevice();
+    } finally {
+      sendSpy.mockRestore();
+    }
+    return sent
+      .map((message) => JSON.parse(message) as Record<string, unknown>)
+      .find((m) => m.type === "set_network_error_simulation");
+  }
+
+  test("reconnect right after start sends the full duration and keeps the legacy epoch", () => {
+    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, null);
+
+    expect(reconnectSimulationMessage()).toMatchObject({
+      enabled: true,
+      remainingMs: 30_000,
+      expiresAtEpochMs: timer.now() + 30_000,
+    });
+  });
+
+  test("reconnect ten seconds in sends what is left, not the original duration", () => {
+    NetworkState.getInstance().startSimulation(DEVICE_A.deviceId, "http500", 30, null);
+    timer.advanceTime(10_000);
+
+    expect(reconnectSimulationMessage()).toMatchObject({ enabled: true, remainingMs: 20_000 });
+  });
+
+  test("a disabled simulation carries no remaining time", () => {
+    expect(reconnectSimulationMessage()).toMatchObject({ enabled: false, remainingMs: null });
+  });
+});

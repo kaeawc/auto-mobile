@@ -684,7 +684,10 @@ data class SetNetworkErrorSimulation(
   val enabled: Boolean,
   val errorType: String? = null,
   val limit: Int? = null,
+  /** Host-clock epoch. Kept for older SDKs; newer ones prefer [remainingMs]. */
   val expiresAtEpochMs: Long? = null,
+  /** Time left on the simulation, measured by the receiver's own monotonic clock (#10062). */
+  val remainingMs: Long? = null,
 ) : WebSocketRequest()
 
 // =============================================================================

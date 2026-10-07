@@ -1362,7 +1362,7 @@ test.each([
   sessions.updateSessionCache("one", { displayPin: "inner" });
   const seen: unknown[] = [];
   await runSessionDisplayPin({
-    name: "overlay",
+    name: "prototype",
     acceptsDisplay: true,
     device,
     args: { action },

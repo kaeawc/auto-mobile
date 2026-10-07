@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/generate-release-constants.sh
 

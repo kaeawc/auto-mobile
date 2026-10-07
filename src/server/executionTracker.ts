@@ -88,6 +88,8 @@ export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
   private deviceExecutions = new Map<string, Set<string>>();
+  /** Last time a tool execution bound to or finished on each device (#10497). */
+  private deviceLastActivityAt = new Map<string, number>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
@@ -352,6 +354,18 @@ export class ExecutionTracker {
     const deviceSet = this.deviceExecutions.get(deviceId) ?? new Set<string>();
     deviceSet.add(executionId);
     this.deviceExecutions.set(deviceId, deviceSet);
+    this.deviceLastActivityAt.set(deviceId, this.timer.now());
+  }
+
+  /** Number of in-flight tool executions bound to `deviceId`. */
+  getActiveDeviceExecutionCount(deviceId: string): number {
+    return this.deviceExecutions.get(deviceId)?.size ?? 0;
+  }
+
+  /** Time since the last tool execution bound to or ended on `deviceId`; null when none has. */
+  getDeviceIdleForMs(deviceId: string): number | null {
+    const lastActivityAt = this.deviceLastActivityAt.get(deviceId);
+    return lastActivityAt === undefined ? null : Math.max(0, this.timer.now() - lastActivityAt);
   }
 
   async cancelDeviceExecutions(
@@ -587,6 +601,7 @@ export class ExecutionTracker {
 
   private unregisterDeviceExecutions(executionId: string, deviceIds?: Set<string>): void {
     for (const deviceId of deviceIds ?? []) {
+      this.deviceLastActivityAt.set(deviceId, this.timer.now());
       const deviceSet = this.deviceExecutions.get(deviceId);
       deviceSet?.delete(executionId);
       if (deviceSet?.size === 0) {

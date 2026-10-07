@@ -32,51 +32,56 @@ export const sendSmsSchema = addDeviceTargetingToSchema(
 export interface PhoneCallArgs extends PhoneCallOptions {}
 export interface SendSmsArgs extends SendSmsOptions {}
 
-// Exported so the typed-failure -> ActionableError mapping can be unit-tested
-// directly against a Telephony result (issue #4181, rank 4b). A non-Android
-// device yields a typed failure with no network access.
-export const phoneCallHandler = async (
-  device: BootedDevice,
-  args: PhoneCallArgs,
-  _progress?: ProgressCallback,
-) => {
-  const telephony = new Telephony(device);
-  const result = await telephony.phoneCall({
-    action: args.action,
-    phoneNumber: args.phoneNumber,
-  });
-  if (!result.success) {
-    throw new ActionableError(result.error || `Failed to execute phoneCall ${args.action}`);
-  }
-  return createJSONToolResponse({
-    message: result.message || `Phone call ${args.action} executed`,
-    ...result,
-  });
-};
+/** Builds the Telephony a handler drives; injectable so tests substitute fakes. */
+export type TelephonyFactory = (device: BootedDevice) => Telephony;
 
-export const sendSmsHandler = async (
-  device: BootedDevice,
-  args: SendSmsArgs,
-  _progress?: ProgressCallback,
-) => {
-  const telephony = new Telephony(device);
-  const result = await telephony.sendSms({
-    phoneNumber: args.phoneNumber,
-    message: args.message,
-  });
-  if (!result.success) {
-    throw new ActionableError(result.error || "Failed to send simulated SMS");
-  }
-  return createJSONToolResponse({
-    message: result.message || "Simulated SMS delivered",
-    ...result,
-  });
-};
+const defaultTelephonyFactory: TelephonyFactory = (device) => new Telephony(device);
+
+// Exported so the typed-failure -> ActionableError mapping can be unit-tested
+// directly against a Telephony result (issue #4181, rank 4b). iOS routes to the
+// in-app SDK trigger route (#1580); tests inject a Telephony with a fake sender.
+export const createPhoneCallHandler =
+  (makeTelephony: TelephonyFactory = defaultTelephonyFactory) =>
+  async (device: BootedDevice, args: PhoneCallArgs, _progress?: ProgressCallback) => {
+    const telephony = makeTelephony(device);
+    const result = await telephony.phoneCall({
+      action: args.action,
+      phoneNumber: args.phoneNumber,
+    });
+    if (!result.success) {
+      throw new ActionableError(result.error || `Failed to execute phoneCall ${args.action}`);
+    }
+    return createJSONToolResponse({
+      message: result.message || `Phone call ${args.action} executed`,
+      ...result,
+    });
+  };
+
+export const phoneCallHandler = createPhoneCallHandler();
+
+export const createSendSmsHandler =
+  (makeTelephony: TelephonyFactory = defaultTelephonyFactory) =>
+  async (device: BootedDevice, args: SendSmsArgs, _progress?: ProgressCallback) => {
+    const telephony = makeTelephony(device);
+    const result = await telephony.sendSms({
+      phoneNumber: args.phoneNumber,
+      message: args.message,
+    });
+    if (!result.success) {
+      throw new ActionableError(result.error || "Failed to send simulated SMS");
+    }
+    return createJSONToolResponse({
+      message: result.message || "Simulated SMS delivered",
+      ...result,
+    });
+  };
+
+export const sendSmsHandler = createSendSmsHandler();
 
 export function registerTelephonyTools() {
   ToolRegistry.registerDeviceAware(
     "phoneCall",
-    "Simulate Android emulator phone call via gsm commands.",
+    "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
     phoneCallSchema,
     phoneCallHandler,
     { defaultEnabled: false },
@@ -84,7 +89,7 @@ export function registerTelephonyTools() {
 
   ToolRegistry.registerDeviceAware(
     "sendSms",
-    "Send simulated incoming SMS on Android emulator.",
+    "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
     sendSmsSchema,
     sendSmsHandler,
     { defaultEnabled: false },

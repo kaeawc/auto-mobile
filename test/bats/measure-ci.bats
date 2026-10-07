@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 #
 # Tests for scripts/ci/measure-ci.sh (issue #4122).
 #

@@ -26,6 +26,7 @@ class CommandAdvertisementTest {
       "ime_clear_field_v1",
       "ime_password_commit_v1",
       "tap_double_v1",
+      "network_mock_rules_report_v1",
       "gesture_display_id_v1",
       "overlay_display_id_v1",
       "overlay_window_options_v1",
@@ -54,6 +55,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("overlay_window_options_v1"))
       assertTrue(commands.contains("overlay_persistence_replay_v1"))
       assertTrue(commands.contains("inspect_overlays"))
+      assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertEquals(commands.size, commands.toSet().size)
       assertTrue(commands.all { it in sealedRequestTypes || it in knownFlags })
       assertTrue(commands.contains("request_tap_coordinates"))

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.storage
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Looper
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
 import java.util.ArrayDeque
@@ -16,10 +17,13 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * @param context Application context
  * @param fileSystemOperations File system abstraction for listing preference files
+ * @param isMainThread Reports whether the calling thread is the app's main thread. Mutations are
+ *   confirmed with a blocking [SharedPreferences.Editor.commit] only off the main thread (#10168).
  */
 internal class SharedPreferencesDriverImpl(
   private val context: Context,
   private val fileSystemOperations: FileSystemOperations = RealFileSystemOperations(),
+  private val isMainThread: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() },
 ) : SharedPreferencesDriver {
 
   companion object {
@@ -293,7 +297,7 @@ internal class SharedPreferencesDriverImpl(
         throw SharedPreferencesError.InvalidType(type.name, "cannot set value with UNKNOWN type")
     }
 
-    editor.apply()
+    persist(fileName, editor)
   }
 
   override fun removeValue(fileName: String, key: String) {
@@ -306,7 +310,7 @@ internal class SharedPreferencesDriverImpl(
     }
 
     val prefs = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
-    prefs.edit().remove(key).apply()
+    persist(fileName, prefs.edit().remove(key))
   }
 
   override fun clear(fileName: String) {
@@ -319,7 +323,30 @@ internal class SharedPreferencesDriverImpl(
     }
 
     val prefs = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
-    prefs.edit().clear().apply()
+    persist(fileName, prefs.edit().clear())
+  }
+
+  /**
+   * Writes [editor] and confirms the write reached disk before the caller replies success (#10168).
+   *
+   * [SharedPreferences.Editor.apply] only updates the in-memory map and queues the disk write, so a
+   * process kill right after the reply loses it and a failed write is never reported. [commit]
+   * blocks on disk I/O and returns whether the write succeeded, so a `false` result becomes
+   * [SharedPreferencesError.WriteFailed]. The inspector's ContentProvider runs on a binder thread
+   * for every supported caller (CtrlProxy, `adb shell content call`), so the block is off the main
+   * thread. A caller that reaches the provider in-process on the main thread would stall the app
+   * (or ANR it), so there we keep the non-blocking [apply] and accept its weaker guarantee.
+   * Read-after-write and the app's change listeners behave the same either way: both update the
+   * in-memory map first and notify listeners once.
+   */
+  private fun persist(fileName: String, editor: SharedPreferences.Editor) {
+    if (isMainThread()) {
+      editor.apply()
+      return
+    }
+    if (!editor.commit()) {
+      throw SharedPreferencesError.WriteFailed(fileName)
+    }
   }
 
   private fun detectType(value: Any?): KeyValueType {

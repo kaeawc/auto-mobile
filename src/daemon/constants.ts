@@ -548,6 +548,22 @@ export function sanitizeCliSessionIdleTimeoutMs(requestedMs: unknown): number | 
 export const DAEMON_LIST_DEVICE_SESSIONS_METHOD = "daemon/listDeviceSessions";
 
 /**
+ * Control-socket method reporting whether this daemon still uses a device whose
+ * CtrlProxy forwarding lease it holds: its live session, in-flight tool calls,
+ * and time since its last tool activity there. Another AutoMobile process asks
+ * before taking the lease over from an idle or orphaned owner (issue #10497).
+ */
+export const DAEMON_DEVICE_LEASE_STATUS_METHOD = "daemon/deviceLeaseStatus";
+
+/**
+ * Control-socket method asking this daemon to give up a device's CtrlProxy
+ * forwarding lease when it no longer uses the device. The daemon checks its use
+ * and releases in one synchronous step, so activity it starts afterwards cannot
+ * lose the lease to the requester (issue #10497, #10506 review).
+ */
+export const DAEMON_RELINQUISH_DEVICE_LEASE_METHOD = "daemon/relinquishDeviceLease";
+
+/**
  * Whether the daemon enforces the inbound version/build-identity handshake
  * (#2744). Enabled by default; set `AUTOMOBILE_DAEMON_DISABLE_HANDSHAKE=1`
  * (or `AUTO_MOBILE_DAEMON_DISABLE_HANDSHAKE=1`) as an escape hatch if a

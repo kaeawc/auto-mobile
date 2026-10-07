@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
@@ -113,6 +114,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
@@ -277,6 +279,43 @@ internal fun nodeActionFailure(action: String, availableActionIds: Collection<In
     return "Accessibility action is unavailable: $action"
   }
   return null
+}
+
+/** What to do with a node action request given the node's current state (issue #10148). */
+internal sealed interface NodeActionDecision {
+  /** Send [actionId] to the node. */
+  data class Perform(val actionId: Int) : NodeActionDecision
+
+  /** The node is already in the requested state; no action is sent and the request succeeds. */
+  data object AlreadySatisfied : NodeActionDecision
+
+  /** The request cannot be honored; [message] is the failure reported to the host. */
+  data class Refused(val message: String) : NodeActionDecision
+}
+
+/**
+ * Accessibility focus is state, not a one-shot action: a node holding accessibility focus
+ * advertises only ACTION_CLEAR_ACCESSIBILITY_FOCUS and an unfocused node only
+ * ACTION_ACCESSIBILITY_FOCUS. So `focus` on an already-focused node and `clear_focus` on an
+ * unfocused node are satisfied as-is, rather than refused as "unavailable". Every other case keeps
+ * the availability check.
+ */
+internal fun decideNodeAction(
+  action: String,
+  isAccessibilityFocused: Boolean,
+  availableActionIds: Collection<Int>?,
+): NodeActionDecision {
+  if (action == "focus" && isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  if (action == "clear_focus" && !isAccessibilityFocused) return NodeActionDecision.AlreadySatisfied
+  nodeActionFailure(action, availableActionIds)?.let {
+    return NodeActionDecision.Refused(it)
+  }
+  val actionId = nodeActionId(action)
+  return if (actionId == null) {
+    NodeActionDecision.Refused("Unsupported accessibility action: $action")
+  } else {
+    NodeActionDecision.Perform(actionId)
+  }
 }
 
 internal fun nodeActionId(action: String): Int? =
@@ -3089,14 +3128,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       occlusionEnabled = occlusionEnabled,
     )
 
-  override fun setNetworkMockRules(rulesJson: String) = broadcastNetworkMockRules(rulesJson)
+  override fun setNetworkMockRules(requestId: String?, rulesJson: String) =
+    broadcastNetworkMockRules(requestId, rulesJson)
 
   override fun setNetworkErrorSimulation(
     enabled: Boolean,
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
-  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs)
+    remainingMs: Long?,
+  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
   override fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
 
@@ -3308,16 +3349,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private fun broadcastNetworkMockRules(rulesJson: String) {
+  private fun broadcastNetworkMockRules(requestId: String?, rulesJson: String) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_MOCK_RULES).apply {
           putExtra(NetworkMockRuleStore.EXTRA_RULES_JSON, rulesJson)
         }
-      sendBroadcast(intent)
-      Log.d(TAG, "Broadcast network mock rules")
+      if (requestId == null) {
+        sendBroadcast(intent)
+        Log.d(TAG, "Broadcast network mock rules")
+        return
+      }
+      // The app's rule store answers an ordered broadcast through its result data (which rules the
+      // device's regex engine rejected); forward that to the host as the correlated reply. An SDK
+      // that predates the reply leaves the data null and the host reports "not confirmed".
+      sendOrderedBroadcast(
+        intent,
+        null,
+        object : BroadcastReceiver() {
+          override fun onReceive(context: Context?, intent: Intent?) {
+            replyNetworkMockRules(networkMockRulesResult(requestId, resultData))
+          }
+        },
+        null,
+        Activity.RESULT_OK,
+        null,
+        null,
+      )
+      Log.d(TAG, "Broadcast network mock rules (awaiting report)")
     } catch (e: Exception) {
       Log.e(TAG, "Failed to broadcast network mock rules", e)
+      if (requestId != null) {
+        replyNetworkMockRules(
+          networkMockRulesFailure(requestId, "Failed to broadcast network mock rules: ${e.message}")
+        )
+      }
+    }
+  }
+
+  private fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      serviceScope.launch { webSocketServer.broadcast(result) }
     }
   }
 
@@ -3326,10 +3398,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     errorType: String?,
     limit: Int?,
     expiresAtEpochMs: Long?,
+    remainingMs: Long?,
   ) {
     try {
       val intent =
         Intent(NetworkMockRuleStore.ACTION_NETWORK_ERROR_SIMULATION).apply {
+          remainingMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_REMAINING_MS, it) }
           putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, enabled)
           errorType?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, it) }
           limit?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_LIMIT, it) }
@@ -3376,6 +3450,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
     if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    // A window appearing in an app is the cheapest sign its process (re)started; an open storage
+    // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
+    // for every package without a subscription, so this is free on the hot path.
+    if (
+      eventPackage != null &&
+        event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        ::storageSubscriptionManager.isInitialized
+    ) {
+      storageSubscriptionManager.onPackageActivity(eventPackage)
+    }
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED
@@ -3907,6 +3991,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Check if running on an emulator. */
+  /**
+   * Runtime `AccessibilityServiceInfo.isAccessibilityTool` of this bound service (#6233). The
+   * getter exists from API 31; below that (or without serviceInfo) the value is unknown (null).
+   */
+  private fun getAccessibilityTool(): Boolean? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) serviceInfo?.isAccessibilityTool else null
+
   private fun getIsEmulator(): Boolean {
     return (Build.FINGERPRINT.startsWith("generic") ||
       Build.FINGERPRINT.startsWith("unknown") ||
@@ -4099,6 +4190,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
@@ -4372,6 +4464,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
+          accessibilityTool = getAccessibilityTool(),
         ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
@@ -6196,9 +6289,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
 
       perfProvider.startOperation("executeAction")
-      val actionId = nodeActionId(action)
-      val actionError = nodeActionFailure(action, targetNode.actionList?.map { it.id })
-      val success = actionId != null && actionError == null && targetNode.performAction(actionId)
+      val decision =
+        decideNodeAction(
+          action,
+          targetNode.isAccessibilityFocused,
+          targetNode.actionList?.map { it.id },
+        )
+      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
+      val actionError = (decision as? NodeActionDecision.Refused)?.message
+      val success =
+        alreadySatisfied ||
+          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
       perfProvider.endOperation("executeAction")
 
       targetNode.recycle()
@@ -6221,6 +6322,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success,
           if (success) null else actionError ?: "performAction returned false",
           totalTime,
+          alreadySatisfied,
         )
       }
     } catch (e: Exception) {
@@ -7590,6 +7692,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     success: Boolean,
     error: String?,
     totalTimeMs: Long,
+    alreadySatisfied: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping action result broadcast")
@@ -7604,6 +7707,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (error != null) {
             put("error", error)
+          }
+          if (alreadySatisfied) {
+            put("alreadySatisfied", true)
           }
         }
       }

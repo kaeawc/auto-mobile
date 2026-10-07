@@ -48,7 +48,7 @@ describe("overlay tool assets", () => {
   });
 
   async function call(input: unknown, signal?: AbortSignal) {
-    const response = await ToolRegistry.getTool("overlay")!.deviceAwareHandler!(
+    const response = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
       input,
       undefined,

@@ -220,8 +220,10 @@ type MultiDeviceAllocationBlock = "queued" | "busy" | "contention";
 interface MultiDeviceAllocationTicket {
   requests: DeviceAllocationRequest[];
   /**
-   * Sessions that already held a pooled device when the ticket was queued.
-   * Their devices are never rolled back, so they stay held while it waits.
+   * Sessions that already held a pooled device when the ticket last checked
+   * whether it can claim (on enqueue and before each claim check, never while
+   * its own attempt is in flight). Their devices are never rolled back, so they
+   * stay held while it waits.
    */
   heldSessionIds?: ReadonlySet<string>;
 }
@@ -2745,6 +2747,9 @@ export class DevicePool {
         return { success: false, attempts, lastBlock };
       }
       waited = true;
+      // A session may gain or lose its device while the ticket waits (e.g.
+      // session-preserving recovery), so deadlock analysis reads a fresh pin.
+      this.recordHeldSessions(ticket);
       if (!this.canClaimMultiDeviceAllocation(ticket)) {
         lastBlock = this.multiDeviceAllocationBlock(ticket);
         this.throwIfMultiDeviceAllocationDeadlocked(ticket);
@@ -2848,12 +2853,41 @@ export class DevicePool {
   }
 
   private enqueueMultiDeviceAllocationTicket(ticket: MultiDeviceAllocationTicket): void {
+    this.recordHeldSessions(ticket);
+    this.multiDeviceAllocationQueue.push(ticket);
+  }
+
+  /** Snapshots which of the ticket's sessions hold a pooled device right now. */
+  private recordHeldSessions(ticket: MultiDeviceAllocationTicket): void {
     ticket.heldSessionIds = new Set(
       ticket.requests
         .map((request) => request.sessionId)
         .filter((sessionId) => this.deviceHeldByExistingSession(sessionId) !== undefined),
     );
-    this.multiDeviceAllocationQueue.push(ticket);
+  }
+
+  /**
+   * Whether a device could serve a claim once its holder releases it. Error,
+   * unhealthy and unassignable transport-alias devices never pass
+   * isIdleDeviceEligible after a release, so they are not supply.
+   */
+  private isPotentialAllocationSupply(device: PooledDevice): boolean {
+    return (
+      device.status !== "error" &&
+      this.androidTransportAliases.isAssignable({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }) &&
+      !this.getDeviceHealthMarker(device.id)
+    );
+  }
+
+  /** Devices matching a request that could ever be allocated to it. */
+  private potentialSupplyFor(request: DeviceAllocationRequest): PooledDevice[] {
+    return this.getDevicesMatchingCriteria(request.criteria).filter((device) =>
+      this.isPotentialAllocationSupply(device),
+    );
   }
 
   /**
@@ -2905,7 +2939,8 @@ export class DevicePool {
    * Whether `ticket` cannot fill its claims (one distinct device each) without
    * a device pinned by a ticket in `blockers`, yet could with them. Idle,
    * recovering, in-flight and non-waiting sessions' devices may free up, so
-   * they count as supply; the ticket's own pinned devices never do.
+   * they count as supply; the ticket's own pinned devices never do, nor do
+   * devices allocation can never use (error, unhealthy, unassignable).
    */
   private isDeviceBlockedBy(
     ticket: MultiDeviceAllocationTicket,
@@ -2916,7 +2951,7 @@ export class DevicePool {
     const pinnedBy = (deviceId: string, by: (other: MultiDeviceAllocationTicket) => boolean) =>
       (pinned.get(deviceId) ?? []).some((holder) => by(holder.ticket));
     const candidates = claims.map((request) =>
-      this.getDevicesMatchingCriteria(request.criteria)
+      this.potentialSupplyFor(request)
         .map((device) => device.id)
         .filter((deviceId) => !pinnedBy(deviceId, (other) => other === ticket)),
     );
@@ -2959,7 +2994,7 @@ export class DevicePool {
   ): Map<MultiDeviceAllocationTicket, DeadlockWait> {
     const members = new Set(deadlocked.keys());
     const pinnedWaits = (ticket: MultiDeviceAllocationTicket, request: DeviceAllocationRequest) =>
-      this.getDevicesMatchingCriteria(request.criteria).flatMap((device) => {
+      this.potentialSupplyFor(request).flatMap((device) => {
         const holders = (pinned.get(device.id) ?? []).filter(
           (holder) => holder.ticket !== ticket && members.has(holder.ticket),
         );
@@ -5347,13 +5382,8 @@ export class DevicePool {
   private isIdleDeviceEligible(device: PooledDevice): boolean {
     return (
       device.status === "idle" &&
-      this.androidTransportAliases.isAssignable({
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform,
-      }) &&
-      !this.isReservedForAssignment(device) &&
-      !this.getDeviceHealthMarker(device.id)
+      this.isPotentialAllocationSupply(device) &&
+      !this.isReservedForAssignment(device)
     );
   }
 

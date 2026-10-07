@@ -148,6 +148,71 @@ class DeviceAvailabilityCheckerTest {
   }
 
   @Test
+  fun checkFailedIsTrueOnlyWhenAdbProbeFailed() {
+    val failing =
+      sdkChecker(
+        commandExecutor = { _, _ -> CommandResult(1, "", "cannot connect to daemon") },
+        sleeper = {},
+      )
+    assertTrue(failing.checkFailed())
+    assertTrue(assertNotNull(failing.getLastError()).contains("Cannot connect to ADB daemon"))
+
+    val timingOut =
+      sdkChecker(commandExecutor = { _, _ -> throw RuntimeException("timed out") }, sleeper = {})
+    assertTrue(timingOut.checkFailed())
+
+    val empty =
+      sdkChecker(
+        commandExecutor = { _, _ -> CommandResult(0, "List of devices attached\n", "") },
+        sleeper = {},
+      )
+    assertFalse(empty.checkFailed())
+    assertFalse(empty.areDevicesAvailable())
+
+    assertFalse(unsetEnvironmentChecker().checkFailed())
+  }
+
+  @Test
+  fun runnerFailsClassWhenDeviceCheckFailed() {
+    AutoMobileSharedUtils.testDeviceChecker =
+      object : DeviceChecker {
+        override fun checkDeviceAvailability() = Unit
+
+        override fun areDevicesAvailable() = false
+
+        override fun getDeviceCount() = 0
+
+        override fun getLastError() = "ADB device check failed (exit code 1)"
+
+        override fun checkFailed() = true
+      }
+    try {
+      val ignored = mutableListOf<Description>()
+      val failures = mutableListOf<Failure>()
+      val notifier = RunNotifier()
+      notifier.addListener(
+        object : RunListener() {
+          override fun testIgnored(description: Description) {
+            ignored.add(description)
+          }
+
+          override fun testFailure(failure: Failure) {
+            failures.add(failure)
+          }
+        }
+      )
+      AutoMobileRunner(RunnerTestTarget::class.java).run(notifier)
+      assertEquals(1, failures.size)
+      assertTrue(failures[0].message.contains("ADB device check failed (exit code 1)"))
+      assertTrue(ignored.isEmpty())
+    } finally {
+      AutoMobileSharedUtils.testDeviceChecker = null
+      SystemPropertyCache.clear()
+      TestTimingCache.clear()
+    }
+  }
+
+  @Test
   fun documentedDeviceOutputCountsOnlyAvailableDevices() {
     for ((output, expectedCount) in deviceOutputProbes()) {
       var attempts = 0

@@ -9,7 +9,9 @@ import {
   applicationWindowSafeTapPoint,
   previewHierarchyHitTest,
 } from "../../../src/features/observe/HierarchyHitTest";
-import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import type { ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedIme from "../../fixtures/android-ime-window/playground-gboard-api36.json";
 import { nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
@@ -176,4 +178,48 @@ test("application fallback avoids multiple covering windows and the IME", () => 
       { left: 360, top: 0, right: 400, bottom: 100 },
     ),
   ).toEqual({ point: null, coveredBy: "Dialog" });
+});
+
+// Inline two-window tree mirroring the tapOn fixtures: no capture of overlapping app dialogs exists.
+describe("skeleton occlusion by application windows", () => {
+  const rowNode = (id: string, bounds: ElementBounds) => ({
+    "resource-id": id,
+    clickable: "true",
+    bounds,
+  });
+  const project = (windows: ViewHierarchyResult["windows"]) => {
+    const hierarchy: ViewHierarchyResult = { hierarchy: { node: [] }, windows };
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+    return projectSkeleton(elements, { width: 400, height: 400 }, hierarchy);
+  };
+  const list = rowNode("list_row", { left: 0, top: 0, right: 200, bottom: 100 });
+  const dialog = rowNode("dialog_btn", { left: 0, top: 0, right: 300, bottom: 200 });
+
+  test("moves a row fully under a higher application window to occluded context", () => {
+    const { skeleton, context } = project([
+      { type: 1, windowLayer: 0, hierarchy: list },
+      { type: 1, windowLayer: 1, hierarchy: dialog },
+    ]);
+    expect(skeleton.map((row) => row.elementId)).toEqual(["dialog_btn"]);
+    expect(context.find((row) => row.elementId === "list_row")).toMatchObject({
+      occluded: true,
+      affordances: [],
+    });
+  });
+
+  test("keeps a partly exposed row actionable and ignores non-application windows", () => {
+    const partial = rowNode("list_row", { left: 0, top: 0, right: 400, bottom: 100 });
+    expect(
+      project([
+        { type: 1, windowLayer: 0, hierarchy: partial },
+        { type: 1, windowLayer: 1, hierarchy: dialog },
+      ]).skeleton.map((row) => row.elementId),
+    ).toContain("list_row");
+    expect(
+      project([
+        { type: 1, windowLayer: 0, hierarchy: list },
+        { type: 3, windowLayer: 1, hierarchy: dialog },
+      ]).skeleton.map((row) => row.elementId),
+    ).toContain("list_row");
+  });
 });

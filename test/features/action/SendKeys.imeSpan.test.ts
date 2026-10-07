@@ -11,6 +11,7 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { logger } from "../../../src/utils/logger";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -390,7 +391,8 @@ test("IME clear without the capability and without a readable length asks for an
   expect(result.commands[0]?.error).toContain("Update the CtrlProxy APK");
   expect(h.clientCalls).toEqual([]);
   expect(h.adb.getExecutedCommands().some((command) => command.includes("KEYCODE_"))).toBe(false);
-  expect(h.selections()).toEqual([activate, restore]);
+  // Key-event deletion needs no keyboard switch, and the failed clear stops the IME type.
+  expect(h.selections()).toEqual([]);
 });
 
 test.each(["ime", "auto", "imeKeyEvents"] as const)(
@@ -413,11 +415,97 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
   },
 );
 
-test("clear outside an IME span retains accessibility delivery", async () => {
+test.each([undefined, "auto", "ime"] as const)(
+  "a clear-only call in %s mode clears through the activated IME, never the accessibility clear (#10479)",
+  async (mode) => {
+    const h = fieldHarness();
+    let selectionsAtClear: string[] = [];
+    const commit = h.client.commitViaIme;
+    h.client.commitViaIme = async (...args) => {
+      selectionsAtClear = h.selections();
+      return commit(...args);
+    };
+    const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
+    expect(result.success).toBe(true);
+    expect(h.clientCalls).toEqual(["clearField"]);
+    expect(selectionsAtClear).toEqual([activate]);
+    expect(h.field()).toBe("");
+    expect(h.deletes()).toEqual([]);
+    expectNoAccessibilityClear(h);
+    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test.each([undefined, "ime"] as const)(
+  "a clear-only call in %s mode on an older APK deletes with key events without switching keyboards",
+  async (mode) => {
+    const h = fieldHarness();
+    h.client.supportsImeClearField = async () => false;
+    const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
+    expect(result.success).toBe(true);
+    expect(h.clientCalls).toEqual([]);
+    expect(h.deletes().length).toBeGreaterThan(0);
+    expect(h.field()).toBe("");
+    expectNoAccessibilityClear(h);
+    expect(h.selections()).toEqual([]);
+  },
+);
+
+test.each([true, false])(
+  "a clear-only call on a password field never logs its text (clear capability %s)",
+  async (supported) => {
+    const h = fieldHarness("hunter2", { password: "true" });
+    h.client.supportsImeClearField = async () => supported;
+    const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+      spyOn(logger, level),
+    );
+    try {
+      const result = await h.action.execute([{ action: "clear" }]);
+      expect(result.success).toBe(true);
+      expect(h.field()).toBe("");
+      expectNoAccessibilityClear(h);
+      const logged = spies.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call)));
+      expect(logged.filter((line) => line.includes("hunter2"))).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  },
+);
+
+test("a clear-only call with mode a11y keeps the accessibility clear", async () => {
   const h = harness();
-  expect((await h.action.execute([{ action: "clear" }])).success).toBe(true);
+  const result = await h.action.execute([{ action: "clear", mode: "a11y" }]);
+  expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["clear"]);
+  expect(h.adb.getExecutedCommands().some((command) => command.includes("KEYCODE_DEL"))).toBe(
+    false,
+  );
   expect(h.selections()).toEqual([]);
+});
+
+test("an a11y clear inside an IME span uses the accessibility clear and keeps the span", async () => {
+  const h = harness();
+  const result = await h.action.execute([type("a"), { action: "clear", mode: "a11y" }, type("b")]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["commit:a", "clear", "commit:b"]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("a clear between a11y types still clears through the IME", async () => {
+  const h = harness();
+  const result = await h.action.execute([
+    { action: "type", text: "a", mode: "a11y" },
+    { action: "clear" },
+    { action: "type", text: "b", mode: "a11y" },
+  ]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["insert:a", "clearField", "insert:b"]);
+  expectNoAccessibilityClear(h);
+  // a11y typing ends the span before delivery, so each IME clear restores before the next type.
+  expect(h.selections()).toEqual([activate, restore]);
 });
 
 test("IME replace clears through the input connection before typing", async () => {

@@ -16,6 +16,7 @@ import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
@@ -1166,6 +1167,68 @@ class WebSocketServerTest {
         assertTrue(result.error.orEmpty().startsWith("Malformed request:"))
         assertFalse(result.error.orEmpty().contains("SECRETBYTES"))
       }
+    }
+
+  @Test
+  fun `an asset frame above its type's cap is answered without being deserialized`() =
+    runTest(testScope.testScheduler) {
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
+                error("An oversized frame must never dispatch")
+            },
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 128L)),
+        )
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      // `dataBase64` is not a string, so a full decode would fail with "Malformed request:"; the
+      // cap reply proves the frame was never deserialized.
+      val raw =
+        """{"requestId":"put-big","id":"hero","mimeType":"image/png","dataBase64":["${"SECRETBYTES".repeat(16)}"],"type":"put_overlay_asset"}"""
+      server.handleInboundTextFrame(1, Frame.Text(raw), owner)
+      runCurrent()
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      val result = Json.decodeFromString<WebSocketResponse>(reply) as OverlayResult
+      assertEquals("put-big", result.requestId)
+      assertFalse(result.success)
+      assertEquals(
+        "Request frame for put_overlay_asset is ${raw.encodeToByteArray().size} bytes; " +
+          "the limit is 128 bytes.",
+        result.error,
+      )
+    }
+
+  @Test
+  fun `a frame within its type's cap is decoded and dispatched`() =
+    runTest(testScope.testScheduler) {
+      val received = mutableListOf<WebSocketRequest>()
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+                received += request
+                return null
+              }
+            },
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 16L)),
+        )
+      val owner = server.registerClient(1, RecordingTransport())
+      // Above the smallest cap but of an uncapped type, so it decodes as before.
+      server.handleInboundTextFrame(
+        1,
+        Frame.Text("""{"type":"request_hierarchy","requestId":"h1"}"""),
+        owner,
+      )
+      advanceUntilIdle()
+      assertEquals(listOf<WebSocketRequest>(RequestHierarchy(requestId = "h1")), received)
     }
 
   @Test

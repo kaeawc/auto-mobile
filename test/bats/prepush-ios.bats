@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=parallel-within-file
 
 setup() {
   repo_root="$(cd "${BATS_TEST_DIRNAME}/../.." && pwd)"

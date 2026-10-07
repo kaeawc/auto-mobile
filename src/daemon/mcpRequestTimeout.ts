@@ -397,7 +397,7 @@ function resolveFileTransferBudgetMs(args: Record<string, unknown>, pushMs: numb
   );
 }
 
-/** Default device request timeout of a show/update, mirrored from the overlay tool. */
+/** Default device request timeout of a show/update, mirrored from the prototype tool. */
 const OVERLAY_MUTATION_DEFAULT_TIMEOUT_MS = 5_000;
 
 function countObservationAssets(assets: readonly unknown[], count: number): number {
@@ -531,6 +531,7 @@ const ARGUMENT_BUDGET_RESOLVERS: ReadonlyMap<string, (args: Record<string, unkno
         ),
     ],
     ["putAppFile", (args) => resolveFileTransferBudgetMs(args, APP_FILE_PUSH_TIMEOUT_MS)],
+    ["prototype", resolveOverlayAwaitBudgetMs],
     ["overlay", resolveOverlayAwaitBudgetMs],
   ]);
 

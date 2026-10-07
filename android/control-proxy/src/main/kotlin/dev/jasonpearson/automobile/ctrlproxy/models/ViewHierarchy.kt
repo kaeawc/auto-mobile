@@ -43,6 +43,9 @@ constructor(
   val sdkInt: Int? = null, // Android API level (e.g. 34)
   val deviceModel: String? = null, // e.g. "Pixel 8"
   val isEmulator: Boolean? = null, // Whether running on an emulator
+  // Runtime AccessibilityServiceInfo.isAccessibilityTool of the bound CtrlProxy service (#6233).
+  // Null when unknown (API < 31 has no such flag, or serviceInfo was unavailable).
+  val accessibilityTool: Boolean? = null,
   // Additive scale metadata (#4548): the ratio between the bounds units reported in this
   // hierarchy and physical screenshot pixels. Android accessibility bounds and screenshots
   // are BOTH physical pixels, so the truthful value is exactly 1 — reported explicitly so

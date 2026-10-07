@@ -54,6 +54,11 @@ export interface AdbExecuteOptions {
    * Receives the remaining command budget, if one was supplied.
    */
   beforeDispatch?: (remainingTimeoutMs?: number) => Promise<void>;
+  /**
+   * Shown in logs, perf span names and error messages instead of the command line, for a
+   * command that carries input which must never be logged (password-field typing).
+   */
+  logLabel?: string;
 }
 
 export interface AdbSpawnOptions {

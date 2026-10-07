@@ -852,6 +852,7 @@ export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
   "ime_key_events_v1",
+  "ime_clear_field_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
   OVERLAY_DISPLAY_CAPABILITY,

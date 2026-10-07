@@ -391,6 +391,7 @@ export interface SendKeysTextClient {
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
   supportsImeKeyEvents(): Promise<boolean>;
+  supportsImeClearField(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
   setKeyboardProfile(
     id: string,
@@ -1489,7 +1490,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       routing.signal,
       routing.display,
       async () => {
-        const cleared = await this.textClient.commitViaIme("", null, routing.signal, "clearField");
+        const supportsClearField = await this.textClient.supportsImeClearField();
+        this.checkAbort(routing.signal);
+        const cleared = supportsClearField
+          ? await this.textClient.commitViaIme("", null, routing.signal, "clearField")
+          : await this.textClient.clear();
         // Record safety before verification can abort or exhaust the request budget.
         progress.safeToRestore = this.canRestoreAfterImeCommit(cleared, prior, priorSubtype);
         if (routing.delivery === "clearField") {
@@ -2761,6 +2766,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           (await client.supportsCommand("request_commit_text")) &&
           (await client.supportsCommand("request_cancel_ime_commit")),
         supportsImeKeyEvents: async () => client.supportsCommand("ime_key_events_v1"),
+        supportsImeClearField: async () => client.supportsCommand("ime_clear_field_v1"),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
@@ -2808,6 +2814,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         client.requestImeAction(action, 5000, undefined, signal, onDispatch),
       supportsImeCommit: async () => false,
       supportsImeKeyEvents: async () => false,
+      supportsImeClearField: async () => false,
       supportsKeyboardProfiles: async () => false,
       setKeyboardProfile: async () => ({
         success: false,

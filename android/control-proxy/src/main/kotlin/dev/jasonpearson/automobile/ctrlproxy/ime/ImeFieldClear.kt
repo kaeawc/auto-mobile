@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.ime
 
 private const val CLEAR_READ_WINDOW_CHARS = 100_000
+private const val MAX_CLEAR_DELETIONS = 16
 
 /**
  * Clear through the editor connection before realistic typing so a rich-text composer retains its
@@ -16,10 +17,17 @@ internal fun clearImeField(
   val success = runCatching {
     // False can mean there was no composing span; still attempt the surrounding-text deletion.
     finishComposing()
+    repeat(MAX_CLEAR_DELETIONS) {
+      val before = readBefore(CLEAR_READ_WINDOW_CHARS)?.length ?: 0
+      val after = readAfter(CLEAR_READ_WINDOW_CHARS)?.length ?: 0
+      if (before == 0 && after == 0) return@runCatching true
+      deletionAttempted = true
+      if (!deleteSurrounding(before, after)) return@runCatching false
+    }
+    // Confirm the last deletion, but never keep writing to an editor that does not converge.
     val before = readBefore(CLEAR_READ_WINDOW_CHARS)?.length ?: 0
     val after = readAfter(CLEAR_READ_WINDOW_CHARS)?.length ?: 0
-    deletionAttempted = true
-    deleteSurrounding(before, after)
+    before == 0 && after == 0
   }
     .getOrDefault(false)
   return ImeCommitResult(

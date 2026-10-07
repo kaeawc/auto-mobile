@@ -449,6 +449,7 @@ function createTextClient(
       return options.supportsImeCommit ?? true;
     },
     supportsImeKeyEvents: async () => options.supportsImeKeyEvents ?? true,
+    supportsImeClearField: async () => true,
     supportsKeyboardProfiles: async () => options.supportsKeyboardProfiles ?? true,
     setKeyboardProfile: async (id) => {
       calls.push(`setKeyboardProfile:${id}`);
@@ -473,6 +474,43 @@ function createTextClient(
     getSupportsImeCommitCalls: () => supportsImeCommitCalls,
   };
 }
+
+test.each([
+  { flags: [], supported: false },
+  { flags: ["ime_key_events_v1"], supported: false },
+  { flags: ["full_command_set_v1", "ime_key_events_v1"], supported: false },
+  { flags: ["ime_clear_field_v1"], supported: true },
+  { flags: ["full_command_set_v1", "ime_clear_field_v1"], supported: true },
+])("Android adapter requires the advertised clear capability: %j", async ({ flags, supported }) => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  const device = { ...androidDevice, deviceId: `ime-clear-capability-${flags.join("-")}` };
+  const client = AndroidCtrlProxyClient.createForTesting(
+    device,
+    adb,
+    (url) => new FakeWebSocket(url, "none", 0, timer),
+    timer,
+  );
+  client["webSocketMessageHandlers"].connected({
+    type: "connected",
+    supportedCommands: ["request_commit_text", "request_cancel_ime_commit", ...flags],
+  });
+  const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+  try {
+    const executor = new DefaultSendKeysCommandExecutor(
+      device,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("", {}, 1)),
+      { timer },
+    );
+    expect(await executor["textClient"].supportsImeCommit()).toBe(true);
+    expect(await executor["textClient"].supportsImeClearField()).toBe(supported);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    instance.mockRestore();
+    await client.close();
+  }
+});
 
 function createAdbFactory(adb: FakeAdbExecutor): AdbClientFactory {
   // The catalog verifies component state with argv reads after `ime set`.

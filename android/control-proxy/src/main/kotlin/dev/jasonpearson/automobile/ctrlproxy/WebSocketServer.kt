@@ -290,6 +290,7 @@ class WebSocketServer(
     addAll(registeredRequestTypes)
     add("node_selector_actions")
     add("ime_key_events_v1")
+    add("ime_clear_field_v1")
     add("tap_double_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the

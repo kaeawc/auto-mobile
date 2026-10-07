@@ -134,6 +134,9 @@
             return .handled
         }
 
+        // `@Sendable` so the default `post` argument converts without a data-race warning; the
+        // body only captures its `String` parameters into a `Task`.
+        @Sendable
         static func postLocalNotification(title: String, body: String) {
             #if canImport(UserNotifications)
                 Task {

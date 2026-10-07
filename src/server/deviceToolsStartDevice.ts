@@ -794,20 +794,25 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       __mcpSessionId: internalSessionId,
     };
     validateCameraPosterPlatform(args);
-    const resolvedArgs = await resolveCameraPosterQr(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
-    const target = {
-      ...resolvedArgs,
-      ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
-    };
     const totalTimeoutMs = args.timeoutMs ?? DEFAULT_START_DEVICE_TIMEOUT_MS;
     return await runWithAcquisitionDeadline(
       rawArgs,
       getDeviceToolsDependencies().timer.now() + totalTimeoutMs,
       signal,
       "startDevice",
-      (deadlineMs, requestSignal, stage) =>
-        prepareDevice(
+      async (deadlineMs, requestSignal, stage) => {
+        // Poster rendering runs under the acquisition deadline and cancellation.
+        const resolvedArgs = await raceWithDeadline(resolveCameraPosterQr(args), {
+          timer: getDeviceToolsDependencies().timer,
+          signal: requestSignal,
+          label: "startDevice camera poster",
+        });
+        const target = {
+          ...resolvedArgs,
+          ...(exactAndroidAvdName ? { name: exactAndroidAvdName, matchExactName: true } : {}),
+        };
+        return prepareDevice(
           target,
           {
             bootTimeoutMs: totalTimeoutMs,
@@ -833,7 +838,8 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
           },
           progress,
           requestSignal,
-        ),
+        );
+      },
     );
   };
 

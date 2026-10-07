@@ -254,6 +254,22 @@ describe("startDevice handler", () => {
     expect(received).toBe("/posters/qr.png");
   });
 
+  it("cancels a stalled cameraPosterQr render when the request is aborted", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeMatcher.setImageResult(androidImage);
+    setDeviceToolsDependencies({
+      cameraPosterQrWriter: { writePoster: () => new Promise<string>(() => {}) },
+    });
+    const controller = new AbortController();
+    const start = callStartDevice(
+      { platform: "android", cameraPosterQr: { text: "hello" } },
+      controller.signal,
+    );
+    controller.abort(new Error("caller aborted"));
+    await expect(start).rejects.toThrow();
+    expect(fakeDeviceUtils.getExecutedOperations()).toEqual([]);
+  });
+
   it("rejects cameraPosterQr together with cameraPosterPath", async () => {
     await expect(
       callStartDevice({

@@ -63,6 +63,12 @@ export function iosSimulatorCapabilityInventory(
     capabilities: [
       biometricCapability,
       {
+        id: "ios.simulator.cameraPoster",
+        state: "unsupported",
+        source: "platform",
+        reason: "Camera posters are only supported at Android emulator boot.",
+      },
+      {
         id: "ios.simulator.nfc",
         state: "unsupported",
         source: "platform",
@@ -122,12 +128,22 @@ function avdCapabilityState(
 /**
  * Derive normalized Android feature identifiers from the AVD config values
  * selected by its image and hardware profile. Unknown config keys stay out of
- * the report so the inventory never over-claims an unverified feature.
+ * the hardware report so the inventory never over-claims an unverified feature.
+ * Camera posters are a boot-time emulator control, independent of the saved camera setting.
  */
 export function buildAndroidAvdCapabilityInventory(
   config: Readonly<Record<string, string | undefined>>,
 ): VirtualDeviceCapabilityInventory {
-  const capabilities = new Map<string, VirtualDeviceCapability>();
+  const capabilities = new Map<string, VirtualDeviceCapability>([
+    [
+      "android.emulator.cameraPoster",
+      {
+        id: "android.emulator.cameraPoster",
+        state: "available",
+        source: "platform",
+      },
+    ],
+  ]);
   for (const definition of ANDROID_AVD_CAPABILITIES) {
     const value = config[definition.configKey];
     const state = value && avdCapabilityState(value, definition.kind);

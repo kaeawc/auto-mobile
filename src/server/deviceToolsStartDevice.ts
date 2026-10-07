@@ -724,6 +724,14 @@ function buildBootedResponse(
   });
 }
 
+function validateCameraPosterPlatform(args: StartDeviceArgs): void {
+  if (args.cameraPosterPath !== undefined && args.platform !== "android") {
+    throw new ActionableError(
+      "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
+    );
+  }
+}
+
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   const { prepareDevice, stripInternalAcquisitionParams } = hooks;
 
@@ -737,6 +745,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       ...startDeviceSchema.parse(stripInternalAcquisitionParams(rawArgs)),
       __mcpSessionId: internalSessionId,
     };
+    validateCameraPosterPlatform(args);
     const exactAndroidAvdName = args.platform === "android" ? args.avdName : undefined;
     const target = {
       ...args,

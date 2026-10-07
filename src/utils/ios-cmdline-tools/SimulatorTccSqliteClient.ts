@@ -1,3 +1,4 @@
+import { customSimulatorDeviceSetPath } from "./simctlArgs";
 import { errorMessage } from "../describeUnknownError";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -102,10 +103,12 @@ export function defaultDeviceSetRoot(
   homeDirectory: string,
   environment: SimulatorDeviceSetEnvironment = process.env,
 ): string {
-  const configured = environment[CORESIMULATOR_DEVICE_SET_PATH_ENV]?.trim();
-  return configured
-    ? configured
-    : join(homeDirectory, "Library", "Developer", "CoreSimulator", "Devices");
+  // The env var name is unverified against a real toolchain; simctl explicitly
+  // passes --set as the owner-approved fallback (#6900). Device check owed.
+  return (
+    customSimulatorDeviceSetPath(environment) ??
+    join(homeDirectory, "Library", "Developer", "CoreSimulator", "Devices")
+  );
 }
 
 export function tccServiceForPermission(permission: string): string {

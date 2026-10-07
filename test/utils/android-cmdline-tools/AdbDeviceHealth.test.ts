@@ -150,3 +150,9 @@ describe("isAdbMissingDeviceError / extractAdbMissingDeviceId", () => {
     });
   }
 });
+
+test("matches a missing alias only when it belongs to the expected canonical", () => {
+  const error = new Error("adb: device 'localhost:5555' not found");
+  expect(isAdbMissingDeviceError(error, "emulator-5554", "localhost:5555")).toBe(true);
+  expect(isAdbMissingDeviceError(error, "emulator-5554", "localhost:5557")).toBe(false);
+});

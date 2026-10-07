@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "../../utils/ios-cmdline-tools/simctlArgs";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -120,35 +121,37 @@ export class VoiceOverToggle {
     // raw out of toggle(), matching TalkBackToggle's graceful contract (#3921).
     const boolValue = enabled ? "YES" : "NO";
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "write",
-        "com.apple.Accessibility",
-        "VoiceOverTouchEnabled",
-        "-bool",
-        boolValue,
-      ]);
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "notifyutil",
-        "-p",
-        "com.apple.accessibility.VoiceOverStatusDidChange",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "defaults",
+          "write",
+          "com.apple.Accessibility",
+          "VoiceOverTouchEnabled",
+          "-bool",
+          boolValue,
+        ]),
+      );
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "notifyutil",
+          "-p",
+          "com.apple.accessibility.VoiceOverStatusDidChange",
+        ]),
+      );
       const serviceCommand = enabled
         ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
         : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
       try {
-        await this.processExecutor.executeCommand("xcrun", [
-          "simctl",
-          "spawn",
-          this.device.deviceId,
-          ...serviceCommand.split(" "),
-        ]);
+        await this.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs(["spawn", this.device.deviceId, ...serviceCommand.split(" ")]),
+        );
       } catch (error) {
         if (enabled || !this.isServiceAlreadyStopped(error)) {
           throw error;

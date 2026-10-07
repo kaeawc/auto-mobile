@@ -501,7 +501,7 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);

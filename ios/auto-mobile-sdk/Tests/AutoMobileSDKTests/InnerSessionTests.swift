@@ -552,6 +552,37 @@ final class InnerSessionTests: XCTestCase {
         XCTAssertEqual(outcome.outcomes.map(\.0), [.performDefaultHandling])
     }
 
+    /// When the app follows a redirect, the URL loading system stops this load and starts the
+    /// target on a new instance; the inner session can still deliver the 302 it had queued. Those
+    /// late callbacks must never reach the client, or the app's task completes with the 302.
+    func testInnerCallbacksQueuedBeforeStopLoadingNeverReachTheClient() {
+        let client = ForwardingRecordingClient()
+        let url = URL(string: "https://api.example.com/old")!
+        let proto = AutoMobileURLProtocol(request: URLRequest(url: url), cachedResponse: nil, client: client)
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: url) // never resumed
+        let response = HTTPURLResponse(url: url, statusCode: 302, httpVersion: nil, headerFields: ["Location": "/new"])!
+        let disposition = OSAllocatedUnfairLock<[URLSession.ResponseDisposition]>(initialState: [])
+        let followed = OSAllocatedUnfairLock<[URLRequest?]>(initialState: [])
+
+        proto.stopLoading()
+        proto.forwardRedirect(response: response, newRequest: URLRequest(url: url)) { next in
+            followed.withLock { $0.append(next) }
+        }
+        proto.urlSession(session, dataTask: task, didReceive: response) { result in
+            disposition.withLock { $0.append(result) }
+        }
+        proto.urlSession(session, dataTask: task, didReceive: Data("moved".utf8))
+        proto.urlSession(session, task: task, didCompleteWithError: nil)
+        proto.urlSession(session, task: task, didCompleteWithError: URLError(.cancelled))
+
+        XCTAssertEqual(client.calls, [], "a stopped protocol must not call its client")
+        XCTAssertEqual(disposition.withLock { $0 }, [.cancel])
+        XCTAssertEqual(followed.withLock { $0.count }, 1)
+        XCTAssertNil(followed.withLock { $0 }[0], "the inner session must not follow the redirect itself")
+    }
+
     // MARK: #10139 requests the protocol declines
 
     func testRequestsThatCannotBeRelayedAreDeclinedSoTheAppStackHandlesThem() throws {

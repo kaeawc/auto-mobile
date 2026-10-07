@@ -1547,6 +1547,28 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             XCTAssertEqual(event.statusCode, 200)
             XCTAssertEqual(event.responseBodySize, 64)
             XCTAssertEqual(event.responseBody, "xxxxxxxx")
+            // The client stopped the load re-entrantly from its first callback, so nothing after
+            // it may reach the client; capture above is still complete.
+            XCTAssertEqual(client.calls, ["didReceive"])
+        }
+
+        func testConcurrentProtocolDataCallbacksAllReachTheClientWhileLoading() {
+            AutoMobileNetwork.shared.initialize(bundleId: "test.bundle", buffer: SdkEventBuffer { _ in })
+            let request = URLRequest(url: URL(string: "https://example.com/concurrent-callbacks")!)
+            let client = RecordingURLProtocolClient()
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            // Drive delegate callbacks directly. The task is never resumed, so no I/O occurs.
+            let task = session.dataTask(with: request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            proto.urlSession(session, dataTask: task, didReceive: response) { _ in }
+
+            DispatchQueue.concurrentPerform(iterations: 32) { _ in
+                proto.urlSession(session, dataTask: task, didReceive: Data("xx".utf8))
+            }
+            proto.urlSession(session, task: task, didCompleteWithError: nil)
+
             XCTAssertEqual(client.calls.filter { $0 == "didLoad" }.count, 32)
             XCTAssertEqual(client.calls.first, "didReceive")
             XCTAssertEqual(client.calls.last, "finish")

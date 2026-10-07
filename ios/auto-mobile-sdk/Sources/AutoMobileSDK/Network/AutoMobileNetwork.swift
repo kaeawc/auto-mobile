@@ -879,12 +879,16 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        let previous = state.withLock { state in
+        let (stopped, previous) = state.withLock { state in
             let previous = state.receivedResponse
             state.receivedResponse = response
-            return previous
+            return (state.stopped, previous)
         }
         withExtendedLifetime(previous) {}
+        guard !stopped else {
+            completionHandler(.cancel)
+            return
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         completionHandler(.allow)
     }
@@ -892,24 +896,32 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
     public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data) {
         // Accumulate response data for body capture (up to configured limit)
         let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
-        state.withLock { state in
+        let stopped = state.withLock { state in
             state.totalBytesReceived += data.count
             if state.receivedData.count < maxBytes {
                 state.receivedData.append(data.prefix(maxBytes - state.receivedData.count))
             }
+            return state.stopped
         }
+        guard !stopped else { return }
         client?.urlProtocol(self, didLoad: data)
     }
 
     public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
         let snapshot = state.withLock { $0 }
         // A redirected request's hop was already recorded when it was handed to the URL loading
-        // system; its completion (the redirect response's body, or a cancel when the app follows
-        // the redirect) must still reach the client but must not be recorded a second time.
+        // system; its completion (the redirect response's body when the app refuses the redirect)
+        // must still reach the client but must not be recorded a second time.
         let record: (NetworkRequestRecord) -> Void = snapshot.redirected
             ? { _ in }
             : { AutoMobileNetwork.shared.recordRequest($0) }
         let durationMs = snapshot.startTime.map { Date().timeIntervalSince($0) * 1000 }
+        // After stopLoading() the URL loading system owns the outer task again (it cancelled the
+        // load, or followed a redirect on a new protocol instance), so this instance must never
+        // call the client. The inner session can still deliver callbacks it had already queued
+        // when the cancel landed; forwarding a followed redirect's 302 then completed the app's
+        // task with the redirect response instead of the redirect target.
+        let client = snapshot.stopped ? nil : self.client
 
         if let error = error {
             record(NetworkRequestRecord(
@@ -970,13 +982,21 @@ extension AutoMobileURLProtocol {
         // The inner request carries our handled marker; the redirected load must start unmarked
         // so it is captured again as its own request.
         let redirected = Self.removingHandledMarker(from: newRequest)
-        state.withLock { $0.redirected = true }
+        let stopped = state.withLock { state -> Bool in
+            state.redirected = true
+            return state.stopped
+        }
+        guard !stopped else {
+            completionHandler(nil)
+            return
+        }
         recordRedirectHop(response)
         client?.urlProtocol(self, wasRedirectedTo: redirected, redirectResponse: response)
         // Never follow inside the inner session: the app (or the system default) owns that choice.
         // Do not cancel the inner task: when the app refuses the redirect, the URL loading system
         // takes the redirect response and its body from this load; when the app follows, it stops
-        // this load itself (observed on macOS CFNetwork; cancelling here hangs the refuse case).
+        // this load itself (observed on macOS CFNetwork; cancelling here hangs the refuse case),
+        // and the stopped guards in the data-delegate callbacks keep late inner ones off the client.
         completionHandler(nil)
     }
 

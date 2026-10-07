@@ -218,7 +218,11 @@ export function projectSanitizedObserveSkeleton(
 function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   const elements = skeletonElementsForProjection(source);
   const { skeleton, context, keyboard } = elements
-    ? projectSkeleton(elements, source.screenSize)
+    ? projectSkeleton(
+        elements,
+        source.screenSize,
+        isIosObservation(source) ? undefined : source.viewHierarchy,
+      )
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;
   if (keyboard) {

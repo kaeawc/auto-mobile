@@ -1,7 +1,6 @@
 import { isCollectionElementProperties } from "./elementProperties";
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
-import { nodeBounds as rawNodeBounds } from "../../models/ViewHierarchyResult";
 import { logger } from "../../utils/logger";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
@@ -1256,36 +1255,6 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Find an element by its index in the flattened view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @param index - The index of the element to find
-   * @returns The element at the specified index or null if not found
-   */
-  findElementByIndex(
-    viewHierarchy: ViewHierarchyResult,
-    index: number,
-  ): { element: Element; text?: string } | null {
-    if (!viewHierarchy || index < 0) {
-      return null;
-    }
-
-    const flattenedElements = this.parser.flattenViewHierarchy(viewHierarchy, {
-      includeWindows: true,
-      windowOrder: "topmost-first",
-    });
-
-    if (index >= flattenedElements.length) {
-      return null;
-    }
-
-    const found = flattenedElements[index];
-    return {
-      element: found.element,
-      text: found.text,
-    };
-  }
-
-  /**
    * Find scrollable elements in the view hierarchy
    * @param viewHierarchy - The view hierarchy to search
    * @returns Array of scrollable elements
@@ -1444,137 +1413,6 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Find child elements within a parent element's bounds
-   * @param viewHierarchy - The view hierarchy to search
-   * @param parentElement - The parent element
-   * @returns Array of child elements
-   */
-  findChildElements(viewHierarchy: ViewHierarchyResult, parentElement: Element): Element[] {
-    if (!viewHierarchy || !parentElement) {
-      return [];
-    }
-
-    const rootNodes = [
-      ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-    ];
-    const childElements: Element[] = [];
-    const parentBounds = parentElement.bounds;
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeBounds = this.parser.parseBounds(rawNodeBounds(node));
-
-        if (!nodeBounds) {
-          return;
-        }
-
-        // Check if the node is within the parent's bounds but not the parent itself
-        const isWithin =
-          nodeBounds.left >= parentBounds.left &&
-          nodeBounds.top >= parentBounds.top &&
-          nodeBounds.right <= parentBounds.right &&
-          nodeBounds.bottom <= parentBounds.bottom;
-
-        const isNotParent =
-          nodeBounds.left !== parentBounds.left ||
-          nodeBounds.top !== parentBounds.top ||
-          nodeBounds.right !== parentBounds.right ||
-          nodeBounds.bottom !== parentBounds.bottom;
-
-        if (isWithin && isNotParent) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            childElements.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    // Sort elements by vertical position
-    childElements.sort((a, b) => a.bounds.top - b.bounds.top);
-
-    return childElements;
-  }
-
-  /**
-   * Find elements that look like spannable text elements
-   * @param element - The parent element to search within
-   * @returns Array of spannable elements or null if none found
-   */
-  findSpannables(element: Element): Element[] | null {
-    if (!element) {
-      return null;
-    }
-
-    // Common classes for spannable text elements in Android
-    const spannableClasses = [
-      "android.widget.TextView",
-      "android.widget.EditText",
-      "android.widget.Button",
-      "android.widget.CheckBox",
-      "android.widget.RadioButton",
-      "android.widget.Switch",
-      "android.widget.Spinner",
-    ];
-
-    // Check if the element itself is a spannable
-    if (
-      element.class &&
-      spannableClasses.some((cls) => element.class?.includes(cls)) &&
-      element.text
-    ) {
-      return [element];
-    }
-
-    // Find all spannable children
-    const spannables: Element[] = [];
-
-    // Process each child if the node structure is available
-    if (element.node) {
-      const children = element.node;
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          this.collectSpannableArrayChild(child, spannableClasses, spannables);
-        }
-      } else if (typeof children === "object") {
-        const parsedNode = this.parser.parseNodeBounds(children);
-        this.collectDescendantSpannables(parsedNode, spannables);
-      }
-    }
-
-    return spannables.length > 0 ? spannables : null;
-  }
-
-  private collectSpannableArrayChild(
-    child: Record<string, unknown>,
-    spannableClasses: string[],
-    spannables: Element[],
-  ): void {
-    const parsedNode = this.parser.parseNodeBounds(child);
-    if (
-      parsedNode &&
-      parsedNode.class &&
-      spannableClasses.some((cls) => parsedNode.class?.includes(cls)) &&
-      parsedNode.text
-    ) {
-      spannables.push(parsedNode);
-    }
-
-    // Recursively search for spannables in this child
-    this.collectDescendantSpannables(parsedNode, spannables);
-  }
-
-  private collectDescendantSpannables(parsedNode: Element | null, spannables: Element[]): void {
-    if (parsedNode) {
-      const childSpannables = this.findSpannables(parsedNode);
-      if (childSpannables) {
-        spannables.push(...childSpannables);
-      }
-    }
-  }
-
-  /**
    * Find a focused text input in the view hierarchy
    * @param viewHierarchy - The view hierarchy to search
    * @returns The focused text input element or null if not found
@@ -1598,26 +1436,6 @@ export class DefaultElementFinder implements ElementFinder {
   }
 
   /**
-   * Check if an element is currently focused based on view hierarchy attributes
-   * @param element - The element to check
-   * @returns True if the element appears to be focused
-   */
-  isElementFocused(element: any): boolean {
-    // Check for focus-related attributes
-    const focused = element.focused === "true" || element.focused === true;
-    const selected = element.selected === "true" || element.selected === true;
-
-    // Some UI frameworks use 'isFocused' instead of 'focused'
-    const isFocused = element.isFocused === "true" || element.isFocused === true;
-
-    // Check if element has keyboard focus (for text inputs)
-    const hasKeyboardFocus =
-      element["has-keyboard-focus"] === "true" || element["has-keyboard-focus"] === true;
-
-    return focused || selected || isFocused || hasKeyboardFocus;
-  }
-
-  /**
    * Check whether an editable element owns input focus, excluding selection state.
    * Android control-proxy nodes expose accessibility focus with the serialized
    * `accessibility-focused` key; accept its raw camelCase spelling as well.
@@ -1634,28 +1452,6 @@ export class DefaultElementFinder implements ElementFinder {
       element.accessibilityFocused === true;
 
     return focused || isFocused || hasKeyboardFocus || accessibilityFocused;
-  }
-
-  /**
-   * Validate that an element with optional text matches expectations
-   * @param foundElement - The element found by index
-   * @param expectedText - Optional expected text for validation
-   * @returns True if the element matches expectations
-   */
-  validateElementText(
-    foundElement: { element: Element; text?: string },
-    expectedText?: string,
-  ): boolean {
-    if (!expectedText) {
-      return true; // No text validation required
-    }
-
-    if (!foundElement.text) {
-      return false; // Expected text but element has no text
-    }
-
-    // Use partial matching for text validation
-    return this.textMatcher.partialTextMatch(foundElement.text, expectedText, false);
   }
 
   /**

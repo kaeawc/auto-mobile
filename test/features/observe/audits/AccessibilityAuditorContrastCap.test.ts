@@ -47,7 +47,7 @@ function readFixture<T>(relativePath: string): T {
 let gboardHierarchy: ViewHierarchyResult;
 let imageBackend: FakeImageBackend;
 
-beforeAll(() => {
+beforeAll(async () => {
   gboardHierarchy = readFixture<ViewHierarchyResult>(
     "android-ime-window/playground-gboard-api36.json",
   );
@@ -61,6 +61,8 @@ beforeAll(() => {
     height: 2400,
     data: Buffer.alloc(1080 * 2400 * 4, 0x80),
   });
+  // Warm the first full-size contrast pass outside JUnit's per-test timing.
+  await audit(auditorWithCaptureFor("obs-warmup"), gboardObservation("obs-warmup"));
 });
 
 /** A bare hierarchy capture (Playground with Gboard open) wrapped as an observation. */

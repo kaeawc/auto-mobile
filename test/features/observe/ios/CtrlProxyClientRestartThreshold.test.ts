@@ -10,6 +10,10 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { CtrlProxyIosManager } from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
+import {
+  RealCtrlProxyWebSocketInTestError,
+  defaultWebSocketFactory,
+} from "../../../../src/features/observe/DeviceServiceClient";
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
@@ -93,6 +97,60 @@ describe("IOSCtrlProxyClient restart threshold", () => {
 
     // forceRestart should have been called exactly once (at failure #3)
     expect(fakeManager.forceRestartCount).toBe(1);
+  });
+
+  test("the unit-test WebSocket guard propagates and never triggers a restart (#10470)", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const fakeManager = createFakeManager(fakeTimer);
+    let setupCalls = 0;
+    fakeManager.setup = async () => {
+      setupCalls++;
+      return { success: false as const, message: "test" };
+    };
+
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => defaultWebSocketFactory(url),
+      fakeTimer,
+      () => fakeManager,
+    );
+
+    for (let i = 0; i < 4; i++) {
+      await expect(client.ensureConnected()).rejects.toBeInstanceOf(
+        RealCtrlProxyWebSocketInTestError,
+      );
+    }
+    await expect(client.requestTapCoordinates(10, 20)).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    await new Promise((resolve) => fakeTimer.setTimeout(resolve, 10));
+
+    expect(fakeManager.forceRestartCount).toBe(0);
+    expect(setupCalls).toBe(0);
+  });
+
+  test("the guard on the post-auto-setup redial is rethrown, not reported as setup failure", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const fakeManager = createFakeManager(fakeTimer);
+    fakeManager.isRunning = async () => true;
+    const failOnce = createInstantFailureWebSocketFactory(fakeTimer);
+    let dials = 0;
+
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => (++dials === 1 ? failOnce(url) : defaultWebSocketFactory(url)),
+      fakeTimer,
+      () => fakeManager,
+    );
+
+    await expect(client.ensureConnected()).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    expect(dials).toBe(2);
   });
 
   test("restarts again after each three further failed handshakes only until budget exhaustion", async () => {

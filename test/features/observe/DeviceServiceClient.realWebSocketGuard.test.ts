@@ -1,16 +1,24 @@
 import { describe, expect, test } from "bun:test";
+import type WebSocket from "ws";
 import {
+  DeviceServiceClient,
   REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV,
+  RealCtrlProxyWebSocketInTestError,
   assertUnitTestRealWebSocketAllowed,
   defaultWebSocketFactory,
+  type WebSocketFactory,
 } from "../../../src/features/observe/DeviceServiceClient";
 import { ActionableError } from "../../../src/models/ActionableError";
+import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket";
 
 const URL = "ws://127.0.0.1:8765/ws";
 
 describe("real CtrlProxy WebSocket unit-test guard (#10470)", () => {
   test("the default factory refuses a real socket under bun test", () => {
     expect(process.env.NODE_ENV).toBe("test");
+    expect(() => defaultWebSocketFactory(URL)).toThrow(RealCtrlProxyWebSocketInTestError);
     expect(() => defaultWebSocketFactory(URL)).toThrow(ActionableError);
     expect(() => defaultWebSocketFactory(URL)).toThrow(/requestTapCoordinates/);
   });
@@ -45,4 +53,81 @@ describe("real CtrlProxy WebSocket unit-test guard (#10470)", () => {
       expect(() => assertUnitTestRealWebSocketAllowed(URL, { NODE_ENV: nodeEnv })).not.toThrow();
     },
   );
+});
+
+/** Minimal concrete client that counts the failed-connect funnel recovery hangs off. */
+class GuardTestClient extends DeviceServiceClient {
+  protected readonly logTag = "GuardTestClient";
+  failedConnectCount = 0;
+
+  constructor(timer: FakeTimer, factory: WebSocketFactory) {
+    super(timer, factory, { maxConnectionAttempts: 3 });
+  }
+
+  protected onConnectAttemptFailed(): void {
+    this.failedConnectCount++;
+  }
+
+  protected getWebSocketUrl(): string {
+    return URL;
+  }
+
+  protected handleMessage(_data: WebSocket.Data): void {}
+
+  protected onConnectionEstablished(): void {}
+
+  protected onConnectionClosed(): void {}
+
+  protected cancelScreenshotBackoff(): void {}
+
+  protected async setupBeforeConnect(
+    _perf: PerformanceTracker,
+    _signal: AbortSignal,
+  ): Promise<void> {}
+}
+
+describe("the guard is rethrown, never counted as a failed connect", () => {
+  test("ensureConnected rejects with the guard error and never records a failure", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new GuardTestClient(timer, defaultWebSocketFactory);
+    // Past maxConnectionAttempts: the guard must not slide into a silent cooldown.
+    for (let i = 0; i < 5; i++) {
+      await expect(client.ensureConnected()).rejects.toBeInstanceOf(
+        RealCtrlProxyWebSocketInTestError,
+      );
+    }
+    expect(client.failedConnectCount).toBe(0);
+    expect(client.getLastConnectionFailureMessage()).toBeUndefined();
+    expect(client.getReconnectStatus()).toBeNull();
+    await client.close();
+  });
+
+  test("waitForConnection stops retrying and rethrows the guard error", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let dials = 0;
+    const client = new GuardTestClient(timer, (url) => {
+      dials++;
+      return defaultWebSocketFactory(url);
+    });
+    await expect(client.waitForConnection(5, 10)).rejects.toBeInstanceOf(
+      RealCtrlProxyWebSocketInTestError,
+    );
+    expect(dials).toBe(1);
+    expect(client.failedConnectCount).toBe(0);
+    await client.close();
+  });
+
+  test("an ordinary connect failure still counts toward recovery", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new GuardTestClient(timer, createInstantFailureWebSocketFactory(timer));
+    for (let i = 0; i < 3; i++) {
+      expect(await client.ensureConnected()).toBe(false);
+    }
+    expect(client.failedConnectCount).toBe(3);
+    expect(client.getLastConnectionFailureMessage()).toBeDefined();
+    await client.close();
+  });
 });

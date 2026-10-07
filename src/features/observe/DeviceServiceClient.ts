@@ -52,6 +52,27 @@ function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
+ * Thrown by {@link assertUnitTestRealWebSocketAllowed}. It is a test-harness
+ * misconfiguration, not a connect failure: every catch on the connect path
+ * rethrows it before recording a failed attempt, so a leaking unit test fails
+ * loudly and never counts toward the platform clients' service recovery or
+ * restart (which would act on an attached device).
+ */
+export class RealCtrlProxyWebSocketInTestError extends ActionableError {
+  constructor(message: string) {
+    super(message);
+    this.name = "RealCtrlProxyWebSocketInTestError";
+  }
+}
+
+/** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
+export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
+  if (error instanceof RealCtrlProxyWebSocketInTestError) {
+    throw error;
+  }
+}
+
+/**
  * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
  * CtrlProxy socket. On a developer machine with an emulator or simulator running,
  * adb/port forwards make `ws://127.0.0.1:<port>/ws` a live device, so an
@@ -67,7 +88,7 @@ export function assertUnitTestRealWebSocketAllowed(
   if (env.NODE_ENV !== "test" || isRealCtrlProxyWebSocketOptInEnabled(env)) {
     return;
   }
-  throw new ActionableError(
+  throw new RealCtrlProxyWebSocketInTestError(
     `Unit test tried to open a real CtrlProxy WebSocket to ${url}. With an ` +
       "emulator or simulator running this reaches a live device (issue #10470). " +
       "Stub the client method the code under test calls (e.g. " +
@@ -429,6 +450,7 @@ export abstract class DeviceServiceClient {
         maxAttempts,
         signal,
         delays: delayMs,
+        shouldRetry: (error) => !(error instanceof RealCtrlProxyWebSocketInTestError),
         onRetry: (_error, attempt) => {
           logger.debug(
             `[${this.logTag}] Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delayMs}ms`,
@@ -438,6 +460,9 @@ export abstract class DeviceServiceClient {
     );
     signal?.throwIfAborted();
 
+    if (result.error instanceof RealCtrlProxyWebSocketInTestError) {
+      throw result.error;
+    }
     if (!result.success) {
       logger.warn(
         `[${this.logTag}] WebSocket not ready after ${maxAttempts} attempts (${maxAttempts * delayMs}ms)`,
@@ -889,9 +914,7 @@ export abstract class DeviceServiceClient {
           }),
       );
     } catch (error) {
-      this.isConnecting = false;
-      this.recordFailedConnect(error, background);
-      return false;
+      return this.failConnectAttempt(error, background);
     }
   }
 
@@ -920,6 +943,22 @@ export abstract class DeviceServiceClient {
       this.connectionAttempts++;
       this.lastConnectionAttempt = this.timer.now();
     }
+  }
+
+  private failConnectAttempt(error: unknown, background: boolean): false {
+    this.isConnecting = false;
+    if (error instanceof RealCtrlProxyWebSocketInTestError) {
+      // A test-harness misconfiguration, not a connect failure: never let it
+      // count toward cooldown or the platform clients' service recovery.
+      // Refund the attempt too, or the third leak would enter cooldown and
+      // return false silently instead of failing the test.
+      if (!background) {
+        this.connectionAttempts = Math.max(0, this.connectionAttempts - 1);
+      }
+      throw error;
+    }
+    this.recordFailedConnect(error, background);
+    return false;
   }
 
   private recordFailedConnect(error: unknown, background: boolean): void {

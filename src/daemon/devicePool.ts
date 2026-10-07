@@ -1,3 +1,4 @@
+import type { Environment } from "./poolConfig";
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
@@ -602,6 +603,7 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface DevicePoolDependencies {
+  env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
   sessionManager: SessionManager;
@@ -891,6 +893,7 @@ export class DevicePool {
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
 
   constructor({
+    env,
     sessionManager,
     daemonSessionId,
     timer = defaultTimer,
@@ -969,7 +972,7 @@ export class DevicePool {
     this.idleDeviceReaper = this.createIdleDeviceReaper();
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
-    this.autolockManager = this.createAutolockManager();
+    this.autolockManager = this.createAutolockManager(env);
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
@@ -1281,7 +1284,7 @@ export class DevicePool {
     };
   }
 
-  private createAutolockManager(): DeviceAutolockManager {
+  private createAutolockManager(env: Environment | undefined): DeviceAutolockManager {
     return new DeviceAutolockManager(
       {
         getSessionManager: () => this.sessionManager,
@@ -1318,6 +1321,7 @@ export class DevicePool {
       },
       this.deviceSessionRepository,
       this.idGenerator,
+      env,
     );
   }
 
@@ -6530,8 +6534,8 @@ export class DevicePool {
     return this.autolockManager.attachAutolockSessionToMcpSession(...args);
   }
 
-  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
-    this.autolockManager.assertAutolockAccess(deviceId, sessionUuid);
+  assertAutolockAccess(...args: Parameters<DeviceAutolockManager["assertAutolockAccess"]>): void {
+    this.autolockManager.assertAutolockAccess(...args);
   }
 
   /**

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as videoRecordingManager from "../../src/server/videoRecordingManager";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -96,7 +97,17 @@ function buildDaemon(overrides: {
 }
 
 describe("Daemon.initializeDatabase fatality", () => {
+  let configureRecordings: ReturnType<
+    typeof spyOn<typeof videoRecordingManager, "setVideoRecordingManagerDependencies">
+  >;
+  beforeEach(() => {
+    configureRecordings = spyOn(
+      videoRecordingManager,
+      "setVideoRecordingManagerDependencies",
+    ).mockResolvedValue(undefined);
+  });
   afterEach(() => {
+    configureRecordings.mockRestore();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
@@ -135,6 +146,9 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(initializer.initializeCalls).toBe(1);
     expect(deviceSessionRepository.markStaleCalls).toBe(1);
     expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(new Set(["live-peer-daemon"]));
+    expect(configureRecordings).toHaveBeenCalledWith({
+      liveDaemonSessionIds: new Set(["live-peer-daemon"]),
+    });
     expect(tracker.recorded).toHaveLength(0);
     // Reset happens only at the END of start() (after all startup DB reads),
     // not here — a later permanent failure recorded before its fatal exit must
@@ -179,6 +193,9 @@ describe("Daemon.initializeDatabase fatality", () => {
       new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
     );
     expect(deviceSessionRepository.incumbentSessionStatus).toBe("active");
+    expect(configureRecordings).toHaveBeenCalledWith({
+      liveDaemonSessionIds: new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
+    });
   });
 
   test("permanent failures back off with increasing delay to avoid a restart hot-loop", async () => {

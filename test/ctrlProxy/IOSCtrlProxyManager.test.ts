@@ -1,3 +1,4 @@
+import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import {
@@ -25,6 +26,14 @@ import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/Xcod
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
+
+function tunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
+  const client = manager["tunnelClient"];
+  if (!(client instanceof DefaultIosTunnelClient)) {
+    throw new Error("Expected default tunnel");
+  }
+  return client;
+}
 
 interface FakeListeningProcess {
   pid: number;
@@ -1990,6 +1999,82 @@ describe("IOSCtrlProxyManager", function () {
     });
   });
 
+  describe("cleanup uninstall backend routing", () => {
+    for (const [deviceId, simulator] of [
+      ["A1B2C3D4-E5F6-7890-ABCD-EF1234567890", true],
+      ["00008030-001C2D3E1234567A", false],
+    ] as const) {
+      for (const [method, bundleId] of [
+        ["uninstallLegacyAppIfPresent", "dev.jasonpearson.automobile.XCTestServiceApp"],
+        ["verifyInstalledAppBundle", IOSCtrlProxyManager.APP_BUNDLE_ID],
+      ] as const) {
+        for (const fails of [false, true]) {
+          test(`${method} on ${simulator ? "simulator" : "physical"} skips termination${fails ? " and swallows uninstall failure" : ""}`, async () => {
+            const executor = new FakeProcessExecutor();
+            const uninstalls: unknown[][] = [];
+            const lookups: unknown[][] = [];
+            const failure = new Error("uninstall failed");
+            const appManager = {
+              getInstalledAppBundleHash: async (...args: unknown[]) => {
+                lookups.push(args);
+                return "installed-hash";
+              },
+              uninstallApp: async (...args: unknown[]) => {
+                uninstalls.push(args);
+                if (fails) {
+                  throw failure;
+                }
+              },
+            } as unknown as DeviceAppManager;
+            const builder = createFakeBuilder();
+            builder.getExpectedAppHash = () => "expected-hash";
+            const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+              { ...testDevice, deviceId },
+              fakeTimer,
+              builder,
+              executor,
+              undefined,
+              appManager,
+            );
+            const internal = manager as unknown as {
+              uninstallLegacyAppIfPresent(): Promise<void>;
+              verifyInstalledAppBundle(): Promise<void>;
+            };
+            const previousSkip = process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+            delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+            const warn = spyOn(logger, "warn").mockImplementation(() => {});
+            try {
+              await internal[method]();
+              expect(uninstalls).toHaveLength(1);
+              expect(uninstalls[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+              expect(uninstalls[0][3]).toBeUndefined();
+              expect(lookups[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
+              expect(executor.getExecutedCommands()).toEqual([]);
+              expect(executor.getSpawnedProcesses()).toEqual([]);
+              if (fails) {
+                expect(
+                  warn.mock.calls.some(([message]) => String(message).includes("uninstall failed")),
+                ).toBe(true);
+              }
+              if (method === "uninstallLegacyAppIfPresent") {
+                await internal[method]();
+                expect(lookups).toHaveLength(1);
+                expect(lookups[0][3]).toEqual({ throwOnLookupTimeout: true });
+              }
+            } finally {
+              warn.mockRestore();
+              if (previousSkip === undefined) {
+                delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
+              } else {
+                process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH = previousSkip;
+              }
+            }
+          });
+        }
+      }
+    }
+  });
+
   // #6575: the legacy-app uninstall probe used to run on every setup() call,
   // including the attemptedSetup fast path that exists to make repeat calls
   // cheap. It should fire at most once per manager instance.
@@ -2357,15 +2442,14 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { iproxyProcessId: number }).iproxyProcessId = fakeProcess.pid;
-      (manager as unknown as { iproxyProcess: ChildProcess }).iproxyProcess =
-        fakeProcess as unknown as ChildProcess;
+      tunnel(manager)["iproxyProcessId"] = fakeProcess.pid;
+      tunnel(manager)["iproxyProcess"] = fakeProcess as unknown as ChildProcess;
 
       fakeTimer.enableAutoAdvance();
       await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
 
       expect(signals).toEqual([undefined, "SIGKILL"]);
-      expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBeNull();
+      expect(tunnel(manager)["iproxyProcessId"]).toBeNull();
     });
 
     test("restarts iproxy after unexpected exit", async function () {
@@ -2427,12 +2511,8 @@ describe("IOSCtrlProxyManager", function () {
           await Promise.resolve();
         }
 
-        expect((manager as unknown as { iproxyProcessId: number | null }).iproxyProcessId).toBe(
-          2222,
-        );
-        expect(
-          (manager as unknown as { iproxyProcess: FakeChildProcess | null }).iproxyProcess,
-        ).toBe(newProcess);
+        expect(tunnel(manager)["iproxyProcessId"]).toBe(2222);
+        expect(tunnel(manager)["iproxyProcess"]).toBe(newProcess);
         expect(eventTimer.getPendingTimeoutCount()).toBe(0);
         expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
       }
@@ -3329,8 +3409,6 @@ describe("IOSCtrlProxyManager", function () {
       const internal = manager as unknown as {
         xcTestProcessId: number | null;
         xcTestProcess: FakeChildProcess | null;
-        iproxyProcessId: number | null;
-        iproxyProcess: FakeChildProcess | null;
         awaitStartupOrphanRunnerReap: () => Promise<void>;
         isCtrlProxyProcessAlive: () => Promise<boolean>;
         isRunning: () => Promise<boolean>;
@@ -3343,8 +3421,9 @@ describe("IOSCtrlProxyManager", function () {
       internal.startOnDevice = async () => {
         internal.xcTestProcessId = runnerPid;
         internal.xcTestProcess = new FakeChildProcess(fakeTimer);
-        internal.iproxyProcessId = iproxy.pid!;
-        internal.iproxyProcess = iproxy;
+        fakeExecutor.setNextSpawnProcess(iproxy);
+        tunnel(manager)["iproxyProcessId"] = iproxy.pid!;
+        tunnel(manager)["iproxyProcess"] = fakeExecutor.spawn("iproxy", []);
       };
       internal.waitForHealthEndpoint = async (start) => {
         healthPollingEntered.resolve();
@@ -3654,14 +3733,35 @@ describe("IOSCtrlProxyManager", function () {
         "idevice_id -l",
         createExecResult(`${physicalDevice.deviceId}\n`, ""),
       );
-      // Health endpoint responds → confirms the tracked PID really is CtrlProxy
-      fakeExecutor.setCommandResponse(
-        "curl -s",
-        createExecResult(JSON.stringify({ status: "ok", deviceId: physicalDevice.deviceId }), ""),
+      // On a local physical device /health is only reachable through iproxy, so the
+      // runner answers only once an iproxy spawn has been recorded. Stubbing a healthy
+      // answer with no tunnel modelled a state that cannot exist and hid the second
+      // xcodebuild the old code launched here (#10234).
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          fakeExecutor.getSpawnedProcesses().some((spawned) => spawned.command === "iproxy")
+            ? JSON.stringify({ status: "ok", deviceId: physicalDevice.deviceId })
+            : "",
+          "",
+        ),
       );
-
       const fakeProcess = new FakeChildProcess();
       fakeExecutor.setNextSpawnProcess(fakeProcess);
+      // The tracked PID is our still-running device runner; the respawned iproxy is alive too.
+      installListeningProcessFakes(fakeExecutor, [
+        {
+          pid: 12345,
+          port: 8765,
+          command:
+            `xcodebuild test-without-building ` +
+            `-xctestrun /tmp/automobile-ctrl-proxy/automobile-runner-${physicalDevice.deviceId}.xctestrun ` +
+            `-destination id=${physicalDevice.deviceId} ` +
+            `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+          environment: `CTRL_PROXY_IOS_PORT=8765 AUTOMOBILE_DEVICE_ID=${physicalDevice.deviceId}`,
+          alive: true,
+        },
+        { pid: fakeProcess.pid!, port: 0, command: "iproxy", alive: true },
+      ]);
 
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         physicalDevice,
@@ -3677,7 +3777,7 @@ describe("IOSCtrlProxyManager", function () {
       fakeTimer.enableAutoAdvance();
       await manager.start();
 
-      // iproxy should have been (re-)spawned even though CtrlProxy was alive
+      // iproxy is (re-)spawned for the live runner, and no second xcodebuild is launched
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].command).toBe("iproxy");
     });
@@ -3904,8 +4004,8 @@ describe("IOSCtrlProxyManager", function () {
         ).startIproxyTunnel();
 
         // Simulate iproxy process dying between monitor ticks (clears tracking state)
-        (manager as unknown as { iproxyProcessId: null }).iproxyProcessId = null;
-        (manager as unknown as { iproxyProcess: null }).iproxyProcess = null;
+        tunnel(manager)["iproxyProcessId"] = null;
+        tunnel(manager)["iproxyProcess"] = null;
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
 
@@ -4917,9 +5017,12 @@ describe("IOSCtrlProxyManager", function () {
         const internal = manager as unknown as {
           startOnDevice: () => Promise<void>;
           startIproxyTunnel: () => Promise<void>;
+          assertTunnelForwardsServicePort: () => void;
           verifyInstalledAppBundle: () => Promise<void>;
         };
         internal.startIproxyTunnel = async () => {};
+        // The tunnel is stubbed out, so there is no forwarded port to compare (#10232).
+        internal.assertTunnelForwardsServicePort = () => {};
         internal.verifyInstalledAppBundle = async () => {};
         if (rejectVerification) {
           await expect(internal.startOnDevice()).rejects.toThrow("runner verification rejected");
@@ -4972,11 +5075,13 @@ describe("IOSCtrlProxyManager", function () {
         const internal = manager as unknown as {
           verifyInstalledAppBundle: () => Promise<void>;
           startIproxyTunnel: () => Promise<void>;
+          assertTunnelForwardsServicePort: () => void;
           startOnDevice: () => Promise<void>;
         };
         // Bypass tunnel/install verification — not under test here.
         internal.verifyInstalledAppBundle = async () => {};
         internal.startIproxyTunnel = async () => {};
+        internal.assertTunnelForwardsServicePort = () => {};
 
         await internal.startOnDevice();
 
@@ -5024,12 +5129,14 @@ describe("IOSCtrlProxyManager", function () {
       const internal = manager as unknown as {
         verifyInstalledAppBundle: () => Promise<void>;
         startIproxyTunnel: () => Promise<void>;
+        assertTunnelForwardsServicePort: () => void;
         startOnDevice: () => Promise<void>;
         xcTestProcessId: number | null;
         xcTestProcess: FakeChildProcess | null;
       };
       internal.verifyInstalledAppBundle = async () => {};
       internal.startIproxyTunnel = async () => {};
+      internal.assertTunnelForwardsServicePort = () => {};
 
       await internal.startOnDevice();
       const staleChild = fakeExecutor.getSpawnedProcesses()[0].process as FakeChildProcess;

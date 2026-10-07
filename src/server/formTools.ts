@@ -167,7 +167,9 @@ function resolveLiveDeadlineKey(args: unknown): string | undefined {
   return key;
 }
 
-function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | undefined) | undefined {
+export function resolveLiveTransportDeadlineGetter(
+  args: unknown,
+): (() => number | undefined) | undefined {
   const key = resolveLiveDeadlineKey(args);
   return key === undefined ? undefined : () => getLiveDeadlineMs(key);
 }
@@ -178,7 +180,9 @@ function resolveLiveTransportDeadlineGetter(args: unknown): (() => number | unde
  * extension rather than only when a later progress tick re-reads it (issue
  * #6283). `undefined` whenever {@link resolveLiveTransportDeadlineGetter} is.
  */
-function resolveLiveTransportDeadlineSubscriber(args: unknown): LiveDeadlineSubscriber | undefined {
+export function resolveLiveTransportDeadlineSubscriber(
+  args: unknown,
+): LiveDeadlineSubscriber | undefined {
   const key = resolveLiveDeadlineKey(args);
   return key === undefined ? undefined : (listener) => subscribeLiveDeadline(key, listener);
 }

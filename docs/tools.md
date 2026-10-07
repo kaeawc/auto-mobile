@@ -25,7 +25,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`, `stageSharedStorage`, `stageSharedStorageFixtures`, `startTestRecording`,
+`sqlQuery`, `startTestRecording`,
 `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
@@ -1211,10 +1211,8 @@ subtree, or the whole active-window tree when owner-less.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Opt-in discovery; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                                    |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 📥 <code>stageSharedStorage</code>                                                               | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 📥 <code>stageSharedStorageFixtures</code>                                                       | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults. On iOS, requires `appId` and selects the store with `suite` (not `name`/`fileName`); omitted/`Standard` uses the default store. Uses an already connected embedded SDK, with simulator plist fallback when permitted.                                                                                                                                                                                                                                                                                  |
 | 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file. For iOS, an empty `name`, "standard" (any case), or the app bundle id selects standard UserDefaults; other names select a valid suite. Names must have no leading or trailing whitespace. Android uses a SharedPreferences file name without `.xml`. iOS write results include `resolvedStore` when supported by the SDK and runner. `setKeyValue` returns `effectiveValueDiffers: true` and appends a warning when the write persisted but the app reads a different effective value due to an override; remove/clear never produce this warning. |
@@ -1302,6 +1300,29 @@ merely command dispatch or process disappearance.
 
 <details class="example" markdown="1">
 <summary>putAppFile canonical call shape and platform-qualified examples</summary>
+
+**Breaking change:** `stageSharedStorage` and `stageSharedStorageFixtures` have been removed.
+Replace either call with default-enabled `putAppFile`:
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "target": {
+      "domain": "user_files",
+      "namespace": "fixtures",
+      "reset": false,
+      "indexMedia": true
+    },
+    "files": [{ "destinationPath": "fixture.txt", "contentText": "fixture" }]
+  }
+}
+```
+
+Move `namespace`, `reset`, and `indexMedia` into `target`; keep `files` and device/session
+options at the top level. Each file requires `destinationPath` and exactly one of
+`sourcePath`, `contentText`, or `contentBase64`. Set `indexMedia: true` to preserve the
+removed tools' Android indexing default; `putAppFile` defaults it to false.
 
 Every target uses `target` plus a non-empty `files` array. Each file has a
 normalized relative `destinationPath` and exactly one of `sourcePath`,
@@ -1427,18 +1448,13 @@ Returned write/list file URIs continue to use these aliases. Paths are normalize
 percent-encoded by segment, and cannot traverse out of the target.
 
 Session enablement currently controls MCP discovery only; an unlisted tool stays
-callable. `putAppFile` stays default-disabled; the legacy defaults stay unchanged
-(`stageSharedStorage` true, `stageSharedStorageFixtures` and `stageSessionDownloads` false).
-The target policy resolves each exact tool name as session override, then startup
-default, then its registration default, and OR-combines effective names:
-app_containers and media_library use only `putAppFile`; user_files uses
-`putAppFile`, `stageSharedStorage`, or `stageSharedStorageFixtures`. Disabling an
-alias suppresses its default; disabling `putAppFile` does not veto an enabled alias.
-A default session therefore enables only the user_files target policy. Legacy
-enablement never enables private writes or lists `putAppFile` in discovery.
-Stored overrides on legacy names are honored in place, read without migration or
-deletion. `stageSessionDownloads` retains its separate session-bound policy and
-is not a grant in the unified target resolver. No new MCP call gate is introduced.
+callable. `putAppFile` is default-enabled for app_containers, user_files, and
+media_library. All domains resolve only its session override, then startup default,
+then registration default. An explicit false override disables all three target
+policies. Stored overrides under removed tool names are ignored without migration
+or deletion. `stageSessionDownloads` stays default-disabled with its separate
+session-bound policy and does not grant unified target enablement. No new MCP call
+gate is introduced.
 
 </details>
 
@@ -1905,6 +1921,11 @@ sets the minimum request count.
 
 `executePlan.planContent` contains YAML plan content (also accepts a `base64:`
 prefix). `startStep` is the start step index (default 0).
+Nested `executePlan` calls run on the enclosing plan's session/device. Remove
+`devices`/`device` labels from the nested call and device declarations from its
+YAML; otherwise execution fails before label allocation with: "Nested executePlan
+cannot use devices/device labels. Remove the labels; nested plans run on the
+enclosing plan's session/device."
 `deviceAllocationTimeoutMs` is the device allocation timeout in milliseconds
 (default 300000). For multi-device failures, `abortStrategy` selects `immediate`
 (default) or `finish-current-step`. `testMetadata` supplies test identity
@@ -2334,3 +2355,22 @@ error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
 `restored`; degraded network writes report capability `partial`. Setter TTL
 rejection and biometric capture failures also return structured failure payloads
 without MCP `isError`.
+
+### Compact action metadata
+
+Action responses compact unchanged metadata by default within a session and device:
+`observation.insets`, `systemInsets`, `backStack`, `gfxMetrics`,
+`displayedTimeMetrics`, `deviceLock`, `accessibilityState`, and `freshness`, plus
+raw `viewHierarchy.insets` and `viewHierarchy.systemInsets`. First delivery,
+a new session, and every device switch send available blocks in full; changed
+blocks reappear. Stale freshness, unstable gfx metrics, and partial back stacks
+remain inline. `backStack.capturedAt` alone does not count as a change.
+A duplicate top-level `element` is omitted when identical to
+`selectedElement.matchedElement` and not required by the output schema.
+Use `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`,
+or feature flag `actions-compact-metadata=false` to restore full metadata.
+`--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
+wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
+Unset or other env values express no preference: proxies relay no compact-metadata
+option and reuse the daemon's effective setting without restarting it.
+`observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).

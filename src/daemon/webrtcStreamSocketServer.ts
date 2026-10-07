@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import {
   assertMayControl,
   subscriptionKindForIdentity,
@@ -17,7 +18,7 @@ import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ActionableError, type BootedDevice } from "../models";
-import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../devices/deviceUtils";
+import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import type {
   getWebRtcStreamDescriptor,
   getWebRtcSubscriptionKind,
@@ -45,8 +46,7 @@ import {
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
-import { reconcileDiscoveryObservation } from "./discoveryReconcile";
-import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { resolveStreamDevice } from "./streamDeviceResolver";
 import { DaemonState } from "./daemonState";
 import type { DeviceOwnershipChanges } from "./videoStreamSocketServer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -116,74 +116,7 @@ function defaultOwnershipChanges(): DeviceOwnershipChanges | null {
 
 const WEBRTC_SOCKET_CLOSE_TIMEOUT_MS = 5_000;
 
-export async function resolveWebRtcStreamDevice(
-  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
-  deviceId?: string,
-  platform: "android" | "ios" = "android",
-  timer: Timer = defaultTimer,
-  signal?: AbortSignal,
-): Promise<BootedDevice> {
-  // The request already names its platform. Querying both platforms makes an
-  // iOS stream wait for ADB (and vice versa), so keep discovery platform-scoped.
-  let candidates = await deviceManager.getBootedDevices(platform);
-  // FUNNEL 1, before the caller joins any of this to pooled identity. This can be
-  // the first path to observe the `Unknown (<serial>)` placeholder or a different
-  // AVD on a reused serial, and without folding it in the admission gate in
-  // `handleStart` would re-read the pool state from BEFORE this discovery and
-  // admit the stream onto an untrusted runtime
-  // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-  await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
-
-  if (candidates.length === 0) {
-    if (platform === "android") {
-      throw new ActionableError("No connected android devices found.");
-    }
-    candidates = await rediscoverWebRtcStreamDevices(deviceManager, platform, timer, signal);
-  }
-
-  if (deviceId) {
-    const match = candidates.find((device) => device.deviceId === deviceId);
-    if (!match) {
-      throw new ActionableError(`No connected ${platform} device with id ${deviceId}.`);
-    }
-    return match;
-  }
-
-  if (candidates.length > 1) {
-    throw new ActionableError(
-      `Multiple connected ${platform} devices; specify deviceId. Found: ${candidates
-        .map((device) => device.deviceId)
-        .join(", ")}`,
-    );
-  }
-  return candidates[0];
-}
-
-async function rediscoverWebRtcStreamDevices(
-  deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
-  platform: "android" | "ios",
-  timer: Timer,
-  signal?: AbortSignal,
-): Promise<BootedDevice[]> {
-  try {
-    return await new DefaultRetryExecutor(timer).executeOrThrow(
-      async () => {
-        const candidates = await deviceManager.getBootedDevices(platform);
-        if (candidates.length === 0) {
-          throw new Error(`No connected ${platform} devices found.`);
-        }
-        await reconcileDiscoveryObservation(candidates, "webrtc-stream-resolve");
-        return candidates;
-      },
-      { delays: [250, 500, 1000, 2000], maxAttempts: 5, signal },
-    );
-  } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
-    throw new ActionableError(`No connected ${platform} devices found (after 5 attempts).`);
-  }
-}
+export { resolveStreamDevice as resolveWebRtcStreamDevice } from "./streamDeviceResolver";
 
 const defaultDeviceManager = new MultiPlatformDeviceManager();
 
@@ -191,7 +124,7 @@ async function defaultResolveDevice(
   deviceId?: string,
   platform: "android" | "ios" = "android",
 ): Promise<BootedDevice> {
-  return resolveWebRtcStreamDevice(defaultDeviceManager, deviceId, platform);
+  return resolveStreamDevice(defaultDeviceManager, deviceId, platform);
 }
 
 function resolveStartOverrides(request: WebRtcStreamSocketRequest): WebRtcStreamingOverrides {
@@ -867,25 +800,16 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: WebRtcStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<WebRtcStreamSocketServer>();
 
 export function getWebRtcStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG);
 }
 
 export async function startWebRtcStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new WebRtcStreamSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new WebRtcStreamSocketServer());
 }
 
 export async function stopWebRtcStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

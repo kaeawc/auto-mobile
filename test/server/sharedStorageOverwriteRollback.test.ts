@@ -81,7 +81,7 @@ const savedCopyMoves = (commands: string[]) =>
 const mutating = (commands: string[]) =>
   commands.filter((command) => / (rm|mv) /.test(command) || command.includes("sh -c"));
 
-describe("stageSharedStorage rollback of overwritten files", () => {
+describe("sharedStorageService rollback of overwritten files", () => {
   test("restores an overwritten file, rescans it, and deletes only files the batch created", async () => {
     const { executor, stage } = setup([0]);
     executor.setCommandError("push /fixtures/third.png", new Error("push failed"));

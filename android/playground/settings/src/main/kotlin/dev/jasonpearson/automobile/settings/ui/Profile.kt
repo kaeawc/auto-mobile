@@ -12,15 +12,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -35,6 +32,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
+import dev.jasonpearson.automobile.design.system.components.AutoMobileOutlinedTextField
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTopAppBar
 import kotlin.math.max
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,7 +46,7 @@ fun ProfileTopAppBar(name: String, email: String, scrollProgress: Float, onEmail
   // Email alpha (fades out as user scrolls)
   val emailAlpha by remember { derivedStateOf { max(0f, 1f - scrollProgress) } }
 
-  TopAppBar(
+  AutoMobileTopAppBar(
     title = {
       Row(
         modifier = Modifier.fillMaxWidth(),
@@ -93,7 +93,7 @@ fun EmailEditBottomSheet(
         modifier = Modifier.padding(bottom = 16.dp),
       )
 
-      OutlinedTextField(
+      AutoMobileOutlinedTextField(
         value = email,
         onValueChange = onEmailChange,
         label = { Text("Email") },
@@ -103,7 +103,7 @@ fun EmailEditBottomSheet(
       Spacer(modifier = Modifier.height(16.dp))
 
       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-        Button(
+        AutoMobileContentButton(
           onClick = onDismiss,
           colors =
             ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
@@ -111,7 +111,7 @@ fun EmailEditBottomSheet(
           Text("Cancel")
         }
 
-        Button(onClick = onSave) { Text("Save") }
+        AutoMobileContentButton(onClick = onSave) { Text("Save") }
       }
 
       Spacer(modifier = Modifier.height(16.dp))

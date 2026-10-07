@@ -14,6 +14,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
 
 describe("RecentApps", () => {
@@ -46,7 +47,9 @@ describe("RecentApps", () => {
     // This is needed because BaseVisualChange compares object identity to detect changes
     fakeObserveScreen.setObserveResult(() => {
       // Create new object to simulate actual change detection
-      return createObserveResult(createAppHierarchy());
+      return fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
+        ? { ...capturedRecents, timestamp: fakeTimer.now() }
+        : createObserveResult(createAppHierarchy());
     });
 
     // Inject the fakes into the feature
@@ -64,7 +67,7 @@ describe("RecentApps", () => {
     viewHierarchy: viewHierarchy || { node: {} },
   });
 
-  // Minimal app hierarchy; Android recentApps never inspects it (see #9979)
+  // Minimal app hierarchy; navigation must never target its controls (see #9979)
   const createAppHierarchy = () => ({
     hierarchy: {
       node: {
@@ -79,7 +82,9 @@ describe("RecentApps", () => {
   describe("execute", () => {
     test("should open recents via the key event on a real captured app hierarchy", async () => {
       fakeObserveScreen.setObserveResult(() => ({
-        ...capturedAppHierarchy,
+        ...(fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
+          ? capturedRecents
+          : capturedAppHierarchy),
         timestamp: Date.now(),
         screenSize: { width: 1080, height: 2400 },
         systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
@@ -91,11 +96,17 @@ describe("RecentApps", () => {
       expect(result.success).toBe(true);
       expect(result.method).toBe("hardware");
       expect(result.observation).toBeDefined();
-      expect(fakeAdb.getExecutedCommands()).toEqual(["shell input keyevent 187"]);
+      expect(fakeAdb.getExecutedCommands().filter((cmd) => cmd.includes("input keyevent"))).toEqual(
+        ["shell input keyevent 187"],
+      );
     });
 
     test("should work with progress callback", async () => {
-      fakeObserveScreen.setObserveResult(() => createObserveResult(createAppHierarchy()));
+      fakeObserveScreen.setObserveResult(() =>
+        fakeAdb.getExecutedCommands().includes("shell input keyevent 187")
+          ? { ...capturedRecents, timestamp: fakeTimer.now() }
+          : createObserveResult(createAppHierarchy()),
+      );
       fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
 
       let callbackCalled = false;
@@ -118,7 +129,7 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.method).toBe("hardware");
     });
   });

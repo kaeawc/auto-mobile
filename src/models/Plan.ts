@@ -9,7 +9,10 @@ import type {
   PlanToolResultsTruncation,
 } from "./ExecutePlanResult";
 
+import type { TapAtGeometry } from "./TapAtGeometry";
+
 export interface PlanStep {
+  geometry?: TapAtGeometry;
   tool: string;
   params: Record<string, any>;
   label?: string;

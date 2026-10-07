@@ -14,6 +14,7 @@
 		2F8BA3EDD179892E3C489DCB /* FilesPickerProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		32FCAE1924E826EF9F5C8A93 /* TapAtTargetsDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1F7F4145845D9AD5D8C48E /* TapAtTargetsDemo.swift */; };
+		41A9106D251A3C850BDF5B2E /* CrayonGrain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7824DDA408B56A9A41551ED /* CrayonGrain.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */; };
 		5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01BCE22E951887741F32904 /* ContentView.swift */; };
@@ -21,11 +22,13 @@
 		553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */; };
 		5855FEB2C4AC53F1F22EFDCB /* TapAtTargetLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C3A6F94431460A61429CE0D /* TapAtTargetLayout.swift */; };
 		619CDEE3F264DBB3415041D0 /* ShantellSans.ttf in Resources */ = {isa = PBXBuildFile; fileRef = E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */; };
+		635DC2C84FB2AA30CF9BB46D /* CrayonGrain.metal in Sources */ = {isa = PBXBuildFile; fileRef = E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */; };
 		72CDA6DB361FDC97490C3C2C /* AutoMobileHighlightCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6F8D59223D0149A0731816E3 /* AutoMobileHighlightCore */; };
 		7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */; };
 		7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF63AC7E447335C9A68A4F7 /* SemanticLinksDemo.swift */; };
 		95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
+		B29A9C90738A612625E68F3A /* CrayonGrainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */; };
 		B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */; };
 		B73660170723595B44749E9F /* Typography.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51580F5FC5ADCD5576885563 /* Typography.swift */; };
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
@@ -72,6 +75,7 @@
 		8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeView.swift; sourceTree = "<group>"; };
 		A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundDatabaseFixtureTests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
+		B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonGrainTests.swift; sourceTree = "<group>"; };
 		BDA9169E926B14087F3B1BA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketch.swift; sourceTree = "<group>"; };
 		C2F4747AC5700DF138836D5F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -84,7 +88,9 @@
 		D3C4751E45B89784F7C11691 /* TapAtTargetLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapAtTargetLayoutTests.swift; sourceTree = "<group>"; };
 		D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityRotorDemo.swift; sourceTree = "<group>"; };
 		E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ShantellSans.ttf; sourceTree = "<group>"; };
+		E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = CrayonGrain.metal; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E7824DDA408B56A9A41551ED /* CrayonGrain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonGrain.swift; sourceTree = "<group>"; };
 		FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundFilesPickerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundThemeTests.swift; sourceTree = "<group>"; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
@@ -134,6 +140,8 @@
 			isa = PBXGroup;
 			children = (
 				2B46870C2DDF4A2F73A5778B /* Colors.swift */,
+				E36CCA31979717E4A6A47AA7 /* CrayonGrain.metal */,
+				E7824DDA408B56A9A41551ED /* CrayonGrain.swift */,
 				C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */,
 				5122FF517804CD75B0F75CBA /* Shapes.swift */,
 				C2F4747AC5700DF138836D5F /* Theme.swift */,
@@ -185,6 +193,7 @@
 		B500CE1A6941BEA33903C091 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				B440AFD2C3249329A0069BD6 /* CrayonGrainTests.swift */,
 				11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */,
 				A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */,
 				FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */,
@@ -367,6 +376,8 @@
 				F99EE983EC6317D09E5A3247 /* AccessibilityRotorDemo.swift in Sources */,
 				97CA6F2DE628A139094EF72D /* Colors.swift in Sources */,
 				5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */,
+				635DC2C84FB2AA30CF9BB46D /* CrayonGrain.metal in Sources */,
+				41A9106D251A3C850BDF5B2E /* CrayonGrain.swift in Sources */,
 				4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */,
 				15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */,
 				EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */,
@@ -387,6 +398,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B29A9C90738A612625E68F3A /* CrayonGrainTests.swift in Sources */,
 				95CF2D08679D32C4A9966ACD /* CrayonSketchTests.swift in Sources */,
 				4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */,
 				7C8CF515031B975C05FA2AD2 /* PlaygroundThemeTests.swift in Sources */,

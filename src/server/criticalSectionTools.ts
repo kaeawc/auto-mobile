@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../utils/toolEnvelopePayload";
 import { waitForTimeoutDiagnostics, waitForTimeoutError } from "../utils/plan/waitForTimeout";
+import { unsupportedToolResultError } from "../utils/plan/unsupportedToolResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -111,12 +112,13 @@ function collectStepWarnings(
 }
 
 /**
- * A sub-step that answered but failed (`success: false` or a `waitFor` timeout) fails the section,
+ * A sub-step that answered but failed (`success: false`, a `waitFor` timeout, or unsupported)
+ * fails the section,
  * like a top-level step. Its own warnings and a timeout's bounded diagnostics are pushed onto
  * `warnings` first so they reach the plan's `warnings` through CriticalSectionStepError (#10024
  * parity: PlanExecutor.buildToolAnsweredFailure does the same for a top-level step).
  */
-function throwIfSubStepFailed(
+function assertCriticalSectionStepSucceeded(
   stepNumber: number,
   tool: string,
   toolResult: Record<string, unknown> | undefined,
@@ -126,7 +128,7 @@ function throwIfSubStepFailed(
   const failure =
     toolResult?.success === false
       ? formatCriticalSectionError(toolResult, tool)
-      : waitForTimeoutError(payload, tool);
+      : (waitForTimeoutError(payload, tool) ?? unsupportedToolResultError(payload));
   if (failure === null) {
     return;
   }
@@ -258,6 +260,9 @@ async function executeCriticalSectionSteps(
         tool.schema,
         stripUndeclaredDeviceLabel(step.params, tool.schema),
       );
+      if (step.tool === "tapAt" && step.geometry) {
+        params.__tapAtPlanContext = { geometry: step.geometry };
+      }
       const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
         forPlan: true,
         targetDevice: device,
@@ -266,7 +271,7 @@ async function executeCriticalSectionSteps(
       // Internal tool calls can return an MCP envelope whose JSON payload
       // contains the actual success/error fields.
       const toolResult = unwrapCriticalSectionResult(result, step.tool);
-      throwIfSubStepFailed(i + 1, step.tool, toolResult, warnings);
+      assertCriticalSectionStepSucceeded(i + 1, step.tool, toolResult, warnings);
 
       warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
       // Nothing evaluates step-level `expectations` yet (#9925); say so rather than

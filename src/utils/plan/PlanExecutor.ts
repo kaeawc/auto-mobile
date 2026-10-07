@@ -1,5 +1,6 @@
 import { classifyToolResult } from "../toolEnvelopePayload";
 import { waitForTimeoutDiagnostics, waitForTimeoutError } from "./waitForTimeout";
+import { unsupportedToolResultError } from "./unsupportedToolResult";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 import { errorMessage } from "../describeUnknownError";
 import {
@@ -707,6 +708,9 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
       const parsedParams = parseStepParams(tool.schema, enhancedParams);
+      if (step.tool === "tapAt" && step.geometry) {
+        parsedParams.__tapAtPlanContext = { geometry: step.geometry };
+      }
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -755,20 +759,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
         });
       }
 
-      const timeoutPayload = getStructuredPayload(toolResult) ?? toolResult;
-      const error = waitForTimeoutError(timeoutPayload, step.tool);
+      const payload = getStructuredPayload(toolResult) ?? toolResult;
+      const error = waitForTimeoutError(payload, step.tool) ?? unsupportedToolResultError(payload);
       if (error) {
         if (step.optional) {
           return skippedOptionalResult(step, error);
         }
-        // A waitFor timeout is a failed step like any other: it gets the same
+        // A waitFor timeout or unsupported result is a failed step like any other: it gets the same
         // failure observation and diagnostics as a `success: false` result, plus
         // what the timeout itself reported (#10024).
         return await this.buildToolAnsweredFailure(step, context, deviceLabel, {
           response,
           toolResult,
           error,
-          waitForTimeout: waitForTimeoutDiagnostics(timeoutPayload),
+          waitForTimeout: waitForTimeoutDiagnostics(payload),
         });
       }
 

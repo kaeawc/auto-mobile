@@ -484,6 +484,20 @@ describe("criticalSection tool", () => {
       );
     });
 
+    test("fails an unsupported setPosture sub-step with its message", async () => {
+      ToolRegistry.register(
+        "setPosture",
+        "unsupported posture",
+        z.object({}).passthrough(),
+        async () =>
+          createStructuredToolResponse({ message: "not foldable", status: "unsupported" }),
+      );
+      await expect(runSteps("setPosture", false, true)).rejects.toThrow(
+        "Failed at step 1/2 (setPosture): not foldable",
+      );
+      expect(nextStep).not.toHaveBeenCalled();
+    });
+
     test.each(["observe", "openLink"])(
       "skips an optional %s timeout with a warning",
       async (tool) => {

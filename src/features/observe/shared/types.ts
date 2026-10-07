@@ -74,8 +74,12 @@ export interface ActionTimingResult extends BaseResult {
  * Provides access to shared state and functionality from the main client.
  */
 export interface DelegateContext {
-  /** Platform-specific serialization at the request construction boundary. */
-  serializeRequest?(message: Record<string, unknown>): string;
+  /**
+   * Platform-specific serialization at the request construction boundary. `options.timeoutMs`
+   * is the host's timeout for the request; iOS puts it on the wire so the runner can drop a
+   * command the host stopped waiting for (#10084).
+   */
+  serializeRequest?(message: Record<string, unknown>, options?: { timeoutMs?: number }): string;
   /** Get the current WebSocket connection (may be null if not connected) */
   getWebSocket(): WebSocket | null;
   /** RequestManager for correlating requests and responses */

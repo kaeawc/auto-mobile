@@ -1245,6 +1245,8 @@ describe("IOSCtrlProxyClient", function () {
           errorType: "timeout",
           limit: 2,
           expiresAtEpochMs: 1_720_000_000_000,
+          // The host request timeout rides on every iOS request envelope (#10084).
+          timeoutMs: expect.any(Number),
         });
 
         socket!.simulateMessage(

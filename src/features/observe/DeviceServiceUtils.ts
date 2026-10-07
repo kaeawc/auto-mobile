@@ -468,7 +468,10 @@ export async function sendCommand<T>(
   const abortListener = registerCommandAbort(context, options, requestId);
 
   const msg = context.serializeRequest
-    ? context.serializeRequest({ type: options.messageType, requestId, ...options.params })
+    ? context.serializeRequest(
+        { type: options.messageType, requestId, ...options.params },
+        { timeoutMs },
+      )
     : createMessage(options.messageType, requestId, options.params);
   dispatchCommand(context, options, requestId, msg, responseErrorFactory);
 

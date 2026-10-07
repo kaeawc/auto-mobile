@@ -36,7 +36,8 @@
       "builder": "CtrlProxyScreenshot.requestScreenshot",
       "wire": {
         "type": "request_screenshot",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "timeoutMs": 5000
       }
     },
     {
@@ -47,7 +48,8 @@
         "requestId": "fixture-request-id",
         "x": 120.5,
         "y": 240.25,
-        "duration": 35
+        "duration": 35,
+        "timeoutMs": 5000
       }
     },
     {
@@ -76,7 +78,8 @@
         "y2": 44.5,
         "pressDurationMs": 350,
         "dragDurationMs": 900,
-        "holdDurationMs": 150
+        "holdDurationMs": 150,
+        "timeoutMs": 5000
       }
     },
     {
@@ -90,7 +93,8 @@
         "distanceStart": 80.5,
         "distanceEnd": 200.75,
         "rotationDegrees": 45.5,
-        "duration": 275
+        "duration": 275,
+        "timeoutMs": 5000
       }
     },
     {
@@ -105,7 +109,8 @@
         "y2": 46.5,
         "fingerCount": 3,
         "duration": 450,
-        "offset": 24.5
+        "offset": 24.5,
+        "timeoutMs": 5000
       }
     },
     {
@@ -115,7 +120,8 @@
         "type": "request_set_text",
         "requestId": "fixture-request-id",
         "text": "hello world",
-        "resourceId": "login_username_field"
+        "resourceId": "login_username_field",
+        "timeoutMs": 5000
       }
     },
     {
@@ -125,7 +131,8 @@
         "type": "request_append_text",
         "requestId": "fixture-request-id",
         "text": "a",
-        "frameContext": "frame-context"
+        "frameContext": "frame-context",
+        "timeoutMs": 5000
       }
     },
     {
@@ -134,7 +141,8 @@
       "wire": {
         "type": "request_clear_text",
         "requestId": "fixture-request-id",
-        "resourceId": "login_username_field"
+        "resourceId": "login_username_field",
+        "timeoutMs": 5000
       }
     },
     {
@@ -143,7 +151,8 @@
       "wire": {
         "type": "request_ime_action",
         "requestId": "fixture-request-id",
-        "action": "done"
+        "action": "done",
+        "timeoutMs": 5000
       }
     },
     {
@@ -151,7 +160,8 @@
       "builder": "SharedTextDelegate.requestSelectAll (via CtrlProxyText)",
       "wire": {
         "type": "request_select_all",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "timeoutMs": 5000
       }
     },
     {
@@ -160,7 +170,8 @@
       "wire": {
         "type": "request_keyboard",
         "requestId": "fixture-request-id",
-        "action": "open"
+        "action": "open",
+        "timeoutMs": 5000
       }
     },
     {
@@ -170,7 +181,8 @@
         "type": "request_press_key",
         "requestId": "fixture-request-id",
         "key": "tab",
-        "modifiers": ["shift"]
+        "modifiers": ["shift"],
+        "timeoutMs": 5000
       }
     },
     {
@@ -180,7 +192,8 @@
         "type": "request_press_button",
         "requestId": "fixture-request-id",
         "action": "volume_up",
-        "frameContext": "frame-context"
+        "frameContext": "frame-context",
+        "timeoutMs": 5000
       }
     },
     {
@@ -189,7 +202,8 @@
       "wire": {
         "type": "request_press_home",
         "requestId": "fixture-request-id",
-        "frameContext": "frame-context"
+        "frameContext": "frame-context",
+        "timeoutMs": 5000
       }
     },
     {
@@ -198,7 +212,8 @@
       "wire": {
         "type": "request_press_back",
         "requestId": "fixture-request-id",
-        "frameContext": "frame-context"
+        "frameContext": "frame-context",
+        "timeoutMs": 5000
       }
     },
     {
@@ -206,7 +221,8 @@
       "builder": "CtrlProxyNavigation.requestShake",
       "wire": {
         "type": "request_shake",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "timeoutMs": 5000
       }
     },
     {
@@ -215,7 +231,8 @@
       "wire": {
         "type": "request_recent_apps",
         "requestId": "fixture-request-id",
-        "frameContext": "frame-context"
+        "frameContext": "frame-context",
+        "timeoutMs": 5000
       }
     },
     {
@@ -226,7 +243,8 @@
         "requestId": "fixture-request-id",
         "action": "scroll_forward",
         "resourceId": "primary_table",
-        "label": "Primary Table"
+        "label": "Primary Table",
+        "timeoutMs": 5000
       }
     },
     {
@@ -236,7 +254,8 @@
         "type": "request_action",
         "requestId": "fixture-request-id",
         "label": "Submit",
-        "action": "activate"
+        "action": "activate",
+        "timeoutMs": 5000
       }
     },
     {
@@ -247,7 +266,8 @@
         "requestId": "fixture-request-id",
         "action": "scroll_backward",
         "resourceId": null,
-        "label": null
+        "label": null,
+        "timeoutMs": 5000
       }
     },
     {
@@ -257,7 +277,8 @@
         "type": "request_launch_app",
         "requestId": "fixture-request-id",
         "bundleId": "com.example.app",
-        "coldBoot": true
+        "coldBoot": true,
+        "timeoutMs": 10000
       }
     },
     {
@@ -266,7 +287,8 @@
       "wire": {
         "type": "request_rotate",
         "requestId": "fixture-request-id",
-        "orientation": "landscape"
+        "orientation": "landscape",
+        "timeoutMs": 5000
       }
     },
     {
@@ -275,7 +297,8 @@
       "wire": {
         "type": "set_hinge_angle",
         "requestId": "fixture-request-id",
-        "angle": 130
+        "angle": 130,
+        "timeoutMs": 5000
       }
     },
     {
@@ -285,7 +308,8 @@
         "type": "request_clipboard",
         "requestId": "fixture-request-id",
         "action": "copy",
-        "text": "clipboard text"
+        "text": "clipboard text",
+        "timeoutMs": 5000
       }
     },
     {
@@ -305,7 +329,8 @@
             "sourceWidth": 390,
             "sourceHeight": 844
           }
-        }
+        },
+        "timeoutMs": 5000
       }
     },
     {
@@ -323,7 +348,8 @@
             "width": 10,
             "height": 12
           }
-        }
+        },
+        "timeoutMs": 5000
       }
     },
     {
@@ -333,7 +359,8 @@
         "type": "request_reset_permissions",
         "requestId": "fixture-request-id",
         "bundleId": "com.example.app",
-        "permissions": ["camera", "photos"]
+        "permissions": ["camera", "photos"],
+        "timeoutMs": 5000
       }
     },
     {
@@ -341,7 +368,8 @@
       "builder": "CtrlProxyVoiceOver.requestVoiceOverState",
       "wire": {
         "type": "get_voiceover_state",
-        "requestId": "fixture-request-id"
+        "requestId": "fixture-request-id",
+        "timeoutMs": 5000
       }
     },
     {

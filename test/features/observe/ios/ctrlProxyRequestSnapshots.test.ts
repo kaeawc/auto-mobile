@@ -681,6 +681,32 @@ describe("iOS integer millisecond request boundary", () => {
     }
   });
 
+  test("the host request timeout rides on every request envelope as integer timeoutMs (#10084)", () => {
+    const message = { type: "request_rotate", requestId: "r", orientation: "landscape" };
+    expect(JSON.parse(serializeIosRequest(message, { timeoutMs: 5000 }))).toEqual({
+      ...message,
+      timeoutMs: 5000,
+    });
+    expect(JSON.parse(serializeIosRequest(message, { timeoutMs: 2500.4 })).timeoutMs).toBe(2500);
+    expect(JSON.parse(serializeIosRequest(message, { timeoutMs: 0.4 })).timeoutMs).toBe(1);
+    // An older runner ignores the field, and a missing/invalid budget keeps today's wire.
+    for (const timeoutMs of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(serializeIosRequest(message, { timeoutMs })).toBe(JSON.stringify(message));
+    }
+    // A payload that already carries its own timeoutMs (swipe) keeps it.
+    const swipe = { type: "request_swipe", requestId: "s", timeoutMs: 1500 };
+    expect(JSON.parse(serializeIosRequest(swipe, { timeoutMs: 9000 })).timeoutMs).toBe(1500);
+  });
+
+  test("live builders put the caller's timeout on the wire (#10084)", async () => {
+    const wire = await captureWire({
+      name: "rotate",
+      builder: "rotate",
+      invoke: (h) => new CtrlProxyNavigation(h.context).requestRotate("landscape", 1234.6),
+    });
+    expect(wire.timeoutMs).toBe(1235);
+  });
+
   test("opaque payloads and unrelated numeric fields are unchanged", () => {
     const message = { type: "set_preference", duration: 0.4, value: { intervalMs: 250.5 } };
     expect(serializeIosRequest(message)).toBe(JSON.stringify(message));

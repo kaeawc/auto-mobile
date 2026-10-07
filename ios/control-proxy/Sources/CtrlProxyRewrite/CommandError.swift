@@ -19,6 +19,8 @@ public enum CommandError: LocalizedError, Sendable {
     case executionFailed(String)
     case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
+    /// A queued command whose wire deadline passed before it reached the head of the queue (#10084).
+    case expiredBeforeExecution(command: String, timeoutMs: Int64, queuedMs: Int64)
 
     public var errorDescription: String? {
         switch self {
@@ -39,6 +41,8 @@ public enum CommandError: LocalizedError, Sendable {
                 ? "gesture completed after its deadline; outcome is indeterminate"
                 : "gesture was not started"
             return "Command \(command) exceeded deadline at \(deadlineMs)ms (\(outcome))"
+        case let .expiredBeforeExecution(command, timeoutMs, queuedMs):
+            return "Command \(command) expired before execution: it waited \(queuedMs)ms in the runner queue, past its \(timeoutMs)ms deadline; the command was not started"
         }
     }
 }

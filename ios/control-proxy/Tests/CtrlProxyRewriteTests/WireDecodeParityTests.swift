@@ -71,6 +71,11 @@ final class WireDecodeParityTests: XCTestCase {
             }
             var payloadWire = snapshot.wire
             payloadWire.removeValue(forKey: "type") // discriminator, not a payload property
+            if type != "request_swipe" {
+                // Envelope deadline read by WebSocketServer.dispatchCommand (#10084); only
+                // RequestSwipe also decodes it as a payload property.
+                payloadWire.removeValue(forKey: "timeoutMs")
+            }
             assertWireSubset(wire: payloadWire, payload: rewritePayload, context: snapshot.name)
         }
     }
@@ -140,7 +145,13 @@ final class WireDecodeParityTests: XCTestCase {
             }
             XCTAssertEqual(actualArray.count, expectedArray.count, context, file: file, line: line)
             for (index, pair) in zip(expectedArray, actualArray).enumerated() {
-                assertValueEqual(expected: pair.0, actual: pair.1, context: "\(context)[\(index)]", file: file, line: line)
+                assertValueEqual(
+                    expected: pair.0,
+                    actual: pair.1,
+                    context: "\(context)[\(index)]",
+                    file: file,
+                    line: line
+                )
             }
             return
         }

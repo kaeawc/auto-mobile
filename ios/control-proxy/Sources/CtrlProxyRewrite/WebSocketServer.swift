@@ -35,8 +35,55 @@ enum GestureExecutionBound {
     static let responseReserveMs: Int64 = 500
 }
 
-/// Only request_swipe carries a wire deadline today. Tap/drag/pinch can legitimately
-/// run long and have no wire deadline; extending the bound to them is a follow-up.
+/// Optional client transport budget carried on every request envelope (#10084). It decodes
+/// exactly like `RequestSwipe.timeoutMs`: only a positive integer counts; anything else
+/// (missing, zero, negative, string, bool, fraction) leaves the legacy no-deadline path.
+struct CommandDeadlineEnvelope: Decodable, Sendable {
+    let timeoutMs: Int?
+
+    private enum CodingKeys: String, CodingKey { case timeoutMs }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let decoded = try? values.decode(Int.self, forKey: .timeoutMs)
+        timeoutMs = decoded.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// Absolute monotonic deadline for a request received at `receivedAtMs`, or nil when the
+    /// envelope carries no valid budget (an older host). Saturates instead of overflowing.
+    static func deadlineMs(from data: Data, receivedAtMs: Int64) -> Int64? {
+        guard let timeoutMs = (try? JSONDecoder().decode(Self.self, from: data))?.timeoutMs else {
+            return nil
+        }
+        let (deadline, overflow) = receivedAtMs.addingReportingOverflow(Int64(timeoutMs))
+        return overflow ? Int64.max : deadline
+    }
+}
+
+/// Whether a queued command is dropped instead of started. A command whose sender has stopped
+/// waiting must not land late on whatever screen is showing by then (#10084).
+enum QueuedCommandDisposition: Equatable {
+    case execute
+    /// The sender's connection closed while the command waited; nobody can receive a reply.
+    case connectionClosed
+    /// The sender's wire deadline passed while the command waited behind earlier commands.
+    case expired(queuedMs: Int64, timeoutMs: Int64)
+}
+
+/// Pure pre-execution rule, evaluated when a queued command reaches the head of the chain.
+func queuedCommandDisposition(
+    connectionOpen: Bool, deadlineMs: Int64?, receivedAtMs: Int64, nowMs: Int64
+)
+    -> QueuedCommandDisposition
+{
+    guard connectionOpen else { return .connectionClosed }
+    guard let deadlineMs, nowMs >= deadlineMs else { return .execute }
+    return .expired(queuedMs: max(0, nowMs - receivedAtMs), timeoutMs: max(0, deadlineMs - receivedAtMs))
+}
+
+/// Every request may carry a wire deadline (#10084), but only request_swipe bounds its
+/// execution with it. Tap/drag/pinch and the other commands can legitimately run long, so
+/// for them the deadline only decides whether a queued command starts at all.
 func gestureExecutionBoundMs(deadlineMs: Int64?, executionStartedAtMs: Int64) -> Int64? {
     guard let deadlineMs else { return nil }
     return max(
@@ -411,29 +458,66 @@ final class WebSocketServer: @unchecked Sendable {
 
     private func handleMessage(_ data: Data, connectionId: Int) {
         guard let connection = connections.value(forId: connectionId) else { return }
-        dispatchCommand(data, responder: connection)
+        dispatchCommand(data, responder: connection, isConnectionOpen: { [weak self] in
+            self?.connections.value(forId: connectionId) != nil
+        })
+    }
+
+    /// Answers (or, with no connection left, only logs) a queued command dropped before it
+    /// started. The busy guard is untouched: the command never became the in-flight one.
+    private func rejectQueuedCommand(
+        _ data: Data, type: String, disposition: QueuedCommandDisposition, responder: any WebSocketResponding
+    ) {
+        switch disposition {
+        case .execute:
+            return
+        case .connectionClosed:
+            // The sender is gone, so there is nobody to answer; the drop itself is the outcome.
+            Self.logger.info("Dropped queued \(type, privacy: .public): client connection closed before it started")
+        case let .expired(queuedMs, timeoutMs):
+            Self.logger.info("Dropped queued \(type, privacy: .public): deadline passed after \(queuedMs)ms queued")
+            let error = CommandError.expiredBeforeExecution(command: type, timeoutMs: timeoutMs, queuedMs: queuedMs)
+            let responseType = (try? JSONDecoder().decode(WebSocketRequest.self, from: data))?
+                .requestType.responseType.rawValue ?? "error"
+            let response = WebSocketResponse.error(
+                type: responseType, requestId: WireError.extractRequestId(from: data),
+                error: error.errorDescription ?? "Command expired before execution", totalTimeMs: queuedMs
+            )
+            do {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = .sortedKeys
+                try responder.send(encoder.encode(response))
+            } catch {
+                print("[WebSocketServer] Failed to encode expired-command response: \(error)")
+            }
+        }
     }
 
     /// Enqueues one command onto the serial task-chain so it runs off the accept `queue` —
     /// a slow XCUITest walk / screenshot / SDK call cannot starve `/health` or new accepts
     /// (issue #5374) — while `await previous?.value` keeps commands strictly ordered.
     /// `responder` is captured strongly so it outlives the hop; enqueuing is non-blocking.
-    func dispatchCommand(_ data: Data, responder: any WebSocketResponding) {
+    ///
+    /// `isConnectionOpen` reports whether the sender is still connected; a queued command whose
+    /// connection closed before it reached the head of the chain is dropped unstarted (#10084).
+    func dispatchCommand(
+        _ data: Data, responder: any WebSocketResponding,
+        isConnectionOpen: @escaping @Sendable () -> Bool = { true }
+    ) {
         // Network.framework delivers this call on the server queue, never the main actor.
-        // Inspect the envelope and swipe budget here; malformed requests still take the
+        // Inspect the envelope and its optional budget here; malformed requests still take the
         // normal queued decode/error path. Keep send outside the lock and task-chain.
         let receivedAtMs = monotonicNowMs()
         let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let type = envelope?["type"] as? String ?? "unknown"
         let requestId = envelope?["requestId"] as? String
-        // Decode only swipe's optional budget here so queue wait counts against the client's
-        // transport timeout. The normal decode/error path still handles malformed requests.
-        let swipeTimeoutMs = type == "request_swipe"
-            ? (try? JSONDecoder().decode(RequestSwipe.self, from: data))?.timeoutMs : nil
-        let deadlineMs: Int64? = swipeTimeoutMs.map { timeout in
-            let (deadline, overflow) = receivedAtMs.addingReportingOverflow(Int64(timeout))
-            return overflow ? Int64.max : deadline
-        }
+        // Any request may carry the client's transport budget so queue wait counts against it.
+        // Swipe keeps enforcing it in its handler (which also bounds its execution and reports
+        // the established swipe deadline error); every other type is gated before it starts.
+        let wireDeadlineMs = CommandDeadlineEnvelope.deadlineMs(from: data, receivedAtMs: receivedAtMs)
+        let isSwipe = type == "request_swipe"
+        let deadlineMs: Int64? = isSwipe ? wireDeadlineMs : nil
+        let queueDeadlineMs: Int64? = isSwipe ? nil : wireDeadlineMs
         let decision = commandState.withLock { state -> CommandAdmissionDecision in
             let decision = admissionDecision(
                 inFlight: state.inFlight, nowMs: monotonicNowMs(), budgetMs: busyBudgetMs
@@ -443,6 +527,14 @@ final class WebSocketServer: @unchecked Sendable {
             state.tail = Task { [weak self] in
                 await previous?.value
                 guard let self else { return }
+                let disposition = queuedCommandDisposition(
+                    connectionOpen: isConnectionOpen(), deadlineMs: queueDeadlineMs,
+                    receivedAtMs: receivedAtMs, nowMs: self.monotonicNowMs()
+                )
+                guard disposition == .execute else {
+                    self.rejectQueuedCommand(data, type: type, disposition: disposition, responder: responder)
+                    return
+                }
                 self.commandState.withLock { state in
                     state.inFlight = InFlightRunnerCommand(
                         type: type, requestId: requestId, startedAtMs: self.monotonicNowMs(),

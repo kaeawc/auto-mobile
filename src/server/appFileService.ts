@@ -4,17 +4,8 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  posix,
-  relative,
-  resolve,
-  sep,
-  win32,
-} from "node:path";
+import * as hostPath from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
@@ -1636,7 +1627,9 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     if (!stats.isDirectory()) {
       throw new ActionableError("iOS Files namespace is not a directory.");
     }
-    return (await listLocalFiles(root, this.fileSystem)).filter((entry) => !entry.isDirectory);
+    return (await listLocalFilesWithPaths(root, this.fileSystem, posix)).filter(
+      (entry) => !entry.isDirectory,
+    );
   }
 
   async readNamespaceFile(
@@ -1661,15 +1654,16 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   ): Promise<string> {
     requireIosFilesSimulator(device);
     const container = await this.resolveContainer({ device, signal });
-    const root = resolve(container, "Documents", "automobile");
-    const managed = resolve(root, normalizeUserFilesNamespace(namespace));
-    this.assertBelow(root, managed);
+    // simctl returns macOS paths regardless of the platform running this reader.
+    const root = posix.resolve(container, "Documents", "automobile");
+    const managed = posix.resolve(root, normalizeUserFilesNamespace(namespace));
+    this.assertBelow(root, managed, posix);
     const target =
-      path === undefined ? managed : resolve(managed, normalizeAppFileRelativePath(path));
+      path === undefined ? managed : posix.resolve(managed, normalizeAppFileRelativePath(path));
     if (path !== undefined) {
-      this.assertBelow(managed, target);
+      this.assertBelow(managed, target, posix);
     }
-    await this.assertNoSymlinks(container, target);
+    await this.assertNoSymlinks(container, target, posix);
     return target;
   }
 
@@ -1711,20 +1705,24 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     }
   }
 
-  private assertBelow(root: string, target: string): void {
-    const path = relative(root, target);
-    if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+  private assertBelow(root: string, target: string, paths: typeof posix = hostPath): void {
+    const path = paths.relative(root, target);
+    if (!path || path === ".." || path.startsWith(`..${paths.sep}`) || paths.isAbsolute(path)) {
       throw new ActionableError(
         "iOS Files fixture destination must remain strictly below its managed namespace root.",
       );
     }
   }
 
-  private async assertNoSymlinks(container: string, target: string): Promise<void> {
-    const parts = relative(container, target).split(sep);
+  private async assertNoSymlinks(
+    container: string,
+    target: string,
+    paths: typeof posix = hostPath,
+  ): Promise<void> {
+    const parts = paths.relative(container, target).split(paths.sep);
     let current = container;
     for (const part of parts) {
-      current = join(current, part);
+      current = paths.join(current, part);
       let stats: AppFileStats;
       try {
         stats = await this.fileSystem.lstat(current);
@@ -2251,18 +2249,26 @@ export async function listLocalFiles(
   root: string,
   fileSystem: AppFileFileSystem,
 ): Promise<LocalFileListEntry[]> {
+  return listLocalFilesWithPaths(root, fileSystem, hostPath);
+}
+
+async function listLocalFilesWithPaths(
+  root: string,
+  fileSystem: AppFileFileSystem,
+  paths: typeof posix,
+): Promise<LocalFileListEntry[]> {
   const entries: LocalFileListEntry[] = [];
 
   async function visit(dir: string): Promise<void> {
     const children = await fileSystem.readdir(dir);
     for (const child of children) {
-      const childPath = join(dir, child.name);
+      const childPath = paths.join(dir, child.name);
       const stat = await fileSystem.lstat(childPath);
       if (stat.isDirectory()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, true));
+        entries.push(buildLocalListEntry(root, childPath, stat, true, paths));
         await visit(childPath);
       } else if (stat.isFile()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, false));
+        entries.push(buildLocalListEntry(root, childPath, stat, false, paths));
       }
     }
   }
@@ -2283,8 +2289,9 @@ function buildLocalListEntry(
   childPath: string,
   stat: AppFileStats,
   isDirectory: boolean,
+  paths: typeof posix,
 ): LocalFileListEntry {
-  const filePath = relative(root, childPath).replace(/\\/g, "/");
+  const filePath = paths.relative(root, childPath).replace(/\\/g, "/");
   return {
     path: filePath,
     name: posix.basename(filePath),

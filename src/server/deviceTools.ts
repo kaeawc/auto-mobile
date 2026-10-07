@@ -3,6 +3,10 @@ import {
   type DeviceResourceObserver,
 } from "../utils/deviceResourceObserver";
 import {
+  unadmittedAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
 } from "../daemon/devicePoolRefresh";
@@ -255,7 +259,9 @@ const listDeviceImagesOutputSchema = z.object({
 
 const listDevicesOutputSchema = z.object({
   message: z.string(),
-  devices: z.array(listDevicesEntrySchema),
+  devices: z.array(
+    listDevicesEntrySchema.extend({ transportAliases: z.array(z.string()).optional() }),
+  ),
   count: z.number(),
   discovery: z.unknown(),
   enrichment: z
@@ -1060,6 +1066,10 @@ export function listDevicePayloads(
   booted: BootedDevice[],
   devicePool: DevicePool | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
+  aliasesForDevice: (deviceId: string) => string[] = (deviceId) =>
+    devicePool?.getAndroidTransportAliases(deviceId) ?? [],
+  transportAvdNameForDevice: (deviceId: string) => string | undefined = (deviceId) =>
+    devicePool?.getAndroidTransportAvdName(deviceId),
 ) {
   const sessionManager = DaemonState.getInstance().isInitialized()
     ? DaemonState.getInstance().getSessionManager()
@@ -1083,8 +1093,26 @@ export function listDevicePayloads(
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,
     });
+    if (device.platform === "android") {
+      return projectAndroidTransportDescription(
+        description,
+        aliasesForDevice(device.deviceId),
+        transportAvdNameForDevice(device.deviceId),
+      );
+    }
     return projectListDevicesEntry(description);
   });
+}
+
+function projectAndroidTransportDescription(
+  description: ReturnType<typeof describeDevice>,
+  aliases: string[],
+  avdName: string | undefined,
+) {
+  const projected = projectListDevicesEntry(
+    avdName ? { ...description, isVirtual: true, identity: { stableId: avdName } } : description,
+  );
+  return { ...projected, ...(aliases.length ? { transportAliases: aliases } : {}) };
 }
 
 /**
@@ -1262,6 +1290,7 @@ export function detailedDiscoveryOptions(
 }
 
 export interface DeviceToolsDependencies {
+  androidAdbFactory: AdbClientFactory;
   env?: Environment;
   deviceResourceControllerFactory: () => DeviceResourceController;
   deviceResourceObserverFactory: () => DeviceResourceObserver;
@@ -3478,6 +3507,7 @@ let moduleDependencies: DeviceToolsDependencies | null = null;
 export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
+      androidAdbFactory: unadmittedAdbClientFactory,
       deviceResourceControllerFactory: () => new DefaultDeviceResourceController(),
       deviceResourceObserverFactory: () =>
         new DefaultDeviceResourceObserver({ timer: getDeviceToolsDependencies().timer }),
@@ -3557,6 +3587,7 @@ function resolveDeviceToolsLifecycleCoordinator(
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
+    androidAdbFactory: deps.androidAdbFactory ?? currentDeps.androidAdbFactory,
     env: deps.env ?? currentDeps.env,
     deviceResourceObserverFactory:
       deps.deviceResourceObserverFactory ?? currentDeps.deviceResourceObserverFactory,

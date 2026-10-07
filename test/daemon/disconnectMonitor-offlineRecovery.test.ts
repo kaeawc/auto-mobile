@@ -1,3 +1,12 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { AndroidTransportAliases } from "../../src/utils/androidSerial";
+import { createExecResult } from "../../src/utils/execResult";
+import type { BootedDevice } from "../../src/models";
 import { Daemon } from "../../src/daemon/daemon";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -5,7 +14,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   pruneStaleOfflineRecoveryAttempts,
   selectOfflineRecoveryCandidates,
@@ -180,6 +189,7 @@ function monitorHarness(
     devicePool: {
       retryDueDeferredSessionRecoveries: async () => {},
       reconcileDiscoveryObservation: async () => {},
+      mapAndroidDiscovery: (devices: BootedDevice[]) => devices,
       getAllDevices: () => [device],
       isDeviceLeasedForAndroidStartup: () => false,
       releaseAdbServerResetCohortReservations: async () => {},
@@ -193,30 +203,44 @@ function monitorHarness(
   return { daemon, device, monitor: daemon.deviceDisconnectMonitor as SingleFlightInterval };
 }
 
-test("a reconnect completing at two misses is rediscovered before disconnect evaluation", async () => {
-  const entered = Promise.withResolvers<void>();
-  const complete = Promise.withResolvers<void>();
-  class RecoveringManager extends FakeDeviceManager {
-    async getAndroidOfflineDeviceIds() {
-      return new Set(["emulator-5554"]);
+test.each(["emulator-5554", "localhost:5555"])(
+  "a reconnect to %s completing at two misses is rediscovered before disconnect evaluation",
+  async (recoveredId) => {
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    class RecoveringManager extends FakeDeviceManager {
+      async getAndroidOfflineDeviceIds() {
+        return new Set(["emulator-5554"]);
+      }
+      async recoverAndroidOfflineDevices() {
+        entered.resolve();
+        await complete.promise;
+        this.bootedDevices = [{ deviceId: recoveredId, platform: "android", name: "Pixel" }];
+      }
     }
-    async recoverAndroidOfflineDevices() {
-      entered.resolve();
-      await complete.promise;
-      this.bootedDevices = [{ deviceId: "emulator-5554", platform: "android", name: "Pixel" }];
-    }
-  }
-  const { daemon, monitor } = monitorHarness(new RecoveringManager());
-  daemon.deviceDisconnectMisses.set("emulator-5554", 2);
-  const sweep = monitor.run();
-  await entered.promise;
-  expect(daemon.deviceDisconnectMisses.get("emulator-5554")).toBe(2);
-  complete.resolve();
-  await sweep;
-  expect(daemon.deviceDisconnectMisses.has("emulator-5554")).toBe(false);
-  expect(daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
-  await monitor.stop();
-});
+    const { daemon, monitor } = monitorHarness(new RecoveringManager());
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult("EMULATOR-SERIAL", ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("1", ""));
+    adb.setCommandResponse("ro.boot.qemu.avd_name", createExecResult("Pixel", ""));
+    const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
+    const initial: BootedDevice[] = [
+      { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      { deviceId: "localhost:5555", name: "Pixel", platform: "android" },
+    ];
+    aliases.fold(initial, await aliases.prepare(initial), new Set(["emulator-5554"]));
+    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
+    daemon.deviceDisconnectMisses.set("emulator-5554", 2);
+    const sweep = monitor.run();
+    await entered.promise;
+    expect(daemon.deviceDisconnectMisses.get("emulator-5554")).toBe(2);
+    complete.resolve();
+    await sweep;
+    expect(daemon.deviceDisconnectMisses.has("emulator-5554")).toBe(false);
+    expect(daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+    await monitor.stop();
+  },
+);
 
 test("alternating successful and failed offline probes do not repeat global reconnect", async () => {
   const probeEntered = Promise.withResolvers<void>();
@@ -290,4 +314,137 @@ test("B1 defers the global reconnect when another offline candidate owns startup
   expect(protectedReconnects).toBe(0);
   expect(attempts).toBe(0);
   expect(reconnects).toBe(1);
+});
+
+test.each([
+  ["emulator-5554", "localhost:5555", "Pixel"],
+  ["PHONE-USB", "host-a:5555", undefined],
+])(
+  "held %s remains present in the disconnect monitor when only %s survives",
+  async (canonical, alias, avd) => {
+    let offlineProbes = 0;
+    let recoveries = 0;
+    class AliasManager extends FakeDeviceManager {
+      async getAndroidOfflineDeviceIds() {
+        offlineProbes++;
+        return new Set<string>();
+      }
+      async recoverAndroidOfflineDevices() {
+        recoveries++;
+      }
+    }
+    const manager = new AliasManager();
+    const { daemon, monitor, device } = monitorHarness(manager);
+    device.id = canonical;
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(canonical, ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult(avd ? "1" : "0", ""));
+    adb.setCommandResponse("ro.boot.qemu.avd_name", createExecResult(avd ?? "", ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+    const aliases = new AndroidTransportAliases(new FakeAdbClientFactory(adb));
+    const normalize = async (rows: BootedDevice[]) =>
+      aliases.fold(rows, await aliases.prepare(rows), new Set([device.id]));
+    await normalize([
+      { deviceId: device.id, name: "Pixel", platform: "android" },
+      { deviceId: alias, name: "Pixel", platform: "android" },
+    ]);
+    daemon.devicePool.mapAndroidDiscovery = (rows: BootedDevice[]) => aliases.mapDiscovery(rows);
+    const identityCalls = adb.getExecutedCommands().length;
+    adb.setCommandError("boot_id", new Error("timeout"));
+    manager.bootedDevices = [{ deviceId: alias, name: "Pixel", platform: "android" }];
+    let cleanups = 0;
+    daemon.cleanupDisconnectedDevice = async () => {
+      cleanups++;
+    };
+    try {
+      for (let tick = 0; tick < 4; tick++) {
+        await monitor.run();
+      }
+      expect(daemon.deviceDisconnectMisses.size).toBe(0);
+      expect(daemon.confirmedDisconnectedDeviceIds.size).toBe(0);
+      expect(offlineProbes).toBe(0);
+      expect(recoveries).toBe(0);
+      expect(cleanups).toBe(0);
+      expect(aliases.resolveTransport(device.id)).toBe(device.id);
+      expect(adb.getExecutedCommands()).toHaveLength(identityCalls);
+      expect(daemon.timer.getSleepHistory()).toEqual([]);
+    } finally {
+      await monitor.stop();
+    }
+  },
+);
+
+test("concurrent refresh and disconnect monitor do not probe twice or fail discovery", async () => {
+  class AliasManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
+    async recoverAndroidOfflineDevices() {}
+  }
+  const manager = new AliasManager();
+  const { daemon, monitor, device } = monitorHarness(manager);
+  const timer = daemon.timer as FakeTimer;
+  const row = (deviceId: string): BootedDevice => ({
+    deviceId,
+    name: deviceId,
+    platform: "android",
+  });
+  const usb = "PHONE-USB";
+  const wifi = "host-a:5555";
+  manager.bootedDevices = [row(usb), row(wifi)];
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("ro.serialno", createExecResult(usb, ""));
+  adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+  adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+  const pool = new DevicePool(
+    createDevicePoolDependencies(
+      new SessionManager(timer, new FakeDeviceSessionPersistence()),
+      "monitor-alias",
+      {
+        timer,
+        deviceManager: manager,
+        androidAdbFactory: new FakeAdbClientFactory(adb),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      },
+    ),
+  );
+  daemon.devicePool = pool;
+  device.id = usb;
+  await pool.refreshDevices();
+  await pool.assignDeviceToSession("owner-a", "android");
+  manager.bootedDevices = [row(wifi), row("host-new:5555")];
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+  const execute = adb.execute.bind(adb);
+  const probe = spyOn(adb, "execute").mockImplementationOnce(async () => {
+    entered.resolve();
+    return release.promise;
+  });
+  const normalization = spyOn(pool, "normalizeAndroidDiscovery");
+  const refresh = pool.refreshDevicesWithOutcome();
+  let sweep: Promise<void> | undefined;
+  try {
+    await entered.promise;
+    probe.mockImplementation(execute);
+    const calls = adb.getExecutedCommands().length;
+    sweep = monitor.run();
+    await drainMicrotasks(100);
+    expect(normalization).toHaveBeenCalledTimes(1);
+    expect(adb.getExecutedCommands()).toHaveLength(calls);
+    expect(daemon.deviceDisconnectMisses.size).toBe(0);
+    release.resolve(createExecResult(usb, ""));
+    await expect(sweep).resolves.toBeUndefined();
+    expect((await refresh).failure).toBeUndefined();
+    expect(pool.getDevice(usb)?.sessionId).toBe("owner-a");
+    expect(pool.getAndroidTransportRouting().resolveTransport(usb)).toBe(wifi);
+    expect(timer.getSleepHistory()).toEqual([]);
+  } finally {
+    release.resolve(createExecResult(usb, ""));
+    await refresh;
+    await sweep;
+    normalization.mockRestore();
+    probe.mockRestore();
+    await monitor.stop();
+    timer.reset();
+  }
 });

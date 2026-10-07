@@ -1,3 +1,12 @@
+import { buildSimctlArgs } from "../../../src/utils/ios-cmdline-tools/simctlArgs";
+import {
+  CORESIMULATOR_DEVICE_SET_PATH_ENV,
+  DAEMON_LAUNCH_CWD_ENV,
+} from "../../../src/utils/workingDirectory";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { EventEmitter } from "node:events";
+import type { HostChildProcess } from "../../../src/utils/HostCommandExecutor";
+import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { restoreIosSettings } from "../../../src/utils/ios-cmdline-tools/iosSettings";
 import { getAppDataContainerPath } from "../../../src/utils/ios-cmdline-tools/iosAppContainer";
@@ -215,4 +224,92 @@ describe("simctl argv integrity (#4196)", () => {
       ]);
     });
   });
+});
+
+describe("custom simctl device set (#6900)", () => {
+  const cases = [
+    { configured: undefined, prefix: ["simctl"] },
+    { configured: "", prefix: ["simctl"] },
+    { configured: "  \t  ", prefix: ["simctl"] },
+    { configured: " /custom/device set ", prefix: ["simctl", "--set", "/custom/device set"] },
+    {
+      configured: "relative/devices",
+      prefix: ["simctl", "--set", resolve("/launch", "relative/devices")],
+    },
+  ];
+
+  test.each(cases)("builds argv from injected env $configured", ({ configured, prefix }) => {
+    const args = ["spawn", UDID, "defaults", "write", "domain", "key", ""];
+    expect(
+      buildSimctlArgs(args, {
+        [CORESIMULATOR_DEVICE_SET_PATH_ENV]: configured,
+        [DAEMON_LAUNCH_CWD_ENV]: "/launch",
+      }),
+    ).toEqual([...prefix, ...args]);
+    expect(args).toEqual(["spawn", UDID, "defaults", "write", "domain", "key", ""]);
+  });
+
+  test("relative paths fall back to the current directory when the launch anchor is invalid", () => {
+    expect(
+      buildSimctlArgs(["list"], {
+        [CORESIMULATOR_DEVICE_SET_PATH_ENV]: "devices",
+        [DAEMON_LAUNCH_CWD_ENV]: "relative-anchor",
+      }),
+    ).toEqual(["simctl", "--set", resolve("devices"), "list"]);
+  });
+
+  test.each(cases)(
+    "exec and spawn wrappers preserve argv for $configured",
+    async ({ configured, prefix }) => {
+      const savedPath = process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+      const savedCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+      try {
+        if (configured === undefined) {
+          delete process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+        } else {
+          process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = configured;
+        }
+        process.env[DAEMON_LAUNCH_CWD_ENV] = "/launch";
+        const calls: Array<{ file: string; args: string[] }> = [];
+        const child = new EventEmitter() as HostChildProcess;
+        const client = new Simctl(
+          null,
+          async (file, args) => {
+            calls.push({ file, args });
+            return createExecResult("", "");
+          },
+          new FakeTimer(),
+          "darwin",
+          (file, args) => {
+            calls.push({ file, args });
+            return child;
+          },
+        );
+        await client.executeCommand("list devices --json");
+        await client.executeCommandArgs(["spawn", UDID, "defaults", "write", "domain", "key", ""]);
+        expect(await client.startCommandArgs(["io", UDID, "recordVideo", "/tmp/file.mov"])).toBe(
+          child,
+        );
+        expect(calls).toEqual([
+          { file: "xcrun", args: [...prefix, "list", "devices", "--json"] },
+          {
+            file: "xcrun",
+            args: [...prefix, "spawn", UDID, "defaults", "write", "domain", "key", ""],
+          },
+          { file: "xcrun", args: [...prefix, "io", UDID, "recordVideo", "/tmp/file.mov"] },
+        ]);
+      } finally {
+        if (savedPath === undefined) {
+          delete process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV];
+        } else {
+          process.env[CORESIMULATOR_DEVICE_SET_PATH_ENV] = savedPath;
+        }
+        if (savedCwd === undefined) {
+          delete process.env[DAEMON_LAUNCH_CWD_ENV];
+        } else {
+          process.env[DAEMON_LAUNCH_CWD_ENV] = savedCwd;
+        }
+      }
+    },
+  );
 });

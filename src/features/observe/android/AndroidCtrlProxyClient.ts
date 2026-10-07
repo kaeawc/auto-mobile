@@ -1147,7 +1147,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult>;
 
   setKeyboardProfile(
@@ -3369,7 +3369,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<ImeCommitActionResult> {
     return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery);
   }

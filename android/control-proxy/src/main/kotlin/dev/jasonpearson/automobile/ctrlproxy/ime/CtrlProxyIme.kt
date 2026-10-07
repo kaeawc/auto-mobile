@@ -257,7 +257,29 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
       return
     }
-    if (isInputStarted && currentInputConnection != null) {
+    val connection = currentInputConnection
+    if (isInputStarted && connection != null) {
+      if (delivery == ImeTextDelivery.CLEAR_FIELD) {
+        val cleared =
+          clearImeField(
+            finishComposing = connection::finishComposingText,
+            readBefore = { connection.getTextBeforeCursor(it, 0) },
+            readAfter = { connection.getTextAfterCursor(it, 0) },
+            deleteSurrounding = connection::deleteSurroundingText,
+          )
+        val result =
+          if (cleared.success && !editorSyncSucceeded(InputConnectionAdapter(connection, this)))
+            cleared.copy(
+              success = false,
+              error = "Input connection lost while syncing clear",
+              partialApplication = true,
+            )
+          else cleared
+        driver.restoreIfNeeded(priorImeId)
+        onResult(result)
+        if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
+        return
+      }
       driver.commit(
         text,
         priorImeId,

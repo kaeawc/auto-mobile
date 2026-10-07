@@ -55,6 +55,20 @@ class WebSocketServerTest {
     assertFalse(WebSocketServer.inboundFrameLogLine(7, "hunter2").contains("hunter2"))
   }
 
+  @Test
+  fun `typed-input parse failure log omits the frame and the decoder message`() {
+    val frame = """{"type":"request_commit_text","text":"hunter2","requestId":7}"""
+    val error = IllegalArgumentException("Unexpected JSON token at offset 40: $frame")
+    val line = WebSocketServer.textInputParseFailureLogLine(frame, "request_commit_text", error)
+    assertEquals(
+      "Failed to parse request_commit_text (${frame.length} chars): IllegalArgumentException",
+      line,
+    )
+    assertNull(
+      WebSocketServer.textInputParseFailureLogLine(frame, "request_tap_coordinates", error)
+    )
+  }
+
   private lateinit var server: WebSocketServer
   private lateinit var testScope: TestScope
 

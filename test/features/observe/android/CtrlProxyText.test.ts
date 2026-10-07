@@ -207,6 +207,29 @@ describe("Android CtrlProxyText", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
+  test("clearField sends an empty commit with explicit protocol delivery", async () => {
+    const timer = new FakeTimer();
+    const harness = createIosDelegateHarness({ timer });
+    const result = new CtrlProxyText(harness.context).commitViaIme(
+      "",
+      undefined,
+      10_000,
+      undefined,
+      undefined,
+      "clearField",
+    );
+    await waitForSent(harness.sentMessages, 1);
+    expect(harness.sentMessages[0]).toMatchObject({
+      type: "request_commit_text",
+      text: "",
+      delivery: "clearField",
+      timeoutMs: 9_500,
+    });
+    harness.resolveLast({ success: true });
+    expect(await result).toMatchObject({ success: true });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("commit timeout reports unknown editor state", async () => {
     const timer = new FakeTimer();
     const requestManager = new RequestManager(timer);

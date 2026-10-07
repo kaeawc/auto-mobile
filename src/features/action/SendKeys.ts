@@ -49,9 +49,13 @@ import {
 } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import {
+  focusedFieldIsPassword,
   focusedImeFieldClass,
   imeFailureFields,
   imeCommitExceptionResult,
+  IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
+  LEGACY_IME_PASSWORD_REFUSAL,
+  redactPasswordImeFailure,
   verifyImeCommitResult,
   withImeFailure,
   type ImeFailureDiagnostic,
@@ -79,6 +83,9 @@ import {
 export const SEND_KEYS_MAX_COMMANDS = 100;
 export const SEND_KEYS_MAX_MODIFIERS = 4;
 const ANDROID_FOCUSED_INPUT_ERROR = "Android event delivery requires a focused editable field";
+const IME_CLEAR_FIELD_UNAVAILABLE_ERROR =
+  "IME-mode clear needs the CtrlProxy ime_clear_field_v1 capability, and key-event deletion " +
+  "could not size the focused text. Update the CtrlProxy APK, then retry.";
 const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.`;
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
@@ -152,9 +159,6 @@ export function segmentGraphemes(text: string): string[] {
   );
 }
 
-/** Distinct undeliverable password characters named in the up-front refusal (#9941). */
-const PASSWORD_UNDELIVERABLE_LIST_LIMIT = 5;
-
 function graphemeCodePoints(graphemes: string[]): string {
   return graphemes
     .map((grapheme) =>
@@ -180,13 +184,65 @@ function validateImeKeyEventsText(
   return null;
 }
 
+/** An older CtrlProxy refused the IME commit because the focused field is a password field. */
+function isLegacyImePasswordRefusal(result: TextActionResult): boolean {
+  return (
+    result.error === LEGACY_IME_PASSWORD_REFUSAL ||
+    result.imeFailure?.cause === LEGACY_IME_PASSWORD_REFUSAL
+  );
+}
+
+/**
+ * A password field's typed text never reaches a diagnostic. An older CtrlProxy's password refusal
+ * names the APK update: explicit IME mode never switches delivery on its own.
+ */
+function redactPasswordTypeResult(
+  result: TextActionResult,
+  text: string,
+  passwordField: boolean,
+): void {
+  const legacyRefusal = isLegacyImePasswordRefusal(result);
+  if (passwordField || legacyRefusal) {
+    Object.assign(result, redactPasswordImeFailure(result, text));
+  }
+  if (legacyRefusal) {
+    result.error = IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR;
+  }
+}
+
+/**
+ * Diagnostics are produced before the final observation. When the resolved target or the final
+ * observation shows a password field, strip typed text from every type command's IME diagnostic.
+ */
+function redactPasswordCommandResults(
+  result: SendKeysResult,
+  commands: SendKeysCommand[],
+  passwordTarget: boolean,
+): SendKeysResult {
+  const password =
+    passwordTarget || (result.observation ? focusedFieldIsPassword(result.observation) : false);
+  if (!password) {
+    return result;
+  }
+  for (const [position, commandResult] of result.commands.entries()) {
+    const command = commands[commandResult.index] ?? commands[position];
+    if (command?.action === "type" && commandResult.imeFailure) {
+      result.commands[position] = redactPasswordImeFailure(commandResult, command.text);
+    }
+  }
+  return result;
+}
+
 function getAutoImeFallback(
   operation: SendKeysOperation,
   requestedMode: SendKeysTypingMode,
   keyboardProfile: KeyboardProfileId | undefined,
   resolvedMode: AndroidSendKeysTypingMode,
+  passwordField?: boolean,
 ): AndroidSendKeysTypingMode | undefined {
-  if (requestedMode !== "auto" || keyboardProfile || resolvedMode !== "ime") {
+  // A password field typed through the IME has no safe fallback: eventAll would need the
+  // up-front deliverability check, and a mid-run switch could leave part of it typed.
+  if (requestedMode !== "auto" || keyboardProfile || resolvedMode !== "ime" || passwordField) {
     return undefined;
   }
   return operation === "insert" ? "eventAll" : "a11y";
@@ -311,7 +367,10 @@ export interface SendKeysTargetFocuser {
     display?: string,
     options?: SendKeysFocusOptions,
   ): Promise<
-    Pick<TapOnFocusResult, "success" | "error" | "focusVerified" | typeof tapFocusFailure>
+    Pick<TapOnFocusResult, "success" | "error" | "focusVerified" | typeof tapFocusFailure> & {
+      /** The resolved target is a password field. */
+      passwordField?: boolean;
+    }
   >;
 }
 
@@ -392,6 +451,9 @@ export interface SendKeysTextClient {
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
   supportsImeKeyEvents(): Promise<boolean>;
+  supportsImeClearField(): Promise<boolean>;
+  /** CtrlProxy commits (and clears) through the IME into password fields. */
+  supportsImePasswordCommit(): Promise<boolean>;
   supportsKeyboardProfiles(): Promise<boolean>;
   setKeyboardProfile(
     id: string,
@@ -400,7 +462,7 @@ export interface SendKeysTextClient {
     text: string,
     priorImeId: string | null,
     signal?: AbortSignal,
-    delivery?: "commit" | "keyEvents",
+    delivery?: "commit" | "keyEvents" | "clearField",
   ): Promise<TextActionResult>;
 }
 
@@ -437,6 +499,9 @@ export interface SendKeysInputKey {
 
 interface ImeCommitRouting {
   focusedFieldClass?: string | null;
+  /** The focused field is a password field: its typed text never reaches logs or diagnostics. */
+  passwordField?: boolean;
+  delivery?: "clearField";
   signal?: AbortSignal;
   display?: string;
   focusedInputVerified?: boolean;
@@ -446,6 +511,11 @@ export interface SendKeysPlatformDependencies {
   timer?: Timer;
   textClient?: SendKeysTextClient;
   inputKey?: SendKeysInputKey;
+}
+
+interface ImeCommitProgress {
+  result: TextActionResult;
+  safeToRestore: boolean;
 }
 
 interface ActiveImeCommitOptions {
@@ -463,7 +533,7 @@ type ImeSpanSnapshot = Pick<ActiveImeCommitOptions, "prior" | "wasEnabled" | "pr
 
 interface AndroidImeSpan {
   snapshot?: ImeSpanSnapshot;
-  lastType?: { text: string; focusedFieldClass?: string | null };
+  lastType?: { text: string; focusedFieldClass?: string | null; passwordField?: boolean };
   safeToRestore: boolean;
   restorationFailed?: boolean;
   releaseLock?: () => void;
@@ -488,6 +558,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly timer: Timer;
   private androidKeyCombinationSupported: Promise<boolean> | undefined;
   private androidCaretUnsafe = false;
+  /** Set while a type command targets a password field: diagnostics never name its characters. */
+  private typingPasswordField = false;
   private readonly imeSpanContext = new AsyncLocalStorage<AndroidImeSpan>();
 
   private get imeSpan(): AndroidImeSpan | undefined {
@@ -589,9 +661,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     result.success = false;
     const lastType = this.imeSpan?.lastType;
     if (lastType && result.action === "type") {
-      result.imeFailure = withImeFailure(result, lastType.text, "restoration", {
+      const failed = withImeFailure(result, lastType.text, "restoration", {
         focusedFieldClass: lastType.focusedFieldClass,
-      }).imeFailure;
+      });
+      result.imeFailure = (
+        lastType.passwordField ? redactPasswordImeFailure(failed, lastType.text) : failed
+      ).imeFailure;
     }
     execution.failure = { index: result.index, error: result.error };
     execution.restorationFailed = true;
@@ -666,11 +741,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
+      this.typingPasswordField = routing.passwordField === true;
       const autoImeFallback = getAutoImeFallback(
         operation,
         requestedMode,
         command.keyboardProfile,
         resolvedMode,
+        routing.passwordField,
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
@@ -686,10 +763,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
                 display,
                 focusedInputVerified: routing.focusedInputVerified,
                 focusedFieldClass: routing.focusedFieldClass,
+                passwordField: routing.passwordField,
               },
               focusedInputVerified: routing.focusedInputVerified,
             });
       this.recordCaretState(result);
+      redactPasswordTypeResult(result, command.text, routing.passwordField === true);
       return {
         ...baseResult,
         success: result.success,
@@ -805,6 +884,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (this.device.platform !== "android") {
       return this.textClient.clear(this.device.platform === "ios" ? signal : undefined);
     }
+    if (this.imeSpan) {
+      return this.executeAndroidImeCommit("", "insert", undefined, {
+        signal,
+        display,
+        delivery: "clearField",
+      });
+    }
     const { result: clearResult, unchangedWarning } = await this.clearAndVerifyAndroid(
       signal,
       display,
@@ -836,9 +922,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async clearAndVerifyAndroid(
     signal?: AbortSignal,
     display?: string,
+    clear: () => Promise<TextActionResult> = () => this.textClient.clear(),
+    passwordField = false,
   ): Promise<{ result: TextActionResult; unchangedWarning?: string }> {
-    const preClearText = await this.readTextBeforeClear(signal, display);
-    const result = await this.textClient.clear();
+    const preClearText = await this.readTextBeforeClear(signal, display, passwordField);
+    this.checkAbort(signal);
+    const result = await clear();
     if (!result.success) {
       return { result };
     }
@@ -853,12 +942,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async readTextBeforeClear(
     signal?: AbortSignal,
     display?: string,
+    passwordField = false,
   ): Promise<string | undefined> {
     try {
       const snapshot = this.readFocusedTextSnapshot(
         await this.readFreshObservation(signal, display),
       );
-      if (snapshot === undefined) {
+      if (snapshot === undefined && passwordField) {
+        // A password field is masked by design; an unverifiable clear is expected, not a fault.
+        logger.debug("[SendKeys] Password field is masked; the clear will not be verified");
+      } else if (snapshot === undefined) {
         logger.warn(
           "[SendKeys] Focused text is unreadable before the clear; it will not be verified",
         );
@@ -1003,6 +1096,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     mode: AndroidSendKeysTypingMode;
     focusedInputVerified: boolean;
     focusedFieldClass?: string | null;
+    passwordField?: boolean;
   }> {
     if (this.device.platform !== "android" || requestedMode !== "auto") {
       return { mode: this.resolveMode(requestedMode), focusedInputVerified: false };
@@ -1016,13 +1110,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         focusedFieldClass = focusedImeFieldClass(observation);
       },
     );
+    const focusedInputVerified = password !== undefined;
+    if (password && (await this.textClient.supportsImePasswordCommit())) {
+      // The CtrlProxy IME commits and clears password fields like any other field.
+      return { mode: "ime", focusedInputVerified, focusedFieldClass, passwordField: true };
+    }
     if (password && operation === "insert") {
       await this.requirePasswordTextDeliverable(text, signal);
     }
     return {
       mode: password ? (operation === "insert" ? "eventAll" : "a11y") : "ime",
-      focusedInputVerified: password !== undefined,
+      focusedInputVerified,
       focusedFieldClass,
+      ...(password ? { passwordField: true } : {}),
     };
   }
 
@@ -1043,14 +1143,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (undeliverable.length === 0) {
       return;
     }
-    const distinct = [...new Set(undeliverable)];
-    const shown = graphemeCodePoints(distinct.slice(0, PASSWORD_UNDELIVERABLE_LIST_LIMIT));
-    const more =
-      distinct.length > PASSWORD_UNDELIVERABLE_LIST_LIMIT
-        ? ` and ${distinct.length - PASSWORD_UNDELIVERABLE_LIST_LIMIT} more`
-        : "";
+    // Never name the characters: they are part of a password.
+    const nonAscii = undeliverable.filter((grapheme) => !isPrintableAscii(grapheme)).length;
+    const reasons = [
+      ...(nonAscii > 0 ? [`${nonAscii} non-ASCII (no key event exists)`] : []),
+      ...(undeliverable.length > nonAscii
+        ? [
+            `${undeliverable.length - nonAscii} uppercase or shifted (key events need Android 12, API 31, or newer)`,
+          ]
+        : []),
+    ];
     throw new ActionableError(
-      `Nothing was typed: the text for the focused password field contains ${distinct.length} distinct character(s) that cannot be sent as key events on this device (${shown}${more}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Non-ASCII characters never have a key event; uppercase letters and shifted symbols need Android 12 (API 31) or newer. Use operation: "replace" to set the whole value at once.`,
+      `Nothing was typed: the text for the focused password field contains ${undeliverable.length} character(s) that cannot be sent as key events on this device (${reasons.join("; ")}), and Android password fields refuse text insertion, so typing would leave part of the password entered. Use operation: "replace" to set the whole value at once.`,
     );
   }
 
@@ -1241,7 +1345,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const { signal } = routing;
     signal?.throwIfAborted();
     if (this.imeSpan) {
-      this.imeSpan.lastType = { text, focusedFieldClass: routing.focusedFieldClass };
+      this.imeSpan.lastType = {
+        text,
+        focusedFieldClass: routing.focusedFieldClass,
+        passwordField: routing.passwordField,
+      };
       await this.acquireImeSpan(this.imeSpan, signal);
       return this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
     }
@@ -1468,6 +1576,67 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return activated;
   }
 
+  private async prepareImeCommitClear(
+    operation: SendKeysOperation,
+    routing: ImeCommitRouting,
+    prior: string | null,
+    priorSubtype: ImeSubtypeSnapshot & { wasEnabled: boolean },
+    progress: ImeCommitProgress,
+  ): Promise<{ outcome?: TextActionResult; warning?: string }> {
+    if (operation !== "replace" && routing.delivery !== "clearField") {
+      return {};
+    }
+    const supportsClearField = await this.textClient.supportsImeClearField();
+    this.checkAbort(routing.signal);
+    if (!supportsClearField) {
+      // IME mode never uses the accessibility clear: it breaks a rich-text editor's live
+      // formatting until the editor resets (#10408). Delete with key events instead.
+      const cleared = await this.clearImeFieldWithKeyEvents(routing.signal, routing.display);
+      if (routing.delivery === "clearField") {
+        progress.result = cleared;
+      }
+      return cleared.success && routing.delivery !== "clearField" ? {} : { outcome: cleared };
+    }
+    const { result, unchangedWarning } = await this.clearAndVerifyAndroid(
+      routing.signal,
+      routing.display,
+      async () => {
+        const cleared = await this.textClient.commitViaIme("", null, routing.signal, "clearField");
+        // Record safety before verification can abort or exhaust the request budget.
+        progress.safeToRestore = this.canRestoreAfterImeCommit(cleared, prior, priorSubtype);
+        if (routing.delivery === "clearField") {
+          progress.result = cleared;
+        }
+        return cleared;
+      },
+      routing.passwordField === true,
+    );
+    if (!result.success || !progress.safeToRestore || routing.delivery === "clearField") {
+      return { outcome: this.withTextWarnings(result, [unchangedWarning]) };
+    }
+    return { warning: unchangedWarning };
+  }
+
+  /**
+   * IME-mode clear for a CtrlProxy without `ime_clear_field_v1`: key-event deletion sized from
+   * the focused field, or an update hint when the length is unknown.
+   */
+  private async clearImeFieldWithKeyEvents(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
+    if (!focusResult.success) {
+      return focusResult;
+    }
+    const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
+    if (textLength === undefined) {
+      return { success: false, error: IME_CLEAR_FIELD_UNAVAILABLE_ERROR };
+    }
+    logger.info("[SendKeys] CtrlProxy lacks ime_clear_field_v1; clearing with key events");
+    return this.clearEventOnlyForReplace(textLength, signal, display);
+  }
+
   private async performImeCommit(
     text: string,
     operation: SendKeysOperation,
@@ -1481,67 +1650,85 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     safeToRestore: boolean;
   }> {
     const { signal } = routing;
-    let safeToRestore = true;
-    let commitResult: TextActionResult = { success: false };
+    const progress: ImeCommitProgress = { result: { success: false }, safeToRestore: true };
     try {
       this.checkAbort(signal);
-      if (operation === "replace") {
-        const clearResult = await this.textClient.clear();
-        this.checkAbort(signal);
-        if (!clearResult.success) {
-          return { outcome: { ...clearResult, resolvedMode: mode }, safeToRestore };
-        }
-      }
+      const cleared = await this.prepareImeCommitClear(
+        operation,
+        routing,
+        prior,
+        priorSubtype,
+        progress,
+      );
       this.checkAbort(signal);
+      if (cleared.outcome) {
+        return {
+          outcome: { ...cleared.outcome, resolvedMode: mode },
+          safeToRestore: progress.safeToRestore,
+        };
+      }
+      const clearWarning = cleared.warning;
       const result = await this.textClient.commitViaIme(
         text,
         this.imeSpan ? null : prior,
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
-      safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
-      commitResult = result;
+      progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
+      progress.result = result;
       if (result.success && mode === "ime" && text.length > 0) {
         const verifiedResult = await this.verifyImeCommit(result, text, routing, operation);
         return {
-          outcome: { ...this.describeImeCommitFailure(verifiedResult), resolvedMode: mode },
-          safeToRestore,
+          outcome: {
+            ...this.withTextWarnings(this.describeImeCommitFailure(verifiedResult), [clearWarning]),
+            resolvedMode: mode,
+          },
+          safeToRestore: progress.safeToRestore,
         };
       }
       return {
         outcome: {
-          ...this.describeImeCommitFailure(
-            withImeFailure(
-              operation === "replace" ? markPartialAfterMutation(result) : result,
-              text,
-              "commit",
-              { focusedFieldClass: routing.focusedFieldClass },
+          ...this.withTextWarnings(
+            this.describeImeCommitFailure(
+              withImeFailure(
+                operation === "replace" ? markPartialAfterMutation(result) : result,
+                text,
+                "commit",
+                { focusedFieldClass: routing.focusedFieldClass },
+              ),
             ),
+            [clearWarning],
           ),
           resolvedMode: mode,
         },
-        safeToRestore,
+        safeToRestore: progress.safeToRestore,
       };
     } catch (error) {
-      if (commitResult.success && isSendKeysBudgetExhausted(signal)) {
+      if (progress.result.success && isSendKeysBudgetExhausted(signal)) {
         logger.warn("[SendKeys] Budget expired after IME acknowledgement", error);
         return {
           outcome: {
-            ...commitResult,
+            ...progress.result,
             resolvedMode: mode,
             warning: [
-              commitResult.warning,
+              progress.result.warning,
               "Delivery was acknowledged but not verified before the request budget expired.",
             ]
               .filter(Boolean)
               .join(" "),
           },
-          safeToRestore,
+          safeToRestore: progress.safeToRestore,
         };
       }
       return {
-        ...imeCommitExceptionResult(error, signal, commitResult, text, routing.focusedFieldClass),
-        safeToRestore,
+        ...imeCommitExceptionResult(
+          error,
+          signal,
+          progress.result,
+          text,
+          routing.focusedFieldClass,
+        ),
+        safeToRestore: progress.safeToRestore,
       };
     }
   }
@@ -1569,6 +1756,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       lacksRequiredFocus: (observation) => this.imeReadBackLacksRequiredFocus(observation, routing),
       focusedText: (observation) => this.readImeCommitText(observation, operation),
       focusError: ANDROID_TYPE_FOCUSED_INPUT_ERROR,
+      passwordField: routing.passwordField,
+      // Explicit modes skip the pre-type observe; the read-back still shows a password field.
+      isPasswordField: focusedFieldIsPassword,
     });
   }
 
@@ -2302,7 +2492,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           return this.withTextWarnings(
             {
               ...eventFailure,
-              error: `eventAll could not deliver grapheme ${graphemeCodePoints([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
+              error: `eventAll could not deliver grapheme ${this.describeGraphemes([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
               committedGraphemes: progress.committedGraphemes,
             },
             progress.warnings,
@@ -2447,6 +2637,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     };
   }
 
+  private describeGraphemes(graphemes: string[]): string {
+    return this.typingPasswordField
+      ? `(${graphemes.length} password character(s))`
+      : graphemeCodePoints(graphemes);
+  }
+
   private async getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null> {
     return grapheme.length === 1 && isPrintableAscii(grapheme)
       ? this.getKeyEventPlan(grapheme)
@@ -2461,7 +2657,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
     const text = run.join("");
-    const codePoints = graphemeCodePoints(run);
+    const codePoints = this.describeGraphemes(run);
     try {
       const result = await this.insertText(text, options, signal);
       if (result.success) {
@@ -2707,6 +2903,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           (await client.supportsCommand("request_commit_text")) &&
           (await client.supportsCommand("request_cancel_ime_commit")),
         supportsImeKeyEvents: async () => client.supportsCommand("ime_key_events_v1"),
+        supportsImeClearField: async () => client.supportsCommand("ime_clear_field_v1"),
+        supportsImePasswordCommit: async () => client.supportsCommand("ime_password_commit_v1"),
         supportsKeyboardProfiles: async () =>
           client.supportsCommand("request_set_keyboard_profile"),
         setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
@@ -2754,6 +2952,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         client.requestImeAction(action, 5000, undefined, signal, onDispatch),
       supportsImeCommit: async () => false,
       supportsImeKeyEvents: async () => false,
+      supportsImeClearField: async () => false,
+      supportsImePasswordCommit: async () => false,
       supportsKeyboardProfiles: async () => false,
       setKeyboardProfile: async () => ({
         success: false,
@@ -2773,6 +2973,8 @@ export class SendKeys {
   private readonly timer: Timer;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly displayTransitionReader: DisplayTransitionReader;
+  /** The selector resolved to a password field during the current execute. */
+  private focusedPasswordTarget = false;
 
   constructor(
     private readonly device: BootedDevice,
@@ -2811,12 +3013,35 @@ export class SendKeys {
             error: result.error,
             focusVerified: result.focusVerified,
             [tapFocusFailure]: result[tapFocusFailure],
+            ...(result.element && new FieldTypeDetector().isPasswordField(result.element)
+              ? { passwordField: true }
+              : {}),
           };
         },
       } satisfies SendKeysTargetFocuser);
   }
 
   async execute(
+    commands: SendKeysCommand[],
+    selector?: SendKeysSelector,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    display?: string,
+    options?: SendKeysFocusOptions,
+  ): Promise<SendKeysResult> {
+    this.focusedPasswordTarget = false;
+    const result = await this.executeFocused(
+      commands,
+      selector,
+      progress,
+      signal,
+      display,
+      options,
+    );
+    return redactPasswordCommandResults(result, commands, this.focusedPasswordTarget);
+  }
+
+  private async executeFocused(
     commands: SendKeysCommand[],
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
@@ -3298,6 +3523,7 @@ export class SendKeys {
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
     const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
     signal?.throwIfAborted();
+    this.focusedPasswordTarget ||= result.passwordField === true;
     if (!result.success && result[tapFocusFailure]) {
       return {
         ...result,

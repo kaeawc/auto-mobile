@@ -4,6 +4,8 @@ import android.content.ContentProvider
 import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.database.Cursor
 import android.net.Uri
@@ -32,6 +34,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -51,13 +54,15 @@ class StorageSubscriptionManagerTest {
   private lateinit var manager: StorageSubscriptionManager
   private val dispatcher = StandardTestDispatcher()
   private val scope = TestScope(dispatcher)
+  // Delays the manager asked for between a DISABLED reply and its retry; nothing really sleeps.
+  private val pauses = mutableListOf<Long>()
 
   @Before
   fun setUp() {
     contentResolver = mockk(relaxed = true)
     context = mockk(relaxed = true)
     every { context.contentResolver } returns contentResolver
-    manager = StorageSubscriptionManager(context, dispatcher, scope)
+    manager = StorageSubscriptionManager(context, dispatcher, scope, pause = { pauses += it })
   }
 
   @After
@@ -321,6 +326,152 @@ class StorageSubscriptionManagerTest {
     assertEquals("com.example.app", subscription.packageName)
     assertEquals("auth", subscription.fileName)
     assertEquals("com.example.app:auth", subscription.subscriptionId)
+  }
+
+  // ================= Subscribe to an app that is not running (#10210) =================
+
+  private fun disabledReply() =
+    Bundle().apply {
+      putBoolean("success", false)
+      putString("errorType", "DISABLED")
+      putString("error", "SharedPreferences inspection is disabled")
+    }
+
+  /** Stubs the package manager so [packageName] is installed and stopped (or not). */
+  private fun givenInstalledPackage(packageName: String, stopped: Boolean) {
+    val packageManager = mockk<PackageManager>(relaxed = true)
+    val appInfo =
+      ApplicationInfo().apply {
+        this.packageName = packageName
+        flags = if (stopped) ApplicationInfo.FLAG_STOPPED else 0
+      }
+    @Suppress("DEPRECATION")
+    every { packageManager.getApplicationInfo(eq(packageName), any<Int>()) } returns appInfo
+    every { context.packageManager } returns packageManager
+  }
+
+  private fun successReply() = Bundle().apply { putBoolean("success", true) }
+
+  /** Stubs `subscribeToFile` to answer [replies] in order, repeating the last one. */
+  private fun givenSubscribeReplies(vararg replies: Bundle) {
+    var next = 0
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } answers
+      {
+        replies[minOf(next++, replies.size - 1)]
+      }
+  }
+
+  @Test
+  fun `subscribe to a stopped app that stays disabled says the request started it`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply())
+
+    val result = manager.subscribe("com.example.app", "auth")
+
+    val error = result.exceptionOrNull()
+    assertTrue(error is StorageError.AppStartedByRequest)
+    assertEquals(
+      "app com.example.app was not running; this request started it but its storage inspection " +
+        "did not become available. Launch the app normally and subscribe again",
+      error?.message,
+    )
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `subscribe to a stopped app whose inspection comes up on the retry succeeds`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(disabledReply(), successReply())
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    assertEquals(1, pauses.size)
+    assertEquals(1, manager.getActiveSubscriptions().size)
+  }
+
+  @Test
+  fun `a dead process with the stopped flag clear retries and subscribes`() {
+    // Swipe-away, low-memory kill, crash or reboot: not FLAG_STOPPED, yet the provider call still
+    // cold-starts the process and can beat the app's own inspection setup.
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply(), successReply())
+
+    val result = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(result.isSuccess)
+    assertEquals(1, pauses.size)
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `a genuinely disabled running app is retried exactly once then keeps the SDK message`() {
+    givenInstalledPackage("com.example.app", stopped = false)
+    givenSubscribeReplies(disabledReply())
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
+    assertEquals(1, pauses.size)
+    verify(exactly = 2) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `a reply other than disabled is not retried`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    givenSubscribeReplies(
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "FileNotFound")
+        putString("error", "Preferences file not found: auth")
+      }
+    )
+
+    manager.subscribe("com.example.app", "auth")
+
+    assertTrue(pauses.isEmpty())
+    verify(exactly = 1) { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) }
+  }
+
+  @Test
+  fun `subscribe to a stopped app that answers is still accepted`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply { putBoolean("success", true) }
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+  }
+
+  @Test
+  fun `a stopped app failing for another reason keeps its own error`() {
+    givenInstalledPackage("com.example.app", stopped = true)
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "FileNotFound")
+        putString("error", "Preferences file not found: auth")
+      }
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("Preferences file not found: auth", error?.message)
+  }
+
+  @Test
+  fun `a package the runner cannot look up keeps the SDK message`() {
+    val packageManager = mockk<PackageManager>(relaxed = true)
+    @Suppress("DEPRECATION")
+    every { packageManager.getApplicationInfo(any<String>(), any<Int>()) } throws
+      PackageManager.NameNotFoundException("com.example.app")
+    every { context.packageManager } returns packageManager
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      disabledReply()
+
+    val error = manager.subscribe("com.example.app", "auth").exceptionOrNull()
+
+    assertTrue(error is StorageError.SdkError)
+    assertEquals("SharedPreferences inspection is disabled", error?.message)
   }
 
   @Test
@@ -640,7 +791,10 @@ class StorageSubscriptionManagerTest {
       advanceUntilIdle()
       withTimeout(1_000) { manager.changeEvents.take(5).toList() }
 
-      // No re-subscribe: the first notification after the restart already reveals the new token.
+      // No re-subscribe: the first notification after the restart already reveals the new token,
+      // and the manager re-arms the new process's listener itself.
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-b")
       requestedSince.clear()
       fakeAppProcess("process-b", listOf(1L, 2L, 3L), requestedSince)
       observerSlot.captured.onChange(false)
@@ -698,6 +852,8 @@ class StorageSubscriptionManagerTest {
 
       // Old cursor is 3; the new process recorded 1..5 before the next poll. The cursor-3 read
       // drains 4 and 5, then the re-read from 0 returns only 1..3.
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-b")
       requestedSince.clear()
       drainingAppProcess("process-b", mutableListOf(1L, 2L, 3L, 4L, 5L), requestedSince)
       observerSlot.captured.onChange(false)
@@ -707,6 +863,54 @@ class StorageSubscriptionManagerTest {
       assertEquals(
         listOf(1L, 2L, 3L, 4L, 5L),
         withTimeout(1_000) { manager.changeEvents.take(5).toList() }.map { it.sequenceNumber },
+      )
+    }
+
+  @Test
+  fun `a second restart during the re-arm drops the dead process reply instead of advancing the cursor`() =
+    runTest(dispatcher) {
+      val observerSlot = slot<ContentObserver>()
+      val requestedSince = mutableListOf<Long>()
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-a")
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      drainingAppProcess("process-a", mutableListOf(1L, 2L, 3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      withTimeout(1_000) { manager.changeEvents.take(3).toList() }
+
+      // The cursor read is answered by process-b (sequences 7, 8) but the app restarts again before
+      // the re-arm, which reaches process-c, whose counter is back at 1.
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-c")
+      requestedSince.clear()
+      every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+        {
+          val since = arg<Bundle>(3).getLong("sinceSequence", 0L)
+          requestedSince.add(since)
+          if (since == 0L) tokenChangesBundle("process-c", listOf(1L, 2L))
+          else tokenChangesBundle("process-b", listOf(7L, 8L))
+        }
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+
+      assertEquals(listOf(3L, 0L), requestedSince)
+      assertEquals(
+        listOf(1L, 2L),
+        withTimeout(1_000) { manager.changeEvents.take(2).toList() }.map { it.sequenceNumber },
+      )
+
+      // The cursor sits at 2, not 8, so process-c's next change is heard.
+      requestedSince.clear()
+      drainingAppProcess("process-c", mutableListOf(3L), requestedSince)
+      observerSlot.captured.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(2L), requestedSince)
+      assertEquals(
+        listOf(3L),
+        withTimeout(1_000) { manager.changeEvents.take(1).toList() }.map { it.sequenceNumber },
       )
     }
 
@@ -725,6 +929,8 @@ class StorageSubscriptionManagerTest {
       advanceUntilIdle()
       withTimeout(1_000) { manager.changeEvents.take(3).toList() }
 
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        tokenSubscribeBundle("process-b")
       requestedSince.clear()
       val queue = mutableListOf(1L, 2L, 3L, 4L, 5L)
       drainingAppProcess("process-b", queue, requestedSince, failRequestsWithSince = 0L)
@@ -787,6 +993,192 @@ class StorageSubscriptionManagerTest {
     assertTrue(retried.exceptionOrNull() is StorageError.SdkError)
     assertEquals(1, manager.getActiveSubscriptions().size)
   }
+
+  // ================= Open subscription survives an app restart (#10069) =================
+
+  /**
+   * A fake inspected app process. Like the real SDK it removes the changes it returns, restarts its
+   * sequence counter with a new process token, and records a change only while its listener is
+   * armed by `subscribeToFile` — a restart disarms it.
+   */
+  private inner class FakeInspectedApp(var token: String) {
+    var present = true
+    var armed = false
+    var failNextSubscribe = false
+    val calls = mutableListOf<String>()
+    private var counter = 0L
+    private val queue = mutableListOf<Long>()
+
+    fun restart(newToken: String) {
+      token = newToken
+      armed = false
+      counter = 0
+      queue.clear()
+    }
+
+    /** A preference write; lost to the inspector when the listener is not armed. */
+    fun write(count: Int = 1) {
+      if (!armed) return
+      repeat(count) { queue.add(++counter) }
+    }
+
+    fun handle(method: String, since: Long): Bundle? {
+      calls.add(method)
+      if (!present) return null
+      return when (method) {
+        "subscribeToFile" ->
+          if (failNextSubscribe) {
+            failNextSubscribe = false
+            Bundle().apply {
+              putBoolean("success", false)
+              putString("error", "provider unavailable")
+            }
+          } else {
+            armed = true
+            tokenSubscribeBundle(token)
+          }
+        "getChanges" -> {
+          val drained = queue.filter { it > since }
+          queue.removeAll(drained.toSet())
+          tokenChangesBundle(token, drained)
+        }
+        else -> null
+      }
+    }
+
+    fun count(method: String): Int = calls.count { it == method }
+  }
+
+  private fun wireApp(app: FakeInspectedApp): ContentObserver {
+    val observerSlot = slot<ContentObserver>()
+    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+      Unit
+    every { contentResolver.call(any<Uri>(), any<String>(), any(), any()) } answers
+      {
+        app.handle(arg<String>(1), arg<Bundle?>(3)?.getLong("sinceSequence", 0L) ?: 0L)
+      }
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    return observerSlot.captured
+  }
+
+  private suspend fun nextSequences(count: Int): List<Long> =
+    withTimeout(1_000) { manager.changeEvents.take(count).toList() }.map { it.sequenceNumber }
+
+  @Test
+  fun `an open subscription re-arms itself after the app restarts without a re-subscribe`() =
+    runTest(dispatcher) {
+      val app = FakeInspectedApp("process-a")
+      val observer = wireApp(app)
+      app.write(2)
+      observer.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(1L, 2L), nextSequences(2))
+
+      // terminateApp + launchApp: new process, listener gone. The client does nothing.
+      app.restart("process-b")
+      app.write(1) // made before the re-arm: the new process cannot report it
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+
+      assertTrue(app.armed)
+      assertEquals(2, app.count("subscribeToFile"))
+      app.write(3)
+      observer.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(1L, 2L, 3L), nextSequences(3))
+      // Nothing is delivered twice.
+      assertEquals(null, withTimeoutOrNull(1_000) { manager.changeEvents.first() })
+      assertEquals(2, app.count("subscribeToFile"))
+    }
+
+  @Test
+  fun `an app that is not running keeps the subscription and re-arms when it returns`() =
+    runTest(dispatcher) {
+      val app = FakeInspectedApp("process-a")
+      val observer = wireApp(app)
+      app.write(1)
+      observer.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(1L), nextSequences(1))
+
+      // Uninstalled / not running: every provider call fails and nothing re-arms or crashes.
+      app.present = false
+      app.restart("process-b")
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+      assertEquals(1, manager.getActiveSubscriptions().size)
+      assertEquals(1, app.count("subscribeToFile"))
+
+      // It returns as a new process.
+      app.present = true
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+      assertEquals(2, app.count("subscribeToFile"))
+      app.write(2)
+      observer.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(1L, 2L), nextSequences(2))
+    }
+
+  @Test
+  fun `a failed re-arm is retried by the next signal even though the token already matches`() =
+    runTest(dispatcher) {
+      val app = FakeInspectedApp("process-a")
+      val observer = wireApp(app)
+      app.restart("process-b")
+      app.failNextSubscribe = true
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+      assertTrue(!app.armed)
+
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+      assertTrue(app.armed)
+      assertEquals(3, app.count("subscribeToFile"))
+
+      app.write(1)
+      observer.onChange(false)
+      advanceUntilIdle()
+      assertEquals(listOf(1L), nextSequences(1))
+    }
+
+  @Test
+  fun `an idle open subscription makes no provider calls however long it stays open`() =
+    runTest(dispatcher) {
+      val app = FakeInspectedApp("process-a")
+      wireApp(app)
+      app.calls.clear()
+
+      testScheduler.advanceTimeBy(60 * 60_000L)
+      advanceUntilIdle()
+
+      assertEquals(emptyList<String>(), app.calls)
+    }
+
+  @Test
+  fun `activity signals cost one getChanges per signal and none for unsubscribed packages`() =
+    runTest(dispatcher) {
+      val app = FakeInspectedApp("process-a")
+      wireApp(app)
+      app.calls.clear()
+
+      repeat(3) {
+        manager.onPackageActivity("com.example.app")
+        advanceUntilIdle()
+      }
+      manager.onPackageActivity("com.other.app")
+      advanceUntilIdle()
+
+      assertEquals(List(3) { "getChanges" }, app.calls)
+
+      manager.unsubscribe("com.example.app", "auth")
+      app.calls.clear()
+      manager.onPackageActivity("com.example.app")
+      manager.destroy()
+      manager.onPackageActivity("com.example.app")
+      advanceUntilIdle()
+      assertEquals(emptyList<String>(), app.calls)
+    }
 
   // ================= Unsubscribe Tests =================
 

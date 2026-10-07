@@ -85,6 +85,7 @@ class WebSocketRequestTest {
         // Millisecond timestamps also use Long, but are not gesture durations.
         Triple("request_hierarchy_if_stale", "", "sinceTimestamp"),
         Triple("set_network_error_simulation", "\"enabled\":false", "expiresAtEpochMs"),
+        Triple("set_network_error_simulation", "\"enabled\":false", "remainingMs"),
       )
     for ((type, requiredFields, field) in cases) {
       val prefix = if (requiredFields.isEmpty()) "" else "$requiredFields,"

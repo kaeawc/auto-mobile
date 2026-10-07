@@ -119,8 +119,14 @@ import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState } from "../../../server/NetworkState";
-import { buildNetworkMockRules } from "../../../server/networkMockRules";
+import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import {
+  buildNetworkMockRules,
+  NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  type NetworkMockPushResult,
+  type NetworkMockRuleSync,
+} from "../../../server/networkMockRules";
+import { pushNetworkMockRules } from "./networkMockRulesPush";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
   ANDROID_FULL_COMMAND_SET_CAPABILITY,
@@ -171,7 +177,7 @@ import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
-import { CtrlProxyFocus } from "./CtrlProxyFocus";
+import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyOverlays, type OverlayAssetRequestOptions } from "./CtrlProxyOverlays";
 import type { OverlaySpec } from "../../overlay/overlaySpec";
 import type { OverlayAssetUpload } from "../../overlay/overlayAssets";
@@ -454,6 +460,15 @@ interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
   previousProfileId?: string;
 }
 
+interface WsSetNetworkMockRulesResultMessage extends WsMessageBase {
+  type: "set_network_mock_rules_result";
+  requestId: string;
+  success?: boolean;
+  /** Absent: no app confirmed the rules. Present (even empty): the app compiled the list. */
+  rejectedMockIds?: string[];
+  rejectedReasons?: Record<string, string>;
+}
+
 interface WsKeyboardProfilesResultMessage extends WsMessageBase {
   type: "keyboard_profiles_result";
   requestId: string;
@@ -490,6 +505,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
+  alreadySatisfied?: boolean;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -970,6 +986,7 @@ type WebSocketMessage =
   | WsCommitTextResultMessage
   | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
+  | WsSetNetworkMockRulesResultMessage
   | WsKeyboardProfilesResultMessage
   | WsInsertTextStateResultMessage
   | WsInsertTextResultMessage
@@ -2444,6 +2461,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Push THIS device's mock rules for a `mockNetwork`/`clearMockNetwork` call and wait (bounded)
+   * for the rules the app's regex engine rejected (issue #10101). A runner or SDK that does not
+   * report resolves to `unconfirmed`; only an undelivered push is a failure.
+   */
+  async pushNetworkMockRules(
+    rules: NetworkMockRuleSync[],
+    timeoutMs: number = NETWORK_MOCK_REPORT_TIMEOUT_MS,
+  ): Promise<NetworkMockPushResult> {
+    return pushNetworkMockRules(
+      this.createDelegateContext(),
+      rules,
+      () =>
+        this.sendMessage(
+          serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })),
+        ),
+      timeoutMs,
+    );
+  }
+
+  /**
    * Push THIS device's mock rules and error simulation from the host store.
    * Runs on every (re)connect, and after a session release clears the store so
    * the device drops what that session installed (issue #10061).
@@ -2469,6 +2506,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             errorType: sim?.errorType,
             limit: sim?.limit,
             expiresAtEpochMs: sim?.expiresAt,
+            // What is left now, not the original duration: the device times it on its own
+            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
+            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
           }),
         ),
       );
@@ -3506,7 +3546,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -3514,7 +3554,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     resourceId: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<void> {
+  ): Promise<FocusActionOutcome> {
     return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
@@ -5456,6 +5496,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         error: message.error,
       })),
 
+    set_network_mock_rules_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success ?? true,
+        totalTimeMs: 0,
+        rejectedMockIds: message.rejectedMockIds,
+        rejectedReasons: message.rejectedReasons,
+        error: message.error,
+      })),
+
     keyboard_profiles_result: (message) =>
       this.resolvePendingResponse(message, (message): KeyboardProfileCatalog => ({
         success: message.success,
@@ -5509,6 +5558,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         perfTiming: message.perfTiming,
+        ...(message.alreadySatisfied ? { alreadySatisfied: true } : {}),
       })),
 
     clipboard_result: (message) =>

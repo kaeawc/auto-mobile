@@ -349,6 +349,23 @@ function decodeSetNetworkFaultRulesResult(message: WebSocketMessage): unknown {
   };
 }
 
+/**
+ * `rejectedMockIds` is passed through only when the runner sent it: its absence means the runner
+ * (or the app SDK behind it) did not report, which the host must not read as "none rejected".
+ */
+function decodeSetNetworkMockRulesResult(message: WebSocketMessage): unknown {
+  const msg = message as { rejectedMockIds?: unknown; rejectedReasons?: unknown };
+  return {
+    success: message.success ?? message.ok ?? false,
+    totalTimeMs: message.totalTimeMs ?? 0,
+    error: message.error,
+    ...(Array.isArray(msg.rejectedMockIds) ? { rejectedMockIds: msg.rejectedMockIds } : {}),
+    ...(typeof msg.rejectedReasons === "object" && msg.rejectedReasons !== null
+      ? { rejectedReasons: msg.rejectedReasons }
+      : {}),
+  };
+}
+
 function decodeExecuteSqlResult(message: WebSocketMessage): unknown {
   return {
     success: message.success ?? false,
@@ -479,6 +496,7 @@ const messageDecoders = new Map<
   ["set_preference_result", decodeSetPreferenceResult],
   ["remove_preference_result", decodeSetPreferenceResult],
   ["clear_preferences_result", decodeSetPreferenceResult],
+  ["set_network_mock_rules_result", decodeSetNetworkMockRulesResult],
   ["set_network_fault_rules_result", decodeSetNetworkFaultRulesResult],
   ["set_network_error_simulation_result", decodeSetNetworkFaultRulesResult],
   ["execute_sql_result", decodeExecuteSqlResult],

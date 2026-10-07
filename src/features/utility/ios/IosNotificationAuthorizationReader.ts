@@ -201,6 +201,8 @@ export function resolveDeviceDataRoot(
   homeDirectory: string = os.homedir(),
   environment: SimulatorDeviceSetEnvironment = process.env,
 ): string {
+  // The env var name is unverified against a real toolchain; simctl explicitly
+  // passes --set as the owner-approved fallback (#6900). Device check owed.
   return path.join(defaultDeviceSetRoot(homeDirectory, environment), udid);
 }
 

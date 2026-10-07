@@ -1,4 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { ElementResolver } from "../../../src/features/utility/ElementResolver";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
+import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
+import { parseBounds } from "../../../src/utils/bounds";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
@@ -794,3 +801,201 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(result.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
   });
 });
+
+const project = (hierarchy: ViewHierarchyResult) => ({
+  id: "promoted-duplicate",
+  nodes: new SearchableHierarchy().project(hierarchy),
+});
+const observed = (hierarchy: ViewHierarchyResult) =>
+  projectSkeleton(new DefaultObserveElementCollector().collect(hierarchy, "ios")!).skeleton;
+
+// Real Discover button / Search image capture used by diffObserveSelectorIndex.
+const capturedDuplicates = JSON.parse(
+  readFileSync(
+    `${import.meta.dir}/../../fixtures/observe-output/ios-keyboard-states/ios-keyboard-minimized.raw.json`,
+    "utf8",
+  ),
+) as ObserveResult;
+
+function capturedDuplicateRows() {
+  const observation = structuredClone(capturedDuplicates);
+  const nodes = new SearchableHierarchy().project(observation.viewHierarchy!);
+  const matches = nodes.filter((entry) => entry.nativeId === "magnifyingglass");
+  expect(matches).toHaveLength(2);
+  return { observation, parent: matches[0].source, child: matches[1].source };
+}
+
+function capturedPromotedPeers(growths: readonly number[] = [50, 100]) {
+  const { observation, parent, child } = capturedDuplicateRows();
+  const peers = growths.map((growth) => {
+    const peer = structuredClone(parent);
+    delete peer.node;
+    const b = parseBounds(peer.bounds)!;
+    peer.bounds = { ...b, right: b.right + growth };
+    return peer;
+  });
+  parent["resource-id"] = "distinct-owner";
+  child.clickable = false;
+  parent.node = [child, ...peers];
+  observation.elements = new DefaultObserveElementCollector().collect(
+    observation.viewHierarchy!,
+    "ios",
+  );
+  return observation;
+}
+
+test("captured promoted child and owner share skeleton indexes in observe-to-resolve round-trip", () => {
+  const { observation, parent, child } = capturedDuplicateRows();
+  const sibling = structuredClone(child);
+  const siblingBounds = parseBounds(sibling.bounds)!;
+  sibling.bounds = {
+    ...siblingBounds,
+    left: siblingBounds.left + 50,
+    right: siblingBounds.right + 50,
+  };
+  const children = parent.node;
+  parent.node = [...(Array.isArray(children) ? children : children ? [children] : []), sibling];
+  child.clickable = false;
+  const hierarchy = observation.viewHierarchy!;
+  const rows = projectSkeleton(
+    new DefaultObserveElementCollector().collect(hierarchy, "ios")!,
+    observation.screenSize,
+  ).skeleton.filter((row) => row.elementId === "magnifyingglass");
+  expect(rows).toHaveLength(2);
+  const snapshot = project(hierarchy);
+  const resolver = new ElementResolver();
+  const result = resolver.resolve(snapshot, { elementId: "magnifyingglass" }, { action: "tap" });
+  expect(result.candidates).toHaveLength(2);
+  expect(result.matches).toHaveLength(3); // Diagnostics retain the inert match.
+  for (const row of rows) {
+    const resolution = resolver.resolve(
+      snapshot,
+      { elementId: row.elementId, index: row.index },
+      { action: "tap" },
+    );
+    expect(resolution.indexInMatches).toBe(row.index);
+    const b = resolution.chosen!.bounds!;
+    expect([b.left, b.top, b.right, b.bottom]).toEqual(row.bounds);
+  }
+  expect(
+    resolver.resolve(snapshot, { elementId: "magnifyingglass", index: 2 }, { action: "tap" })
+      .chosen,
+  ).toBeNull();
+});
+
+test("captured plain duplicates keep smallest-area-first indexes", () => {
+  const { observation, parent, child } = capturedDuplicateRows();
+  const hierarchy = observation.viewHierarchy!;
+  const rows = observed(hierarchy).filter((row) => row.elementId === "magnifyingglass");
+  const resolver = new ElementResolver();
+  const snapshot = project(hierarchy);
+  expect(rows).toHaveLength(2);
+  expect(
+    resolver.resolve(snapshot, { elementId: "magnifyingglass", index: 0 }, { action: "tap" })
+      .chosen!.source,
+  ).toBe(child);
+  expect(
+    resolver.resolve(snapshot, { elementId: "magnifyingglass", index: 1 }, { action: "tap" })
+      .chosen!.source,
+  ).toBe(parent);
+  for (const row of rows) {
+    const b = resolver.resolve(
+      snapshot,
+      { elementId: row.elementId, index: row.index },
+      { action: "tap" },
+    ).chosen!.bounds!;
+    expect([b.left, b.top, b.right, b.bottom]).toEqual(row.bounds);
+  }
+});
+
+test("captured matching labels promoted to another ID occupy the same ranked set as skeleton duplicates", () => {
+  const observation = capturedPromotedPeers();
+  const hierarchy = observation.viewHierarchy!;
+  const rows = observed(hierarchy).filter((row) => row.elementId === "magnifyingglass");
+  expect(rows).toHaveLength(2);
+  const snapshot = project(hierarchy);
+  const resolver = new ElementResolver();
+  expect(
+    resolver.resolve(snapshot, { elementId: "magnifyingglass" }, { action: "tap" }).candidates,
+  ).toHaveLength(3);
+  // The promoted owner is smaller than either emitted duplicate and occupies slot 0.
+  expect(rows.map((row) => row.index)).toEqual([1, 2]);
+  for (const row of rows) {
+    const b = resolver.resolve(
+      snapshot,
+      { elementId: row.elementId, index: row.index },
+      { action: "tap" },
+    ).chosen!.bounds!;
+    expect([b.left, b.top, b.right, b.bottom]).toEqual(row.bounds);
+  }
+});
+
+test.each(["structuredClone", "sanitize", "sanitize compact"])(
+  "captured duplicate indexes survive %s without collector provenance",
+  (cloneMode) => {
+    const observation = capturedPromotedPeers();
+    const cfg = { dropElements: true, project: "skeleton" } as const;
+    const fresh = sanitizeObserveResult(observation, cfg);
+    expect(
+      fresh.skeleton?.filter((row) => row.elementId === "magnifyingglass").map((row) => row.index),
+    ).toEqual([1, 2]);
+    const cloned =
+      cloneMode === "structuredClone"
+        ? structuredClone(observation)
+        : sanitizeObserveResult(observation, {
+            dropElements: false,
+            compact: cloneMode === "sanitize compact",
+          });
+    const before = JSON.stringify(cloned);
+    const cached = sanitizeObserveResult(cloned, cfg);
+    expect(cached.skeleton).toEqual(fresh.skeleton);
+    expect(cached.context).toEqual(fresh.context);
+    expect(JSON.stringify(cloned)).toBe(before);
+  },
+);
+
+test("one emitted duplicate still resolves when a hidden promoted candidate consumes slot zero", () => {
+  const observation = capturedPromotedPeers([50]);
+  const fresh = projectSkeleton(observation.elements!, observation.screenSize).skeleton;
+  const rows = fresh.filter((row) => row.elementId === "magnifyingglass");
+  expect(rows).toHaveLength(1);
+  expect(rows[0].index).toBe(1);
+  const cloned = structuredClone(observation);
+  expect(
+    sanitizeObserveResult(cloned, { dropElements: true, project: "skeleton" }).skeleton,
+  ).toEqual(fresh);
+});
+
+test.each(["native id", "node key", "label"])(
+  "200 captured rows with unique %s selectors need no resolver passes",
+  (selectorKind) => {
+    const { observation, parent } = capturedDuplicateRows();
+    const peers = Array.from({ length: 200 }, (_, index) => {
+      const peer = structuredClone(parent);
+      delete peer.node;
+      delete peer["resource-id"];
+      delete peer["view-id"];
+      peer.text = `Unique row ${index}`;
+      if (selectorKind !== "label") {
+        peer[selectorKind === "native id" ? "resource-id" : "view-id"] = `unique-${index}`;
+      }
+      const b = parseBounds(peer.bounds)!;
+      peer.bounds = { ...b, top: b.top + index * 50, bottom: b.bottom + index * 50 };
+      return peer;
+    });
+    observation.viewHierarchy!.hierarchy.node = peers;
+    const elements = new DefaultObserveElementCollector().collect(
+      observation.viewHierarchy!,
+      "ios",
+    )!;
+    const resolve = spyOn(ElementResolver.prototype, "resolve");
+    try {
+      const rows = projectSkeleton(elements).skeleton;
+      expect(rows).toHaveLength(200);
+      expect(rows.every((row) => row.index === undefined)).toBe(true);
+      expect(resolve).not.toHaveBeenCalled();
+    } finally {
+      resolve.mockRestore();
+    }
+  },
+);

@@ -1691,6 +1691,114 @@
           "required": ["executionTimeMs", "steps"],
           "additionalProperties": false
         },
+        "healthSummary": {
+          "description": "End-of-run aggregate of per-tool step latency, failures and skips",
+          "type": "object",
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "totalSteps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "executedSteps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "failedSteps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "skippedSteps": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "warningCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "slowestStep": {
+              "type": "object",
+              "properties": {
+                "stepIndex": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "durationMs": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["stepIndex", "tool", "durationMs"],
+              "additionalProperties": false
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "failed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "skipped": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "totalMs": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "maxMs": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["tool", "count", "failed", "skipped", "totalMs", "maxMs"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "success",
+            "totalSteps",
+            "executedSteps",
+            "failedSteps",
+            "skippedSteps",
+            "warningCount",
+            "durationMs",
+            "tools"
+          ],
+          "additionalProperties": false
+        },
         "videoFilePaths": {
           "type": "array",
           "items": {
@@ -1833,7 +1941,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },
@@ -2822,7 +2929,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },
@@ -8303,7 +8409,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },

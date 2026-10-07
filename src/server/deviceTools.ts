@@ -309,6 +309,12 @@ const startDeviceParametersSchema = z.object({
     .describe(
       "Exact Android Virtual Device name. Unlike name, this never selects a substring-matching AVD.",
     ),
+  cameraPosterPath: z
+    .string()
+    .optional()
+    .describe(
+      "Host PNG/JPG/JPEG poster image for the Android emulator back camera wall; cold boot only",
+    ),
   formFactor: z.enum(["phone", "tablet", "foldable"]).optional().describe("Device form factor"),
   requires: z
     .object({
@@ -838,6 +844,7 @@ export function createToolErrorResponse(
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
+  cameraPosterPath?: string;
   platform: "android" | "ios";
   minOsVersion?: string;
   maxOsVersion?: string;
@@ -4635,7 +4642,18 @@ export type DevicePreparationBudgets = {
   stableTarget?: StableDeviceTarget;
   /** Android `avdName` + `deviceId` pair, validated before and after discovery. */
   requestedAndroidIdentifierPair?: { avdName: string; deviceId: string };
+  /** Running preparation stage, named when the acquisition deadline backstop fires (#6034). */
+  stage?: AcquisitionStage;
 };
+
+/** Mutable holder for the acquisition stage currently in flight. */
+export type AcquisitionStage = { current: string };
+
+export function setAcquisitionStage(budgets: DevicePreparationBudgets, stage: string): void {
+  if (budgets.stage) {
+    budgets.stage.current = stage;
+  }
+}
 
 /**
  * Acquisition-phase timeout. `reserveStableDeviceLifecycle` defaults to the

@@ -1,5 +1,6 @@
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
+import { redactPlanStepTypedText } from "../redactTypedTextArguments";
 
 /**
  * Internal helper for normalizing plan steps
@@ -51,7 +52,10 @@ export class PlanNormalizer {
    * @returns Normalized PlanStep
    */
   static normalizeStep(step: any, index: number): PlanStep {
-    logger.debug(`Processing step ${index}:`, JSON.stringify(step, null, 2));
+    logger.debug(
+      `Processing step ${index}:`,
+      JSON.stringify(redactPlanStepTypedText(step), null, 2),
+    );
 
     const parts = PlanNormalizer.toolAndParams(step);
     if (!parts) {
@@ -84,7 +88,10 @@ export class PlanNormalizer {
     }
 
     logger.info(`Normalized step ${index}: ${toolName}`);
-    logger.debug(`Normalized step ${index}:`, JSON.stringify(normalizedStep, null, 2));
+    logger.debug(
+      `Normalized step ${index}:`,
+      JSON.stringify(redactPlanStepTypedText(normalizedStep), null, 2),
+    );
     return normalizedStep;
   }
 

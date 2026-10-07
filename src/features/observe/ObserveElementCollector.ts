@@ -18,6 +18,7 @@ import {
   setCapturedKeyboard,
   setUncollectedWrappers,
   setHierarchyNodeSource,
+  setSearchableEntries,
 } from "./output/elementProvenance";
 
 export interface ObserveElementCollector {
@@ -102,6 +103,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
     const elements: NonNullable<ObserveResult["elements"]> = { clickable, scrollable, text, media };
+    setSearchableEntries(elements, projected);
     // Like element ancestry, this is output-projection metadata, not raw element content.
     if (keyboardPackage) {
       setCapturedKeyboard(elements, { visible: true, package: keyboardPackage });

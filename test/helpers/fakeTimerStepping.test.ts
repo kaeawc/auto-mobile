@@ -1,6 +1,11 @@
 import { expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "./fakeTimerStepping";
+import {
+  drainUntil,
+  drainUntilQuiescent,
+  settleByFakeEvents,
+  settleWithFakeTime,
+} from "./fakeTimerStepping";
 
 test("drainUntil returns for an already true predicate", async () => {
   await drainUntil(() => true, { description: "already ready", maxTurns: 0 });
@@ -40,6 +45,43 @@ test("settleWithFakeTime settles a promise parked on a fake sleep", async () => 
   ).resolves.toBe("ready");
   expect(timer.now()).toBe(100);
   expect(timer.getPendingSleeps()).toEqual([]);
+});
+
+test("settleByFakeEvents fires events of very different durations in due order", async () => {
+  const timer = new FakeTimer();
+  const fired: string[] = [];
+  timer.setTimeout(() => fired.push("late"), 900_000);
+  const work = (async () => {
+    await timer.sleep(5);
+    fired.push("sleep");
+    await new Promise<void>((resolve) => timer.setTimeout(resolve, 60_000));
+    return "done";
+  })();
+  await expect(settleByFakeEvents(timer, work, { description: "mixed waits" })).resolves.toBe(
+    "done",
+  );
+  expect(fired).toEqual(["sleep"]);
+  expect(timer.now()).toBe(60_005);
+  expect(timer.getMsUntilNextDueEvent()).toBe(839_995);
+});
+
+test("settleByFakeEvents fails when nothing is pending on fake time", async () => {
+  const timer = new FakeTimer();
+  await expect(
+    settleByFakeEvents(timer, new Promise<void>(() => {}), { description: "parked work" }),
+  ).rejects.toThrow("Nothing is pending on fake time, but parked work has not settled");
+});
+
+test("settleByFakeEvents fails after its event cap", async () => {
+  const timer = new FakeTimer();
+  timer.setInterval(() => {}, 10);
+  await expect(
+    settleByFakeEvents(timer, new Promise<void>(() => {}), {
+      maxEvents: 3,
+      description: "endless work",
+    }),
+  ).rejects.toThrow("Fake time fired 3 events without settling endless work");
+  expect(timer.now()).toBe(30);
 });
 
 test("settleWithFakeTime fails within the fake-time step budget", async () => {

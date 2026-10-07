@@ -1,0 +1,91 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"success\":true,\"executedSteps\":2,\"totalSteps\":3,\"platform\":\"android\",\"deviceId\":\"emulator-5554\",\"skippedSteps\":[{\"stepIndex\":1,\"tool\":\"tapOn\",\"error\":\"Element not found\"}],\"toolResults\":[{\"stepIndex\":0,\"tool\":\"tapOn\",\"result\":{\"message\":\"Tapped on element (matched id=com.example:id/item text=\\\"Row 7\\\"; 12 matches (index 6))\",\"success\":true,\"action\":\"tap\",\"element\":{\"text\":\"Item\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320}},\"selectedElement\":{\"text\":\"Row 7\",\"resourceId\":\"com.example:id/item\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320,\"centerX\":540,\"centerY\":260},\"indexInMatches\":6,\"totalMatches\":12,\"selectionStrategy\":\"random\"}}},{\"stepIndex\":2,\"tool\":\"tapOn\",\"result\":{\"message\":\"Tapped on element (matched id=com.example:id/item text=\\\"Confirm\\\"; 12 matches (index 6))\",\"success\":true,\"action\":\"tap\",\"element\":{\"text\":\"Confirm\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320}},\"selectedElement\":{\"text\":\"Confirm\",\"resourceId\":\"com.example:id/item\",\"bounds\":{\"left\":0,\"top\":200,\"right\":1080,\"bottom\":320,\"centerX\":540,\"centerY\":260},\"indexInMatches\":6,\"totalMatches\":12,\"selectionStrategy\":\"first\"}}}]}"
+    }
+  ],
+  "structuredContent": {
+    "success": true,
+    "executedSteps": 2,
+    "totalSteps": 3,
+    "platform": "android",
+    "deviceId": "emulator-5554",
+    "skippedSteps": [
+      {
+        "stepIndex": 1,
+        "tool": "tapOn",
+        "error": "Element not found"
+      }
+    ],
+    "toolResults": [
+      {
+        "stepIndex": 0,
+        "tool": "tapOn",
+        "result": {
+          "message": "Tapped on element (matched id=com.example:id/item text=\"Row 7\"; 12 matches (index 6))",
+          "success": true,
+          "action": "tap",
+          "element": {
+            "text": "Item",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320
+            }
+          },
+          "selectedElement": {
+            "text": "Row 7",
+            "resourceId": "com.example:id/item",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320,
+              "centerX": 540,
+              "centerY": 260
+            },
+            "indexInMatches": 6,
+            "totalMatches": 12,
+            "selectionStrategy": "random"
+          }
+        }
+      },
+      {
+        "stepIndex": 2,
+        "tool": "tapOn",
+        "result": {
+          "message": "Tapped on element (matched id=com.example:id/item text=\"Confirm\"; 12 matches (index 6))",
+          "success": true,
+          "action": "tap",
+          "element": {
+            "text": "Confirm",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320
+            }
+          },
+          "selectedElement": {
+            "text": "Confirm",
+            "resourceId": "com.example:id/item",
+            "bounds": {
+              "left": 0,
+              "top": 200,
+              "right": 1080,
+              "bottom": 320,
+              "centerX": 540,
+              "centerY": 260
+            },
+            "indexInMatches": 6,
+            "totalMatches": 12,
+            "selectionStrategy": "first"
+          }
+        }
+      }
+    ]
+  },
+  "success": true
+}

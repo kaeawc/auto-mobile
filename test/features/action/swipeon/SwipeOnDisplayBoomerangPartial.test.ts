@@ -71,15 +71,23 @@ test("a successful display boomerang is unchanged", async () => {
 
 test("cancelling during the display apex pause stops before the return leg", async () => {
   const h = harness();
-  // A pause that never completes: only the abort signal can end it.
-  spyOn(h.timer, "sleep").mockImplementation(() => new Promise<void>(() => {}));
   const controller = new AbortController();
-  h.afterSwipe(() => {
-    if (h.legs().length === 1) {
-      queueMicrotask(() => controller.abort());
-    }
+  // A pause that never completes: only the abort signal can end it, and it fires once the
+  // pause has started (after the forward leg has fully returned).
+  spyOn(h.timer, "sleep").mockImplementation(() => {
+    queueMicrotask(() => controller.abort());
+    return new Promise<void>(() => {});
   });
 
-  await expect(h.action.execute(boomerang, undefined, controller.signal)).rejects.toThrow();
+  const error = await h.action.execute(boomerang, undefined, controller.signal).then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+
   expect(h.legs()).toHaveLength(1);
+  expect(error).toBeInstanceOf(Error);
+  // The caller sees a cancellation that still says the forward swipe landed.
+  expect((error as Error).message).toContain("Operation cancelled");
+  expect((error as Error).message).toContain("forward swipe was delivered");
+  expect((error as Error).message).toContain("do not retry automatically");
 });

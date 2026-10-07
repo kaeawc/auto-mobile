@@ -3,7 +3,6 @@ import { androidControlObservation } from "../../../helpers/androidDisabledContr
 import { sanitizeObserveResult } from "../../../../src/features/observe/output/ObserveResultOutput";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
-import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
@@ -90,7 +89,7 @@ test.each([false, true])(
     ]);
     const skeleton = projectSkeleton(elements).skeleton;
     expect(skeleton).toHaveLength(3);
-    const liveSelector = new DefaultElementSelector();
+    const liveSelector = new ResolverElementSelector();
     const selectedRows = [0, 1, 2].map(
       (index) => liveSelector.selectByText(projected, "Open", { index }).element,
     );

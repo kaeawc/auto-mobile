@@ -9,6 +9,7 @@ import { PressButton } from "./PressButton";
 import type { SwipeOnDependencies } from "./swipeon/types";
 import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker, IosUnlockOptions } from "./WakeAndUnlock";
+import { isRunnerDeadlineCompletedLate } from "../observe/ios/runnerErrorCodes";
 
 const PRE_SWIPE_LOCK_PROBE_MAX_MS = 1_500;
 
@@ -17,7 +18,13 @@ export interface IosUnlockActions {
   swipeUp(
     timeoutMs: number,
     options?: { signal?: AbortSignal; lockScreen?: true },
-  ): Promise<{ success: boolean; error?: string; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    warning?: string;
+    /** The swipe was dispatched but no result was confirmed (it may have been applied). */
+    outcomeIndeterminate?: boolean;
+  }>;
 }
 
 /**
@@ -101,7 +108,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       signal,
       lockScreen: true,
     });
-    if (!readUnlocked || cannotRetrySwipe(fast.error)) {
+    if (!readUnlocked || cannotRetrySwipe(fast)) {
       logger.info(
         `[IosLockScreenUnlocker] fast swipe finished; fallback unavailable: ${fast.error ?? "no lock-state reader"}`,
       );
@@ -174,7 +181,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     timeoutMs: number;
     signal?: AbortSignal;
     lockScreen?: true;
-  }): Promise<{ success: boolean; error?: string }> {
+  }): Promise<{ success: boolean; error?: string; outcomeIndeterminate?: boolean }> {
     try {
       const swipeAbort = new AbortController();
       const swipe = await raceWithDeadline(
@@ -202,6 +209,9 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
           swipe.success === false
             ? (swipe.error ?? swipe.warning ?? "iOS lock-screen swipe did not report success")
             : undefined,
+        ...(swipe.success === false && swipe.outcomeIndeterminate === true
+          ? { outcomeIndeterminate: true }
+          : {}),
       };
     } catch (error) {
       throwIfAborted(signal);
@@ -242,14 +252,24 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
   }
 }
 
-// The decoder's typed runnerBusy flag is consumed by IOSCtrlProxyClient; action
-// results retain only its message. Transport timeouts likewise cannot be retried.
-function cannotRetrySwipe(message: string | undefined): boolean {
+// A dispatched swipe with no confirmed result (timeout, socket close, abort after the write) may
+// already have unlocked the screen, so the structured `outcomeIndeterminate` marker decides that no
+// fallback swipe follows, whatever the error text says. Text only covers replies that carry no
+// marker: the decoder's typed runnerBusy flag is consumed by IOSCtrlProxyClient and action results
+// retain only its message, and a thrown transport timeout arrives as text.
+function cannotRetrySwipe(fast: { error?: string; outcomeIndeterminate?: boolean }): boolean {
+  const message = fast.error;
   return (
-    message !== undefined &&
-    (/runner_busy|iOS runner is busy executing/i.test(message) ||
-      /exceeded execution bound[\s\S]*XCUITest call is still executing/i.test(message) ||
-      (!message.startsWith("iOS lock-screen swipe timed out after ") &&
-        /swipe timed out|request.*timed out/i.test(message)))
+    fast.outcomeIndeterminate === true ||
+    (message !== undefined &&
+      (/runner_busy|iOS runner is busy executing/i.test(message) ||
+        /exceeded execution bound[\s\S]*XCUITest call is still executing/i.test(message) ||
+        // The runner's deadline error (#10084). "gesture was not started" is safe to retry; a
+        // gesture that completed after its deadline may already have unlocked the screen. A real
+        // swipe carries the typed marker (ExecuteGesture reads the runner's errorCode); this reads
+        // the wording only for results that lost it, with the same fallback older runners get.
+        isRunnerDeadlineCompletedLate({ error: message }) ||
+        (!message.startsWith("iOS lock-screen swipe timed out after ") &&
+          /swipe timed out|request.*timed out/i.test(message))))
   );
 }

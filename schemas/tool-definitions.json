@@ -1833,7 +1833,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },
@@ -2822,7 +2821,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },
@@ -8303,7 +8301,6 @@
       "additionalProperties": false
     },
     "_meta": {
-      "automobile/debugOnly": true,
       "automobile/embeddedSdkOnly": true
     }
   },

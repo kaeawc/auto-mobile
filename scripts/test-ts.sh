@@ -48,7 +48,8 @@ fi
 
 # Owner decision on #8381: GitHub-hosted macOS unit lanes run 3 workers. Keyed on the
 # runner-provided RUNNER_OS (not uname) so local macOS development keeps the core-based default.
-if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+# Runners with fewer than 3 cores keep the 2-worker minimum rather than oversubscribing.
+if [[ "${RUNNER_OS:-}" == "macOS" && "$cores" -ge 3 ]]; then
   default_workers=3
 fi
 

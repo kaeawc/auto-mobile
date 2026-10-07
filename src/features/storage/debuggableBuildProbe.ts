@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -23,7 +24,11 @@ export async function probeDebuggableBuild(
   appId: string,
 ): Promise<boolean | undefined> {
   try {
-    const result = await adb.executeCommand(`shell dumpsys package ${shellQuote(appId)}`, 5000);
+    const result = await adb.executeCommand(
+      `shell dumpsys package ${shellQuote(appId)}`,
+      5000,
+      DUMPSYS_MAX_BUFFER,
+    );
     return parseDebuggableBuild(result.stdout);
   } catch (error) {
     logger.warn("[DebuggableBuildProbe] Android package probe failed", error);

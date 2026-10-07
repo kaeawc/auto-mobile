@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import * as yaml from "js-yaml";
 import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
 import {
@@ -18,6 +18,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../../src/utils/plan/PlanExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 const SIMULATOR: BootedDevice = {
   name: "iPhone 16",
@@ -202,4 +203,80 @@ describe("recorded param size cap (#10052)", () => {
     expect(steps).toHaveLength(1);
     expect(warnings).toEqual([]);
   });
+});
+
+test.each([
+  { x: 2, y: 3 },
+  { x: 0.25, y: 0.5, coordinateSpace: "normalized" },
+  { x: 20, y: 30, image: "reference.png", action: "longPress", durationMs: 800 },
+])("missing tapAt geometry preserves legacy params %p and warns", (params) => {
+  const recorder = new McpCallRecorder();
+  const warning = spyOn(logger, "warn");
+  try {
+    recorder.start();
+    recorder.record("tapAt", {
+      ...params,
+      sessionUuid: "recording-session",
+      snapshotId: "ephemeral",
+      __tapAtRecordingContext: {},
+    });
+    const { steps, warnings } = recorder.stopWithWarnings();
+    expect(steps).toEqual([{ tool: "tapAt", params }]);
+    expect(steps[0]).not.toHaveProperty("geometry");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("tapAt was recorded without geometry");
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining("native geometry provenance is unavailable"),
+    );
+  } finally {
+    warning.mockRestore();
+  }
+});
+
+test("executor passes step geometry through the real tapAt handler", async () => {
+  const { tapAtHandler, tapAtSchema, setTapAtElementFactory, resetTapAtElementFactory } =
+    await import("../../../src/server/interactionTools");
+  const { createTapAt } = await import("../../helpers/tapAtCoordinate");
+  const fake = createTapAt(SIMULATOR);
+  setTapAtElementFactory(() => fake.tapAt);
+  try {
+    ToolRegistry.register(
+      "tapAt",
+      "fake native tap",
+      tapAtSchema,
+      (args, progress, signal) => tapAtHandler(SIMULATOR, args, progress, signal),
+      { defaultEnabled: true },
+    );
+    const geometry = {
+      platform: "ios" as const,
+      deviceWidth: 10,
+      deviceHeight: 10,
+      orientation: 0,
+      x: 2.125,
+      y: 3.75,
+    };
+    const executor = new DefaultPlanExecutor(new FakeTimer());
+    const step = { tool: "tapAt", params: { x: geometry.x, y: geometry.y }, geometry };
+    const compatible = await executor.executePlan(
+      { name: "native", steps: [step] },
+      0,
+      "ios",
+      SIMULATOR.deviceId,
+      "replay",
+    );
+    expect(compatible.success).toBe(true);
+    expect(fake.iosDispatches).toHaveLength(1);
+    const incompatible = await executor.executePlan(
+      { name: "native", steps: [{ ...step, geometry: { ...geometry, orientation: 2 } }] },
+      0,
+      "ios",
+      SIMULATOR.deviceId,
+      "replay",
+    );
+    expect(incompatible.success).toBe(false);
+    expect(incompatible.failedStep?.error).toContain("orientation mismatch");
+    expect(fake.iosDispatches).toHaveLength(1);
+  } finally {
+    resetTapAtElementFactory();
+  }
 });

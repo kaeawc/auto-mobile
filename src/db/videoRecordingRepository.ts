@@ -41,6 +41,8 @@ export interface VideoRecordingOwnerScope {
 }
 
 export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
+  /** Restart maintenance must leave active sessions owned by live daemons alone. */
+  excludeLiveDaemonSessionIds?: ReadonlySet<string>;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
   platform?: "android" | "ios";
@@ -329,6 +331,21 @@ export class VideoRecordingRepository {
     let builder = db.selectFrom("video_recordings").selectAll();
 
     builder = applyOwnerScope(builder, query.ownerSessionUuid);
+    const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
+    if (liveDaemonSessionIds.length > 0) {
+      builder = builder.where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom("device_sessions")
+              .select("session_uuid")
+              .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
+              .where("device_sessions.status", "=", "active")
+              .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+          ),
+        ),
+      );
+    }
     if (query.status !== undefined) {
       const statuses = Array.isArray(query.status) ? query.status : [query.status];
       builder = builder.where("status", "in", statuses);

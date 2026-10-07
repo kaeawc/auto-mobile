@@ -17,15 +17,11 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +42,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
+import dev.jasonpearson.automobile.design.system.components.AutoMobileOutlinedTextField
+import dev.jasonpearson.automobile.design.system.components.AutoMobileTextField
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
@@ -88,7 +88,7 @@ fun InputTextScreen() {
 
       // Basic Text Fields
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -100,7 +100,7 @@ fun InputTextScreen() {
               modifier = Modifier.padding(bottom = 8.dp),
             )
 
-            TextField(
+            AutoMobileTextField(
               value = basicText,
               onValueChange = { basicText = it },
               label = { Text("Basic Text Field") },
@@ -110,7 +110,7 @@ fun InputTextScreen() {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedTextField(
+            AutoMobileOutlinedTextField(
               value = emailText,
               onValueChange = {
                 emailText = it
@@ -135,7 +135,7 @@ fun InputTextScreen() {
 
       // Password Field
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -147,7 +147,7 @@ fun InputTextScreen() {
               modifier = Modifier.padding(bottom = 8.dp),
             )
 
-            OutlinedTextField(
+            AutoMobileOutlinedTextField(
               value = passwordText,
               onValueChange = { passwordText = it },
               label = { Text("Password") },
@@ -176,7 +176,7 @@ fun InputTextScreen() {
 
       // Multiline Text Area
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -188,7 +188,7 @@ fun InputTextScreen() {
               modifier = Modifier.padding(bottom = 8.dp),
             )
 
-            OutlinedTextField(
+            AutoMobileOutlinedTextField(
               value = multilineText,
               onValueChange = { multilineText = it },
               label = { Text("Comments") },
@@ -203,7 +203,7 @@ fun InputTextScreen() {
 
       // Numeric and Search Fields
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -215,7 +215,7 @@ fun InputTextScreen() {
               modifier = Modifier.padding(bottom = 8.dp),
             )
 
-            OutlinedTextField(
+            AutoMobileOutlinedTextField(
               value = numericText,
               onValueChange = { newValue ->
                 if (newValue.all { it.isDigit() || it == '.' }) {
@@ -230,7 +230,7 @@ fun InputTextScreen() {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            OutlinedTextField(
+            AutoMobileOutlinedTextField(
               value = searchText,
               onValueChange = { searchText = it },
               label = { Text("Search") },
@@ -252,7 +252,7 @@ fun InputTextScreen() {
 
       // Chip Input
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -278,7 +278,7 @@ fun InputTextScreen() {
               horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               chipOptions.take(3).forEach { chip ->
-                FilterChip(
+                AutoMobileFilterChip(
                   selected = selectedChips.contains(chip),
                   onClick = {
                     selectedChips =
@@ -300,7 +300,7 @@ fun InputTextScreen() {
               horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
               chipOptions.drop(3).forEach { chip ->
-                FilterChip(
+                AutoMobileFilterChip(
                   selected = selectedChips.contains(chip),
                   onClick = {
                     selectedChips =
@@ -329,7 +329,7 @@ fun InputTextScreen() {
 
       // Rich Text Display
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -362,7 +362,7 @@ fun InputTextScreen() {
 
       // URL Highlighted Text
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
@@ -402,7 +402,7 @@ fun InputTextScreen() {
 
       // Selectable Text
       item {
-        Card(
+        AutoMobileContentCard(
           modifier = Modifier.fillMaxWidth(),
           elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {

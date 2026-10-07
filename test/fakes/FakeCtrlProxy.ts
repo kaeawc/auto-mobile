@@ -1003,6 +1003,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
+  async requestClickFocusedInput(
+    _timeoutMs: number = 5000,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+  ): Promise<A11yActionResult> {
+    await this.applyDelay("requestClickFocusedInput");
+    this.checkFailure("requestClickFocusedInput");
+    return this.actionResult ?? { success: true, action: "click", totalTimeMs: 100 };
+  }
+
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,

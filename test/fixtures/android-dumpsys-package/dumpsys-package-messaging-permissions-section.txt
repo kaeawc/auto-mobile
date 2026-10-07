@@ -1,0 +1,141 @@
+    declared permissions:
+      com.google.android.messages.rcs.PROVISIONING_EVENT: prot=normal
+      com.google.android.apps.messaging.emergency.permission.START_ESOS_CONVERSATION: prot=signature|privileged
+      com.google.android.apps.messaging.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION: prot=signature
+      com.google.android.apps.messaging.services.ACCESS_MESSAGING_NOTIFICATION_SERVICE: prot=normal
+      com.google.android.ims.services.ACCESS_MESSAGING_SERVICE: prot=normal
+      com.google.android.apps.messaging.shared.satelliteapi.endpointservice.ACCESS_ENDPOINT_SERVICE: prot=normal
+      com.google.android.ims.messaging.ACCESS_MESSAGING_ENGINE_SERVICE: prot=normal
+    requested permissions:
+      android.permission.QUERY_ADVANCED_PROTECTION_MODE
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION
+      com.cequint.ecid.CALLER_ID_EXTERNAL_LOOKUP_SMS
+      com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE
+      android.permission.READ_SMS
+      com.sonyericsson.home.permission.BROADCAST_BADGE
+      android.permission.POST_NOTIFICATIONS
+      android.permission.READ_CALL_LOG
+      com.google.android.c2dm.permission.RECEIVE
+      android.permission.ACCESS_FINE_LOCATION
+      com.google.android.providers.gsf.permission.READ_GSERVICES
+      com.google.android.apps.stargate.endpointservice.ACCESS_ENDPOINT_SERVICE
+      android.permission.RECEIVE_WAP_PUSH
+      com.oppo.launcher.permission.WRITE_SETTINGS
+      com.google.android.ims.providers.ACCESS_DATA
+      com.google.android.apps.stargate.permission.SEND_EMERGENCY_INTENTS
+      com.anddoes.launcher.permission.UPDATE_COUNT
+      com.sec.android.provider.badge.permission.READ
+      android.permission.READ_PHONE_NUMBERS
+      android.permission.CHANGE_NETWORK_STATE
+      android.permission.FOREGROUND_SERVICE
+      android.permission.READ_MEDIA_VISUAL_USER_SELECTED
+      com.huawei.android.launcher.permission.WRITE_SETTINGS
+      android.permission.RECEIVE_BOOT_COMPLETED
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING
+      android.permission.RECEIVE_MMS
+      android.permission.RECEIVE_SMS
+      android.permission.ACCESS_RCS_USER_CAPABILITY_EXCHANGE
+      android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+      android.permission.READ_PROFILE
+      android.permission.INTERNET
+      com.sonymobile.launcher.permission.PROVIDER_INSERT_BADGE
+      com.google.android.apps.stargate.permission.END_EMERGENCY_INTENTS
+      android.permission.READ_PRECISE_PHONE_STATE
+      android.permission.PERFORM_IMS_SINGLE_REGISTRATION
+      android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING
+      android.permission.READ_EXTERNAL_STORAGE
+      android.permission.GET_PACKAGE_SIZE
+      android.permission.ACCESS_COARSE_LOCATION
+      android.permission.SATELLITE_COMMUNICATION
+      android.permission.READ_PHONE_STATE
+      android.permission.READ_APP_BADGE
+      android.permission.READ_PRIVILEGED_PHONE_STATE
+      android.permission.SEND_SMS
+      android.permission.CALL_PHONE
+      android.permission.WRITE_SMS
+      android.permission.READ_MEDIA_IMAGES
+      android.permission.WRITE_CONTACTS
+      com.google.android.apps.aicore.service.BIND_SERVICE
+      com.majeur.launcher.permission.UPDATE_BADGE
+      android.permission.FOREGROUND_SERVICE_DATA_SYNC
+      android.permission.ACCESS_MESSAGES_ON_ICC
+      android.permission.ACCESS_NETWORK_STATE
+      com.oppo.launcher.permission.READ_SETTINGS
+      android.permission.CAMERA
+      com.sonymobile.home.permission.PROVIDER_INSERT_BADGE
+      com.huawei.android.launcher.permission.READ_SETTINGS
+      android.permission.READ_MEDIA_AUDIO
+      android.permission.READ_MEDIA_VIDEO
+      com.google.android.setupwizard.READ_DEVICE_ORIGIN_FIRST_PARTY
+      com.sec.android.provider.badge.permission.WRITE
+      android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS
+      android.permission.SCHEDULE_EXACT_ALARM
+      android.permission.QUERY_USERS
+      android.permission.DETECT_SCREEN_RECORDING
+      android.permission.WRITE_EXTERNAL_STORAGE
+      android.permission.VIBRATE
+      android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND
+      com.huawei.android.launcher.permission.CHANGE_BADGE
+      android.permission.READ_SYSTEM_GRAMMATICAL_GENDER
+      com.htc.launcher.permission.UPDATE_SHORTCUT
+      com.google.android.setupwizard.READ_DEVICE_ORIGIN
+      android.permission.MODIFY_PHONE_STATE
+      android.permission.RECORD_AUDIO
+      com.htc.launcher.permission.READ_SETTINGS
+      android.permission.WAKE_LOCK
+      android.permission.READ_CONTACTS
+      com.google.android.ims.LOG_ACCESS
+    install permissions:
+      android.permission.QUERY_ADVANCED_PROTECTION_MODE: granted=true
+      android.permission.DOWNLOAD_WITHOUT_NOTIFICATION: granted=true
+      com.google.android.c2dm.permission.RECEIVE: granted=true
+      com.google.android.providers.gsf.permission.READ_GSERVICES: granted=true
+      android.permission.CHANGE_NETWORK_STATE: granted=true
+      android.permission.FOREGROUND_SERVICE: granted=true
+      android.permission.RECEIVE_BOOT_COMPLETED: granted=true
+      android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING: granted=true
+      android.permission.ACCESS_RCS_USER_CAPABILITY_EXCHANGE: granted=true, flags=[ GRANTED_BY_ROLE]
+      android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: granted=true
+      android.permission.READ_PROFILE: granted=true
+      android.permission.INTERNET: granted=true
+      android.permission.READ_PRECISE_PHONE_STATE: granted=true
+      android.permission.PERFORM_IMS_SINGLE_REGISTRATION: granted=true, flags=[ GRANTED_BY_ROLE]
+      android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING: granted=true
+      android.permission.GET_PACKAGE_SIZE: granted=true
+      android.permission.SATELLITE_COMMUNICATION: granted=true
+      android.permission.READ_PRIVILEGED_PHONE_STATE: granted=true
+      android.permission.WRITE_SMS: granted=true
+      android.permission.FOREGROUND_SERVICE_DATA_SYNC: granted=true
+      android.permission.ACCESS_NETWORK_STATE: granted=true
+      android.permission.CONNECTIVITY_USE_RESTRICTED_NETWORKS: granted=true
+      android.permission.SCHEDULE_EXACT_ALARM: granted=true
+      android.permission.QUERY_USERS: granted=true
+      android.permission.DETECT_SCREEN_RECORDING: granted=true
+      android.permission.VIBRATE: granted=true
+      android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND: granted=true
+      android.permission.READ_SYSTEM_GRAMMATICAL_GENDER: granted=true
+      android.permission.MODIFY_PHONE_STATE: granted=true
+      android.permission.WAKE_LOCK: granted=true
+      runtime permissions:
+        android.permission.READ_SMS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.POST_NOTIFICATIONS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_CALL_LOG: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.ACCESS_FINE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.RECEIVE_WAP_PUSH: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.READ_PHONE_NUMBERS: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_MEDIA_VISUAL_USER_SELECTED: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.RECEIVE_MMS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.RECEIVE_SMS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.READ_EXTERNAL_STORAGE: granted=true, flags=[ GRANTED_BY_DEFAULT|REVOKE_WHEN_REQUESTED|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.ACCESS_COARSE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_PHONE_STATE: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.SEND_SMS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.CALL_PHONE: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.READ_MEDIA_IMAGES: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.WRITE_CONTACTS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.CAMERA: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_MEDIA_AUDIO: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.READ_MEDIA_VIDEO: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.WRITE_EXTERNAL_STORAGE: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|RESTRICTION_SYSTEM_EXEMPT|RESTRICTION_UPGRADE_EXEMPT]
+        android.permission.RECORD_AUDIO: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]
+        android.permission.READ_CONTACTS: granted=true, flags=[ GRANTED_BY_DEFAULT|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]

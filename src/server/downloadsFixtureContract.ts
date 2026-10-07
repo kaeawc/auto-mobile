@@ -10,7 +10,7 @@ import {
 
 /**
  * A session-scoped Downloads-fixture staging request. Unlike the
- * device-targeted `stageSharedStorage` tool, every operation is bound to the
+ * device-targeted `sharedStorageService` tool, every operation is bound to the
  * caller's live device session (`sessionUuid`) and refuses before any device
  * access when that session is missing or no longer owns a device, exactly like
  * the session-log family (#7006).

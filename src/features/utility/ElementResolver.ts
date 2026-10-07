@@ -6,7 +6,7 @@ import {
 } from "../observe/android/StableNodeIdentity";
 
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
-import type { SearchableEntry } from "./SearchableNode";
+import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
@@ -49,6 +49,11 @@ export interface ResolutionIntent {
   preferTap?: boolean;
   /** Prefer bounded checkable matches and their checkable descendants. */
   preferToggle?: boolean;
+  /**
+   * Leave the soft keyboard's keys out of the search and out of `index` numbering,
+   * as `observe` folds them into one `<ime>` row (issue #10225).
+   */
+  excludeImeKeys?: boolean;
   /** An action lookup cannot use an unbounded ID match as its target. */
   requireBounds?: boolean;
   viewport?: { width: number; height: number };
@@ -323,7 +328,13 @@ export class ElementResolver {
     selector: ResolverSelector,
     intent: ResolutionIntent,
   ): ElementResolution {
-    return this.resolveInNodes(snapshot, selector, intent, snapshot.nodes);
+    // Keyboard keys are not part of what `observe` presents, so an action's selector
+    // cannot see them (issue #10225). Indices stay snapshot indices, so only the
+    // searched list shrinks.
+    const searched = intent.excludeImeKeys
+      ? snapshot.nodes.filter((node) => !isImeKeyEntry(node))
+      : snapshot.nodes;
+    return this.resolveInNodes(snapshot, selector, intent, searched);
   }
 
   private containerFailure(

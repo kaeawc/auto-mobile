@@ -1,3 +1,7 @@
+import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { DUMPSYS_MAX_BUFFER } from "../../../src/utils/android-cmdline-tools/dumpsysLimits";
+import { createExecResult } from "../../../src/utils/execResult";
+import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   findAndroidPackageProcessId,
@@ -121,8 +125,8 @@ describe("readAndroidPackageProcesses", () => {
 
     expect(state.isRunning).toBe(true);
     expect(calls).toEqual([
-      [COMMAND, 5_000, undefined, true, undefined],
-      [COMMAND, 5_000, undefined, true, undefined],
+      [COMMAND, 5_000, DUMPSYS_MAX_BUFFER, true, undefined],
+      [COMMAND, 5_000, DUMPSYS_MAX_BUFFER, true, undefined],
     ]);
     expect(timer.now()).toBe(200);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -171,3 +175,27 @@ function result(stdout: string) {
     includes: (search: string) => stdout.includes(search),
   };
 }
+
+test("launchApp's process reader forwards the bound through fake exec for a large dump", async () => {
+  // Pad the existing process parser unit vector, not an invented captured fixture.
+  const padding = "  filler_feature_flag=true\n".repeat(50_000);
+  const stdout = padding + PROCESS_LIST + "\n" + padding;
+  expect(Buffer.byteLength(stdout)).toBeGreaterThan(1024 * 1024);
+  const timer = new FakeTimer();
+  const adb = new AdbClient(
+    null,
+    async (_file, args, maxBuffer) => {
+      expect(args).toEqual(["shell", "dumpsys activity processes"]);
+      expect(maxBuffer).toBe(DUMPSYS_MAX_BUFFER);
+      expect(Buffer.byteLength(stdout)).toBeLessThanOrEqual(maxBuffer ?? 1024 * 1024);
+      return createExecResult(stdout, "");
+    },
+    null,
+    new DefaultRetryExecutor(timer),
+    timer,
+  );
+  const state = await readAndroidPackageProcesses(adb, "com.example.app", { userId: 0, timer });
+  expect(state.isRunning).toBe(true);
+  expect(state.processes).toEqual([{ pid: 1234, processName: "com.example.app", userId: 0 }]);
+  expect(state.stdout).toBe(stdout);
+});

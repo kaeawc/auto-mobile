@@ -1,3 +1,4 @@
+import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
 import {
   type AndroidPackagePermissionState,
   parseAndroidRuntimePermissions,
@@ -291,7 +292,7 @@ export class GrantAndroidPermissions {
       const result = await this.adb.executeCommand(
         `shell dumpsys package ${shellQuote(packageName)}`,
         undefined,
-        undefined,
+        DUMPSYS_MAX_BUFFER,
         true,
       );
       if (outputLooksLikeShellFailure(result.stdout, result.stderr ?? "")) {

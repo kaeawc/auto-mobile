@@ -994,6 +994,8 @@ export class DaemonMcpProxy {
   private readonly ownershipConflictLeashMs: number;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
+  /** The call-wait bound of the current stretch of liveness recovery (#10508). */
+  private livenessRecoveryCallWait: { episode: number; deadline: number } | undefined;
   /** Detects this proxy's own tick firing later than the lease allows. */
   private readonly tickLateness: TickLatenessClock;
   /** Proxy-clock time of each held session's last acknowledged heartbeat. */
@@ -1315,8 +1317,10 @@ export class DaemonMcpProxy {
    * Wait for liveness recovery of the sessions this proxy holds, bounded (#10508). Recovery spreads
    * its attempts over the lease, so an unbounded wait wedged every later call on the connection
    * for as long as recovery ran, including the call that would let the daemon resume the session.
-   * Past the bound the caller goes ahead: its connection stays observation-only while the fence
-   * holds, and a handover recorded meanwhile still surfaces from the caller's own checks.
+   * The bound runs once per stretch of recovery, from the first call that waits on it: once it has
+   * passed, later calls go ahead at once instead of each waiting it out again while the same
+   * recovery keeps running. A call that goes ahead keeps its connection observation-only while the
+   * fence holds, and a handover recorded meanwhile still surfaces from the caller's own checks.
    */
   private async waitForLivenessRecovery(signal?: AbortSignal): Promise<void> {
     if (
@@ -1325,10 +1329,14 @@ export class DaemonMcpProxy {
     ) {
       return;
     }
-    const timeoutMs = livenessRecoveryCallWaitMs(
-      this.heartbeatLeashMs,
-      this.heartbeatRequestTimeoutMs(),
-    );
+    const deadline = this.livenessRecoveryCallDeadline();
+    const timeoutMs = deadline - this.timer.now();
+    if (timeoutMs <= 0) {
+      // This stretch of recovery already used up its bound on an earlier call; the same recovery
+      // is still running, and waiting it out again would wedge every call on the connection.
+      logger.debug("[DaemonMcpProxy] Liveness recovery still running; call goes ahead without it");
+      return;
+    }
     try {
       await raceWithDeadline(this.livenessRecovery.settled(), {
         timer: this.timer,
@@ -1343,6 +1351,20 @@ export class DaemonMcpProxy {
         error,
       );
     }
+  }
+
+  /** When calls stop waiting for the current stretch of recovery, fixed by its first waiting call. */
+  private livenessRecoveryCallDeadline(): number {
+    const episode = this.livenessRecovery.busyEpisode();
+    if (this.livenessRecoveryCallWait?.episode !== episode) {
+      this.livenessRecoveryCallWait = {
+        episode,
+        deadline:
+          this.timer.now() +
+          livenessRecoveryCallWaitMs(this.heartbeatLeashMs, this.heartbeatRequestTimeoutMs()),
+      };
+    }
+    return this.livenessRecoveryCallWait.deadline;
   }
 
   private throwIfLivenessHandedOver(): void {

@@ -1611,10 +1611,20 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(errorCode(await tap)).toBe("session_recovery_pending");
       expect(tapCalls).toBe(1);
 
+      // A second call in the same stretch of recovery does not wait the bound out again.
+      const retap = proxy.callTool("tapOn", {});
+      expect(await advanceUntilSettled(retap)).toBe(0);
+      expect(errorCode(await retap)).toBe("session_recovery_pending");
+      expect(tapCalls).toBe(2);
+
       await deviceReturns();
       const observe = proxy.callTool("observe", {});
-      expect(await advanceUntilSettled(observe)).toBeLessThanOrEqual(boundMs + 1_000);
+      expect(await advanceUntilSettled(observe)).toBe(0);
       await expect(observe).resolves.toEqual(OBSERVED);
+      // Recovery's next attempt is still minutes away; later calls still go straight through.
+      const next = proxy.callTool("observe", {});
+      expect(await advanceUntilSettled(next)).toBe(0);
+      await expect(next).resolves.toEqual(OBSERVED);
     });
 
     test("the bound never exceeds the liveness budget recovery itself fits in", () => {

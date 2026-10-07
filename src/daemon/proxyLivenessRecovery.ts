@@ -276,8 +276,18 @@ export class LivenessRecovery {
   private readonly stopSignal = new AbortController();
   private socketResetClaimed = false;
   private stopped = false;
+  private busyGeneration = 0;
 
   constructor(private readonly deps: LivenessRecoveryDeps) {}
+
+  /**
+   * Identifies the current stretch of recovery: it changes each time recovery starts while none
+   * was running, and stays the same for every session that joins before all of them settle. Lets a
+   * caller bound its wait once per stretch rather than once per call (#10508).
+   */
+  busyEpisode(): number {
+    return this.busyGeneration;
+  }
 
   /** Whether the session is being recovered, or failed and awaits its episode's handover. */
   isRecovering(sessionUuid: string): boolean {
@@ -298,6 +308,9 @@ export class LivenessRecovery {
       this.episodes.set(code, episode);
     }
     episode.pending += 1;
+    if (this.recovering.size === 0) {
+      this.busyGeneration += 1;
+    }
     const run = this.run(sessionUuid, code, episode).finally(() => {
       this.recovering.delete(sessionUuid);
       this.finishEpisodeMember(code, episode);

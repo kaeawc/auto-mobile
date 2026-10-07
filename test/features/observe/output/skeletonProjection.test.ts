@@ -12,7 +12,6 @@ import {
 import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
-import { DefaultElementSelector } from "../../../../src/features/utility/DefaultElementSelector";
 import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import { tapOnSchema } from "../../../../src/server/interactionTools";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
@@ -1493,7 +1492,7 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(dupEntries).toHaveLength(3);
       expect(dupEntries.map((e) => e.index)).toEqual([0, 1, 2]);
 
-      const selector = new DefaultElementSelector();
+      const selector = new ResolverElementSelector();
       for (const entry of dupEntries) {
         const result = selector.selectByResourceId(
           viewHierarchy as unknown as ViewHierarchyResult,

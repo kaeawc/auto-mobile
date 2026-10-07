@@ -160,6 +160,17 @@ checkpoints so failures explain which state was missing.
 
 </div>
 
+### Plan parameters and special characters
+
+A `${paramName}` value reaches the tool exactly as your test supplied it, whatever
+characters it contains (backslashes, quotes, ` #`, `: `, line breaks, unicode,
+even `${other}`): it never changes the plan's structure and is substituted once,
+never re-expanded. Write the placeholder in a double-quoted scalar to keep a
+value a string — `text: "${password}"`. In an unquoted scalar the value keeps
+the type YAML would read from it, as before: `timeout: ${ms}` with `500` or
+`true` stays a number or boolean, while a value that is not a plain scalar (for
+example `shoes #1`) becomes a string.
+
 ### Redacting sensitive parameters
 
 Plans substitute `${paramName}` placeholders with values you pass from the test

@@ -155,6 +155,7 @@ import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
 } from "../devices/virtualDeviceLifecycleCoordinator";
+import { OwnerDisconnectRelease, OWNER_DISCONNECT_GRACE_MS } from "./ownerDisconnectRelease";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
@@ -722,6 +723,13 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  *
  * Works with SessionManager to maintain bidirectional mappings.
  */
+export interface OwnerDisconnectOptions {
+  /** Defaults to an ownership-fenced session release that returns the device to the pool. */
+  release?: (session: Session, reason: string) => Promise<void>;
+  /** Grace before the session is released. Defaults to {@link OWNER_DISCONNECT_GRACE_MS}. */
+  graceMs?: number;
+}
+
 export interface DevicePoolDependencies {
   androidAdbFactory?: AdbClientFactory;
   env?: Environment;
@@ -736,6 +744,8 @@ export interface DevicePoolDependencies {
   deviceSessionRepository?: Pick<DeviceSessionRepository, "markAutolockSession">;
   criteriaMatcher?: DeviceCriteriaMatcher;
   releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser;
+  /** Release of a session whose owning client connection closed with no other owner (#10503). */
+  ownerDisconnect?: OwnerDisconnectOptions;
   onDeviceReady?: DeviceReadyListener;
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
@@ -879,6 +889,8 @@ export class DevicePool {
    * adopt it through an idempotent getAndroid/getApple/startDevice call.
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
+  /** Releases a session after its owning connection closes and no owner remains (#10503). */
+  private readonly ownerDisconnectRelease: OwnerDisconnectRelease;
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly androidTransportAliases: AndroidTransportAliases;
@@ -1033,6 +1045,7 @@ export class DevicePool {
     deviceSessionRepository = new DeviceSessionRepository(),
     criteriaMatcher = new DeviceCriteriaMatcher(),
     releaseSessionForDisconnectedDevice,
+    ownerDisconnect,
     onDeviceReady,
     androidDeviceReboot,
     recoveryPolicy,
@@ -1168,8 +1181,35 @@ export class DevicePool {
         );
         return !release.superseded;
       });
-
+    this.ownerDisconnectRelease = this.createOwnerDisconnectRelease(ownerDisconnect);
     this.registerSessionReleaseHandlers();
+  }
+
+  private createOwnerDisconnectRelease(
+    options: OwnerDisconnectOptions = {},
+  ): OwnerDisconnectRelease {
+    return new OwnerDisconnectRelease(
+      {
+        getSession: (sessionId) => this.sessionManager.getSession(sessionId),
+        hasConnectedOwner: (sessionId) => this.hasConnectedMcpSessionOwner(sessionId),
+        release:
+          options.release ??
+          ((session, reason) => this.releaseSessionForDisconnectedOwner(session, reason)),
+      },
+      this.timer,
+      options.graceMs ?? OWNER_DISCONNECT_GRACE_MS,
+    );
+  }
+
+  private async releaseSessionForDisconnectedOwner(
+    session: Session,
+    reason: string,
+  ): Promise<void> {
+    const { sessionId, assignedDevice } = session;
+    await releaseSessionAndDevice(this.sessionManager, this, assignedDevice, sessionId, reason, {
+      release: () =>
+        this.sessionManager.releaseSessionIfOwned(sessionId, session, assignedDevice, reason),
+    });
   }
 
   private createIdleDeviceReaper(): IdleDeviceReaper {
@@ -5519,10 +5559,21 @@ export class DevicePool {
       const marker = this.getDeviceHealthMarker(device.id);
       return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
     });
+    const appCleanupRecovery = devices
+      .filter((device) => this.getDeviceHealthMarker(device.id)?.reason === "app-cleanup")
+      .map(
+        (device) =>
+          ` Device '${device.id}' is held for app-cleanup: an executePlan app cleanup did not ` +
+          "complete and only three background retries are made, so it can stay unavailable " +
+          `until it is replaced. Recovery: call killDevice with device { name: '${device.name}', ` +
+          `deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to ` +
+          "bring up a fresh device.",
+      );
     return new ActionableError(
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
-        "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed.",
+        "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
+        appCleanupRecovery.join(""),
     );
   }
 
@@ -6945,6 +6996,7 @@ export class DevicePool {
     if (!mcpSessionId) {
       return;
     }
+    this.ownerDisconnectRelease.cancel(sessionId);
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
     acquired.add(sessionId);
     this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
@@ -7138,9 +7190,25 @@ export class DevicePool {
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
   releaseMcpSessionBindings(mcpSessionId: string): void {
+    const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
+    for (const sessionId of acquired ?? []) {
+      if (!this.hasConnectedMcpSessionOwner(sessionId)) {
+        this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+      }
+    }
+  }
+
+  /** Whether a still-connected MCP client owns the session or routes to it by autolock. */
+  private hasConnectedMcpSessionOwner(sessionId: string): boolean {
+    for (const acquired of this.mcpSessionAcquiredDeviceSessions.values()) {
+      if (acquired.has(sessionId)) {
+        return true;
+      }
+    }
+    return this.autolockManager.hasMcpSessionOwner(sessionId);
   }
 
   /**
@@ -7190,6 +7258,7 @@ export class DevicePool {
   }
 
   private clearMcpSessionOwnership(sessionId: string): void {
+    this.ownerDisconnectRelease.cancel(sessionId);
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       acquired.delete(sessionId);
       if (acquired.size === 0) {

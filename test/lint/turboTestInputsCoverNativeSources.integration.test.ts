@@ -67,6 +67,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // test/helpers/capturedH264Stream.ts reads the real x264 sample stream for the
     // packet-boundary tests (issue #10150).
     "android/desktop-core/src/test/resources/sample.h264",
+    // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
+    // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
+    "android/junit-runner/src/test/resources/captured/**",
   ] as const;
 
   interface TurboConfig {

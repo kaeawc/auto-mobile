@@ -11,7 +11,7 @@ import type { TextSelectionIntent } from "../../src/utils/interfaces/ElementFind
  *
  * Limitation: the "random" selection strategy is not modeled — the fake always
  * returns the pre-configured nextElement regardless of strategy. Tests that need
- * to verify randomness should test DefaultElementSelector directly.
+ * to verify randomness should test ResolverElementSelector directly.
  */
 export class FakeElementSelector implements ElementSelector {
   lastStrategy?: ElementSelectionStrategy;

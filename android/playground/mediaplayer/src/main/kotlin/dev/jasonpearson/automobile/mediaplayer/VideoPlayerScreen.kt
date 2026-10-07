@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,6 +61,7 @@ import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
+import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 
 sealed class VideoResource {
@@ -282,7 +282,7 @@ private fun VideoPlayerContent(
             .padding(top = 24.dp), // Additional top padding for status bar area
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        IconButton(
+        AutoMobileIconButton(
           onClick = onNavigateBack,
           modifier = Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)),
         ) {

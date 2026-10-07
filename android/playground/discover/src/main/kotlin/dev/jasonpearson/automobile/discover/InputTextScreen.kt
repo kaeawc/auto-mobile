@@ -19,7 +19,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.design.system.components.AutoMobileContentCard
 import dev.jasonpearson.automobile.design.system.components.AutoMobileFilterChip
+import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.design.system.components.AutoMobileOutlinedTextField
 import dev.jasonpearson.automobile.design.system.components.AutoMobileTextField
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
@@ -160,7 +160,7 @@ fun InputTextScreen() {
                 },
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
               trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                AutoMobileIconButton(onClick = { passwordVisible = !passwordVisible }) {
                   Icon(
                     imageVector =
                       if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -239,7 +239,7 @@ fun InputTextScreen() {
               trailingIcon =
                 if (searchText.isNotEmpty()) {
                   {
-                    IconButton(onClick = { searchText = "" }) {
+                    AutoMobileIconButton(onClick = { searchText = "" }) {
                       Icon(Icons.Filled.Clear, contentDescription = "Clear")
                     }
                   }

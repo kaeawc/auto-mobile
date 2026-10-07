@@ -1,30 +1,24 @@
-import { classifyToolResult } from "../utils/toolEnvelopePayload";
-import { waitForTimeoutError } from "../utils/plan/waitForTimeout";
-import { unsupportedToolResultError } from "../utils/plan/unsupportedToolResult";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
+import { DaemonState } from "../daemon/daemonState";
+import { ToolRegistry, type RegisteredTool } from "./toolRegistry";
 import { ActionableError, BootedDevice, toActionableError } from "../models/index";
 import { logger } from "../utils/logger";
-import {
-  abortErrorFromSignal,
-  createJSONToolResponse,
-  getStructuredPayload,
-  throwIfAborted,
-} from "../utils/toolUtils";
+import { abortErrorFromSignal, createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 import { migratePlanStep } from "../utils/plan/PlanMigrator";
 import {
-  UNEVALUATED_EXPECTATIONS_WARNING,
-  formatStepError,
-  parseStepParams,
-  stripUndeclaredDeviceLabel,
-} from "../utils/plan/planStepParams";
+  DefaultPlanStepExecutor,
+  type PlanStepExecutor,
+  type StepExecutionResult,
+  PlanStepError as CriticalSectionStepError,
+} from "../utils/plan/PlanStepExecutor";
+import { type Timer, defaultTimer } from "../utils/SystemTimer";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import type { PlanStep } from "../models/Plan";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
 // Schema for steps inside critical section.
 // Every sub-step MUST declare a `device` matching the section owner label.
@@ -77,40 +71,6 @@ const criticalSectionSchema = addDeviceTargetingToSchema(
 
 type CriticalSectionParams = z.infer<typeof criticalSectionSchema>;
 
-function unwrapCriticalSectionResult(
-  response: unknown,
-  toolName: string,
-): Record<string, unknown> | undefined {
-  const result = classifyToolResult(response, toolName);
-  if ("failure" in result) {
-    return result.failure;
-  }
-  return result.kind === "payload" ? result.payload : undefined;
-}
-
-/**
- * Best-effort epilogue warnings a step reported while still succeeding (issue
- * #6868) — a keyboard that would not dismiss, for example. The step stays
- * successful, but this used to be its `success:false`, so dropping it would let
- * the section report an entirely clean success while later steps run against a
- * screen the caller does not expect.
- */
-function collectStepWarnings(
-  stepNumber: number,
-  tool: string,
-  result: Record<string, unknown> | undefined,
-): string[] {
-  // Structured action responses hoist success/error, but keep warnings in the
-  // payload. Read the same payload as PlanExecutor's diagnostic collector.
-  const warnings = (getStructuredPayload(result) ?? result)?.warnings;
-  if (!Array.isArray(warnings)) {
-    return [];
-  }
-  return warnings
-    .filter((warning): warning is string => typeof warning === "string")
-    .map((warning) => `step ${stepNumber} (${tool}): ${warning}`);
-}
-
 function criticalSectionSuccess(
   lock: string,
   deviceId: string,
@@ -128,163 +88,123 @@ function criticalSectionSuccess(
   });
 }
 
-function formatCriticalSectionError(result: Record<string, unknown>, tool: string): string {
-  return (
-    formatStructuredToolError(result.error) ??
-    (typeof result.message === "string" ? result.message : `Tool "${tool}" returned failure status`)
-  );
-}
-
-function assertCriticalSectionStepSucceeded(
-  toolResult: Record<string, unknown> | undefined,
+/**
+ * A timed-out `waitFor` sub-step's bounded diagnostics, as a section warning so they reach the
+ * plan's `warnings` through CriticalSectionStepError (#10024 parity with a top-level step). The
+ * duration alone is already in the error text; only add a line that says more.
+ */
+function waitForTimeoutWarning(
+  stepNumber: number,
   tool: string,
-): void {
-  if (toolResult?.success === false) {
-    const errorMsg = formatCriticalSectionError(toolResult, tool);
-    throw new ActionableError(errorMsg);
+  result: StepExecutionResult,
+): string[] {
+  const diagnostics = result.details.waitForTimeout;
+  if (
+    !diagnostics ||
+    typeof diagnostics !== "object" ||
+    !Object.keys(diagnostics).some((key) => key !== "awaitDuration")
+  ) {
+    return [];
   }
-  const timeoutError = waitForTimeoutError(getStructuredPayload(toolResult) ?? toolResult, tool);
-  if (timeoutError) {
-    throw new ActionableError(timeoutError);
-  }
-  const unsupportedError = unsupportedToolResultError(
-    getStructuredPayload(toolResult) ?? toolResult,
-  );
-  if (unsupportedError) {
-    throw new ActionableError(unsupportedError);
-  }
+  return [`step ${stepNumber} (${tool}): waitFor timeout: ${JSON.stringify(diagnostics)}`];
 }
 
-// PlanExecutor treats failed tool lookup as fatal even for optional steps.
-class CriticalSectionToolNotFoundError extends ActionableError {}
-
-/** Retain diagnostics from sub-steps that ran before a required failure. */
-class CriticalSectionStepError extends ActionableError {
-  readonly warnings: string[];
-
-  constructor(message: string, warnings: string[]) {
-    super(message);
-    this.warnings = [...warnings];
-  }
+function legacyStepError(result: StepExecutionResult): string {
+  // Keep the existing section message for thrown Errors and missing tools. The
+  // new failedStep.error carries the exact shared executor error for consumers.
+  return result.sourceError && !(result.sourceError instanceof z.ZodError)
+    ? errorMessage(result.sourceError)
+    : (result.error ?? "Unknown error");
 }
 
-function handleCriticalSectionStepFailure(
-  error: unknown,
-  step: { tool: string; optional?: boolean; params?: Record<string, unknown> },
+function throwCriticalSectionStepFailure(
+  step: PlanStep,
+  result: StepExecutionResult,
+  errorMsg: string,
   context: {
-    deviceId: string;
-    lock: string;
-    stepNumber: number;
-    totalSteps: number;
-    signal?: AbortSignal;
+    device: BootedDevice;
+    params: CriticalSectionParams;
+    index: number;
     warnings: string[];
-    schema?: z.ZodType;
+    signal?: AbortSignal;
   },
-): void {
-  const { deviceId, lock, stepNumber, totalSteps, signal, warnings, schema } = context;
-  if (isDeviceLostError(error) || (step.optional && signal?.aborted)) {
-    throw error;
+): never {
+  const { device, params, index, warnings, signal } = context;
+  const stepNumber = index + 1;
+  // Retain the section's existing cancellation and optional authoring-error
+  // boundary messages. Neither is a skippable transient failure.
+  if (step.optional && signal?.aborted) {
+    throw result.sourceError ?? new ActionableError(errorMsg);
   }
-
-  // A schema failure reads like the top-level plan step's (and the MCP boundary's)
-  // "Invalid parameters for tool ..." rather than a raw zod issue dump (#9927).
-  const errorMsg =
-    error instanceof z.ZodError
-      ? formatStepError(step.tool, error, step.params, schema)
-      : errorMessage(error);
-  // An optional step with invalid params is a plan authoring error, not a
-  // transient failure: it fails the section instead of being skipped.
-  if (step.optional && error instanceof z.ZodError) {
-    throw new ActionableError(errorMsg);
-  }
-  if (step.optional && !(error instanceof CriticalSectionToolNotFoundError)) {
-    warnings.push(`step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`);
-    logger.warn(
-      `Device ${deviceId} optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`,
-    );
-    return;
-  }
-
+  const message =
+    step.optional && result.sourceError instanceof z.ZodError
+      ? errorMsg
+      : `Failed at step ${stepNumber}/${params.steps.length} (${step.tool}): ${errorMsg}`;
   logger.error(
-    `Device ${deviceId} failed at step ${stepNumber}/${totalSteps} in critical section "${lock}": ${errorMsg}`,
+    `Device ${device.deviceId} failed at step ${stepNumber}/${params.steps.length} in critical section "${params.lock}": ${errorMsg}`,
   );
-  throw new CriticalSectionStepError(
-    `Failed at step ${stepNumber}/${totalSteps} (${step.tool}): ${errorMsg}`,
-    warnings,
-  );
+  throw new CriticalSectionStepError(message, warnings, {
+    stepIndex: index,
+    tool: step.tool,
+    error: result.error ?? "Unknown error",
+    ...(result.failureObservation ? { failureObservation: result.failureObservation } : {}),
+  });
 }
 
 async function executeCriticalSectionSteps(
   device: BootedDevice,
   normalizedSteps: PlanStep[],
-  lock: string,
-  totalSteps: number,
+  params: CriticalSectionParams,
+  stepExecutor: PlanStepExecutor,
   signal?: AbortSignal,
 ): Promise<{ executedSteps: Array<{ tool: string; success: boolean }>; warnings: string[] }> {
   const executedSteps: Array<{ tool: string; success: boolean }> = [];
   const warnings: string[] = [];
 
-  for (let i = 0; i < normalizedSteps.length; i++) {
-    const step = normalizedSteps[i];
+  for (const [index, step] of normalizedSteps.entries()) {
     throwIfAborted(signal);
-
-    logger.debug(
-      `Device ${device.deviceId} executing step ${i + 1}/${normalizedSteps.length}: ${step.tool}`,
+    const stepNumber = index + 1;
+    const result = await stepExecutor.executeStep(step, {
+      platform: device.platform,
+      deviceId: device.deviceId,
+      sessionUuid: getToolSelectionContext()?.routingSessionUuid ?? params.sessionUuid,
+      targetDevice: device,
+      signal,
+      logPrefix: `[CRITICAL_SECTION][${device.deviceId}][${stepNumber}]`,
+      debugLog: true,
+    });
+    warnings.push(
+      ...(result.warnings ?? []).map((warning) => `step ${stepNumber} (${step.tool}): ${warning}`),
     );
-
-    let schema: z.ZodType | undefined;
-    try {
-      // Critical-section steps are plan steps, so use the same lookup rules
-      // as executePlan for tools hidden from MCP discovery.
-      const tool = ToolRegistry.getToolForPlan(step.tool);
-      if (!tool) {
-        throw new CriticalSectionToolNotFoundError(`Tool "${step.tool}" not found in registry`);
-      }
-      schema = tool.schema;
-
-      // callInternal does not parse, so apply the same schema parse a top-level
-      // plan step gets: defaults, aliases and strict unknown-key rejection (#9927).
-      // The section requires the owner label on every sub-step; drop it for a tool
-      // whose schema has no `device` field (routing uses `targetDevice` below).
-      const params = parseStepParams(
-        tool.schema,
-        stripUndeclaredDeviceLabel(step.params, tool.schema),
-      );
-      if (step.tool === "tapAt" && step.geometry) {
-        params.__tapAtPlanContext = { geometry: step.geometry };
-      }
-      const result = await ToolRegistry.callInternal(tool, params, undefined, signal, {
-        forPlan: true,
-        targetDevice: device,
-      });
-
-      // Internal tool calls can return an MCP envelope whose JSON payload
-      // contains the actual success/error fields.
-      const toolResult = unwrapCriticalSectionResult(result, step.tool);
-      assertCriticalSectionStepSucceeded(toolResult, step.tool);
-
-      warnings.push(...collectStepWarnings(i + 1, step.tool, toolResult));
-      // Nothing evaluates step-level `expectations` yet (#9925); say so rather than
-      // report a clean section, as PlanExecutor does for a top-level step.
-      if (step.expectations && step.expectations.length > 0) {
-        warnings.push(`step ${i + 1} (${step.tool}): ${UNEVALUATED_EXPECTATIONS_WARNING}`);
-      }
-      executedSteps.push({ tool: step.tool, success: true });
-    } catch (error) {
-      executedSteps.push({ tool: step.tool, success: false });
-
-      handleCriticalSectionStepFailure(error, step, {
-        deviceId: device.deviceId,
-        lock,
-        stepNumber: i + 1,
-        totalSteps,
-        signal,
-        warnings,
-        schema,
-      });
+    executedSteps.push({ tool: step.tool, success: result.status === "completed" });
+    if (result.status === "completed") {
+      continue;
     }
+    // Pushed before the skip/failure line, as main's inline sub-step check did (#10024 parity).
+    warnings.push(...waitForTimeoutWarning(stepNumber, step.tool, result));
+
+    const errorMsg = legacyStepError(result);
+    if (result.status === "skipped") {
+      warnings.push(
+        `step ${stepNumber} (${step.tool}): optional step failed; skipped: ${errorMsg}`,
+      );
+      logger.warn(
+        `Device ${device.deviceId} optional step ${step.tool} failed; skipping and continuing: ${errorMsg}`,
+      );
+      continue;
+    }
+
+    throwCriticalSectionStepFailure(step, result, errorMsg, {
+      device,
+      params,
+      index,
+      warnings,
+      signal,
+    });
   }
 
+  // executedSteps has historically counted attempts, including optional skips.
+  // Keep that public count while using the shared executor's skip policy.
   return { executedSteps, warnings };
 }
 
@@ -323,6 +243,7 @@ function validateCriticalSectionSteps(
  * Coordinates multiple devices to execute steps serially at a synchronization point.
  */
 const criticalSectionHandler = async (
+  stepExecutor: PlanStepExecutor,
   device: BootedDevice,
   params: CriticalSectionParams,
   _progress?: unknown,
@@ -374,8 +295,8 @@ const criticalSectionHandler = async (
     const { executedSteps, warnings } = await executeCriticalSectionSteps(
       device,
       normalizedSteps,
-      lock,
-      steps.length,
+      params,
+      stepExecutor,
       signal,
     );
 
@@ -406,7 +327,7 @@ const criticalSectionHandler = async (
     }
     const message = `Critical section "${lock}" failed for device ${device.deviceId}: ${errorMsg}`;
     if (error instanceof CriticalSectionStepError) {
-      throw new CriticalSectionStepError(message, error.warnings);
+      throw new CriticalSectionStepError(message, error.warnings, error.failedStep);
     }
     throw new ActionableError(message);
   } finally {
@@ -420,12 +341,18 @@ const criticalSectionHandler = async (
 /**
  * Register the criticalSection tool.
  */
-export function registerCriticalSectionTools(): void {
+export function registerCriticalSectionTools(timer: Timer = defaultTimer): void {
+  const stepExecutor = new DefaultPlanStepExecutor<RegisteredTool>(
+    ToolRegistry,
+    () => DaemonState.getInstance().isInitialized(),
+    timer,
+  );
   ToolRegistry.registerDeviceAware(
     "criticalSection",
     "Synchronize multiple devices at a barrier, then run steps serially.",
     criticalSectionSchema,
-    criticalSectionHandler,
+    (device, params, progress, signal) =>
+      criticalSectionHandler(stepExecutor, device, params, progress, signal),
     // Plan-only: a multi-device coordination primitive that only makes sense as
     // a plan step (a single direct call would just block). Hidden from tools/list
     // discovery, still runnable in plans via getToolForPlan.

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
@@ -680,7 +681,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
-          ? await this.executeIosType(command.text, operation, signal)
+          ? await this.executeIosType(command.text, operation, signal, display)
           : await this.executeAndroidType({
               text: command.text,
               operation,
@@ -1116,6 +1117,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     text: string,
     operation: SendKeysOperation,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
     const resolvedMode = "xcuiTypeText" as const;
@@ -1126,6 +1128,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       signal?.throwIfAborted();
     }
+
+    const before = await readIosTypedTextField(this.observer, this.timer, signal, display);
+    signal?.throwIfAborted();
 
     // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
     // requested cross-platform mode in metadata, but report the actual mechanism.
@@ -1144,7 +1149,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         resolvedMode,
       };
     }
-    return { success: true, resolvedMode };
+    return {
+      ...(await verifyIosTypedText(text, before, this.observer, this.timer, signal, display)),
+      resolvedMode,
+    };
   }
 
   private async executeAndroidType(

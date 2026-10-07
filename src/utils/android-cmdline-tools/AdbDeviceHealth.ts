@@ -32,10 +32,18 @@ export function extractAdbMissingDeviceId(error: unknown): string | null {
   return match?.[1] ?? null;
 }
 
-export function isAdbMissingDeviceError(error: unknown, expectedDeviceId?: string): boolean {
+export function isAdbMissingDeviceError(
+  error: unknown,
+  expectedDeviceId?: string,
+  expectedTransportId?: string,
+): boolean {
   const missingDeviceId = extractAdbMissingDeviceId(error);
   if (missingDeviceId) {
-    return !expectedDeviceId || missingDeviceId === expectedDeviceId;
+    return (
+      !expectedDeviceId ||
+      missingDeviceId === expectedDeviceId ||
+      missingDeviceId === expectedTransportId
+    );
   }
 
   if (expectedDeviceId) {

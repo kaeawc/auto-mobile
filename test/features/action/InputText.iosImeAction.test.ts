@@ -1,9 +1,10 @@
+import { typedObservation } from "./IosTypedTextTestHarness";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, SendTextResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -30,12 +31,9 @@ describe("InputText iOS IME action", () => {
     const action = new InputText(device, fakeAdb, undefined, fakeTimer);
     const fakeObserveScreen = new FakeObserveScreen();
     fakeObserveScreen.enableAutoVaryHierarchy();
-    fakeObserveScreen.setObserveResult((): ObserveResult => ({
-      timestamp: fakeTimer.now(),
-      screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: { $: {} } } },
-    }));
+    fakeObserveScreen.setObserveResult(() =>
+      typedObservation(fakeIosCtrlProxy.getTextInputHistory().at(-1)?.text ?? ""),
+    );
     const fakeWindow = new FakeWindow();
     fakeWindow.configureCachedActiveWindow(null);
     fakeWindow.configureActiveWindow({
@@ -73,6 +71,49 @@ describe("InputText iOS IME action", () => {
     androidGetInstanceSpy?.mockRestore();
     androidGetInstanceSpy = undefined;
     AndroidCtrlProxyClient.resetInstances();
+  });
+
+  test.each([
+    ["unchanged", "old", false, undefined],
+    ["mask", "(123) 456", true, undefined],
+    ["truncated", "123", true, '\"123\"'],
+    ["unreadable", undefined, true, "not verified"],
+    ["secure", "secret", true, "skipped"],
+  ] as const)("iOS InputText verification: %s", async (name, after, success, warning) => {
+    const observation =
+      name === "secure" ? typedObservation("secret", true) : typedObservation("old");
+    inputText.observeScreen = new FakeObserveScreen();
+    const execute = spyOn(inputText.observeScreen, "execute").mockImplementation(async () => {
+      const delivered = fakeIosCtrlProxy.getTextInputHistory().length > 0;
+      if (!delivered || name === "secure") {
+        return observation;
+      }
+      if (after === undefined) {
+        throw new Error("Unavailable hierarchy");
+      }
+      return typedObservation(after);
+    });
+    try {
+      const result = await (
+        inputText as unknown as {
+          executeiOSTextInput(text: string): Promise<SendTextResult>;
+        }
+      ).executeiOSTextInput("123456");
+      expect(result.success).toBe(success);
+      if (!success) {
+        expect(result.error).toContain("nothing was typed");
+      }
+      if (warning) {
+        expect(result.warnings?.join(" ")).toContain(warning);
+      } else {
+        expect(result.warnings).toBeUndefined();
+      }
+      if (name === "secure") {
+        expect(JSON.stringify(result)).not.toContain("secret");
+      }
+    } finally {
+      execute.mockRestore();
+    }
   });
 
   test("carries the requested action on success without warnings", async () => {

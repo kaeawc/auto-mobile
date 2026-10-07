@@ -3,6 +3,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   defaultAdbClientFactory,
+  androidTransportIdentityAdbFactory,
   unadmittedAdbClientFactory,
 } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -24,6 +25,9 @@ import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
 import type { BootedDevice } from "../../src/models";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 
 /**
  * FUNNEL 2 at the seam, rather than at each entry point.
@@ -229,5 +233,71 @@ describe("device-client admission seam", () => {
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
 
     expect(() => defaultAdbClientFactory.create(DEVICE)).not.toThrow();
+  });
+
+  test("default factory clients follow the published pool's live alias and reset to direct routing", async () => {
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const device: BootedDevice = { deviceId: "USB-SERIAL", name: "Phone", platform: "android" };
+    const alias = { ...device, deviceId: "192.168.1.20:5555" };
+    const utils = new FakeDeviceUtils();
+    utils.setBootedDevices("android", [device, alias]);
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("ro.serialno", createExecResult(device.deviceId, ""));
+    adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
+    adb.setCommandResponse("ro.kernel.qemu", createExecResult("0", ""));
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "alias-daemon", {
+        timer,
+        deviceManager: utils,
+        androidAdbFactory: new FakeAdbClientFactory(adb),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      }),
+    );
+    await pool.refreshDevices();
+    DaemonState.getInstance().initialize(sessions, pool);
+    const previousTestMode = process.env.AUTOMOBILE_TEST_MODE;
+    process.env.AUTOMOBILE_TEST_MODE = "true";
+    let identityClient: ReturnType<typeof androidTransportIdentityAdbFactory.create> | undefined;
+    const client = (() => {
+      try {
+        identityClient = androidTransportIdentityAdbFactory.create(device);
+        return defaultAdbClientFactory.create(device);
+      } finally {
+        if (previousTestMode === undefined) {
+          delete process.env.AUTOMOBILE_TEST_MODE;
+        } else {
+          process.env.AUTOMOBILE_TEST_MODE = previousTestMode;
+        }
+      }
+    })();
+    if (!(client instanceof AdbClient) || !(identityClient instanceof AdbClient)) {
+      throw new Error("Expected the default AdbClient");
+    }
+    const calls: string[][] = [];
+    const exec = spyOn(client, "execAsync").mockImplementation(async (_file, args) => {
+      calls.push(args);
+      return createExecResult("", "");
+    });
+    try {
+      await client.execute(["shell", "echo", "before"], { noRetry: true });
+      utils.setBootedDevices("android", [alias]);
+      await pool.refreshDevices();
+      await client.execute(["forward", "tcp:1234", "tcp:7001"], { noRetry: true });
+      expect((await identityClient.getBaseCommandParts()).baseArgs).toEqual([
+        "-s",
+        device.deviceId,
+      ]);
+      DaemonState.getInstance().reset();
+      await client.execute(["shell", "echo", "direct"], { noRetry: true });
+      expect(calls).toEqual([
+        ["-s", device.deviceId, "shell", "echo", "before"],
+        ["-s", alias.deviceId, "forward", "tcp:1234", "tcp:7001"],
+        ["-s", device.deviceId, "shell", "echo", "direct"],
+      ]);
+    } finally {
+      exec.mockRestore();
+      timer.reset();
+    }
   });
 });

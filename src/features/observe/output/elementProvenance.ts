@@ -1,3 +1,4 @@
+import type { SearchableEntry } from "../../utility/SearchableNode";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type { Element } from "../../../models/Element";
 import type { ObserveResult } from "../../../models/ObserveResult";
@@ -111,4 +112,16 @@ export function getElementProvenance(el: Element): ElementProvenance | undefined
  */
 export function isStrictAncestor(outer: ElementProvenance, inner: ElementProvenance): boolean {
   return outer.group === inner.group && outer.enter < inner.enter && inner.exit <= outer.exit;
+}
+
+// Keep the complete captured search universe, including uncollected inert nodes,
+// available to duplicate numbering without adding fields to public output.
+const searchableEntriesByElements = new WeakMap<object, readonly SearchableEntry[]>();
+
+export function setSearchableEntries(elements: object, entries: readonly SearchableEntry[]): void {
+  searchableEntriesByElements.set(elements, entries);
+}
+
+export function getSearchableEntries(elements: object): readonly SearchableEntry[] | undefined {
+  return searchableEntriesByElements.get(elements);
 }

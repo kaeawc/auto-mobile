@@ -9,11 +9,14 @@ import dev.jasonpearson.automobile.protocol.OverlayResult
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.RequestHierarchyIfStale
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRules
+import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.websocket.CloseReason
+import io.ktor.websocket.Frame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
@@ -682,7 +685,8 @@ class WebSocketServerTest {
           """{"type":"set_hierarchy_interval","requestId":"interval"}""",
           """{"type":"set_recomposition_tracking","requestId":"recomposition","enabled":true}""",
           """{"type":"set_accessibility_flags","requestId":"accessibility"}""",
-          """{"type":"set_network_mock_rules","requestId":"mock-rules","rules":[]}""",
+          // set_network_mock_rules is awaited when it carries a requestId (#10101); see
+          // `set_network_mock_rules records an owner only when it carries a requestId`.
           """{"type":"set_network_error_simulation","requestId":"network-error","enabled":true}""",
           """{"type":"start_recording","requestId":"record-start"}""",
           """{"type":"stop_recording","requestId":"record-stop"}""",
@@ -854,6 +858,26 @@ class WebSocketServerTest {
       server.recordsRequestOwner(
         RequestHierarchyIfStale(sinceTimestamp = 0L, requestId = "stale_owner")
       )
+    )
+  }
+
+  // Issue #10101: a rules push that asks for the rejected-rule report keeps an owner so the reply
+  // reaches the asking client; the fire-and-forget push must not leak one.
+  @Test
+  fun `set_network_mock_rules records an owner only when it carries a requestId`() {
+    assertTrue(
+      server.recordsRequestOwner(SetNetworkMockRules(requestId = "r1", rules = emptyList()))
+    )
+    assertFalse(server.recordsRequestOwner(SetNetworkMockRules(rules = emptyList())))
+  }
+
+  @Test
+  fun `the rules result is routed by its requestId`() {
+    assertEquals(
+      "r1",
+      WebSocketServer.correlationRequestId(
+        SetNetworkMockRulesResult(timestamp = 1L, requestId = "r1")
+      ),
     )
   }
 
@@ -1143,6 +1167,68 @@ class WebSocketServerTest {
         assertTrue(result.error.orEmpty().startsWith("Malformed request:"))
         assertFalse(result.error.orEmpty().contains("SECRETBYTES"))
       }
+    }
+
+  @Test
+  fun `an asset frame above its type's cap is answered without being deserialized`() =
+    runTest(testScope.testScheduler) {
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
+                error("An oversized frame must never dispatch")
+            },
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 128L)),
+        )
+      val transport = RecordingTransport()
+      val owner = server.registerClient(1, transport)
+      // `dataBase64` is not a string, so a full decode would fail with "Malformed request:"; the
+      // cap reply proves the frame was never deserialized.
+      val raw =
+        """{"requestId":"put-big","id":"hero","mimeType":"image/png","dataBase64":["${"SECRETBYTES".repeat(16)}"],"type":"put_overlay_asset"}"""
+      server.handleInboundTextFrame(1, Frame.Text(raw), owner)
+      runCurrent()
+      val reply = transport.messages.single()
+      assertFalse(reply, reply.contains("SECRETBYTES"))
+      val result = Json.decodeFromString<WebSocketResponse>(reply) as OverlayResult
+      assertEquals("put-big", result.requestId)
+      assertFalse(result.success)
+      assertEquals(
+        "Request frame for put_overlay_asset is ${raw.encodeToByteArray().size} bytes; " +
+          "the limit is 128 bytes.",
+        result.error,
+      )
+    }
+
+  @Test
+  fun `a frame within its type's cap is decoded and dispatched`() =
+    runTest(testScope.testScheduler) {
+      val received = mutableListOf<WebSocketRequest>()
+      server =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+                received += request
+                return null
+              }
+            },
+          inboundFrameLimits = InboundFrameLimits(mapOf("put_overlay_asset" to 16L)),
+        )
+      val owner = server.registerClient(1, RecordingTransport())
+      // Above the smallest cap but of an uncapped type, so it decodes as before.
+      server.handleInboundTextFrame(
+        1,
+        Frame.Text("""{"type":"request_hierarchy","requestId":"h1"}"""),
+        owner,
+      )
+      advanceUntilIdle()
+      assertEquals(listOf<WebSocketRequest>(RequestHierarchy(requestId = "h1")), received)
     }
 
   @Test

@@ -386,6 +386,9 @@
         },
         "confirmed": {
           "type": "boolean"
+        },
+        "alreadySatisfied": {
+          "type": "boolean"
         }
       },
       "required": ["success"],
@@ -590,13 +593,13 @@
   },
   {
     "name": "biometricAuth",
-    "description": "Simulate biometric auth: Android emulator/SDK hook or iOS Simulator.",
+    "description": "Simulate biometric auth: Android emulator/SDK hook, or iOS via the app's AutoMobile SDK or Simulator.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
-          "description": "match/fail/enroll/unenroll on iOS Simulator; cancel/error require Android SDK hook",
+          "description": "match/fail/enroll/unenroll on iOS Simulator; cancel/error need the AutoMobile SDK in the app",
           "type": "string",
           "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
         },
@@ -17248,7 +17251,7 @@
   },
   {
     "name": "phoneCall",
-    "description": "Simulate Android emulator phone call via gsm commands.",
+    "description": "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -26058,7 +26061,7 @@
   },
   {
     "name": "sendSms",
-    "description": "Send simulated incoming SMS on Android emulator.",
+    "description": "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

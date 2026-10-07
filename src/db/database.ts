@@ -12,6 +12,7 @@ import {
   selectMigrationLock,
 } from "./migrationLock";
 import { logger } from "../utils/logger";
+import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../utils/bunTestRunnerProcess";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { BunSqliteDialect, DEFAULT_OPTIMIZE_INTERVAL_MS } from "./bunSqliteDialect";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -157,26 +158,15 @@ export function resolveDatabasePathFromEnvironment(
 }
 
 /**
- * True when this process is a Bun test runner context. `bun test` sets
- * `NODE_ENV=test` automatically when it is not already set, and nothing in
- * production (the daemon runs under `bun run`/a compiled binary) sets it, so this
- * is the arm-by-default signal for the real-DB guard (#3140). It is deliberately
- * env-based — not a `bun:test`/`Bun.jest` runtime probe — because `Bun.jest` is a
- * function under any Bun runtime (including a plain `bun run`), so it does not
- * distinguish a test run from production.
- */
-function isBunTestContext(env: NodeJS.ProcessEnv): boolean {
-  return env.NODE_ENV === "test";
-}
-
-/**
- * Whether the real-DB guard is armed for this process. As of #3185 this is a
- * pure inversion: the guard arms only from Bun's default test context signal
- * (`NODE_ENV=test`) and no longer keeps a preload-set force-arm fallback for the
- * unsupported `NODE_ENV=production bun test` corner case.
+ * Whether the real-DB guard is armed for this process. `bun test` sets
+ * `NODE_ENV=test` (#3140, #3185), but that variable is inherited by CLI/daemon
+ * children of real-device integration tests, so the process must also be the
+ * test runner itself (its entrypoint is a test file) — see
+ * {@link isBunTestRunnerProcess} and #10486. Deliberately not a `Bun.jest`
+ * probe: that is a function under any Bun runtime, including plain `bun run`.
  */
 function isUnitTestDbGuardArmed(env: NodeJS.ProcessEnv): boolean {
-  return isBunTestContext(env);
+  return isBunTestRunnerProcess(env, currentProcessEntrypoint());
 }
 
 // The four env vars that redirect the database off the default `~/.auto-mobile`

@@ -2214,7 +2214,7 @@ export class DevicePool {
             while (assigned.size < requiredCount) {
               const sessionId = sessionIds[assigned.size];
 
-              if (this.recordHeldAssignment(sessionId, assignments)) {
+              if (this.recordHeldAssignment(ticket.requests[assigned.size], assignments)) {
                 assigned.add(sessionId);
                 continue;
               }
@@ -2415,7 +2415,7 @@ export class DevicePool {
               if (assignments.has(request.sessionId)) {
                 continue;
               }
-              if (this.recordHeldAssignment(request.sessionId, assignments)) {
+              if (this.recordHeldAssignment(request, assignments)) {
                 continue;
               }
 
@@ -2498,25 +2498,62 @@ export class DevicePool {
    * session takes no new claim, so a multi-device request counts that device
    * toward its total instead of waiting for an idle device it will not use.
    */
-  private deviceHeldByExistingSession(sessionId: string): string | undefined {
+  private deviceHeldByExistingSession(sessionId: string): PooledDevice | undefined {
     const session = this.sessionManager.getSession(sessionId);
     if (!session) {
       return undefined;
     }
     const device = this.devices.get(session.assignedDevice);
-    return device?.sessionId === sessionId ? device.id : undefined;
+    return device?.sessionId === sessionId ? device : undefined;
+  }
+
+  /**
+   * Why a session's held device cannot serve a request: the same platform,
+   * criteria and health rules an idle candidate must meet. Undefined when it can.
+   */
+  private heldDeviceDisqualification(
+    request: DeviceAllocationRequest,
+    device: PooledDevice,
+  ): string | undefined {
+    if (this.criteriaMatcher.filterDevices([device], request.criteria).length === 0) {
+      return (
+        `it does not match the requested criteria` +
+        `${this.criteriaMatcher.formatCriteriaSummary(request.criteria)}`
+      );
+    }
+    if (device.status === "error") {
+      return "the device is in an error state";
+    }
+    const marker = this.getDeviceHealthMarker(device.id);
+    return marker ? `the device is unhealthy (${marker.reason}, since ${marker.since})` : undefined;
   }
 
   /**
    * Records the device an existing session (e.g. an executePlan base session)
    * already holds (#10153). It needs no idle device and is never rolled back.
+   * A held device that cannot serve the request fails the allocation: the
+   * session keeps its device rather than silently moving to another one.
    */
-  private recordHeldAssignment(sessionId: string, assignments: Map<string, string>): boolean {
-    const heldDeviceId = this.deviceHeldByExistingSession(sessionId);
-    if (heldDeviceId) {
-      assignments.set(sessionId, heldDeviceId);
+  private recordHeldAssignment(
+    request: DeviceAllocationRequest,
+    assignments: Map<string, string>,
+  ): boolean {
+    const held = this.deviceHeldByExistingSession(request.sessionId);
+    if (!held) {
+      return false;
     }
-    return heldDeviceId !== undefined;
+    const disqualification = this.heldDeviceDisqualification(request, held);
+    if (disqualification) {
+      throw new ActionableError(
+        `Session '${request.sessionId}' already holds device '${held.id}', but ${disqualification}.\n` +
+          `A device label mapped to an existing session must use that session's device.\n` +
+          `Suggestions:\n` +
+          `  - Release the session or select a device that matches the plan's device requirements\n` +
+          `  - Recover or replace the device (killDevice/startDevice) and retry`,
+      );
+    }
+    assignments.set(request.sessionId, held.id);
+    return true;
   }
 
   private multiDeviceAllocationBlock(
@@ -2549,16 +2586,30 @@ export class DevicePool {
   private canClaimMultiDeviceAllocation(
     ticket: (typeof this.multiDeviceAllocationQueue)[number],
   ): boolean {
+    // Sessions that already hold a pooled device need no new claim and must
+    // survive rollback; anything else (including a session whose device left
+    // the pool) counts as a claim, matching recordHeldAssignment.
+    const claims: DeviceAllocationRequest[] = [];
+    for (const request of ticket.requests) {
+      const held = this.deviceHeldByExistingSession(request.sessionId);
+      if (!held) {
+        claims.push(request);
+      } else if (this.heldDeviceDisqualification(request, held)) {
+        // Let the attempt fail fast with the reason instead of waiting.
+        return true;
+      }
+    }
+    // A ticket that claims nothing cannot take a device from an earlier waiter,
+    // so it is exempt from the queue (#10153).
+    if (claims.length === 0) {
+      return true;
+    }
     if (this.isQueuedBehindConflictingRequest(ticket)) {
       return false;
     }
     const available = new Set<string>();
     let canClaim = true;
-    for (const request of this.criteriaMatcher.sortBySpecificity(ticket.requests)) {
-      // Existing sessions do not require a new claim and must survive rollback.
-      if (this.sessionManager.getSession(request.sessionId)) {
-        continue;
-      }
+    for (const request of this.criteriaMatcher.sortBySpecificity(claims)) {
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
       const device = candidates.find(
         (candidate) => this.isIdleDeviceEligible(candidate) && !available.has(candidate.id),

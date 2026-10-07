@@ -20,11 +20,11 @@ for (const criteria of [false, true]) {
     let pool: DevicePool;
     let manager: FakeDeviceManager;
 
-    const setUp = async (deviceIds: string[]) => {
+    const setUp = async (deviceIds: string[], iosIds: string[] = []) => {
       const devices = deviceIds.map((deviceId) => ({
         deviceId,
         name: deviceId,
-        platform: "android" as const,
+        platform: iosIds.includes(deviceId) ? ("ios" as const) : ("android" as const),
       }));
       manager.bootedDevices = devices;
       pool = new DevicePool(
@@ -152,6 +152,71 @@ for (const criteria of [false, true]) {
       await sessions.releaseSession("owner");
       await pool.releaseDevice("d2", "owner");
       expect(await settle(head.result)).toBeInstanceOf(Map);
+    });
+
+    test("a plan needing no new claim is not queued behind a request waiting on its device", async () => {
+      await setUp(["d1", "d2"]);
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      // Another client's two-device request waits for d1, which base holds.
+      const other = observe(["x", "y"], 8_000);
+      await drainUntilQuiescent(timer);
+
+      const plan = observe(["base"]);
+      await drainUntilQuiescent(timer);
+
+      expect(plan.isSettled()).toBe(true);
+      expect([...((await plan.result) as Map<string, string>)]).toEqual([["base", "d1"]]);
+      expect(timer.now()).toBe(0);
+      expect(other.isSettled()).toBe(false);
+      await sessions.releaseSession("base");
+      await pool.releaseDevice("d1", "base");
+      expect(await settle(other.result)).toBeInstanceOf(Map);
+    });
+
+    test("a held device in an error state fails fast naming the label", async () => {
+      await setUp(["d1", "d2"]);
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      pool.getDevice("d1")!.status = "error";
+
+      const plan = observe(["base"]);
+      await drainUntilQuiescent(timer);
+
+      expect(plan.isSettled()).toBe(true);
+      const outcome = String(await plan.result);
+      expect(outcome).toContain("Session 'base' already holds device 'd1'");
+      expect(outcome).toContain("the device is in an error state");
+      expect(pool.getDevice("d2")?.sessionId).toBeNull();
+      expect(sessions.getSession("base")?.assignedDevice).toBe("d1");
+      expect(timer.now()).toBe(0);
+    });
+
+    test("a held device on another platform fails fast naming the label", async () => {
+      await setUp(["d1", "d2"], ["d1"]);
+      await pool.bindOrReuseDeviceSession("base", "d1", "ios");
+
+      const plan = observe(["base"]);
+      await drainUntilQuiescent(timer);
+
+      expect(plan.isSettled()).toBe(true);
+      const outcome = String(await plan.result);
+      expect(outcome).toContain("Session 'base' already holds device 'd1'");
+      expect(outcome).toContain("does not match the requested criteria (platform=android)");
+      expect(pool.getDevice("d2")?.sessionId).toBeNull();
+      expect(timer.now()).toBe(0);
+    });
+
+    test("a session whose device left the pool is counted as needing a claim", async () => {
+      await setUp(["d1", "d2"]);
+      await pool.bindOrReuseDeviceSession("base", "d1", "android");
+      await pool.bindOrReuseDeviceSession("other-client", "d2", "android");
+      // The session survives, but the pool no longer attributes d1 to it.
+      pool.getDevice("d1")!.sessionId = "someone-else";
+
+      const outcome = String(await settle(observe(["base"], 2_000).result));
+
+      expect(outcome).toContain(
+        "0 attempts; too few matching devices were idle to attempt allocation",
+      );
     });
   });
 }

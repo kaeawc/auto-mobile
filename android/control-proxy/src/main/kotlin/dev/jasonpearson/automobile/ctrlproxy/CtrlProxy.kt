@@ -391,19 +391,24 @@ internal data class AccessibilityEventWork(
 }
 
 /**
- * True only for an event from CtrlProxy's own accessibility-overlay window (the highlight overlay
- * or the interactive overlay). CtrlProxy's package also owns the CtrlProxy keyboard
- * (`TYPE_INPUT_METHOD`) and `MainActivity` (`TYPE_APPLICATION`), whose events must still advance
- * `frameContext` and refresh the hierarchy, so they are never skipped. Fails open: an unknown
- * window type ([windowType] null) is processed, because handling one extra event is safe while
- * dropping a keyboard event leaves stale key coordinates passing the staleness check.
+ * True only for an event from CtrlProxy's own overlay window: an accessibility-overlay window (the
+ * highlight overlay or the interactive overlay) or, while an application-layer interactive overlay
+ * is up ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
+ * CtrlProxy's package also owns the CtrlProxy keyboard (`TYPE_INPUT_METHOD`) and `MainActivity`
+ * (`TYPE_APPLICATION`), whose events must still advance `frameContext` and refresh the hierarchy,
+ * so they are never skipped. Fails open: an unknown window type ([windowType] null) is processed,
+ * because handling one extra event is safe while dropping a keyboard event leaves stale key
+ * coordinates passing the staleness check.
  */
 internal fun shouldSkipOwnOverlayEvent(
   eventPackage: String?,
   ownPackage: String,
   windowType: Int?,
+  appLayerShowing: Boolean = false,
 ): Boolean =
-  eventPackage == ownPackage && windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+  eventPackage == ownPackage &&
+    (windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
+      (appLayerShowing && windowType == AccessibilityWindowInfo.TYPE_SYSTEM))
 
 /**
  * Window type of the window [event] came from, or null when it cannot be determined (no source
@@ -3429,7 +3434,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // and feeding the hierarchy push. The window type is resolved only for own-package events.
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
-    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    val appLayerShowing = ::overlayController.isInitialized && overlayController.isAppLayerShowing
+    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
     // A window appearing in an app is the cheapest sign its process (re)started; an open storage
     // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
     // for every package without a subscription, so this is free on the hot path.

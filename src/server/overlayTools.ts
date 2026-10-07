@@ -650,6 +650,8 @@ async function prepareWindowOptions(
       (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
       signal,
     );
+    // An abort that landed after the grant completed must still stop the mutation.
+    signal?.throwIfAborted();
   }
   return undefined;
 }

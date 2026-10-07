@@ -59,6 +59,20 @@ enum class OverlayWindowLayer(val windowType: Int) {
 }
 
 /**
+ * A non-focusable window is stacked above the keyboard unless it also opts out of input-method
+ * interaction, so a non-focusable app-layer overlay adds FLAG_ALT_FOCUSABLE_IM to stay below it. A
+ * window that takes focus for a text field is focusable and needs neither flag.
+ */
+private fun focusFlags(layer: OverlayWindowLayer, hasTextField: Boolean): Int =
+  when {
+    hasTextField -> 0
+    layer == OverlayWindowLayer.APP ->
+      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
+    else -> WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+  }
+
+/**
  * Edge-to-edge window bounds deliberately ignore safe areas; node-level insets are a renderer
  * concern. The highlight overlay's API-guarded cutout policy keeps offsets in true screen
  * coordinates, including cutouts (#9154). Density is supplied by the host's display context.
@@ -82,7 +96,7 @@ fun interactiveOverlayLayoutParams(
       layer.windowType,
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-        if (hasTextField) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+        focusFlags(layer, hasTextField),
       PixelFormat.TRANSLUCENT,
     )
     .apply {

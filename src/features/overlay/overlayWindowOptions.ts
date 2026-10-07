@@ -37,7 +37,8 @@ export const OVERLAY_APP_LAYER_APPOP_COMMAND = `shell appops set ${CTRL_PROXY_PA
 /**
  * Grants SYSTEM_ALERT_WINDOW to CtrlProxy before an app-layer overlay is sent. Best effort: when
  * the grant fails the device refuses the show itself with the command to run, so the failure is
- * logged rather than thrown and the request still goes out.
+ * logged rather than thrown and the request still goes out. Cancellation is not a grant failure:
+ * an aborted [signal] is rethrown so a cancelled request never goes on to show the overlay.
  */
 export async function grantOverlayAppLayer(
   adb: Pick<AdbExecutor, "executeCommand">,
@@ -57,6 +58,9 @@ export async function grantOverlayAppLayer(
       );
     }
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     logger.warn(`[overlay] SYSTEM_ALERT_WINDOW appop grant failed: ${errorMessage(error)}`, error);
   }
 }

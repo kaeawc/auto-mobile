@@ -67,6 +67,13 @@ class OverlayController(
   val isShowing: Boolean
     get() = host.isShowing
 
+  /**
+   * Whether the overlay on screen is in the application-overlay layer, whose windows the system
+   * reports to accessibility as `TYPE_SYSTEM` rather than as an accessibility overlay.
+   */
+  val isAppLayerShowing: Boolean
+    get() = host.isShowing && activeRequest?.layer == OverlayWindowLayer.APP
+
   private val mutex = Mutex()
   internal var activeRuntime: OverlayRuntime? = null
     private set
@@ -77,7 +84,7 @@ class OverlayController(
   private var activeObserverSession = 0
   // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
   private var disconnectPending = false
-  private var activeRequest: InteractiveOverlayRequest? = null
+  @Volatile private var activeRequest: InteractiveOverlayRequest? = null
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false

@@ -65,6 +65,18 @@ class OverlayWindowOptionsTest {
     }
 
   @Test
+  fun `the controller reports an app-layer overlay only while one is showing`() = runTest {
+    assertFalse(controller.isAppLayerShowing)
+    controller.show(null, spec(layer = "app"))
+    assertTrue(controller.isAppLayerShowing)
+    controller.show(null, spec(layer = "system"))
+    assertFalse(controller.isAppLayerShowing)
+    controller.show(null, spec(layer = "app"))
+    controller.dismiss(null, "proto", null)
+    assertFalse(controller.isAppLayerShowing)
+  }
+
+  @Test
   fun `offline actions still apply to a device persistent overlay`() = runTest {
     controller.show(null, spec(persistence = "device"))
     clients = 0

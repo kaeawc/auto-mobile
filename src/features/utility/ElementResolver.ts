@@ -13,7 +13,7 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
-import { compareSelectionRank } from "./selectionRank";
+import { compareSelectionRank, selectableCandidates } from "./selectionRank";
 import { hasVisibleScreenPart } from "./ElementGeometry";
 
 const ordinalNodeKey = new RegExp(
@@ -475,7 +475,17 @@ export class ElementResolver {
           ? actionTarget(candidate) !== null
           : actionTarget(candidate) !== null ||
             (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
-    result.candidates = result.candidates.filter(actionableCandidate);
+    const selectable = (candidates: SearchableEntry[]) =>
+      preserveTextScope ||
+      (scope &&
+        selector.selectionStrategy === "unique" &&
+        selector.index === undefined &&
+        usesClickablePromotion(intent.action))
+        ? candidates.filter(actionableCandidate)
+        : selectableCandidates(candidates, (candidate) =>
+            actionableCandidate(candidate) ? (actionTarget(candidate) ?? candidate) : null,
+          );
+    result.candidates = selectable(result.candidates);
     this.rankCandidates(result, selector, actionTarget, intent);
     this.choose(result, selector, actionTarget);
     if (siblingCandidateNodes) {
@@ -490,7 +500,7 @@ export class ElementResolver {
         preserveTextScope,
       );
       result.matches = preparedAll.matches;
-      result.candidates = preparedAll.matches.map(({ node }) => node).filter(actionableCandidate);
+      result.candidates = selectable(preparedAll.matches.map(({ node }) => node));
       if (result.chosen) {
         result.indexInMatches = result.candidates.findIndex(
           (candidate) => actionTarget(candidate) === result.chosen,

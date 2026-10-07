@@ -66,6 +66,7 @@ import {
   responseCarriesStructuredContent,
 } from "./stripToolResultStructuredContent";
 import { shapeToolCallError } from "./shapeToolCallError";
+import { forwardingLeaseConflictCause } from "./forwardingLeaseConflictOutcome";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
@@ -1657,6 +1658,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
           isError: true,
         };
+      }
+      const leaseConflict = forwardingLeaseConflictCause(error, execution.deviceIds);
+      if (leaseConflict) {
+        // The device is fine; another AutoMobile process kept its CtrlProxy
+        // forwarding. Report that instead of a missing hierarchy or device loss (#10485).
+        return shapeToolCallError(leaseConflict, {
+          toolName: name,
+          source: "MCP",
+        }) as McpToolCallResult;
       }
       const deviceLoss =
         deviceLossOutcomeFromError(error, executionSessionUuid) ??

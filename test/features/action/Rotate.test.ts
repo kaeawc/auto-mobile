@@ -28,6 +28,10 @@ const mirrorPortrait = readFileSync(
   join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-portrait.txt"),
   "utf8",
 );
+const twoDisplays = readFileSync(
+  join(__dirname, "..", "observe", "android", "fixtures", "cmd-display-two-displays.txt"),
+  "utf8",
+);
 
 describe("Rotate", () => {
   let rotate: Rotate;
@@ -119,6 +123,55 @@ describe("Rotate", () => {
     expect(result.success).toBe(true);
   });
 
+  test("non-default display uses per-display rotation without global settings writes", async () => {
+    fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
+    fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
+    const result = await rotate.execute("landscape", undefined, true, undefined, 2);
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell cmd display get-displays",
+      "shell wm size",
+      "shell cmd window user-rotation -d 2 lock 1",
+    ]);
+  });
+
+  test("missing non-default display reports available ids without rotating", async () => {
+    fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
+    const error = await rotate
+      .execute("landscape", undefined, true, undefined, 7)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toBe("display 7 not found; available: 0, 2");
+    expect(fakeAdb.getExecutedCommands()).toEqual(["shell cmd display get-displays"]);
+  });
+
+  test("omitted display keeps the global rotation settings path", async () => {
+    fakeAdb.clearHistory();
+    fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
+    fakeAdb.setCommandResponse("shell dumpsys window displays", createExecResult(mirrorPortrait));
+    await rotate.execute("landscape", undefined, true);
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => command.includes("settings put system")),
+    ).toEqual([
+      "shell settings put system accelerometer_rotation 0",
+      "shell settings put system user_rotation 1",
+    ]);
+  });
+
+  test("iOS rejects non-default display", async () => {
+    mockDevice.platform = "ios";
+    await expect(rotate.execute("portrait", undefined, undefined, undefined, 1)).rejects.toThrow(
+      "supported only on Android",
+    );
+  });
+
+  test("per-display user-rotation failure is surfaced as an ActionableError", async () => {
+    fakeAdb.setCommandError("cmd window user-rotation -d 2", new Error("window manager failed"));
+    await expect(rotate.execute("landscape", undefined, true, undefined, 2)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+
   describe("live rotation request budget", () => {
     for (const [remainingMs, expectedTimeoutMs] of [
       [3000, 3000],
@@ -160,12 +213,11 @@ describe("Rotate", () => {
 
       expect(await budgetedRotate["readLiveRotationWithSettleWait"]("portrait", signal)).toBe(0);
 
-      const reads = fakeAdb.getCommandCalls();
-      expect(reads.map((read) => read.command)).toEqual([
-        "shell dumpsys window displays",
-        "shell dumpsys window displays",
-        "shell dumpsys window displays",
-      ]);
+      // A bare settle-wait outside an execute() call re-reads the natural axes per sample.
+      const reads = fakeAdb
+        .getCommandCalls()
+        .filter((read) => read.command === "shell dumpsys window displays");
+      expect(reads).toHaveLength(3);
       expect(reads.map((read) => read.timeoutMs)).toEqual([3000, 2850, 2700]);
       expect(reads.every((read) => read.signal === signal)).toBe(true);
     });

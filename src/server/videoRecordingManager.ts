@@ -26,7 +26,7 @@ import { redactHomeDir } from "../utils/redactPath";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
-import { combineAbortSignals } from "../utils/AbortContext";
+import { combineAbortSignals, runOutsideRequestContext } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   VideoRecordingRepository,
@@ -177,6 +177,8 @@ interface VideoRecordingManagerDependencies {
   highlightClient: VisualHighlightClient;
   timer: Timer;
   now: () => Date;
+  /** The same live-owner snapshot used by daemon startup's device-session sweep. */
+  liveDaemonSessionIds: ReadonlySet<string>;
   /**
    * Time-based retention + in-progress size-cap policy (issue #4762). Injected so
    * tests can drive the sweep/monitor with FakeTimer; defaults come from
@@ -435,7 +437,10 @@ async function initializeVideoRecordingState(
 async function performVideoRecordingStateInitialization(
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  const active = await deps.recordingRepository.listRecordings({ status: "recording" });
+  const active = await deps.recordingRepository.listRecordings({
+    status: "recording",
+    excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+  });
   if (moduleDependencies === deps) {
     ensureRetentionSweep(deps);
   }
@@ -446,7 +451,7 @@ async function performVideoRecordingStateInitialization(
   const endedAt = deps.now().toISOString();
 
   for (const record of active) {
-    const sizeBytes = await getFileSize(record.filePath);
+    const sizeBytes = await deps.statFileSize(record.filePath);
     const durationMs = calculateDurationMs(record.startedAt, endedAt);
     await deps.recordingRepository.updateRecording(record.recordingId, {
       status: "interrupted",
@@ -469,6 +474,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       highlightClient: new VisualHighlightClient(),
       timer: defaultTimer,
       now: () => new Date(),
+      liveDaemonSessionIds: new Set(),
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
@@ -492,6 +498,7 @@ export async function setVideoRecordingManagerDependencies(
     highlightClient: deps.highlightClient ?? current.highlightClient,
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
+    liveDaemonSessionIds: deps.liveDaemonSessionIds ?? current.liveDaemonSessionIds,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
     statFileSize: deps.statFileSize ?? current.statFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
@@ -509,6 +516,7 @@ async function initialVideoRecordingDependencies(
     highlightClient: deps.highlightClient ?? new VisualHighlightClient(),
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),
+    liveDaemonSessionIds: deps.liveDaemonSessionIds ?? new Set(),
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
     statFileSize: deps.statFileSize ?? getFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
@@ -669,7 +677,10 @@ async function resolveActiveRecordingId(
   }
 
   const { recordingRepository } = deps;
-  const active = await recordingRepository.listRecordings({ status: "recording" });
+  const localRecordingIds = new Set(deps.videoRecorderService.listActiveRecordingIds());
+  const active = (await recordingRepository.listRecordings({ status: "recording" })).filter(
+    (record) => localRecordingIds.has(record.recordingId),
+  );
 
   if (active.length === 0) {
     throw new ActionableError("No active video recording found. Provide recordingId.");
@@ -697,7 +708,7 @@ function scheduleAutoStop(
     if (moduleDependencies !== deps) {
       return;
     }
-    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
+    void stopUnattendedWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Failed to auto-stop recording ${recordingId}: ${error}`);
     });
   }, timeoutMs);
@@ -794,6 +805,10 @@ async function runRetentionSweepWithDependencies(
  * (iOS `simctl recordVideo` runs up to an hour) could fill the disk before any
  * eviction — which only ever considers *other completed* recordings — could run.
  * `capBytes <= 0` disables the monitor for that recording.
+ *
+ * `filePath` is the file the capture is writing right now: the backend's
+ * `liveCapturePath` when it reports one (iOS Simulator's raw `.mov`, since the
+ * final `.mp4` only exists after stop's post-process), else the output path.
  */
 function scheduleInProgressSizeCap(
   recordingId: string,
@@ -853,7 +868,7 @@ async function rearmRetainedRecordingSafety(
     if (moduleDependencies !== deps) {
       return;
     }
-    void stopVideoRecordingWithDependencies(deps, recordingId).catch((error) => {
+    void stopUnattendedWithDependencies(deps, recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Retained safety stop failed for ${recordingId}: ${error}`);
     });
   }, RETAINED_STOP_RETRY_MS);
@@ -861,7 +876,17 @@ async function rearmRetainedRecordingSafety(
 
   const capBytes = Math.floor((record.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
   clearInProgressSizeCap(recordingId);
-  scheduleInProgressSizeCap(recordingId, record.filePath, capBytes, deps);
+  scheduleInProgressSizeCap(
+    recordingId,
+    sizeMonitorPath(deps.videoRecorderService.getLiveCapturePath(recordingId), record.filePath),
+    capBytes,
+    deps,
+  );
+}
+
+/** The file to stat for the size cap: the live capture file if reported, else the output. */
+function sizeMonitorPath(liveCapturePath: string | undefined, outputPath: string): string {
+  return liveCapturePath ?? outputPath;
 }
 
 async function enforceInProgressSizeCap(
@@ -890,7 +915,7 @@ async function enforceInProgressSizeCap(
       `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`,
   );
   clearInProgressSizeCap(recordingId);
-  await stopVideoRecordingWithDependencies(deps, recordingId);
+  await stopUnattendedWithDependencies(deps, recordingId);
 }
 
 function getHighlightSessionByDevice(deviceId: string): VideoRecordingHighlightSession | null {
@@ -1282,7 +1307,12 @@ export async function startVideoRecording(
     scheduleAutoStop(active.recordingId, maxDurationSeconds, deps);
 
     const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+    scheduleInProgressSizeCap(
+      active.recordingId,
+      sizeMonitorPath(active.liveCapturePath, active.outputPath),
+      capBytes,
+      deps,
+    );
     start.abortSignal.throwIfAborted();
     return active;
   } catch (error) {
@@ -1356,6 +1386,27 @@ export async function rollbackVideoRecordingStart(
 export async function stopVideoRecording(recordingId?: string): Promise<StopVideoRecordingResult> {
   const deps = await getVideoRecordingDependencies();
   return stopVideoRecordingWithDependencies(deps, recordingId);
+}
+
+/**
+ * Stop a recording on behalf of nobody's live request: the auto-stop and size-cap timers, a
+ * device disconnect. It runs outside whatever request context is ambient, so the stop is
+ * bounded by its own teardown budget (post-processing) instead of reading the deadline of a
+ * request that may have ended long ago. Only a stop made by a live `videoRecording` stop
+ * request (`stopVideoRecording`) is bounded by that request's remaining time.
+ */
+export async function stopVideoRecordingUnattended(
+  recordingId?: string,
+): Promise<StopVideoRecordingResult> {
+  const deps = await getVideoRecordingDependencies();
+  return stopUnattendedWithDependencies(deps, recordingId);
+}
+
+function stopUnattendedWithDependencies(
+  deps: VideoRecordingManagerDependencies,
+  recordingId?: string,
+): Promise<StopVideoRecordingResult> {
+  return runOutsideRequestContext(() => stopVideoRecordingWithDependencies(deps, recordingId));
 }
 
 async function stopVideoRecordingWithDependencies(
@@ -1496,7 +1547,7 @@ async function interruptVideoRecordingWithDependencies(
   recordingId: string,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  const { recordingRepository, now } = deps;
+  const { recordingRepository, now, statFileSize } = deps;
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);
 
@@ -1520,7 +1571,8 @@ async function interruptVideoRecordingWithDependencies(
     status: "interrupted",
     endedAt,
     lastAccessedAt: endedAt,
-    sizeBytes: await getFileSize(record.filePath),
+    // Through the injected seam, not a direct fs.stat, so an interrupt does no real I/O in tests.
+    sizeBytes: await statFileSize(record.filePath),
     durationMs: calculateDurationMs(record.startedAt, endedAt),
     highlights,
     recordedPanel: record.recordedPanel,
@@ -1603,17 +1655,84 @@ export async function getVideoRecordingMetadata(
   return metadata;
 }
 
+/**
+ * What "latest" resolves to (#10187): the newest recording whose file exists, or, when
+ * recordings exist but none has a file, the newest one and its status so the caller can
+ * say why nothing is playable.
+ */
+export interface LatestVideoRecordingLookup {
+  recording: VideoRecordingMetadata | null;
+  newestWithoutFile?: { recordingId: string; status: VideoRecordingRecord["status"] };
+}
+
+/**
+ * A row is playable when it was recorded as having a file (`sizeBytes` is 0 for an
+ * interrupted recording whose capture never reached the host) and that file is still
+ * there now. The size check comes first so a row known to have no file costs no disk read.
+ */
+async function hasPlayableFile(
+  record: VideoRecordingRecord,
+  { statFileSize }: VideoRecordingManagerDependencies,
+): Promise<boolean> {
+  return record.sizeBytes > 0 && (await statFileSize(record.filePath)) > 0;
+}
+
+/** Newest-first rows read before "latest" widens to every row (the common case needs one). */
+const LATEST_LOOKUP_FIRST_PAGE = 20;
+
+async function firstPlayable(
+  records: VideoRecordingRecord[],
+  deps: VideoRecordingManagerDependencies,
+): Promise<VideoRecordingRecord | undefined> {
+  for (const record of records) {
+    if (await hasPlayableFile(record, deps)) {
+      return record;
+    }
+  }
+  return undefined;
+}
+
+export async function lookupLatestVideoRecording(
+  scope: { ownerSessionUuid?: string } = {},
+): Promise<LatestVideoRecordingLookup> {
+  const deps = await getVideoRecordingDependencies();
+  const query = {
+    status: ["completed", "interrupted"] as VideoRecordingRecord["status"][],
+    orderByStartedAt: "desc" as const,
+    ownerSessionUuid: scope.ownerSessionUuid,
+  };
+  let recordings = await deps.recordingRepository.listRecordings({
+    ...query,
+    limit: LATEST_LOOKUP_FIRST_PAGE,
+  });
+  const newestPlayable = await firstPlayable(recordings, deps);
+  if (newestPlayable) {
+    return { recording: toMetadata(newestPlayable) };
+  }
+  if (recordings.length === LATEST_LOOKUP_FIRST_PAGE) {
+    // Every one of the newest rows lacks a file: widen to all rows rather than miss an
+    // older playable one. The common case reads only a page.
+    const firstPageIds = new Set(recordings.map((recording) => recording.recordingId));
+    recordings = await deps.recordingRepository.listRecordings(query);
+    const older = await firstPlayable(
+      recordings.filter((recording) => !firstPageIds.has(recording.recordingId)),
+      deps,
+    );
+    if (older) {
+      return { recording: toMetadata(older) };
+    }
+  }
+  const newest = recordings[0];
+  return {
+    recording: null,
+    newestWithoutFile: newest && { recordingId: newest.recordingId, status: newest.status },
+  };
+}
+
 export async function getLatestVideoRecordingMetadata(
   scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata | null> {
-  const { recordingRepository } = await getVideoRecordingDependencies();
-  const recordings = await recordingRepository.listRecordings({
-    status: ["completed", "interrupted"],
-    orderByStartedAt: "desc",
-    limit: 1,
-    ownerSessionUuid: scope.ownerSessionUuid,
-  });
-  return recordings[0] ? toMetadata(recordings[0]) : null;
+  return (await lookupLatestVideoRecording(scope)).recording;
 }
 
 async function deleteVideoRecording(

@@ -34,6 +34,14 @@ export interface FileSystem {
   readFileBuffer(filePath: string): Promise<Buffer>;
 
   /**
+   * Read at most the first `byteCount` bytes of a file without loading the rest
+   * @param filePath - Path to the file to read
+   * @param byteCount - Maximum number of leading bytes to return
+   * @returns Promise resolving to the leading bytes (shorter when the file is shorter)
+   */
+  readFileHead(filePath: string, byteCount: number): Promise<Buffer>;
+
+  /**
    * Read directory contents asynchronously
    * @param dirPath - Path to the directory to read
    * @returns Promise resolving to array of file names
@@ -121,6 +129,17 @@ export class DefaultFileSystem implements FileSystem {
 
   async readFileBuffer(filePath: string): Promise<Buffer> {
     return fsPromises.readFile(filePath);
+  }
+
+  async readFileHead(filePath: string, byteCount: number): Promise<Buffer> {
+    const handle = await fsPromises.open(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(byteCount);
+      const { bytesRead } = await handle.read(buffer, 0, byteCount, 0);
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   async readdir(dirPath: string): Promise<string[]> {

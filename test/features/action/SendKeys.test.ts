@@ -22,7 +22,8 @@ import { createStructuredToolResponse, getStructuredPayload } from "../../../src
 import { ActionableError } from "../../../src/models/ActionableError";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import {
   CARET_UNKNOWN_WARNING,
   SEND_KEYS_MAX_COMMANDS,
@@ -555,6 +556,70 @@ describe("SendKeys", () => {
     return { executor, timer, textClient, adb };
   }
 
+  test.each([false, true])(
+    "default replace reads a hinted empty field as empty with focusedElement=%s",
+    async (withFocusedElement) => {
+      const fixture: { viewHierarchy: ViewHierarchyResult } = JSON.parse(
+        readFileSync(
+          resolve("test/fixtures/android-focus/playground-text-field-post-tap.json"),
+          "utf8",
+        ),
+      );
+      const parser = new DefaultElementParser();
+      const observation: ObserveResult = { timestamp: 0, viewHierarchy: fixture.viewHierarchy };
+      let fields = 0;
+      for (const root of [
+        ...parser.extractRootNodes(fixture.viewHierarchy),
+        ...parser.extractWindowRootNodes(fixture.viewHierarchy),
+      ]) {
+        parser.traverseNode(root, (node) => {
+          const properties = nodeAttributes(node);
+          if (properties.class === "android.widget.EditText" && properties.focused === "true") {
+            // Typed fake state, not a new or modified device capture.
+            properties.text = "Search settings";
+            properties["hint-text"] = "Search settings";
+            fields++;
+            if (withFocusedElement) {
+              observation.focusedElement = {
+                ...properties,
+                bounds: { left: 84, top: 1115, right: 996, bottom: 1262 },
+              };
+            }
+          }
+        });
+      }
+      expect(fields).toBeGreaterThan(0);
+      if (withFocusedElement) {
+        expect(observation.focusedElement?.text).toBe("Search settings");
+      }
+      const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+      const result = await executor.type({ action: "type", text: "Q", operation: "replace" });
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedUnits: 1,
+        resolvedMode: "ime",
+      });
+      expect(result.error).toContain('the focused field holds ""');
+      expect(result.error).not.toContain("Search settings");
+      expect(textClient.calls).toContain("clear");
+      expect(textClient.commitViaImeCalls).toHaveLength(1);
+      expect(timer.getSleepHistory()).toEqual([150, 150]);
+    },
+  );
+
+  test("default replace still verifies non-hint replacement content", async () => {
+    const observation = focusedAndroidObservation("Q", { "hint-text": "Search settings" }, 0);
+    const { executor, timer, textClient } = imeVerificationHarness(createObserver(observation));
+    expect(await executor.type({ action: "type", text: "Q", operation: "replace" })).toMatchObject({
+      success: true,
+      resolvedMode: "ime",
+      committedUnits: 1,
+    });
+    expect(textClient.commitViaImeCalls).toHaveLength(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
   test.each([
     ["default type", undefined],
     ["explicit insert/append", "insert"],
@@ -752,7 +817,13 @@ describe("SendKeys", () => {
     ).toMatchObject({ success: true });
     expect(observer.options).toEqual([
       { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -797,7 +868,13 @@ describe("SendKeys", () => {
         (options) => options?.freshness === "fresh" && options.minTimestamp === undefined,
       ),
     ).toEqual([
-      { signal: undefined, freshness: "fresh", display: "external", skipScreenshot: true },
+      {
+        signal: undefined,
+        freshness: "fresh",
+        display: "external",
+        skipScreenshot: true,
+        hierarchyOnly: true,
+      },
     ]);
   });
 
@@ -1894,6 +1971,101 @@ describe("DefaultSendKeysCommandExecutor", () => {
     }
   });
 
+  test("auto password typing refuses undeliverable text before typing anything (#9941)", async () => {
+    const cases = [
+      { text: "contraseña1", apiLevel: 36, codePoint: "U+00F1" },
+      { text: "Passw0rd!", apiLevel: 30, codePoint: "U+0050" },
+      { text: "пароль", apiLevel: 36, codePoint: "U+043F" },
+    ];
+    for (const { text, apiLevel, codePoint } of cases) {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      const textClient = createTextClient({
+        commitViaIme: async () => ({ success: false, error: "password input rejected" }),
+      });
+      textClient.client.insert = async (value) => {
+        textClient.calls.push(`insert:${value}`);
+        return {
+          success: false,
+          error: "Cannot insert text into a password field without exposing its original value",
+        };
+      };
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation("", { password: "true" })),
+        { textClient: textClient.client },
+      );
+
+      const result = await executor.type({ action: "type", text });
+
+      expect(result.success).toBe(false);
+      expect(result.partialApplication).toBeUndefined();
+      expect(result.error).toContain("Nothing was typed");
+      expect(result.error).toContain(codePoint);
+      expect(result.error).toContain('operation: "replace"');
+      expect(result.error).not.toContain(text);
+      expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input key"))).toEqual([]);
+      expect(textClient.calls).toEqual([]);
+      expect(textClient.commitViaImeCalls).toEqual([]);
+    }
+  });
+
+  test("auto password typing lists a bounded set of distinct undeliverable characters", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(36);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("", { password: "true" })),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "ñññáéíóúü" });
+
+    expect(result.error).toContain("7 distinct character(s)");
+    expect(result.error).toContain("U+00F1, U+00E1, U+00E9, U+00ED, U+00F3 and 2 more");
+  });
+
+  test("auto password typing still delivers key-event text and uppercase on API 31+", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(31);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("", { password: "true" })),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "Pw1" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(adb.getExecutedCommands()).toContain(
+      "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_P",
+    );
+  });
+
+  test("auto password replace is not pre-checked and sets the whole value", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(30);
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("secret", { password: "true" })),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "contraseña1!A",
+      operation: "replace",
+    });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+    expect(textClient.calls).toContain("replace:contraseña1!A");
+  });
+
   test("explicit IME mode retains password rejection", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell settings get secure default_input_method", [
@@ -2347,6 +2519,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         signal: undefined,
         freshness: "fresh",
         skipScreenshot: true,
+        hierarchyOnly: true,
       });
       expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
       expect(textClient.calls.includes("clear")).toBe(operation === "replace");
@@ -2421,6 +2594,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       signal: undefined,
       freshness: "fresh",
       skipScreenshot: true,
+      hierarchyOnly: true,
     });
     expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -3831,6 +4005,7 @@ describe("SendKeys post-action capture boundary", () => {
         freshness: "cached-ok",
         signal: undefined,
         skipScreenshot: true,
+        skipAccessibilityAudit: true,
       });
       expect(h.reads.every((read) => read.skipScreenshot === true)).toBe(true);
       await settleEmbeddedObservationInResponse(createStructuredToolResponse(result), {
@@ -3965,7 +4140,9 @@ describe("SendKeys post-action capture boundary", () => {
 });
 
 describe("SendKeys Android non-idempotent outcomes", () => {
-  const modes = ["a11y", "eventLast", "eventAll", "autoPassword", "autoOlder"] as const;
+  // Auto typing into a password field never reaches insert with undeliverable text: it is
+  // refused before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
+  const modes = ["a11y", "eventLast", "eventAll", "autoOlder"] as const;
   for (const mode of modes) {
     test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
       `${mode}: insert %s`,
@@ -3998,11 +4175,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           }
           return pending;
         };
-        const observation = focusedAndroidObservation(
-          "",
-          mode === "autoPassword" ? { password: "true" } : {},
-          1,
-        );
+        const observation = focusedAndroidObservation("", {}, 1);
         const observer = createObserver(observation);
         const executor = new DefaultSendKeysCommandExecutor(
           android,
@@ -4524,6 +4697,155 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(h.timer.getSleepHistory().slice(0, 1)).toEqual([150]);
       expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
     });
+
+    // #9953 x #9948 composition: an empty field legitimately stays empty after the clear, so it
+    // is never an "unchanged clear".
+    describe("a replace on an empty field whose clear leaves it empty", () => {
+      const emptyFields: Array<[string, (h: ReturnType<typeof harness>) => void]> = [
+        ["empty text", () => {}],
+        [
+          "placeholder hint text",
+          (h) => {
+            h.seq.observer.execute = async (options) => {
+              h.seq.options.push(options);
+              h.order.push("read");
+              return focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
+            };
+          },
+        ],
+      ];
+
+      test.each(emptyFields)(
+        "eventLast with only a tail key event: %s gives no warning and one read before the key",
+        async (_name, arrange) => {
+          const h = harness(
+            [""],
+            [{ text: null, isShowingHintText: false, selectionStart: -1, selectionEnd: -1 }],
+          );
+          arrange(h);
+          const result = await h.executor.type({
+            action: "type",
+            text: "0",
+            operation: "replace",
+            mode: "eventLast",
+          });
+          expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
+          expect(result.warning).toBeUndefined();
+          // Focus check + pre-clear read only: no settle polls, no post-type read.
+          expect(h.seq.reads()).toBe(2);
+          expect(h.timer.getSleepHistory()).toEqual([]);
+          expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
+        },
+      );
+
+      test("eventLast with a prefix replaces it directly with no clear and no read of the field", async () => {
+        const h = harness(
+          [""],
+          [{ text: null, isShowingHintText: false, selectionStart: -1, selectionEnd: -1 }],
+        );
+        const result = await h.executor.type({
+          action: "type",
+          text: "abc0",
+          operation: "replace",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({ success: true });
+        expect(result.warning).toBeUndefined();
+        expect(h.order).not.toContain("clear");
+        expect(h.calls).toContain("replace:abc");
+        expect(h.seq.reads()).toBe(1);
+      });
+
+      test("eventAll adds no post-type read for an unchanged-clear check", async () => {
+        // Focus check, pre-clear, then the single letter-case read-back ("Émile" has letters).
+        const h = harness([""]);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Émile",
+          operation: "replace",
+          mode: "eventAll",
+        });
+        expect(result.success).toBe(true);
+        expect(result.warning).toBeUndefined();
+        expect(h.seq.reads()).toBe(3);
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      });
+    });
+
+    describe("a replace on a password field (#9941 pre-flight is insert-only)", () => {
+      const fieldText = "hunter2-old";
+      const secureFieldHarness = () => {
+        const h = harness([""]);
+        h.seq.observer.execute = async (options) => {
+          h.seq.options.push(options);
+          h.order.push("read");
+          return focusedAndroidObservation(fieldText, { password: "true" }, 0);
+        };
+        return h;
+      };
+
+      const warnedText = (calls: unknown[][]) =>
+        calls.map((call) => call.map((part) => String(part)).join(" ")).join("\n");
+
+      test("auto replace still routes to a11y replace: one routing read, no clear, no refusal", async () => {
+        const h = secureFieldHarness();
+        const result = await h.executor.type({
+          action: "type",
+          text: "contraseña1!A",
+          operation: "replace",
+        });
+        expect(result).toMatchObject({ success: true, resolvedMode: "a11y" });
+        expect(h.calls).toContain("replace:contraseña1!A");
+        expect(h.order).toEqual(["read"]);
+      });
+
+      test("explicit eventAll replace verifies nothing it can read and never echoes the old value", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const info = spyOn(logger, "info").mockImplementation(() => {});
+        const debug = spyOn(logger, "debug").mockImplementation(() => {});
+        try {
+          const h = secureFieldHarness();
+          const result = await h.executor.type({
+            action: "type",
+            text: "Pass1",
+            operation: "replace",
+            mode: "eventAll",
+          });
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+          // Focus check, pre-clear (unreadable password), then the letter-case read-back.
+          expect(h.seq.reads()).toBe(3);
+          expect(h.order.filter((entry) => entry === "clear")).toHaveLength(1);
+          const logged = warnedText([...warn.mock.calls, ...info.mock.calls, ...debug.mock.calls]);
+          expect(logged).toContain("Focused text is unreadable before the clear");
+          expect(logged).not.toContain(fieldText);
+          expect(JSON.stringify(result)).not.toContain(fieldText);
+        } finally {
+          warn.mockRestore();
+          info.mockRestore();
+          debug.mockRestore();
+        }
+      });
+
+      test("explicit eventLast replace with an empty prefix does not read or echo the old value", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const h = secureFieldHarness();
+          const result = await h.executor.type({
+            action: "type",
+            text: "0",
+            operation: "replace",
+            mode: "eventLast",
+          });
+          expect(result.success).toBe(true);
+          expect(result.warning).toBeUndefined();
+          expect(h.seq.reads()).toBe(2);
+          expect(warnedText(warn.mock.calls)).not.toContain(fieldText);
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    });
   });
 
   describe("#9887 eventLast proves the caret from the pre- and post-insert state", () => {
@@ -4551,6 +4873,51 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       expect(result.warning).toBeUndefined();
       expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_0"]);
       expect(h.stateReads()).toBe(2);
+    });
+
+    // The empty Playground "Basic Text Field" (Compose, API 36) observes with no text and no
+    // set_selection action (scratch/mt36 i3b observe); CtrlProxy reports it as no text, -1/-1.
+    describe("#9948 an empty Compose field with no text and an unset selection", () => {
+      const emptyCompose = (text: string | null | undefined) => ({
+        text,
+        isShowingHintText: false,
+        selectionStart: -1,
+        selectionEnd: -1,
+      });
+
+      test.each([
+        ["null text", null],
+        ["absent text", undefined],
+        ["empty text", ""],
+      ])("sends the tail key event after the prefix with %s", async (_name, text) => {
+        const h = harness([""], [emptyCompose(text), state("Hello W", 7)]);
+        placedFalse(h.client);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Hello Wz",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({ success: true, resolvedMode: "eventLast" });
+        expect(result.warning).toBeUndefined();
+        expect(keyCommands(h.adb)).toEqual(["shell input keyevent KEYCODE_Z"]);
+        expect(h.stateReads()).toBe(2);
+      });
+
+      test("still fails when the field was not left with the caret after the prefix", async () => {
+        const h = harness([""], [emptyCompose(null), state("Hello W", -1)]);
+        placedFalse(h.client);
+        const result = await h.executor.type({
+          action: "type",
+          text: "Hello Wz",
+          mode: "eventLast",
+        });
+        expect(result).toMatchObject({
+          success: false,
+          partialApplication: true,
+          error: expect.stringContaining("prefix insert could not place the caret"),
+        });
+        expect(keyCommands(h.adb)).toEqual([]);
+      });
     });
 
     test("an empty field showing a hint counts as empty before the insert", async () => {
@@ -4648,8 +5015,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test.each([
       ["an unreadable pre-insert state", [undefined]],
-      ["a null pre-insert text", [{ ...empty, text: null }]],
       ["an out-of-range pre-insert selection", [state("ab", 0, 9)]],
+      ["an unset selection on a non-empty field", [state("ab", -1)]],
     ])("does not attempt the proof with %s", async (_name, states) => {
       const h = harness([""], states);
       placedFalse(h.client);

@@ -1,3 +1,4 @@
+import type { TapAtPlanContext } from "../../models/TapAtGeometry";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import {
   resolveTalkBackStateConfirmation,
@@ -51,6 +52,7 @@ import {
 } from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
+  type IosCoordinateTapClient,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
   isStaleFrameContextRejection,
@@ -68,6 +70,8 @@ import {
   LONG_PRESS_MIN_MS,
   LONG_PRESS_MAX_MS,
 } from "./tapAtGesture";
+
+class TapAtGeometryError extends ActionableError {}
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
@@ -338,7 +342,7 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: Pick<TalkBackTapStrategy, "executePreciseTap" | "executeCoordinateFallback">;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   androidClient?: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> };
-  iosClient?: CoordinateTapClient;
+  iosClient?: IosCoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   invalidateIosCache?: () => void;
@@ -368,7 +372,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient<() => void> & {
     supportsCommand?: (name: string) => Promise<boolean>;
   };
-  private readonly iosClient: CoordinateTapClient;
+  private readonly iosClient: IosCoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
@@ -491,7 +495,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    planContext?: TapAtPlanContext,
   ): Promise<TapAtResult> {
+    options = { ...options, planContext };
     const action = options.action ?? "tap";
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAt");
@@ -635,6 +641,9 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.annotateDeviceLock(result, preDispatchObservation);
       return { ...result, ...(warnings.size ? { warnings: [...warnings] } : {}) };
     } catch (error) {
+      if (error instanceof TapAtGeometryError) {
+        throw error;
+      }
       this.rethrowObservationAbort(error, signal, delivery.displayCompleted);
       return this.createDispatchFailure(error, options, dispatchedCoordinates, delivery);
     } finally {
@@ -689,6 +698,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       point.y,
       tapDurationMs(options, "ios"),
       frameContext,
+      { signal },
     );
     onTapDelivered();
     try {
@@ -1119,8 +1129,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     const guardedDriver: TalkBackNavigationDriver = {
       requestTraversalOrder: driver.requestTraversalOrder.bind(driver),
       requestCurrentFocus: driver.requestCurrentFocus.bind(driver),
-      requestSwipe: driver.requestSwipe.bind(driver),
-      getScreenSize: driver.getScreenSize.bind(driver),
       requestAction: driver.requestAction.bind(driver),
       requestNodeAction: driver.requestNodeAction.bind(driver),
       supportsNodeActionSelectors: driver.supportsNodeActionSelectors.bind(driver),
@@ -1239,25 +1247,90 @@ export class TapAtCoordinate extends BaseVisualChange {
     await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
-    await this.iosCoordinateTap(
-      this.iosClient,
-      point.x,
-      point.y,
-      IOS_TAP_DURATION_MS,
-      undefined,
-      "second tap",
-    );
+    await this.iosCoordinateTap(this.iosClient, point.x, point.y, IOS_TAP_DURATION_MS, undefined, {
+      failureLabel: "second tap",
+      signal,
+    });
   }
 
   private resolveCoordinates(
     options: TapAtOptions,
     observeResult: ObserveResult,
   ): { x: number; y: number } | { x: number; y: number; error: string } {
+    this.validatePlanGeometry(options, observeResult);
     const gestureError = gestureOptionError(options);
     if (gestureError) {
       return { x: inputPoint(options).x, y: inputPoint(options).y, error: gestureError };
     }
-    return resolveTapAtCoordinates(options, observeResult, this.device.platform);
+    const resolved = resolveTapAtCoordinates(options, observeResult, this.device.platform);
+    if (options.planContext && !("error" in resolved)) {
+      this.recordNativeGeometry(options.planContext, observeResult, resolved);
+    }
+    return resolved;
+  }
+
+  private validatePlanGeometry(options: TapAtOptions, observation: ObserveResult): void {
+    const geometry = options.planContext?.geometry;
+    if (!geometry) {
+      return;
+    }
+    const orientation = observation.rotation ?? observation.viewHierarchy?.rotation;
+    const checks: Array<[string, boolean]> = [
+      ["platform", geometry.platform === this.device.platform],
+      [
+        "dimensions",
+        geometry.deviceWidth === observation.screenSize.width &&
+          geometry.deviceHeight === observation.screenSize.height,
+      ],
+      ["orientation", Number.isInteger(orientation) && geometry.orientation === orientation],
+      ["point", this.matchesRecordedPoint(options, geometry)],
+    ];
+    const mismatch = checks.find(([, matches]) => !matches)?.[0];
+    if (mismatch) {
+      throw new TapAtGeometryError(
+        `tapAt replay ${mismatch} mismatch: recorded ${JSON.stringify(geometry)}, current ${this.device.platform} ${observation.screenSize?.width}x${observation.screenSize?.height} orientation ${orientation}. Replay on compatible geometry or record this step again.`,
+      );
+    }
+  }
+
+  private matchesRecordedPoint(
+    options: TapAtOptions,
+    geometry: NonNullable<TapAtPlanContext["geometry"]>,
+  ): boolean {
+    if (options.image || (options.coordinateSpace ?? "absolute") !== "absolute") {
+      return false;
+    }
+    if (options.x !== geometry.x || options.y !== geometry.y) {
+      return false;
+    }
+    return (
+      this.device.platform !== "android" ||
+      (Number.isInteger(geometry.x) && Number.isInteger(geometry.y))
+    );
+  }
+
+  private recordNativeGeometry(
+    context: TapAtPlanContext,
+    observeResult: ObserveResult,
+    point: { x: number; y: number },
+  ): void {
+    const orientation = observeResult.rotation ?? observeResult.viewHierarchy?.rotation;
+    if (
+      (this.device.platform === "android" || this.device.platform === "ios") &&
+      Number.isInteger(orientation) &&
+      orientation !== undefined &&
+      orientation >= 0 &&
+      orientation <= 3
+    ) {
+      context.recordedGeometry = {
+        platform: this.device.platform,
+        deviceWidth: observeResult.screenSize.width,
+        deviceHeight: observeResult.screenSize.height,
+        orientation,
+        x: point.x,
+        y: point.y,
+      };
+    }
   }
 
   private async dispatchAndroidDisplayGesture(
@@ -1351,7 +1424,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           point.y,
           duration,
           second ? undefined : observation.viewHierarchy?.frameContext,
-          second ? "second tap" : "tap",
+          { failureLabel: second ? "second tap" : "tap", signal },
         );
         context.onTapDelivered();
       } else {

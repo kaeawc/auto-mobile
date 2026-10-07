@@ -1,5 +1,7 @@
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
+import { extname, resolve } from "node:path";
+import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
@@ -11,6 +13,8 @@ import {
   type SpawnFn,
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
+import { toActionableError } from "../../models/ActionableError";
+import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
 import {
@@ -235,6 +239,7 @@ interface EmulatorEarlyExitContext {
 }
 
 interface EmulatorProcessOptions {
+  cameraPosterPath?: string;
   requestedExtraArgs?: readonly string[];
   onSpawn?: (process: ChildProcess) => void;
   isCancelled?: () => boolean;
@@ -340,6 +345,8 @@ function configuredAvdArchitecture(
  * Provides emulator lifecycle and control capabilities
  */
 export interface AndroidEmulatorLaunchRequest {
+  /** Host still image used as the virtual-scene back-camera wall poster at boot. */
+  cameraPosterPath?: string;
   /** The configured Android Virtual Device to launch. */
   avdName: string;
   /**
@@ -698,6 +705,17 @@ function isLaunchChildAlive(child: ChildProcess): boolean {
   return (child.exitCode ?? null) === null && (child.signalCode ?? null) === null;
 }
 
+/** Any failure of a launch the caller cancelled is reported as that cancellation, with the spawned child. */
+function asLaunchCancellation(
+  avdName: string,
+  error: unknown,
+  process: ChildProcess | null,
+): EmulatorLaunchCancelledError {
+  return error instanceof EmulatorLaunchCancelledError
+    ? error
+    : new EmulatorLaunchCancelledError(avdName, process);
+}
+
 function shouldCaptureEmulatorReservationSnapshot(deviceId: string | undefined): boolean {
   return deviceId === undefined || deviceId.startsWith("emulator-");
 }
@@ -861,6 +879,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
     consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
+    private readonly posterFileSystem?: Pick<FileSystem, "existsSync">,
   ) {
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn =
@@ -2594,13 +2613,35 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return (await this.launchEmulator({ avdName })).process;
   }
 
+  private resolveCameraPosterPath(posterPath?: string): string | undefined {
+    const cameraPosterPath = posterPath === undefined ? undefined : resolve(posterPath);
+    if (cameraPosterPath !== undefined) {
+      if (![".png", ".jpg", ".jpeg"].includes(extname(cameraPosterPath).toLowerCase())) {
+        throw new ActionableError("cameraPosterPath must point to a PNG, JPG, or JPEG image.");
+      }
+      if (!(this.posterFileSystem ?? { existsSync }).existsSync(cameraPosterPath)) {
+        throw new ActionableError(`Camera poster image does not exist: ${cameraPosterPath}`);
+      }
+    }
+    return cameraPosterPath;
+  }
+
+  private assertCameraPosterColdBoot(posterPath?: string): void {
+    if (posterPath !== undefined) {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on a running or starting AVD. Stop it first.",
+      );
+    }
+  }
+
   async launchEmulator(
     request: AndroidEmulatorLaunchRequest,
   ): Promise<AndroidEmulatorLaunchHandle> {
     if (request.signal?.aborted) {
-      throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(request.avdName, null);
     }
 
+    const cameraPosterPath = this.resolveCameraPosterPath(request.cameraPosterPath);
     let process: ChildProcess | null = null;
     let disposed = false;
     const dispose = () => {
@@ -2619,33 +2660,43 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // validation). It ends when `startEmulatorProcess` resolves — never the
       // resident emulator's whole lifetime — mirroring the iOS `simctl boot`
       // leaf (see PerfContext).
-      process = await trackAmbient(`emulator launch ${request.avdName}`, () =>
-        this.startEmulatorProcess(request.avdName, {
-          requestedExtraArgs: request.extraArgs,
-          onSpawn: (spawnedProcess) => {
-            process = spawnedProcess;
-            if (disposed && !spawnedProcess.killed) {
-              spawnedProcess.kill();
-            }
-          },
-          isCancelled: () => disposed,
-          capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
-          expectedDeviceId: request.deviceId,
-          signal: request.signal,
-        }),
+      // Raced against the request's abort so a cancel does not outwait the
+      // startup validation: that can run its full 5 s fallback against an
+      // emulator that ignores SIGTERM, and the owner needs the child handle
+      // inside its abort grace to confirm the exit (#10075).
+      process = await raceWithDeadline(
+        () =>
+          trackAmbient(`emulator launch ${request.avdName}`, () =>
+            this.startEmulatorProcess(request.avdName, {
+              requestedExtraArgs: request.extraArgs,
+              cameraPosterPath,
+              onSpawn: (spawnedProcess) => {
+                process = spawnedProcess;
+                if (disposed && !spawnedProcess.killed) {
+                  spawnedProcess.kill();
+                }
+              },
+              isCancelled: () => disposed,
+              capturePreLaunchDeviceIds: shouldCaptureEmulatorReservationSnapshot(request.deviceId),
+              expectedDeviceId: request.deviceId,
+              signal: request.signal,
+            }),
+          ),
+        { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
       );
+      if (!process) {
+        // A sibling can win the AVD lock after the pre-spawn check. Never adopt its camera state.
+        this.assertCameraPosterColdBoot(cameraPosterPath);
+      }
       if (disposed) {
-        if (process && !process.killed) {
-          process.kill();
-        }
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
+        // `dispose` already sent the SIGTERM to this child.
+        throw new EmulatorLaunchCancelledError(request.avdName, process);
       }
     } catch (error) {
       request.signal?.removeEventListener("abort", dispose);
-      if (disposed) {
-        throw new ActionableError(`Android emulator launch for '${request.avdName}' was cancelled`);
-      }
-      throw error;
+      // Hand the spawned child to the owner: one SIGTERM is only a request, and
+      // the owner must confirm the exit before freeing the AVD (#10075).
+      throw disposed ? asLaunchCancellation(request.avdName, error, process) : error;
     }
     if (process && request.deviceId) {
       this.launchTargetDeviceIds.set(process, request.deviceId);
@@ -2730,7 +2781,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   private throwIfLaunchCancelled(avdName: string, isCancelled?: () => boolean): void {
     if (isCancelled?.()) {
-      throw new ActionableError(`Android emulator launch for '${avdName}' was cancelled`);
+      throw new EmulatorLaunchCancelledError(avdName, null);
     }
   }
 
@@ -2761,7 +2812,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
     // Check if the AVD exists
     perf.startOperation("validateAvd");
-    const availableAvds = await this.listAvds();
+    const availableAvds = await this.listAvds({ signal: options.signal });
     perf.endOperation("validateAvd");
     if (!availableAvds.find((emu) => emu.name === avdName)) {
       throw new ActionableError(
@@ -2773,6 +2824,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // adjacent and synchronous, so two concurrent launches of the same AVD in
     // this process can never both reach the spawn (#6407).
     if (AndroidEmulatorClient.inFlightAvdLaunches.has(avdName)) {
+      this.assertCameraPosterColdBoot(options.cameraPosterPath);
       logger.info(
         `AVD '${avdName}' already has a launch in flight in this process - waiting for it to be ready`,
       );
@@ -2804,6 +2856,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       signal,
     } = options;
     if (await this.adoptsExistingAvdLaunch(avdName, perf, signal)) {
+      this.assertCameraPosterColdBoot(options.cameraPosterPath);
       // Some other actor already owns this AVD, so we hold no process handle for
       // it. Return null rather than a fabricated `{} as ChildProcess`
       // (issue #3938); the caller waits for readiness regardless.
@@ -2839,6 +2892,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     } else if (extraArgsRaw) {
       args.push(...parseExtraEmulatorArguments(extraArgsRaw));
     }
+    this.appendCameraPosterArguments(args, options.cameraPosterPath);
     this.throwIfLaunchCancelled(avdName, isCancelled);
     const preLaunchEmulatorDeviceSnapshot = await this.capturePreLaunchEmulatorDeviceIds(
       capturePreLaunchDeviceIds,
@@ -2857,6 +2911,25 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
 
     return this.spawnClaimedEmulator({ avdName, perf, args, reservedEmulator, onSpawn });
+  }
+
+  private appendCameraPosterArguments(args: string[], posterPath?: string): void {
+    if (posterPath !== undefined) {
+      if (
+        args.some(
+          (arg) =>
+            arg === "-camera-back" ||
+            arg === "-virtualscene-poster" ||
+            arg.startsWith("-camera-back=") ||
+            arg.startsWith("-virtualscene-poster="),
+        )
+      ) {
+        throw new ActionableError(
+          "cameraPosterPath cannot be combined with camera-back or virtualscene-poster extra arguments. Remove the conflicting arguments.",
+        );
+      }
+      args.push("-camera-back", "virtualscene", "-virtualscene-poster", `wall=${posterPath}`);
+    }
   }
 
   private spawnReservedEmulator(context: {
@@ -3637,7 +3710,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
-      throw new ActionableError(`Emulator '${device.name}' is not running`);
+      return await this.killEmulatorMissingFromOnlineList(device, options);
     }
 
     if (emulator.platform !== device.platform) {
@@ -3708,16 +3781,91 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // termination at all: the serial is the kill's identity, the discovery-time
     // check above refuses a replacement AVD found on that serial, and callers
     // confirm disappearance and incarnation afterwards.
-    const adb = this.adbFactory.create(emulator);
-    await adb.execute(["emu", "kill"], {
+    await this.dispatchEmulatorConsoleKill(emulator, options);
+    logger.info(`Requested termination of emulator '${device.name}'`);
+    return emulator;
+  }
+
+  private async dispatchEmulatorConsoleKill(
+    target: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<void> {
+    await this.adbFactory.create(target).execute(["emu", "kill"], {
       timeoutMs: options.timeoutMs,
       noRetry: true,
       signal: options.signal,
       waitForProcessSettlementAfterAbort: true,
     });
+  }
 
-    logger.info(`Requested termination of emulator '${device.name}'`);
-    return emulator;
+  /**
+   * The serial is not among the `device`-state rows `killDevice` rediscovered.
+   * That is not proof the emulator stopped: `adb devices` also lists an
+   * emulator whose transport dropped (host sleep/wake, a boot that never
+   * finished) as `offline` while its process keeps running and keeps holding
+   * its AVD (#10074). Read the raw states before answering "not running", so a
+   * caller never retires session/pool ownership of an emulator that is alive.
+   *
+   * - absent from `adb devices` altogether: the one case that is "not running";
+   * - attached in another state, without `force`: a distinct error that the
+   *   already-stopped classifier does not match, so ownership stays intact;
+   * - attached in another state, under `force`: the serial-scoped console kill.
+   *   `adb emu` talks to the emulator console port rather than the adb
+   *   transport, so it still reaches an `offline` emulator. Disappearance is
+   *   confirmed by the caller, which must also see the serial leave `adb devices`.
+   */
+  private async killEmulatorMissingFromOnlineList(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
+  ): Promise<BootedDevice> {
+    const attachedState = await this.readAttachedStateForKill(device, options);
+    if (attachedState === undefined) {
+      throw new ActionableError(`Emulator '${device.name}' is not running`);
+    }
+    if (!options.force) {
+      throw new ActionableError(
+        `Emulator '${device.name}' (${device.deviceId}) is attached to adb but reported in state ` +
+          `'${attachedState}', so the daemon cannot tell whether it has stopped and has left its ` +
+          `session and pool entry untouched. Retry killDevice with force: true to send the ` +
+          `emulator console kill to ${device.deviceId} anyway.`,
+      );
+    }
+    logger.warn(
+      `[AndroidEmulatorClient] force=true: '${device.deviceId}' is attached in adb state ` +
+        `'${attachedState}'; dispatching the console kill without a booted-device match.`,
+    );
+    await this.dispatchEmulatorConsoleKill(device, options);
+    logger.info(
+      `Requested termination of emulator '${device.name}' (adb state '${attachedState}')`,
+    );
+    return device;
+  }
+
+  private async readAttachedStateForKill(
+    device: BootedDevice,
+    options: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<string | undefined> {
+    const adb = this.adbFactory.create(null);
+    if (!adb.getDeviceStates) {
+      return undefined;
+    }
+    try {
+      const states = await adb.getDeviceStates({
+        timeoutMs: options.timeoutMs,
+        signal: options.signal,
+      });
+      return states.find((state) => state.deviceId === device.deviceId)?.state;
+    } catch (error) {
+      if (options.signal?.aborted) {
+        throw error;
+      }
+      // An unreadable state list cannot prove the serial is gone, so fail the kill
+      // rather than let the caller classify the emulator as already stopped.
+      throw toActionableError(
+        error,
+        `Could not read adb device states to confirm '${device.deviceId}' is stopped`,
+      );
+    }
   }
 
   private getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined {

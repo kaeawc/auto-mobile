@@ -35,6 +35,7 @@ import {
   waitForObservation,
   type WaitForWithSettled,
 } from "../../src/server/observeTools";
+import { MAX_WAIT_FOR_TIMEOUT_MS } from "../../src/features/observe/waitForTimeout";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -372,6 +373,80 @@ describe("published observe waitFor input schema", () => {
     expect(descriptions.length).toBeGreaterThan(0);
     expect(new Set(descriptions)).toEqual(
       new Set(["How to match waitFor.text; does not affect contentDescription"]),
+    );
+  });
+
+  test("bounds both timeout aliases in legacy and DSL waits", () => {
+    const waits = [
+      { text: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS },
+      { text: "target", timeoutMs: MAX_WAIT_FOR_TIMEOUT_MS },
+      { for: "appear", elementId: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS },
+      { for: "appear", elementId: "target", timeoutMs: MAX_WAIT_FOR_TIMEOUT_MS },
+    ];
+    for (const waitFor of waits) {
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(true);
+      expect(validatePublishedObserveInput({ platform: "android", waitFor }).valid).toBe(true);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS + 1 },
+      { text: "target", timeoutMs: 1e300 },
+      { for: "appear", elementId: "target", timeout: MAX_WAIT_FOR_TIMEOUT_MS + 1 },
+      { for: "appear", elementId: "target", timeoutMs: 1e300 },
+    ]) {
+      const parsed = observeSchema.safeParse({ platform: "android", waitFor });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.message).toContain(
+          `Wait timeout must not exceed ${MAX_WAIT_FOR_TIMEOUT_MS} ms`,
+        );
+      }
+      expect(validatePublishedObserveInput({ platform: "android", waitFor }).valid).toBe(false);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: Number.POSITIVE_INFINITY },
+      { for: "appear", elementId: "target", timeoutMs: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(false);
+    }
+
+    for (const timeout of [undefined, 0, -1, 0.0001]) {
+      const waitFor = { text: "target", ...(timeout === undefined ? {} : { timeout }) };
+      expect(observeSchema.safeParse({ platform: "android", waitFor }).success).toBe(true);
+    }
+
+    for (const waitFor of [
+      { text: "target", timeout: 1, timeoutMs: 1 },
+      { for: "appear", elementId: "target", timeout: 1, timeoutMs: 1 },
+    ]) {
+      const parsed = observeSchema.safeParse({ platform: "android", waitFor });
+      expect(parsed.success).toBe(false);
+      if (!parsed.success) {
+        expect(parsed.error.message).toContain(
+          "waitFor accepts either timeout or timeoutMs, not both",
+        );
+      }
+    }
+  });
+
+  test("commits the same maximum for both wait timeout aliases", () => {
+    const definitions = JSON.parse(
+      readFileSync(new URL("../../schemas/tool-definitions.json", import.meta.url), "utf8"),
+    ) as Array<{
+      name: string;
+      inputSchema: {
+        properties: {
+          waitFor: { properties: Record<string, { maximum?: number }> };
+        };
+      };
+    }>;
+    const observeTool = definitions.find((definition) => definition.name === "observe");
+    expect(observeTool?.inputSchema.properties.waitFor.properties.timeout.maximum).toBe(
+      MAX_WAIT_FOR_TIMEOUT_MS,
+    );
+    expect(observeTool?.inputSchema.properties.waitFor.properties.timeoutMs.maximum).toBe(
+      MAX_WAIT_FOR_TIMEOUT_MS,
     );
   });
 

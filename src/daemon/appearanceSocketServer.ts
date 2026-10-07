@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
@@ -270,25 +271,16 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: AppearanceSocketServer | null = null;
+const socketServer = new SocketServerSingleton<AppearanceSocketServer>();
 
 export function getAppearanceSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(APPEARANCE_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(APPEARANCE_SOCKET_CONFIG);
 }
 
 export async function startAppearanceSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new AppearanceSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new AppearanceSocketServer());
 }
 
 export async function stopAppearanceSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

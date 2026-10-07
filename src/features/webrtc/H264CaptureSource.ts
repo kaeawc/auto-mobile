@@ -20,11 +20,17 @@ export interface H264CaptureSourceOptions {
   device: BootedDevice;
   /** Called with each chunk of the raw H.264 (Annex-B) elementary stream. */
   onData: (chunk: Buffer) => void;
+  /** Cached parameter sets for a late shared joiner; never fresh producer/liveness evidence. */
+  onReplayData?: (chunk: Buffer) => void;
   /** Called only for a fresh frame from the capture producer, before encoder replay can occur. */
   onSourceFrame?: () => void;
   /** Native Simulator idle callback from an attached stream; carries no encoded frame. */
   onSourceIdle?: () => void;
-  /** The encoded helper completed one self-contained access-unit record. */
+  /**
+   * The source finished delivering one self-contained record through `onData`: an iOS encoded-helper
+   * access unit, or one length-framed packet from the Android persistent encoder (config or frame).
+   * Sources that only stream raw bytes (iOS ffmpeg, Android screenrecord) never call it.
+   */
   onEncodedAccessUnit?: () => void;
   /** Whether this Simulator helper can attest native idle callbacks. */
   onIdleAttestationSupport?: (supported: boolean) => void;

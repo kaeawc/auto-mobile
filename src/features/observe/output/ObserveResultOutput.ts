@@ -14,7 +14,7 @@ import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
-import { isIosKeyboardClass } from "../ios/IosScreenIdentity";
+import { isIosKeyboardClass, isIosKeyboardVisible } from "../ios/IosScreenIdentity";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -1066,12 +1066,19 @@ function platformClassNameForDiff(node: Record<string, unknown>): string {
  * Whether a node roots (or, for a bare keycap, is) the soft keyboard the skeleton
  * collapses to `<ime>`: the Android `automobile:imePackage` window extra, or an
  * iOS keyboard class per the collector's own predicate. The class names are
- * iOS-only, so no platform probe is needed.
+ * iOS-only, so no platform probe is needed. iOS keyboard nodes collapse only
+ * while that observation's keyboard is visible (`isIosKeyboardVisible`, the same
+ * rule the screen identity and the skeleton use): a parked keyboard has no
+ * `<ime>` row, so its nodes diff like any other.
  */
-function isKeyboardNodeForDiff(node: ViewHierarchyNode, rec: Record<string, unknown>): boolean {
+function isKeyboardNodeForDiff(
+  node: ViewHierarchyNode,
+  rec: Record<string, unknown>,
+  iosKeyboardVisible: boolean,
+): boolean {
   return (
     Boolean(node.extras?.["automobile:imePackage"]) ||
-    isIosKeyboardClass(platformClassNameForDiff(rec).trim() || undefined)
+    (iosKeyboardVisible && isIosKeyboardClass(platformClassNameForDiff(rec).trim() || undefined))
   );
 }
 
@@ -1083,6 +1090,8 @@ function isKeyboardNodeForDiff(node: ViewHierarchyNode, rec: Record<string, unkn
  */
 function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
+  const iosKeyboardVisible =
+    collapseKeyboard && isIosKeyboardVisible(obs.viewHierarchy, obs.screenSize);
   const walk = (
     node: ViewHierarchyNode | undefined,
     siblingIndex: number,
@@ -1093,7 +1102,7 @@ function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObser
       return;
     }
     const rec: Record<string, unknown> = node;
-    if (collapseKeyboard && isKeyboardNodeForDiff(node, rec)) {
+    if (collapseKeyboard && isKeyboardNodeForDiff(node, rec, iosKeyboardVisible)) {
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);

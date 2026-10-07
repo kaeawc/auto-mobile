@@ -1,3 +1,4 @@
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
@@ -544,8 +545,7 @@ export class DragAndDrop extends BaseVisualChange {
         throw new ActionableError("Target not found within container");
       }
     } catch (error) {
-      const prefix =
-        target.container || target.selectionStrategy === "unique" ? `dragAndDrop ${label}: ` : "";
+      const prefix = isStrictlyScoped(target, "any-container") ? `dragAndDrop ${label}: ` : "";
       throw new ActionableError(`${prefix}${errorMessage(error)}`, { cause: error });
     }
     if (!element) {
@@ -571,8 +571,7 @@ export class DragAndDrop extends BaseVisualChange {
     // Preflight that scope via the shared resolver so drag errors remain distinct.
     if (
       target.container &&
-      !target.container.container &&
-      target.selectionStrategy !== "unique" &&
+      !isStrictlyScoped(target) &&
       this.selector.resolveContainer &&
       !this.selector.resolveContainer(viewHierarchy, target.container, target.selectionStrategy)
     ) {

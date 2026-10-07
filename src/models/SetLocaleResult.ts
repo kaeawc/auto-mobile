@@ -18,4 +18,6 @@ export interface SetLocaleResult {
    * the entire device (issue #6346) so they can restore global state afterwards.
    */
   localeScope?: "app" | "system";
+  /** The change succeeded but on a weaker footing than usual (e.g. an assumed target user). */
+  warning?: string;
 }

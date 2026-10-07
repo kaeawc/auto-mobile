@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { spyOn, describe, expect, test, beforeEach } from "bun:test";
 import { SystemConfigurationManager } from "../../../src/features/utility/SystemConfigurationManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -738,15 +738,22 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("returns error when adb command fails", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/Chicago");
       fakeAdbClient.setCommandError(
-        "shell setprop persist.sys.timezone 'Bad/Zone'",
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
         new Error("setprop failed"),
       );
+      fakeAdbClient.setCommandError(
+        "shell cmd alarm set-timezone 'Asia/Tokyo'",
+        new Error("alarm failed"),
+      );
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
-      const result = await mgr.setTimeZone("Bad/Zone");
+      const result = await mgr.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Failed to set time zone");
+      expect(result.error).toBe(
+        'Read-back verification failed: expected "Asia/Tokyo" but got "America/Chicago" Failed to set time zone: setprop failed; cmd alarm set-timezone: alarm failed.',
+      );
     });
   });
 
@@ -1550,4 +1557,85 @@ describe("SystemConfigurationManager", () => {
       expect(result.timeZone).toBe("Asia/Tokyo");
     });
   });
+});
+
+describe("custom simulator device set argv", () => {
+  for (const configured of [false, true]) {
+    test(
+      configured
+        ? "injects --set immediately after simctl"
+        : "preserves the original argv when unset",
+      async () => {
+        const previous = process.env.CORESIMULATOR_DEVICE_SET_PATH;
+        try {
+          if (configured) {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = "/tmp/custom device set";
+          } else {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          }
+          const prefix = configured ? ["simctl", "--set", "/tmp/custom device set"] : ["simctl"];
+          const exec = new FakeProcessExecutor();
+          const capture = spyOn(exec, "executeCommand");
+          exec.setDefaultResponse(execResult("SpringBoard"));
+          const timer = new FakeTimer();
+          timer.enableAutoAdvance();
+          const manager = new SystemConfigurationManager(
+            IOS_SIMULATOR,
+            new FakeAdbClientFactory(new FakeAdbClient()),
+            exec,
+            timer,
+          );
+          expect(await manager.applyIosLiveChanges("com.example.app")).toEqual({
+            springBoardRestarted: true,
+            notificationPosted: true,
+            appRestarted: true,
+          });
+          expect(capture.mock.calls.map(([file, args]) => [file, args])).toEqual([
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                IOS_SIMULATOR.deviceId,
+                "launchctl",
+                "stop",
+                "com.apple.SpringBoard",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                IOS_SIMULATOR.deviceId,
+                "launchctl",
+                "list",
+                "com.apple.SpringBoard",
+              ],
+            ],
+            [
+              "xcrun",
+              [
+                ...prefix,
+                "spawn",
+                IOS_SIMULATOR.deviceId,
+                "notifyutil",
+                "-p",
+                "com.apple.language.changed",
+              ],
+            ],
+            ["xcrun", [...prefix, "terminate", IOS_SIMULATOR.deviceId, "com.example.app"]],
+            ["xcrun", [...prefix, "launch", IOS_SIMULATOR.deviceId, "com.example.app"]],
+          ]);
+          expect(timer.getSleepHistory()).toEqual([500, 500]);
+        } finally {
+          if (previous === undefined) {
+            delete process.env.CORESIMULATOR_DEVICE_SET_PATH;
+          } else {
+            process.env.CORESIMULATOR_DEVICE_SET_PATH = previous;
+          }
+        }
+      },
+    );
+  }
 });

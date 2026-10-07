@@ -9,8 +9,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { republishOwnedIdentity, type IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  recoveryOwnerSchema,
+  republishOwnedIdentity,
+  type IdentityRecoveryIO,
+} from "../../src/daemon/identityRecovery";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -150,9 +154,26 @@ function harness(
   };
 }
 
+// Managers that start a (fake) daemon still open a launch log under the resolved
+// AutoMobile data dir; keep it off the developer's real ~/.auto-mobile.
+let isolatedDataDir: string;
+let originalDataDir: string | undefined;
+
+beforeEach(() => {
+  originalDataDir = process.env.AUTOMOBILE_DATA_DIR;
+  isolatedDataDir = mkdtempSync(join(tmpdir(), "identity-recovery-data-"));
+  process.env.AUTOMOBILE_DATA_DIR = isolatedDataDir;
+});
+
 afterEach(() => {
   executionTracker.clearDaemonMaintenancePreparation();
   executionTracker.clearDaemonRestartPreparation();
+  if (originalDataDir === undefined) {
+    delete process.env.AUTOMOBILE_DATA_DIR;
+  } else {
+    process.env.AUTOMOBILE_DATA_DIR = originalDataDir;
+  }
+  rmSync(isolatedDataDir, { recursive: true, force: true });
 });
 
 describe("provider-owned identity recovery", () => {
@@ -823,7 +844,11 @@ describe("provider-owned identity recovery", () => {
   });
 });
 
-function provider(sessions: unknown[] = []) {
+function provider(
+  sessions: unknown[] = [],
+  token = "provider-generation",
+  claimed: Record<string, unknown> = { processGenerationToken: token },
+) {
   let writes = 0;
   const server = new UnixSocketServer(
     socketPath,
@@ -845,7 +870,7 @@ function provider(sessions: unknown[] = []) {
     null,
     {
       identityStartedAt: 100,
-      processGenerationToken: "provider-generation",
+      processGenerationToken: token,
       onRepublishIdentity: async () => {
         writes++;
         return true;
@@ -855,17 +880,16 @@ function provider(sessions: unknown[] = []) {
   const params = {
     pid: process.pid,
     startedAt: 100,
-    processGenerationToken: "provider-generation",
+    ...claimed,
     version: DAEMON_VERSION,
     ...getCurrentBuildIdentity(),
   };
-  const call = (overrides = {}) =>
-    (server as any).handleLocalSocketRequest({
-      method: REPUBLISH,
-      params: { ...params, ...overrides },
-    });
+  const request = (method: string, requestParams: Record<string, unknown> = {}) =>
+    (server as any).handleLocalSocketRequest({ method, params: requestParams });
+  const call = (overrides = {}) => request(REPUBLISH, { ...params, ...overrides });
   return {
     call,
+    request,
     get writes() {
       return writes;
     },
@@ -889,6 +913,38 @@ describe("republish admin RPC admission", () => {
     });
     await first;
     expect(p.writes).toBe(1);
+  });
+  test("a daemon with a zone-free Darwin token accepts a republish echoing the zone-free field", async () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const p = provider([], utc, { processGenerationTokenUtc: utc });
+    expect(await p.call()).toEqual({ accepted: true });
+    expect(p.writes).toBe(1);
+  });
+  test("ide/status publishes a zone-free Darwin token only under the zone-free field", async () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const status = await provider([], utc).request("ide/status");
+    expect(status.processGenerationTokenUtc).toBe(utc);
+    expect("processGenerationToken" in status).toBe(false);
+  });
+  test("ide/status keeps a Linux token under the legacy field", async () => {
+    const linux = "linux:boot-id:424242";
+    const status = await provider([], linux).request("ide/status");
+    expect(status.processGenerationToken).toBe(linux);
+    expect("processGenerationTokenUtc" in status).toBe(false);
+  });
+  test("a zone-free daemon rejects a republish echoing a different zone-free token", async () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const p = provider([], utc, {
+      processGenerationTokenUtc: "darwin-utc:Tue Oct 6 09:30:00 2026",
+    });
+    expect(await p.call()).toEqual({ accepted: false, reason: "generation_changed" });
+    expect(p.writes).toBe(0);
+  });
+  test("a zone-free daemon rejects an older client's republish, which sees no token (safe deferral)", async () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const p = provider([], utc, {});
+    expect(await p.call()).toEqual({ accepted: false, reason: "generation_changed" });
+    expect(p.writes).toBe(0);
   });
   test("fix 4: provider republishes with active sessions without maintenance admission", async () => {
     const p = provider([{ sessionId: "active" }]);
@@ -940,6 +996,46 @@ describe("incumbent-owned atomic publisher", () => {
     expect(record).toEqual(complete);
     expect(await republishOwnedIdentity(true, complete, io, sockets)).toBe(true);
     expect(writes).toBe(1);
+  });
+
+  test("a complete record carrying the zone-free field is already the owner's identity", async () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const zoneFree: PidFileData = {
+      ...complete,
+      processGenerationToken: undefined,
+      processGenerationTokenUtc: utc,
+    };
+    let writes = 0;
+    const io = {
+      readRecord: () => zoneFree,
+      isProcessRunning: () => false,
+      writeRecord: async () => {
+        writes++;
+      },
+    };
+    expect(
+      await republishOwnedIdentity(
+        true,
+        { pid: 123, startedAt: 100, processGenerationToken: utc },
+        io,
+        sockets,
+      ),
+    ).toBe(true);
+    expect(writes).toBe(0);
+  });
+
+  test("the recovery owner schema keeps the zone-free field", () => {
+    const utc = "darwin-utc:Tue Oct 6 07:35:51 2026";
+    const parsed = recoveryOwnerSchema.parse({
+      ...complete,
+      processGenerationToken: undefined,
+      processGenerationTokenUtc: utc,
+      running: true,
+      reportedPidFilePath: "/isolated/pid",
+      reportedSocketPath: socketPath,
+      reportedSockets: sockets,
+    });
+    expect(parsed.processGenerationTokenUtc).toBe(utc);
   });
 
   test("publisher defers startup and preserves another live contender's early record", async () => {

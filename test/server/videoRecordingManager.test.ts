@@ -10,6 +10,7 @@ import {
   spyOn,
   test as bunTest,
 } from "bun:test";
+import { AsyncResource } from "node:async_hooks";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -31,6 +32,7 @@ import { ActionableError, type BootedDevice } from "../../src/models";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
 import {
   getLatestVideoRecordingMetadata,
+  lookupLatestVideoRecording,
   getVideoRecordingMetadata,
   listVideoRecordings,
   interruptVideoRecording,
@@ -43,6 +45,7 @@ import {
   startVideoRecording,
   stopAcceptingVideoRecordingStarts,
   stopVideoRecording,
+  stopVideoRecordingUnattended,
   type VideoRetentionPolicy,
 } from "../../src/server/videoRecordingManager";
 import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
@@ -66,6 +69,12 @@ import {
 import { createTestDatabase } from "../db/testDbHelper";
 import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
 import { logger } from "../../src/utils/logger";
+import {
+  getRequestContext,
+  runWithAbortSignal,
+  type RequestContext,
+} from "../../src/utils/AbortContext";
+import { TextRequestState } from "../../src/features/action/textTransportTimeout";
 import {
   getLatestVideoRecording,
   getVideoArchiveItem,
@@ -338,6 +347,92 @@ describe("videoRecordingManager", () => {
     expect(recordings[0]?.recordingId).toBe(active.recordingId);
   });
 
+  describe("timer-driven stops do not inherit the start request's context (#10217)", () => {
+    // AsyncLocalStorage stores are captured by timers created inside a run() scope (verified
+    // under Bun), so an auto-stop armed during the `start` tool call fires with that call's
+    // long-expired deadline unless the stop runs outside it.
+    const START_REQUEST_MS = 90_000;
+    let contextAtStop: Array<RequestContext | undefined>;
+
+    beforeEach(() => {
+      contextAtStop = [];
+      // FakeTimer fires callbacks in the advancing test's context; a real timer fires them in
+      // the context that was ambient when it was armed. Model the real behaviour.
+      const armTimeout = fakeTimer.setTimeout.bind(fakeTimer);
+      fakeTimer.setTimeout = (callback, ms) => armTimeout(AsyncResource.bind(callback), ms);
+      const armInterval = fakeTimer.setInterval.bind(fakeTimer);
+      fakeTimer.setInterval = (callback, ms) => armInterval(AsyncResource.bind(callback), ms);
+      const realStop = fakeBackend.stop.bind(fakeBackend);
+      fakeBackend.stop = async (handle) => {
+        contextAtStop.push(getRequestContext());
+        return realStop(handle);
+      };
+    });
+
+    const startRequest = (): RequestContext => {
+      const deadlineMs = fakeTimer.now() + START_REQUEST_MS;
+      return { getDeadlineMs: () => deadlineMs, textState: new TextRequestState() };
+    };
+
+    test("the auto-stop timer runs outside the start request's context", async () => {
+      const request = startRequest();
+      const active = await runWithAbortSignal(
+        undefined,
+        () => startVideoRecording({ device: testDevice, maxDurationSeconds: 200 }),
+        request,
+      );
+      const stopCall = fakeBackend.waitForStopCall();
+
+      // Fire the timer well past the start request's deadline.
+      fakeTimer.advanceTime(200_000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId);
+
+      expect(fakeTimer.now()).toBeGreaterThan(request.getDeadlineMs?.() ?? 0);
+      expect(contextAtStop).toEqual([undefined]);
+    });
+
+    test("the in-progress size cap runs its stop outside the start request's context", async () => {
+      await setVideoRecordingManagerDependencies({
+        statFileSize: async () => Number.MAX_SAFE_INTEGER,
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+      });
+      const active = await runWithAbortSignal(
+        undefined,
+        () => startVideoRecording({ device: testDevice, maxDurationSeconds: 300 }),
+        startRequest(),
+      );
+      const stopCall = fakeBackend.waitForStopCall();
+
+      fakeTimer.advanceTime(1000);
+      await stopCall;
+      await stopVideoRecording(active.recordingId).catch(() => undefined);
+
+      expect(contextAtStop[0]).toBeUndefined();
+    });
+
+    test("stopVideoRecordingUnattended drops the caller's request context", async () => {
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 200 });
+
+      await runWithAbortSignal(
+        undefined,
+        () => stopVideoRecordingUnattended(active.recordingId),
+        startRequest(),
+      );
+
+      expect(contextAtStop).toEqual([undefined]);
+    });
+
+    test("a live stop request keeps its own context so it can bound post-processing", async () => {
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 200 });
+      const request = startRequest();
+
+      await runWithAbortSignal(undefined, () => stopVideoRecording(active.recordingId), request);
+
+      expect(contextAtStop).toEqual([request]);
+    });
+  });
+
   test("failed state initialization does not arm retention", async () => {
     const listing = spyOn(fakeRepository, "listRecordings").mockRejectedValue(
       new ActionableError("repository unavailable"),
@@ -499,7 +594,7 @@ describe("videoRecordingManager", () => {
       fakeTimer.advanceTime(60_000);
       const newer = await finish("newer");
       const store: VideoRecordingResourceStore = {
-        getLatest: getLatestVideoRecordingMetadata,
+        lookupLatest: lookupLatestVideoRecording,
         getById: getVideoRecordingMetadata,
         list: listVideoRecordings,
         readFile: fsPromises.readFile,
@@ -543,6 +638,52 @@ describe("videoRecordingManager", () => {
         active.recordingId,
       ]);
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("size cap measures the live capture file, not the not-yet-written output (#10017)", async () => {
+      const probed: string[] = [];
+      fakeBackend.setLiveCapturePath(
+        (config) => `${config.outputDirectory}/${config.recordingId}-raw.mov`,
+      );
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        // The final output is absent until stop's post-process; only the raw file grows.
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return filePath.endsWith("-raw.mov") ? capBytes * 2 : 0;
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      expect(active.liveCapturePath).toBe(
+        `${path.dirname(active.outputPath)}/${active.recordingId}-raw.mov`,
+      );
+      expect(active.liveCapturePath).not.toBe(active.outputPath);
+
+      const stopping = fakeBackend.waitForStopCall();
+      fakeTimer.advanceTime(15_000);
+      await stopping;
+      await stopVideoRecording(active.recordingId);
+
+      expect(probed).toEqual([active.liveCapturePath!]);
+      expect(fakeBackend.stopCalls).toHaveLength(1);
+      expect(fakeTimer.getPendingIntervalCount()).toBe(0);
+    });
+
+    test("size cap still measures the output path when the backend reports no live path", async () => {
+      const probed: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
+        statFileSize: async (filePath) => {
+          probed.push(filePath);
+          return 0;
+        },
+      });
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 600 });
+      expect(active.liveCapturePath).toBeUndefined();
+      fakeTimer.advanceTime(15_000);
+      await Promise.resolve();
+      expect(probed).toEqual([active.outputPath]);
+      expect(fakeBackend.stopCalls).toHaveLength(0);
     });
 
     test.each([
@@ -847,9 +988,37 @@ describe("videoRecordingManager", () => {
     expect(stopAttempts).toBe(2);
   });
 
+  /**
+   * Terminal finalization failures delete the recording directory and stat the output; both
+   * are real threadpool I/O by default, which a loaded runner can delay past the 5 s test
+   * ceiling for a test whose logic takes under a millisecond. Route them through the
+   * service's `fileSystem` and the manager's `statFileSize` seams instead.
+   */
+  const useHermeticFileSystem = async (): Promise<string[]> => {
+    const removed: string[] = [];
+    service = new VideoRecorderService({
+      backend: fakeBackend,
+      idGenerator: new FakeIdGenerator(),
+      archiveRoot,
+      securePermissions: new FakeSecurePermissions(false),
+      now: () => new Date(fakeTimer.now()),
+      fileSystem: {
+        rm: async (target) => {
+          removed.push(String(target));
+        },
+      },
+    });
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: service,
+      statFileSize: async () => 0,
+    });
+    return removed;
+  };
+
   test.each(["ios", "android"] as const)(
     "exited %s backend finalization failure is terminal through the manager",
     async (platform) => {
+      const removed = await useHermeticFileSystem();
       const device = { ...testDevice, platform };
       const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
       const captureTimer = new FakeTimer();
@@ -915,6 +1084,7 @@ describe("videoRecordingManager", () => {
       fakeTimer.advanceTime(60_000);
       await Promise.resolve();
       expect(stopAttempts).toBe(1);
+      expect(removed).toEqual([path.dirname(active.outputPath)]);
       await expect(startVideoRecording({ device })).resolves.toBeDefined();
       if (platform === "android") {
         expect(factory.getFakeClient().wasSpawned("rm /sdcard/empty.mp4")).toBe(true);
@@ -925,6 +1095,7 @@ describe("videoRecordingManager", () => {
   test.each(["ios", "android"] as const)(
     "terminal %s finalization failure releases ownership, cancels retries and allows restart",
     async (platform) => {
+      const removed = await useHermeticFileSystem();
       const device = { ...testDevice, platform };
       const active = await startVideoRecording({ device, maxDurationSeconds: 1 });
       let stopAttempts = 0;
@@ -945,6 +1116,7 @@ describe("videoRecordingManager", () => {
       expect(stopAttempts).toBe(1);
       expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
       expect(error).toBeInstanceOf(ActionableError);
+      expect(removed).toEqual([path.dirname(active.outputPath)]);
       await expect(startVideoRecording({ device })).resolves.toBeDefined();
     },
   );
@@ -1574,6 +1746,224 @@ describe("videoRecordingManager", () => {
     ]);
   });
 
+  describe("latest recording is the newest one with a file (#10187)", () => {
+    const seed = async (
+      recordingId: string,
+      status: "completed" | "interrupted",
+      startedAtMs: number,
+      sizeBytes: number,
+    ): Promise<string> => {
+      const iso = new Date(startedAtMs).toISOString();
+      const filePath = path.join(archiveRoot, recordingId, `${recordingId}.mp4`);
+      await fakeRepository.insertRecording({
+        recordingId,
+        deviceId: "test-device",
+        platform: "android",
+        status,
+        fileName: `${recordingId}.mp4`,
+        filePath,
+        format: "mp4",
+        sizeBytes,
+        createdAt: iso,
+        startedAt: iso,
+        endedAt: iso,
+        lastAccessedAt: iso,
+        config: DEFAULT_VIDEO_RECORDING_CONFIG,
+      });
+      return filePath;
+    };
+
+    /** Files the manager's `statFileSize` seam reports as present, with their size. */
+    const filesOnDisk = async (files: Record<string, number>): Promise<string[]> => {
+      const statted: string[] = [];
+      await setVideoRecordingManagerDependencies({
+        statFileSize: async (filePath) => {
+          statted.push(filePath);
+          return files[filePath] ?? 0;
+        },
+      });
+      return statted;
+    };
+
+    test("skips a newer interrupted recording that has no file", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      await seed("newer", "interrupted", 2_000, 0);
+      await filesOnDisk({ [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
+    test("does not touch the disk for a row recorded as having no file", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      const newerPath = await seed("newer", "interrupted", 2_000, 0);
+      const statted = await filesOnDisk({ [olderPath]: 1024 });
+
+      await getLatestVideoRecordingMetadata();
+
+      expect(statted).toEqual([olderPath]);
+      expect(statted).not.toContain(newerPath);
+    });
+
+    test("an interrupted recording whose partial file exists is still the newest", async () => {
+      const partialPath = await seed("partial", "interrupted", 2_000, 512);
+      await seed("older", "completed", 1_000, 1024);
+      await filesOnDisk({ [partialPath]: 512 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("partial");
+    });
+
+    test("verifies the file at read time, skipping a row whose file was since deleted", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      await seed("deleted", "completed", 2_000, 1024);
+      await filesOnDisk({ [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
+    test("skips a newer recording whose file exists on disk but is 0 bytes", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      const emptyPath = await seed("empty-on-disk", "completed", 2_000, 1024);
+      await filesOnDisk({ [olderPath]: 1024, [emptyPath]: 0 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
+    test("reads and stats only the newest playable recording when there is one", async () => {
+      const newestPath = await seed("newest", "completed", 3_000, 1024);
+      const olderPath = await seed("older", "completed", 2_000, 1024);
+      const statted = await filesOnDisk({ [newestPath]: 1024, [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("newest");
+      expect(statted).toEqual([newestPath]);
+    });
+
+    test("reads only one page when the first page has a playable recording", async () => {
+      const newestPath = await seed("newest-page-only", "completed", 3_000, 1024);
+      await seed("older-page-only", "completed", 2_000, 1024);
+      await filesOnDisk({ [newestPath]: 1024 });
+      const originalList = fakeRepository.listRecordings.bind(fakeRepository);
+      let listCalls = 0;
+      fakeRepository.listRecordings = async (query = {}) => {
+        if (query.orderByStartedAt === "desc") {
+          listCalls++;
+        }
+        return originalList(query);
+      };
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("newest-page-only");
+      expect(listCalls).toBe(1);
+    });
+
+    test("checks shifted rows by ID after widening the latest lookup", async () => {
+      const playablePath = await seed("shifted-playable", "completed", 1_000, 1024);
+      for (let index = 0; index < 20; index++) {
+        await seed(`missing-${index}`, "completed", 2_000 + index, 0);
+      }
+      const originalList = fakeRepository.listRecordings.bind(fakeRepository);
+      fakeRepository.listRecordings = async (query = {}) => {
+        const records = await originalList(query);
+        if (query.limit !== undefined) {
+          return records;
+        }
+        const playable = records.find((record) => record.recordingId === "shifted-playable");
+        if (!playable) {
+          return records;
+        }
+        return [
+          ...records.slice(0, 19),
+          playable,
+          ...records.slice(19).filter((record) => record !== playable),
+        ];
+      };
+      await filesOnDisk({ [playablePath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("shifted-playable");
+    });
+
+    test("preserves newestWithoutFile when a widened lookup finds no playable recording", async () => {
+      for (let index = 0; index < 20; index++) {
+        await seed(`missing-full-${index}`, "completed", 2_000 + index, 0);
+      }
+      await filesOnDisk({});
+
+      expect(await lookupLatestVideoRecording()).toEqual({
+        recording: null,
+        newestWithoutFile: { recordingId: "missing-full-19", status: "completed" },
+      });
+    });
+
+    test("still finds an older playable recording behind a full page of rows with no file", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      for (let index = 0; index < 25; index++) {
+        await seed(`gone-${index}`, "completed", 2_000 + index, 1024);
+      }
+      await filesOnDisk({ [olderPath]: 1024 });
+
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+
+    test.each([
+      ["interrupted", 0],
+      ["completed", 1024],
+    ] as const)(
+      "reports the newest %s recording when no recording has a file",
+      async (status, sizeBytes) => {
+        await seed("only-interrupted", "interrupted", 1_000, 0);
+        await seed("newest", status, 2_000, sizeBytes);
+        await filesOnDisk({});
+
+        expect(await lookupLatestVideoRecording()).toEqual({
+          recording: null,
+          newestWithoutFile: { recordingId: "newest", status },
+        });
+        expect(await getLatestVideoRecordingMetadata()).toBeNull();
+      },
+    );
+
+    test("has no newest-without-file entry when there are no recordings", async () => {
+      await filesOnDisk({});
+
+      expect(await lookupLatestVideoRecording()).toEqual({
+        recording: null,
+        newestWithoutFile: undefined,
+      });
+    });
+
+    test("scopes the lookup to the owner session", async () => {
+      const mine = await seed("mine", "completed", 1_000, 1024);
+      const theirs = await seed("theirs", "completed", 2_000, 1024);
+      await fakeRepository.updateRecording("mine", { ownerSessionUuid: "session-a" });
+      await fakeRepository.updateRecording("theirs", { ownerSessionUuid: "session-b" });
+      await filesOnDisk({ [mine]: 1024, [theirs]: 1024 });
+
+      expect(
+        (await getLatestVideoRecordingMetadata({ ownerSessionUuid: "session-a" }))?.recordingId,
+      ).toBe("mine");
+    });
+
+    test("a recording whose stop fails after confirmed teardown does not replace the last playable one", async () => {
+      const olderPath = await seed("older", "completed", 1_000, 1024);
+      const removed = await useHermeticFileSystem();
+      // The failed recording's directory was removed, so only the older file is on disk.
+      await filesOnDisk({ [olderPath]: 1024 });
+      const active = await startVideoRecording({ device: testDevice, maxDurationSeconds: 1 });
+      fakeBackend.stop = async () => {
+        throw new VideoCaptureFinalizationError(
+          "android capture exited: recording produced no usable video (zero bytes / finalization failed). Start a new recording.",
+          { retainOwnership: false },
+        );
+      };
+
+      await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(
+        VideoCaptureFinalizationError,
+      );
+
+      expect((await fakeRepository.getRecording(active.recordingId))?.status).toBe("interrupted");
+      expect(removed).toEqual([path.dirname(active.outputPath)]);
+      expect((await getLatestVideoRecordingMetadata())?.recordingId).toBe("older");
+    });
+  });
+
   describe("retention: TTL sweep + in-progress size cap (#4762)", () => {
     const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -1746,6 +2136,43 @@ describe("videoRecordingManager", () => {
       // restores it and also schedules a bounded stop retry.
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    });
+
+    test("re-armed size monitor keeps probing the live capture path (#10017)", async () => {
+      const capBytes = baseConfig.maxArchiveSizeMb * 1024 * 1024;
+      const probed: string[] = [];
+      fakeBackend.setLiveCapturePath(
+        (config) => `${config.outputDirectory}/${config.recordingId}-raw.mov`,
+      );
+      await reconfigureRetention(
+        { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
+        async (filePath) => {
+          probed.push(filePath);
+          return filePath.endsWith("-raw.mov") ? capBytes * 2 : 0;
+        },
+      );
+      const active = await startVideoRecording({ device: iosDevice, maxDurationSeconds: 300 });
+      let stopAttempts = 0;
+      let stopped = Promise.withResolvers<void>();
+      fakeBackend.stop = async () => {
+        stopAttempts++;
+        stopped.resolve();
+        throw new ProcessTeardownUnconfirmedError("host process may still be alive");
+      };
+
+      fakeTimer.advanceTime(1000);
+      await stopped.promise;
+      await expect(stopVideoRecording(active.recordingId)).rejects.toBeInstanceOf(ActionableError);
+      // Retained safety re-armed the monitor; its next tick must still see the raw file.
+      stopped = Promise.withResolvers<void>();
+      fakeTimer.advanceTime(1000);
+      await stopped.promise;
+
+      expect(stopAttempts).toBeGreaterThanOrEqual(2);
+      expect(probed.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(probed)).toEqual(
+        new Set([`${path.dirname(active.outputPath)}/${active.recordingId}-raw.mov`]),
+      );
     });
 
     test("in-progress recording under the cap keeps running", async () => {

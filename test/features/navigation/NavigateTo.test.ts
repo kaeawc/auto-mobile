@@ -615,6 +615,9 @@ describe("NavigateTo", () => {
         { waitForScreen: async () => false },
         fakeGraph,
         new FakeTimer(),
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute(
@@ -648,6 +651,9 @@ describe("NavigateTo", () => {
         null,
         fakeGraph,
         timer,
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
       let settled = false;
       const execution = navigateTo
@@ -727,6 +733,9 @@ describe("NavigateTo", () => {
         },
         fakeGraph,
         new FakeTimer(),
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute({
@@ -811,6 +820,9 @@ describe("NavigateTo", () => {
         null,
         fakeGraph,
         timer,
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
       );
 
       const result = await navigateTo.execute({
@@ -825,6 +837,50 @@ describe("NavigateTo", () => {
       expect(result.partialPath).toEqual([]);
       // Bundled with A3 so the durationMs assertion measures a real elapsed span.
       expect(result.durationMs).toBe(31_000);
+    });
+
+    test("does not press Back for an edge that is not recorded as Back and has no interaction (#10196)", async () => {
+      await fakeGraph.recordNavigationEvent({
+        destination: "HomeScreen",
+        source: "TEST",
+        arguments: {},
+        metadata: {},
+        timestamp: Date.now(),
+        sequenceNumber: 0,
+      });
+      fakeGraph.setPathResult({
+        found: true,
+        path: [{ from: "HomeScreen", to: "TargetScreen", timestamp: 0, edgeType: "unknown" }],
+        startScreen: "HomeScreen",
+        targetScreen: "TargetScreen",
+      });
+      let backPresses = 0;
+      ToolRegistry.register("pressButton", "Fake back tool", {}, async () => {
+        backPresses++;
+        return { success: true };
+      });
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      navigateTo = new NavigateTo(
+        device,
+        fakeAdbFactory,
+        null,
+        { waitForScreen: async () => true },
+        fakeGraph,
+        timer,
+        undefined,
+        undefined,
+        () => ({ execute: async () => ({}) }),
+      );
+
+      const result = await navigateTo.execute({
+        targetScreen: "TargetScreen",
+        platform: "android",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("has no recorded action, so it cannot be replayed");
+      expect(backPresses).toBe(0);
     });
 
     test("records a back-button hop for an edge with no known interaction", async () => {

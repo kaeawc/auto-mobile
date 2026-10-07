@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   SHARED_STORAGE_RESOURCE_TEMPLATES,
+  CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES,
+  buildCanonicalMediaLibraryResourceUri,
   buildSharedStorageResourceUri,
   parseSharedStorageResourceParams,
 } from "../../src/server/sharedStorageResourceContract";
@@ -12,6 +14,22 @@ describe("shared-storage resource contract", () => {
     );
     expect(SHARED_STORAGE_RESOURCE_TEMPLATES.FILE).toBe(
       "automobile:devices/{deviceId}/downloads/{namespace}/{path}",
+    );
+  });
+
+  test("canonical media templates mirror user_files and encode bounded paths", () => {
+    expect(CANONICAL_MEDIA_LIBRARY_RESOURCE_TEMPLATES).toEqual({
+      NAMESPACE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}",
+      FILE: "automobile:devices/{deviceId}/storage-domains/media_library/{namespace}/{path}",
+    });
+    expect(
+      buildCanonicalMediaLibraryResourceUri({
+        deviceId: "device one",
+        namespace: "automobile-media",
+        path: "photos/a b.png",
+      }),
+    ).toBe(
+      "automobile:devices/device%20one/storage-domains/media_library/automobile-media/photos/a%20b.png",
     );
   });
 

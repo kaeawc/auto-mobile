@@ -11,12 +11,21 @@
         let query: String
         let sessionId: String?
         let mutationToken: String?
+        /// How long the runner waits for this response. Optional: older runners do not send it.
+        let relayTimeoutMs: Int?
 
-        init(databasePath: String, query: String, sessionId: String? = nil, mutationToken: String? = nil) {
+        init(
+            databasePath: String,
+            query: String,
+            sessionId: String? = nil,
+            mutationToken: String? = nil,
+            relayTimeoutMs: Int? = nil
+        ) {
             self.databasePath = databasePath
             self.query = query
             self.sessionId = sessionId
             self.mutationToken = mutationToken
+            self.relayTimeoutMs = relayTimeoutMs
         }
 
         init(from decoder: Decoder) throws {
@@ -25,6 +34,7 @@
             query = try container.decode(String.self, forKey: .query)
             sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
             mutationToken = try container.decodeIfPresent(String.self, forKey: .mutationToken)
+            relayTimeoutMs = try container.decodeIfPresent(Int.self, forKey: .relayTimeoutMs)
         }
     }
 
@@ -102,6 +112,10 @@
     }
 
     final class SdkDatabaseRouteHandler {
+        /// Wire code (HTTP 503) for a database the app holds locked past the SDK's bounded wait. Same
+        /// string as the driver's `busy_lock` diagnostic.
+        static let busyCode = "busy_lock"
+
         private let currentSessionId: () -> String?
 
         init(currentSessionId: @escaping () -> String? = { AutoMobileSDK.shared.currentSessionId() }) {
@@ -147,7 +161,11 @@
                 return error(statusCode: 404, code: "unknown_database_path")
             }
 
-            return encode(SdkTablesPayload(tables: driver.getTables(databasePath: request.databasePath)))
+            let lookup = tables(databasePath: request.databasePath, driver: driver)
+            if lookup.diagnostic?.code == Self.busyCode {
+                return error(statusCode: 503, code: Self.busyCode)
+            }
+            return encode(SdkTablesPayload(tables: lookup.tables))
         }
 
         func handleTableData(body: Data) -> SdkRouteResponse {
@@ -160,8 +178,10 @@
             guard isKnownDatabasePath(request.databasePath, driver: driver) else {
                 return error(statusCode: 404, code: "unknown_database_path")
             }
-            guard isKnownTable(request.table, databasePath: request.databasePath, driver: driver) else {
-                return error(statusCode: 404, code: "unknown_table")
+            switch lookupTable(request.table, databasePath: request.databasePath, driver: driver) {
+            case .busy: return error(statusCode: 503, code: Self.busyCode)
+            case .missing: return error(statusCode: 404, code: "unknown_table")
+            case .found: break
             }
 
             let result = driver.getTableData(
@@ -170,6 +190,9 @@
                 limit: min(max(request.limit, 1), DatabaseInspector.shared.inspectionConfiguration.maxRows),
                 offset: max(request.offset, 0)
             )
+            if result.diagnostic?.code == Self.busyCode {
+                return error(statusCode: 503, code: Self.busyCode)
+            }
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             let redacted = StorageInspectionAccess.redactedRows(
                 columns: result.columns,
@@ -196,11 +219,16 @@
             guard isKnownDatabasePath(request.databasePath, driver: driver) else {
                 return error(statusCode: 404, code: "unknown_database_path")
             }
-            guard isKnownTable(request.table, databasePath: request.databasePath, driver: driver) else {
-                return error(statusCode: 404, code: "unknown_table")
+            switch lookupTable(request.table, databasePath: request.databasePath, driver: driver) {
+            case .busy: return error(statusCode: 503, code: Self.busyCode)
+            case .missing: return error(statusCode: 404, code: "unknown_table")
+            case .found: break
             }
 
             let result = driver.getTableStructure(databasePath: request.databasePath, table: request.table)
+            if result.diagnostic?.code == Self.busyCode {
+                return error(statusCode: 503, code: Self.busyCode)
+            }
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             return encode(SdkTableStructurePayload(columns: result.columns.map {
                 SdkColumnInfoPayload(
@@ -216,7 +244,9 @@
             }, diagnostic: result.diagnostic))
         }
 
-        func handleExecuteSql(body: Data) -> SdkRouteResponse {
+        /// `receivedAt` is when the server accepted the request, before any queueing, so time spent
+        /// waiting behind other database work counts against the relay's timeout.
+        func handleExecuteSql(body: Data, receivedAt: TimeInterval = SdkDatabaseBudget.now()) -> SdkRouteResponse {
             guard let driver = DatabaseInspector.shared.getDriver() else {
                 return error(statusCode: 503, code: "db_inspection_disabled")
             }
@@ -227,11 +257,10 @@
                 return error(statusCode: 404, code: "unknown_database_path")
             }
 
-            let classification = SQLiteDatabaseDriver.classifySQL(
-                databasePath: request.databasePath,
-                query: request.query,
-                allowSyntaxFallback: !(driver is SQLiteDatabaseDriver)
-            )
+            let classification = classify(request, driver: driver)
+            if classification.isBusy {
+                return error(statusCode: 503, code: Self.busyCode)
+            }
             if classification.hasMultipleStatements {
                 return error(statusCode: 400, code: "multiple_statements_not_supported")
             }
@@ -244,7 +273,10 @@
             {
                 return error(statusCode: 403, code: "mutation_not_authorized")
             }
-            let result = driver.executeSQL(databasePath: request.databasePath, query: request.query)
+            let result = execute(request, driver: driver, receivedAt: receivedAt)
+            if result.diagnostic?.code == Self.busyCode {
+                return error(statusCode: 503, code: Self.busyCode)
+            }
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             let columns = result.columns
             let rows = columns.map {
@@ -277,8 +309,61 @@
             }
         }
 
-        private func isKnownTable(_ table: String, databasePath: String, driver: DatabaseDriver) -> Bool {
-            driver.getTables(databasePath: databasePath).contains(table)
+        private enum TableLookup {
+            case found
+            case missing
+            case busy
+        }
+
+        /// A lock held by the app must not read as "no such table" (#10165).
+        private func lookupTable(_ table: String, databasePath: String, driver: DatabaseDriver) -> TableLookup {
+            let lookup = tables(databasePath: databasePath, driver: driver)
+            if lookup.diagnostic?.code == Self.busyCode { return .busy }
+            return lookup.tables.contains(table) ? .found : .missing
+        }
+
+        private func tables(
+            databasePath: String,
+            driver: DatabaseDriver
+        )
+            -> (tables: [String], diagnostic: StorageDiagnostic?)
+        {
+            if let sqlite = driver as? SQLiteDatabaseDriver {
+                let result = sqlite.tablesResult(databasePath: databasePath)
+                return (result.tables, result.diagnostic)
+            }
+            return (driver.getTables(databasePath: databasePath), nil)
+        }
+
+        private func execute(
+            _ request: SdkExecuteSqlRequest,
+            driver: DatabaseDriver,
+            receivedAt: TimeInterval
+        )
+            -> SQLExecutionResult
+        {
+            guard let sqlite = driver as? SQLiteDatabaseDriver else {
+                return driver.executeSQL(databasePath: request.databasePath, query: request.query)
+            }
+            return sqlite.executeSQL(
+                databasePath: request.databasePath,
+                query: request.query,
+                deadline: SdkDatabaseBudget.mutationDeadline(
+                    receivedAt: receivedAt,
+                    relayTimeoutMs: request.relayTimeoutMs
+                )
+            )
+        }
+
+        private func classify(_ request: SdkExecuteSqlRequest, driver: DatabaseDriver) -> SQLClassification {
+            if let sqlite = driver as? SQLiteDatabaseDriver {
+                return sqlite.classify(databasePath: request.databasePath, query: request.query)
+            }
+            return SQLiteDatabaseDriver.classifySQL(
+                databasePath: request.databasePath,
+                query: request.query,
+                allowSyntaxFallback: true
+            )
         }
 
         private func encode<T: Encodable>(_ payload: T) -> SdkRouteResponse {

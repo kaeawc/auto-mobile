@@ -9,7 +9,12 @@
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../shared/SharedGestureDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ElementBounds } from "../../../models/ElementBounds";
-import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
+import type {
+  DelegateContext,
+  CtrlProxyVoiceOverResult,
+  CtrlProxyActionResult,
+  CtrlProxyMagicTapResult,
+} from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort, getAbortSignal } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -33,6 +38,8 @@ export interface VoiceOverActivationOptions {
 export interface CtrlProxyRequestActionOptions {
   abortSignal?: AbortSignal;
   duration?: number;
+  /** Fires once the request frame was written; after it the action may have run. */
+  onDispatch?: () => void;
 }
 
 /**
@@ -43,6 +50,33 @@ export class CtrlProxyVoiceOver {
 
   constructor(context: DelegateContext) {
     this.context = context;
+  }
+
+  /** Invoke the foreground app's SDK responder chain, even with VoiceOver off. */
+  async requestMagicTap(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    const failure = (error: string, unsupported = false): CtrlProxyMagicTapResult => ({
+      success: false,
+      unsupported,
+      requiresVoiceOver: false,
+      totalTimeMs: 0,
+      error,
+    });
+    return sendCommand<CtrlProxyMagicTapResult>(this.context, {
+      idPrefix: "magicTap",
+      responseType: "magic_tap_result",
+      messageType: "request_magic_tap",
+      timeoutMs,
+      perf,
+      abortSignal: signal,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => failure("Not connected to CtrlProxy"),
+      unsupportedCommandError: (_type, error) => failure(error, true),
+      timeoutError: () => failure("Timeout waiting for magic_tap_result"),
+    });
   }
 
   /**
@@ -109,7 +143,8 @@ export class CtrlProxyVoiceOver {
     perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
-    return sendCommand<CtrlProxyActionResult>(this.context, {
+    let dispatched = false;
+    const result = await sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
       responseType: "action",
       messageType: "request_action",
@@ -123,9 +158,22 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       abortSignal: options?.abortSignal,
+      onDispatch: () => {
+        dispatched = true;
+        options?.onDispatch?.();
+      },
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
-      timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
+      // A write that was never answered may have run: say so, and do not invite a retry.
+      timeoutError: () => ({
+        success: false,
+        error: "Timeout waiting for action_result",
+        ...(dispatched ? { dispatched, acknowledged: false, retryable: false } : {}),
+      }),
     });
+    // Only the unanswered path above sets acknowledged:false; any reply confirms the runner answered.
+    return dispatched
+      ? { ...result, dispatched, acknowledged: result.acknowledged ?? true }
+      : result;
   }
 
   /**

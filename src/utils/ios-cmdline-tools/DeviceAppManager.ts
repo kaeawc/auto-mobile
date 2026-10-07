@@ -1,3 +1,4 @@
+import { buildSimctlArgs } from "./simctlArgs";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
 import { promises as fs } from "fs";
@@ -15,13 +16,21 @@ import { throwIfAborted } from "../toolUtils";
 import type { Logger } from "../logger";
 import type { DevicectlVersionSource } from "./CoreDeviceCapabilityProbe";
 import { classifyDevicectlInvocationError } from "./DevicectlDeviceLister";
+import { SimctlCommandTimeoutError } from "./SimctlCommandTimeoutError";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import {
+  indeterminateSimulatorUninstallError,
+  SIMULATOR_UNINSTALL_TIMEOUT_MS,
+} from "./simulatorUninstallBound";
 
 /** Short reads share the 15-second device-list budget used by the lister and SimCtlClient. */
 const DEVICECTL_INFO_TIMEOUT_MS = 15_000;
 /** Process changes and uninstall match SimCtlClient's 60-second command budget. */
 const DEVICECTL_PROCESS_TIMEOUT_MS = 60_000;
+export { SIMULATOR_UNINSTALL_TIMEOUT_MS };
+/** `simctl get_app_container` is a local lookup; a wedged one must not hold the hash read. */
+export const SIMULATOR_APP_CONTAINER_TIMEOUT_MS = 15_000;
 /** Large bundle installs and copies over USB need longer than simctl, but must remain bounded. */
 const DEVICECTL_TRANSFER_TIMEOUT_MS = 180_000;
 /** Let the executor's timeout and SIGKILL settle first before abandoning a wedged executor. */
@@ -596,9 +605,15 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     deviceUdid: string,
     bundleId: string,
     isSimulator = false,
+    options?: { signal?: AbortSignal; throwOnLookupTimeout?: boolean },
   ): Promise<string | null> {
     if (isSimulator) {
-      return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
+      return this.getSimulatorAppBundleHash(
+        deviceUdid,
+        bundleId,
+        options?.signal,
+        options?.throwOnLookupTimeout,
+      );
     }
 
     // withInstalledAppBundle propagates callback errors; preserve this method's
@@ -746,9 +761,10 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     deviceUdid: string,
     bundleId: string,
     isSimulator = false,
+    options?: { signal?: AbortSignal },
   ): Promise<void> {
     if (isSimulator) {
-      return this.uninstallSimulatorApp(deviceUdid, bundleId);
+      return this.uninstallSimulatorApp(deviceUdid, bundleId, options?.signal);
     }
 
     if (this.deps.platform() !== "darwin") {
@@ -1169,6 +1185,8 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
   private async getSimulatorAppBundleHash(
     deviceUdid: string,
     bundleId: string,
+    signal?: AbortSignal,
+    throwOnLookupTimeout = false,
   ): Promise<string | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
@@ -1176,16 +1194,30 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
 
     let appPath: string;
     try {
-      const result = await this.execute("xcrun", [
-        "simctl",
-        "get_app_container",
-        deviceUdid,
-        bundleId,
-        "app",
-      ]);
+      // Bounded and killable like the simulator uninstall: a wedged lookup must not hold the
+      // install-time hash read, and its child must not outlive a cancelled caller.
+      const result = await this.execute(
+        "xcrun",
+        buildSimctlArgs(["get_app_container", deviceUdid, bundleId, "app"]),
+        {
+          timeoutMs: SIMULATOR_APP_CONTAINER_TIMEOUT_MS,
+          killSignal: "SIGKILL",
+          ...(signal ? { signal } : {}),
+        },
+      );
       appPath = result.trim();
     } catch (error) {
+      // Cancellation is the caller's own decision; it must not read as "app not installed".
+      throwIfAborted(signal);
       const errorMessage = getErrorMessage(error);
+      if (throwOnLookupTimeout && classifyDevicectlInvocationError(error) === "timeout") {
+        // A killed lookup says nothing about whether the app exists; a caller that must not read
+        // "unknown" as "absent" opts in to the typed timeout instead of the null.
+        throw new SimctlCommandTimeoutError(
+          `simctl get_app_container for ${bundleId} timed out after ${SIMULATOR_APP_CONTAINER_TIMEOUT_MS}ms`,
+          { cause: error },
+        );
+      }
       const logMessage = `[DeviceAppManager] Failed to read simulator app bundle for ${bundleId}: ${errorMessage}`;
       if (isExpectedMissingLegacySimulatorApp(bundleId, errorMessage)) {
         this.deps.logger.debug(logMessage);
@@ -1209,11 +1241,34 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     }
   }
 
-  private async uninstallSimulatorApp(deviceUdid: string, bundleId: string): Promise<void> {
+  private async uninstallSimulatorApp(
+    deviceUdid: string,
+    bundleId: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (this.deps.platform() !== "darwin") {
       return;
     }
-    await this.execute("xcrun", ["simctl", "uninstall", deviceUdid, bundleId]);
+    // Bounded and killable (issue #10077): a wedged `simctl uninstall` must not
+    // hold the call, and its child must not be left behind on cancellation.
+    try {
+      await this.execute("xcrun", buildSimctlArgs(["uninstall", deviceUdid, bundleId]), {
+        timeoutMs: SIMULATOR_UNINSTALL_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+        ...(signal ? { signal } : {}),
+      });
+    } catch (error) {
+      // Cancellation is the caller's own decision; it propagates unchanged.
+      signal?.throwIfAborted();
+      if (classifyDevicectlInvocationError(error) !== "timeout") {
+        throw error;
+      }
+      // The command was dispatched and never acknowledged, so the app may or may
+      // not be gone: neither a success nor a plain failure.
+      const indeterminate = indeterminateSimulatorUninstallError(bundleId, error);
+      this.deps.logger.warn(indeterminate.message);
+      throw indeterminate;
+    }
   }
 }
 

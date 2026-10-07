@@ -4,6 +4,7 @@ import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecu
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
@@ -176,10 +177,12 @@ export interface DeviceDestroyOptions {
   lifecycleLease?: VirtualDeviceLifecycleLease;
 }
 
-/**
- * Interface for device utility operations
- * Provides platform-agnostic device management for Android emulators and iOS simulators
- */
+/** Options applied only when starting a new virtual-device process. */
+export interface DeviceStartOptions {
+  cameraPosterPath?: string;
+}
+
+/** Platform-agnostic device management for Android emulators and iOS simulators. */
 export interface PlatformDeviceManager {
   /**
    * List all available device images for a specific platform
@@ -231,7 +234,11 @@ export interface PlatformDeviceManager {
    * @param device - The device to start
    * @returns Promise with the spawned child process for the running device
    */
-  startDevice(device: DeviceInfo, timeoutMs?: number): Promise<ChildProcess | null>;
+  startDevice(
+    device: DeviceInfo,
+    timeoutMs?: number,
+    options?: DeviceStartOptions,
+  ): Promise<ChildProcess | null>;
 
   /**
    * Kill/terminate a running device
@@ -239,6 +246,18 @@ export interface PlatformDeviceManager {
    * @returns Promise that resolves when the device has been stopped
    */
   killDevice(device: BootedDevice, options?: DeviceShutdownOptions): Promise<BootedDevice | void>;
+
+  /**
+   * Among the given Android serials, which `adb devices` still lists as
+   * `offline` rather than absent. An offline emulator is invisible to
+   * {@link getBootedDevices} yet its process may still be running, so the
+   * shutdown wait uses this to avoid confirming disappearance too early
+   * (#10074). Optional: managers without an ADB transport omit it.
+   */
+  getAndroidOfflineDeviceIds?(
+    candidateIds: Iterable<string>,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): Promise<Set<string>>;
 
   /**
    * Delete an already-resolved platform device representation.
@@ -935,6 +954,23 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
+  private validateCameraPosterTarget(device: DeviceInfo, options: DeviceStartOptions): void {
+    if (options.cameraPosterPath !== undefined && device.platform !== "android") {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on iOS. Use a stopped Android emulator.",
+      );
+    }
+    if (
+      options.cameraPosterPath !== undefined &&
+      device.deviceId &&
+      !isAndroidEmulatorSerial(device.deviceId)
+    ) {
+      throw new ActionableError(
+        "cameraPosterPath is unsupported on physical Android devices. Use a stopped Android emulator.",
+      );
+    }
+  }
+
   /**
    * Start a device
    * @param device - The device to start
@@ -943,7 +979,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    options: DeviceStartOptions = {},
   ): Promise<ChildProcess | null> {
+    this.validateCameraPosterTarget(device, options);
     assertAndroidImageRunningStateKnown(device);
     // Validate the UDID before any simctl running-state probe: a slow/hung
     // 'simctl list' would otherwise burn the boot budget, and an already-booted
@@ -966,7 +1004,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       );
     }
     if (isRunning) {
-      throw new ActionableError(`${device.platform} device '${device.name}' is already running`);
+      if (options.cameraPosterPath !== undefined) {
+        throw new ActionableError(
+          "cameraPosterPath is unsupported on a running Android emulator. Stop it first.",
+        );
+      }
+      throw new DeviceAlreadyRunningError(
+        `${device.platform} device '${device.name}' is already running`,
+        device.platform,
+        device.deviceId,
+      );
     }
 
     switch (device.platform) {
@@ -976,6 +1023,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
             avdName: device.name,
             deviceId: device.deviceId,
             signal: getAbortSignal(),
+            cameraPosterPath: options.cameraPosterPath,
           })
         ).process;
       case "ios":

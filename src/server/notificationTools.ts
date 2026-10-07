@@ -14,7 +14,10 @@ import {
   PostNotification,
   PostNotificationOptions,
 } from "../features/utility/PostNotification";
-import { NotificationPolicy } from "../features/utility/NotificationPolicy";
+import {
+  NotificationPolicy,
+  type NotificationPolicyResult,
+} from "../features/utility/NotificationPolicy";
 
 export interface PostNotificationArgs extends PostNotificationOptions {
   // #6154: optional — resolved from deviceId/session when omitted.
@@ -174,7 +177,7 @@ export const postNotificationHandler = async (device: BootedDevice, args: PostNo
     });
 
     const message = result.success
-      ? `Posted notification${result.method ? ` via ${result.method}` : ""}`
+      ? `Posted notification${result.method ? ` via ${result.method}` : ""}${result.warning ? ` (warning: ${result.warning})` : ""}`
       : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
 
     const response = createJSONToolResponse({
@@ -189,6 +192,19 @@ export const postNotificationHandler = async (device: BootedDevice, args: PostNo
     throw toActionableError(error, `Failed to post notification`);
   }
 };
+
+/** Say "Allowed/Revoked" only when the read-back confirmed it; otherwise say it is unverified. */
+function describeSetPolicySuccess(
+  args: SetNotificationPolicyArgs,
+  result: NotificationPolicyResult,
+): string {
+  const verb = args.policyAccess ? "allowed" : "revoked";
+  if (result.policyAccess.allowed === args.policyAccess) {
+    return `${args.policyAccess ? "Allowed" : "Revoked"} notification policy access for ${args.appId}`;
+  }
+  const detail = result.policyAccess.warning ? `: ${result.policyAccess.warning}` : "";
+  return `Requested notification policy access be ${verb} for ${args.appId}, but the resulting state was not verified${detail}`;
+}
 
 export function registerNotificationTools() {
   const getNotificationPolicyHandler = async (
@@ -218,7 +234,7 @@ export function registerNotificationTools() {
 
     const response = createJSONToolResponse({
       message: result.success
-        ? `${args.policyAccess ? "Allowed" : "Revoked"} notification policy access for ${args.appId}`
+        ? describeSetPolicySuccess(args, result)
         : (result.error ?? `Failed to set notification policy for ${args.appId}`),
       ...result,
     });

@@ -3,6 +3,7 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -16,6 +17,11 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { verifyIosRotation } from "./iosRotateVerification";
 import { ROTATION_READ_FLOOR_MS } from "../observe/Idle";
+import {
+  orientationFromRotation,
+  readNaturalLandscape,
+  rotationForOrientation,
+} from "./OrientationReader";
 
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
@@ -97,6 +103,13 @@ export class Rotate extends BaseVisualChange {
   private static readonly SETTLE_WAIT_POLL_INTERVAL_MS = 150;
   private static readonly SETTLE_WAIT_STABLE_READS = 2;
 
+  // The active display's natural orientation, read once per Android call so every
+  // rotation <-> orientation conversion in that call agrees. Only set while a call
+  // is running and dropped when it ends: a fold or unfold changes the active panel
+  // and its natural axes, so it must never carry over to the next call.
+  private callNaturalLandscape: { value: boolean | null } | undefined;
+  private callScoped = false;
+
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
@@ -104,6 +117,27 @@ export class Rotate extends BaseVisualChange {
     private readonly options: RotateOptions = {},
   ) {
     super(device, adb, timer);
+  }
+
+  /** Natural orientation of the active display (the rule shared with AndroidOrientationReader). */
+  private async readNaturalAxes(signal?: AbortSignal): Promise<boolean | null> {
+    if (this.callNaturalLandscape) {
+      return this.callNaturalLandscape.value;
+    }
+    throwIfAborted(signal);
+    const value = await awaitWhileRequestIsLive(readNaturalLandscape(this.adb, signal), signal);
+    throwIfAborted(signal);
+    if (this.callScoped) {
+      this.callNaturalLandscape = { value };
+    }
+    return value;
+  }
+
+  private async orientationOfRotation(
+    rotation: number,
+    signal?: AbortSignal,
+  ): Promise<"portrait" | "landscape"> {
+    return orientationFromRotation(rotation, await this.readNaturalAxes(signal)) ?? "landscape";
   }
 
   private getRotationLock(): Mutex {
@@ -386,7 +420,7 @@ export class Rotate extends BaseVisualChange {
     for (let attempt = 1; attempt <= Rotate.SETTLE_WAIT_MAX_ATTEMPTS; attempt++) {
       lastValue = await this.readLiveRotation(signal);
       lastAchieved =
-        lastValue === null ? null : lastValue === 0 || lastValue === 2 ? "portrait" : "landscape";
+        lastValue === null ? null : await this.orientationOfRotation(lastValue, signal);
       this.updateOrientationStreak(lastAchieved, streak);
       if (lastAchieved !== null && streak.count >= Rotate.SETTLE_WAIT_STABLE_READS) {
         lastConfirmed.value = lastValue;
@@ -465,8 +499,7 @@ export class Rotate extends BaseVisualChange {
       };
     }
 
-    const achievedOrientation =
-      liveRotationValue === 0 || liveRotationValue === 2 ? "portrait" : "landscape";
+    const achievedOrientation = await this.orientationOfRotation(liveRotationValue, signal);
     return {
       achievedOrientation,
       warning: this.buildConfirmationWarning(
@@ -583,8 +616,7 @@ export class Rotate extends BaseVisualChange {
     // auto-rotate applies a sensor-driven rotation on top of it (#6129).
     const liveRotation = await this.readLiveRotation(signal);
     if (liveRotation !== null) {
-      // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
-      return liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
+      return this.orientationOfRotation(liveRotation, signal);
     }
 
     const userRotationStr = await this.readSystemSetting("user_rotation", signal);
@@ -596,10 +628,7 @@ export class Rotate extends BaseVisualChange {
 
     const userRotation = parseInt(userRotationStr, 10);
 
-    // Convert numeric value to orientation string
-    // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
-    // For simplicity, we'll treat 0,2 as portrait and 1,3 as landscape
-    return userRotation === 0 || userRotation === 2 ? "portrait" : "landscape";
+    return this.orientationOfRotation(userRotation, signal);
   }
 
   /**
@@ -647,7 +676,7 @@ export class Rotate extends BaseVisualChange {
       // when the exact live rotation is temporarily unavailable.
       return { kind: "requires-rotation", reason: "live-rotation-unavailable" };
     }
-    const liveOrientation = liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
+    const liveOrientation = await this.orientationOfRotation(liveRotation, signal);
     if (liveOrientation !== orientation) {
       // The display changed after the initial read; perform a normal requested
       // rotation instead of locking a now-opposite orientation.
@@ -691,9 +720,7 @@ export class Rotate extends BaseVisualChange {
       const achievedOrientation =
         confirmedRotation === null
           ? "unknown"
-          : confirmedRotation === 0 || confirmedRotation === 2
-            ? "portrait"
-            : "landscape";
+          : await this.orientationOfRotation(confirmedRotation, signal);
       return {
         kind: "handled",
         result: {
@@ -1050,6 +1077,7 @@ export class Rotate extends BaseVisualChange {
     progress?: ProgressCallback,
     lockOrientation?: boolean,
     signal?: AbortSignal,
+    display = 0,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
@@ -1058,8 +1086,32 @@ export class Rotate extends BaseVisualChange {
     try {
       switch (this.device.platform) {
         case "ios":
+          if (display !== 0) {
+            throw new ActionableError(
+              "Selecting a non-default display for rotate is supported only on Android devices.",
+            );
+          }
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
+          if (display !== 0) {
+            await this.assertDisplayExists(display, signal);
+            const rotation = rotationForOrientation(
+              orientation,
+              await readNaturalLandscape(this.adb, signal),
+            );
+            const mode = lockOrientation === false ? "free" : "lock";
+            await this.adb.executeCommand(
+              `shell cmd window user-rotation -d ${display} ${mode} ${rotation}`,
+            );
+            return {
+              success: true,
+              orientation,
+              value: rotation,
+              currentOrientation: orientation,
+              rotationPerformed: true,
+              message: `Rotated display ${display} to ${orientation}`,
+            };
+          }
           return await this.executeAndroidRotation(
             orientation,
             progress,
@@ -1076,6 +1128,38 @@ export class Rotate extends BaseVisualChange {
         signal?.aborted
           ? "Rotation cancelled; device may still complete the change"
           : "Failed to rotate device",
+      );
+    }
+  }
+
+  private async assertDisplayExists(display: number, signal?: AbortSignal): Promise<void> {
+    let availableDisplayIds: string[] = [];
+    try {
+      const displayOutput = await this.adb.executeCommand(
+        "shell cmd display get-displays",
+        2000,
+        undefined,
+        true,
+        signal,
+      );
+      throwIfAborted(signal);
+      availableDisplayIds = parseAndroidDisplayInfos(displayOutput.stdout).map(
+        ({ logicalId }) => logicalId,
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      logger.debug(`[Rotate] Could not read Android displays: ${error}`);
+    }
+    if (availableDisplayIds.length === 0) {
+      logger.debug("[Rotate] Android display list is empty; skipping display existence check");
+      return;
+    }
+    if (!availableDisplayIds.includes(String(display))) {
+      throw new ActionableError(
+        `display ${display} not found; available: ${availableDisplayIds.join(", ")}`,
       );
     }
   }
@@ -1150,6 +1234,23 @@ export class Rotate extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
+    this.callScoped = true;
+    this.callNaturalLandscape = undefined;
+    try {
+      return await this.runAndroidRotation(orientation, progress, perf, lockOrientation, signal);
+    } finally {
+      this.callScoped = false;
+      this.callNaturalLandscape = undefined;
+    }
+  }
+
+  private async runAndroidRotation(
+    orientation: "portrait" | "landscape",
+    progress: ProgressCallback | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    lockOrientation: boolean | undefined,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
     const observationOptions = {
       usesObservationForResolution: false,
       changeExpected: true,
@@ -1237,7 +1338,7 @@ export class Rotate extends BaseVisualChange {
         message: warning,
       };
     }
-    const actual = rotation === 0 || rotation === 2 ? "portrait" : "landscape";
+    const actual = await this.orientationOfRotation(rotation, signal);
     if (actual === orientation) {
       return result;
     }
@@ -1364,7 +1465,8 @@ export class Rotate extends BaseVisualChange {
     slot?: RotationRestoreSlot,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
-    const value = orientation === "portrait" ? 0 : 1;
+    // Read the natural axes first so the requested value and every orientation read agree.
+    const value = rotationForOrientation(orientation, await this.readNaturalAxes(signal));
 
     // Run getCurrentOrientation and getAutoRotateState in parallel
     const [currentOrientation, autoRotateState] = await perf.track("getOrientationState", () =>
@@ -1511,7 +1613,7 @@ export class Rotate extends BaseVisualChange {
       );
       if (liveRotation !== null) {
         return {
-          achievedOrientation: liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape",
+          achievedOrientation: await this.orientationOfRotation(liveRotation, signal),
         };
       }
       return {

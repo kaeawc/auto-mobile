@@ -14,6 +14,18 @@ import {
   traverseForHint,
 } from "./notificationHints";
 
+/**
+ * A CtrlProxy gesture result. `dispatched`/`acknowledged` are the host-side markers from
+ * `sendIOSPressCommand`: a runner reply (including a refusal) is acknowledged, a timeout or
+ * socket close after the write is not.
+ */
+export interface IosGestureResult {
+  success: boolean;
+  error?: string;
+  dispatched?: boolean;
+  acknowledged?: boolean;
+}
+
 export interface IosNotificationUIDetectorDeps {
   requestSwipe(
     x1: number,
@@ -21,8 +33,8 @@ export interface IosNotificationUIDetectorDeps {
     x2: number,
     y2: number,
     duration?: number,
-  ): Promise<{ success: boolean; error?: string }>;
-  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }>;
+  ): Promise<IosGestureResult>;
+  requestTapCoordinates(x: number, y: number): Promise<IosGestureResult>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
 }
@@ -110,10 +122,17 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     this.requireGestureSuccess(result, "dismiss notification");
   }
 
-  private requireGestureSuccess(
-    result: { success: boolean; error?: string },
-    gesture: string,
-  ): void {
+  /**
+   * A gesture written to the runner whose reply never arrived may already have run (a swipe may
+   * have dismissed the notification), so it is indeterminate rather than a plain failure. A runner
+   * refusal is acknowledged and a gesture that was never sent is not dispatched; both stay failures.
+   */
+  private requireGestureSuccess(result: IosGestureResult, gesture: string): void {
+    if (!result.success && result.dispatched === true && result.acknowledged !== true) {
+      throw new ActionableError(
+        `Outcome of ${gesture} is indeterminate: the request was dispatched but no result was confirmed (${result.error || "unknown error"}). Do not retry automatically. Observe before retrying.`,
+      );
+    }
     if (!result.success) {
       throw new ActionableError(
         `Failed to ${gesture}: ${result.error || "CtrlProxy rejected the gesture"}`,

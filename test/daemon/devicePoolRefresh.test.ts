@@ -6,6 +6,7 @@ import type { PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import { DevicePoolRefresh, type DevicePoolRefreshPort } from "../../src/daemon/devicePoolRefresh";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { recoveryCoordinatorHarness } from "../helpers/recoveryCoordinatorHarness";
 
 const booted: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
@@ -19,7 +20,10 @@ async function flushUntil(condition: () => boolean): Promise<void> {
   throw new Error("Condition did not settle within 100 microtasks");
 }
 
-function harness(trackingFailure?: unknown) {
+function harness(
+  trackingFailure?: unknown,
+  lift?: DevicePoolRefreshPort["liftUnconfirmedRecoveringAndroidImages"],
+) {
   const timer = new FakeTimer();
   const devices = new Map<string, PooledDevice>();
   const starts = new Map<string, number>();
@@ -79,6 +83,11 @@ function harness(trackingFailure?: unknown) {
     notifyDeviceReady: () => {
       calls.push("ready");
     },
+    liftUnconfirmedRecoveringAndroidImages:
+      lift ??
+      (async () => {
+        calls.push("lift-recovery-images");
+      }),
   };
   const refresh = new DevicePoolRefresh(port);
   return {
@@ -148,7 +157,14 @@ describe("DevicePoolRefresh", () => {
     expect(await h.refresh.refreshDevices()).toBe(1);
     expect(h.devices.get(booted.deviceId)?.lastUsedAt).toBe(42);
     expect(h.starts.get(booted.deviceId)).toBe(42);
-    expect(h.calls).toEqual(["discover", "prune", "unsuppress", "track", "ready"]);
+    expect(h.calls).toEqual([
+      "discover",
+      "prune",
+      "unsuppress",
+      "track",
+      "ready",
+      "lift-recovery-images",
+    ]);
   });
 
   test("a removal during discovery fences a stale addition", async () => {
@@ -175,5 +191,82 @@ describe("DevicePoolRefresh", () => {
     expect(await stale).toBe(0);
     expect(await fresh).toBe(1);
     expect(h.calls.filter((call) => call === "track")).toHaveLength(1);
+  });
+
+  describe("the rejected-kill fence (#9626) and the unconfirmed recovery reservation (#10076)", () => {
+    const image = { name: "Pixel", platform: "android" as const, isRunning: false };
+    const pooled = (device: BootedDevice): PooledDevice => ({
+      id: device.deviceId,
+      name: device.name,
+      platform: "android",
+      avdName: device.name,
+      sessionId: null,
+      status: "idle",
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      errorCount: 0,
+      incarnation: 1,
+    });
+    const android = (...devices: BootedDevice[]): BootedDeviceDiscovery => ({
+      devices,
+      succeededPlatforms: new Set<Platform>(["android"]),
+    });
+    const wired = () => {
+      const recovery = recoveryCoordinatorHarness();
+      const h = harness(undefined, (discovery, generation) =>
+        recovery.coordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
+      );
+      recovery.coordinator.setRecoveringAndroidImage("Pixel", image);
+      recovery.coordinator.finishAndroidRecoveryAttempt(
+        "Pixel",
+        new Set([booted.deviceId]),
+        true,
+        Symbol("attempt"),
+      );
+      return { ...h, recovery };
+    };
+    const fenceRejectedKill = (h: ReturnType<typeof wired>, device: BootedDevice) => {
+      h.devices.set(device.deviceId, pooled(device));
+      h.intentional.set(device.deviceId, 1);
+      h.settled.set(device.deviceId, { incarnation: 1, refreshGeneration: 0 });
+    };
+
+    test("one fresh observation lifts each once, and neither lift touches a later owner", async () => {
+      const h = wired();
+      fenceRejectedKill(h, booted);
+      await h.refresh.refreshDevicesInternal(false);
+      expect(h.intentional.size).toBe(0);
+      expect(h.settled.size).toBe(0);
+      expect(h.recovery.coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+
+      // New owners of the same serial and AVD appear; a second observation has
+      // nothing of theirs to lift (no settled kill, no unconfirmed entry).
+      h.intentional.set(booted.deviceId, 1);
+      h.recovery.coordinator.setRecoveringAndroidImage("Pixel", image);
+      await h.refresh.refreshDevicesInternal(false);
+      expect(h.intentional.get(booted.deviceId)).toBe(1);
+      expect(h.recovery.coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+    });
+
+    test("a kill command that has not settled keeps its fence while the reservation still lifts", async () => {
+      const h = wired();
+      fenceRejectedKill(h, booted);
+      h.settled.clear();
+      await h.refresh.refreshDevicesInternal(false);
+      expect(h.intentional.get(booted.deviceId)).toBe(1);
+      expect(h.recovery.coordinator.recoveringAndroidImages.has("Pixel")).toBe(false);
+    });
+
+    test("an offline serial keeps the reservation while another device's fence lifts", async () => {
+      const h = wired();
+      const other: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
+      h.recovery.port.getAndroidOfflineDeviceIds = async () => new Set([booted.deviceId]);
+      fenceRejectedKill(h, other);
+      h.setDiscovery(android(other));
+      await h.refresh.refreshDevicesInternal(false);
+      expect(h.intentional.has(other.deviceId)).toBe(false);
+      expect(h.recovery.coordinator.recoveringAndroidImages.has("Pixel")).toBe(true);
+      expect(h.recovery.coordinator.findUnconfirmedRecoveringAndroidImage(["Pixel"])).toBe("Pixel");
+    });
   });
 });

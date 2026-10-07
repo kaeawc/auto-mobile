@@ -59,6 +59,7 @@ import type { ExecResult } from "../../../src/models";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/StableNodeIdentity";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -369,7 +370,9 @@ describe("AndroidCtrlProxyClient", function () {
     );
     try {
       const connectPromise = client.ensureConnected();
-      await flushPromises(8); // let setupBeforeConnect + ws construction settle; open has NOT fired
+      // Wait only until the ws is constructed (not a fixed number of event-loop turns); open has
+      // NOT fired.
+      await waitForSocket(() => socket);
       expect(socket).not.toBeNull();
       expect(client.isConnected()).toBe(false);
 
@@ -379,11 +382,10 @@ describe("AndroidCtrlProxyClient", function () {
       // The handshake now completes — `open` fires AFTER close().
       socket!.readyState = WebSocketState.OPEN;
       socket!.emit("open");
-      await flushPromises(8);
 
       // The post-close open is discarded: no socket installed, connect resolves false.
-      expect(client.isConnected()).toBe(false);
       await expect(connectPromise).resolves.toBe(false);
+      expect(client.isConnected()).toBe(false);
     } finally {
       await client.close();
     }
@@ -521,7 +523,7 @@ describe("AndroidCtrlProxyClient", function () {
       }),
     );
 
-    return { navHarness, navManager, resultPromise, testClient, testTimer };
+    return { navHarness, navManager, resultPromise, socket, testClient, testTimer };
   };
 
   interface ScreenshotUpdateMessage {
@@ -3102,6 +3104,92 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
+    test("a navigation event is handed to the graph stamped with this client's device (#10195)", async function () {
+      const record = spyOn(navHarness.manager, "recordNavigationEvent");
+      const { resultPromise, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(record).toHaveBeenCalledTimes(1);
+        expect(record.mock.calls[0][0]).toMatchObject({
+          destination: "SdkHome",
+          applicationId: "com.example.sdk",
+          deviceId: testDevice.deviceId,
+        });
+      } finally {
+        record.mockRestore();
+        await testClient.close();
+      }
+    });
+
+    test("an SDK app's hierarchy update after another app was in front restores its screen (#10193)", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        await navManager.recordHierarchyNavigation({
+          packageName: "com.example.launcher",
+          fromFingerprint: null,
+          toFingerprint: "launcher-hash",
+          timestamp: testTimer.now(),
+        });
+        expect(navManager.getCurrentAppId()).toBe("com.example.launcher");
+        expect(navManager.getCurrentScreen()).toBeNull();
+
+        // Warm return: the SDK sends no navigation event, only a hierarchy update.
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(navManager.getCurrentAppId()).toBe("com.example.sdk");
+        expect(navManager.getCurrentScreen()).toBe("SdkHome");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("the foreground signal for an SDK app names this client's device, so another device's tick cannot switch the shared manager", async function () {
+      const { navManager, resultPromise, socket, testClient, testTimer } =
+        await startSdkNavigationHierarchyInterleaving();
+      const foreground = spyOn(navManager, "recordAppForeground");
+
+      try {
+        await resultPromise;
+        await settleNavigationHierarchyInterleaving(testTimer);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: { text: "SDK Home", "resource-id": "com.example.sdk:id/home" },
+            },
+          }),
+        );
+        await settleNavigationHierarchyInterleaving(testTimer);
+
+        expect(foreground).toHaveBeenCalledWith("com.example.sdk", testDevice.deviceId);
+      } finally {
+        foreground.mockRestore();
+        await testClient.close();
+      }
+    });
+
     test("skips the hierarchy-navigation detector for an SDK app after a navigation_event (#3068)", async function () {
       // Pins the sdkNavigationAppIds skip MECHANISM (layer 1), independent of the
       // NavigationGraphManager early-return (layer 2) that also protects the SDK
@@ -4214,7 +4302,64 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("package events", function () {
-    test("should upsert package on added event", async function () {
+    test("should upsert package on added event onto an existing snapshot", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const timestamp = timer.now();
+      await repo.replaceInstalledApps(testDevice.deviceId, [
+        {
+          device_id: testDevice.deviceId,
+          user_id: 0,
+          package_name: "com.example.existing",
+          is_system: 0,
+          installed_at: timestamp,
+          last_verified_at: timestamp,
+        },
+      ]);
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        timer,
+        repo,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_event",
+            timestamp,
+            event: {
+              action: "added",
+              packageName: "com.example.new",
+              userId: 0,
+              isSystem: false,
+            },
+          }),
+        );
+
+        await flushPromises();
+
+        const rows = await repo.listInstalledApps(testDevice.deviceId);
+        expect(rows).toHaveLength(2);
+        const added = rows.find((row) => row.package_name === "com.example.new");
+        expect(added?.user_id).toBe(0);
+        expect(added?.is_system).toBe(0);
+        expect(added?.last_verified_at).toBe(timestamp);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("should drop an added event when the device has no cached snapshot (#10041)", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -4250,12 +4395,10 @@ describe("AndroidCtrlProxyClient", function () {
 
         await flushPromises();
 
-        const rows = await repo.listInstalledApps(testDevice.deviceId);
-        expect(rows).toHaveLength(1);
-        expect(rows[0].package_name).toBe("com.example.new");
-        expect(rows[0].user_id).toBe(0);
-        expect(rows[0].is_system).toBe(0);
-        expect(rows[0].last_verified_at).toBe(timestamp);
+        // A lone broadcast row would pass the freshness check as the whole
+        // app list; the next listApps must rebuild from the device instead.
+        expect(await repo.listInstalledApps(testDevice.deviceId)).toHaveLength(0);
+        expect(await repo.getCacheVerifiedAt(testDevice.deviceId)).toBeNull();
       } finally {
         await testClient.close();
       }
@@ -5589,6 +5732,37 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function () {
+    test("readiness forwards cancellation to the hierarchy request without retrying", async () => {
+      const caller = new AbortController();
+      const reason = new Error("readiness deadline exceeded");
+      let received: AbortSignal | undefined;
+      const gate = Promise.withResolvers<null>();
+      const request = spyOn(accessibilityServiceClient, "requestHierarchySync").mockImplementation(
+        async (_perf, _filter, signal) => {
+          received = signal;
+          await gate.promise;
+          signal?.throwIfAborted();
+          return null;
+        },
+      );
+      const pending = runWithAbortSignal(caller.signal, () =>
+        accessibilityServiceClient.verifyServiceReady(1, 0),
+      );
+      const failure = pending.catch((error: unknown) => error);
+      try {
+        await flushMicrotasks();
+        expect(received).toBe(caller.signal);
+        caller.abort(reason);
+        gate.resolve(null);
+        expect(await failure).toBe(reason);
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(fakeTimer.getSleepHistory()).toEqual([]);
+      } finally {
+        gate.resolve(null);
+        await failure;
+        request.mockRestore();
+      }
+    });
     // Follow-up to #3062. That surfaced the runner's structured error text to verifyServiceReady
     // via diagnostics, but the method still retried to exhaustion even when every attempt failed
     // with the SAME deterministic runner handler error. #3097 short-circuits the retry loop once

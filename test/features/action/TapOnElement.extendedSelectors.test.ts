@@ -11,6 +11,16 @@ import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { logger } from "../../../src/utils/logger";
 import { notificationHierarchy, notificationRows } from "../talkback/capturedNotificationTargets";
+import {
+  testTagHierarchy,
+  testTagHierarchyWithFirstRowMoved,
+  testTagHierarchyWithoutFirstRow,
+  testTagRows,
+} from "../talkback/capturedTestTagTargets";
+
+import scrollCapture from "../../fixtures/observe/diff/scroll-before.json";
+import { assignStableViewIds } from "../../../src/features/observe/android/StableNodeIdentity";
+import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
@@ -703,6 +713,71 @@ describe("TapOnElement extended selectors", () => {
       expect(internals.adb.getAllCommands()).toEqual([]);
     });
 
+    test("falls back to coordinates when an advertised unique-id long click reports node not found", async () => {
+      const { proxy, internals } = setup();
+      proxy.setActionResult(
+        longClickResult(
+          false,
+          `Element not found with resource-id: ${uniqueIdElement["resource-id"]}`,
+        ),
+      );
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await internals.executeAndroidLongPress(50, 25, 1000, uniqueIdElement);
+        expect(proxy.getActionHistory()).toHaveLength(1);
+        expect(internals.adb.getAllCommands()).toEqual([coordinateCommand]);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    describe("advertised selector long click reports node not found", () => {
+      const row: Element = { ...testTagRows[0]!, actions: ["long_click"] };
+      const rowCommand = "shell input touchscreen swipe 120 130 120 130 1000";
+      const notFound = "Element not found with NodeSelector(testTag=submit-form)";
+
+      test("falls back to coordinates while a fresh hierarchy still shows the element in place", async () => {
+        const { proxy, internals } = setup();
+        proxy.setViewHierarchyResult(testTagHierarchy);
+        proxy.setActionResult(longClickResult(false, notFound));
+        const warning = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await internals.executeAndroidLongPress(120, 130, 1000, row);
+          expect(proxy.getNodeActionHistory()).toHaveLength(1);
+          expect(internals.adb.getAllCommands()).toEqual([rowCommand]);
+        } finally {
+          warning.mockRestore();
+        }
+      });
+
+      test.each([
+        ["gone", testTagHierarchyWithoutFirstRow],
+        ["moved", testTagHierarchyWithFirstRowMoved],
+        ["incomplete", { ...testTagHierarchy, ctrlProxyIncomplete: true }],
+        ["unavailable", null],
+      ] satisfies [string, ViewHierarchyResult | null][])(
+        "fails instead of pressing a possibly stale coordinate (%s)",
+        async (_name, hierarchy) => {
+          const { proxy, internals } = setup();
+          proxy.setViewHierarchyResult(hierarchy);
+          if (!hierarchy) {
+            proxy.setHierarchyData(null);
+          }
+          proxy.setActionResult(longClickResult(false, notFound));
+          const warning = spyOn(logger, "warn").mockImplementation(() => {});
+          try {
+            await expect(internals.executeAndroidLongPress(120, 130, 1000, row)).rejects.toThrow(
+              `Semantic long press failed for the selected element: ${notFound}`,
+            );
+            expect(proxy.getNodeActionHistory()).toHaveLength(1);
+            expect(internals.adb.getAllCommands()).toEqual([]);
+          } finally {
+            warning.mockRestore();
+          }
+        },
+      );
+    });
+
     test("logs a thrown bare-id action and falls back", async () => {
       const { proxy, internals } = setup();
       proxy.setFailureMode("requestAction", new Error("runner disconnected"));
@@ -795,5 +870,65 @@ describe("TapOnElement extended selectors", () => {
         }
       },
     );
+  });
+});
+
+describe("capture-local synthetic element ids", () => {
+  test("a sibling leaving the capture makes the old id stale and requires re-observe", async () => {
+    const before = structuredClone(scrollCapture.viewHierarchy);
+    const mapping = assignStableViewIds(before.hierarchy);
+    const oldId = "s2-3340048129449c01-2";
+    const removedUuid = [...mapping].find(([, id]) => id === "s2-3340048129449c01-1")?.[0];
+    expect(removedUuid).toBeDefined();
+
+    // No captured pair has this suffix disappearance. Remove only a sibling
+    // subtree from the real scroll capture, then run the unchanged generator.
+    const after = structuredClone(scrollCapture.viewHierarchy);
+    const removeSibling = (node: Record<string, unknown>): void => {
+      if (Array.isArray(node.node)) {
+        node.node = node.node.filter((child) => child["view-id"] !== removedUuid);
+        for (const child of node.node as Record<string, unknown>[]) {
+          removeSibling(child);
+        }
+      } else if (node.node && typeof node.node === "object") {
+        removeSibling(node.node as Record<string, unknown>);
+      }
+    };
+    removeSibling(after.hierarchy);
+    const afterMapping = assignStableViewIds(after.hierarchy);
+    const survivorUuid = [...mapping].find(([, id]) => id === oldId)?.[0];
+    expect(survivorUuid).toBeDefined();
+    expect(afterMapping.get(survivorUuid!)).toBe("s2-3340048129449c01");
+
+    const finder = new DefaultElementFinder();
+    expect(finder.findElementByResourceId(before, oldId)).not.toBeNull();
+    expect(finder.findElementByResourceId(after, oldId)).toBeNull();
+    expect(finder.findElementByResourceId(after, "s2-3340048129449c01")).not.toBeNull();
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"]({ action: "tap", elementId: oldId }),
+    ).rejects.toThrow(
+      `Element id '${oldId}' is stale; re-observe and use the id from the new observation.`,
+    );
+  });
+
+  test("plain element-id not-found wording is unchanged", async () => {
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"]({ action: "tap", elementId: "example:id/missing" }),
+    ).rejects.toThrow("Element not found with provided elementId 'example:id/missing'");
+  });
+});
+
+describe("capture-local container ids", () => {
+  test("a missing synthetic container id requires re-observe", async () => {
+    const tapOn = createDefaultTapOnElement();
+    await expect(
+      tapOn["handleElementNotFound"](
+        { action: "tap", text: "Discover", container: { elementId: "s2-3340048129449c01-2" } },
+        undefined,
+        false,
+      ),
+    ).rejects.toThrow("Container element id 's2-3340048129449c01-2' is stale; re-observe");
   });
 });

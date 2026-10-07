@@ -294,6 +294,18 @@ describe("decodeCtrlProxyMessage", () => {
     });
   }
 
+  test("action_result carries the runner warning (#10082)", () => {
+    const warning =
+      "Using owner 'a', the first of 2 candidate owners; scope with container/subtext for a specific owner.";
+    const decoded = decodeCtrlProxyMessage(msg({ type: "action_result", success: true, warning }));
+    expect(decoded?.result).toMatchObject({ success: true, warning });
+  });
+
+  test("action_result without a warning leaves it undefined", () => {
+    const decoded = decodeCtrlProxyMessage(msg({ type: "action_result", success: true }));
+    expect((decoded?.result as { warning?: string }).warning).toBeUndefined();
+  });
+
   test("voiceover_state_result includes enabled", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({ type: "voiceover_state_result", enabled: true } as never),
@@ -768,8 +780,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 49 rawValues", () => {
-    expect(rawValues.length).toBe(49);
+  test("Swift ResponseType declares exactly 50 rawValues", () => {
+    expect(rawValues.length).toBe(50);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -782,8 +794,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 42 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(42);
+  test("the decoder explicitly reshapes exactly 43 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(43);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -793,6 +805,103 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
       .sort();
     expect(unhandled).toEqual(["shake_result"]);
   });
+});
+
+/**
+ * Field-level parity with the Swift `WebSocketResponse` envelope (#10082).
+ *
+ * The ResponseType parity above only proves a decoder EXISTS per response type. The
+ * runner's `warning` on `action_result` was dropped because that decoder copies fields
+ * by hand, so every field of the shared Swift envelope must be either proven to survive
+ * decoding on the response types the runner sets it on, or named below as consumed
+ * elsewhere. A field added to the Swift struct fails here until it is classified.
+ */
+function parseSwiftStructFieldNames(swiftSource: string, structName: string): string[] {
+  const lines = swiftSource.split("\n");
+  const start = lines.findIndex((line) =>
+    new RegExp(`struct\\s+${structName}\\b[^{]*\\{`).test(line),
+  );
+  if (start < 0) {
+    throw new Error(`Could not locate \`struct ${structName}\``);
+  }
+  const names: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line === "}") {
+      break; // end of the struct (top-level closing brace)
+    }
+    // Stored properties sit at the struct's own indent; init parameters are deeper.
+    const match = line.match(/^ {4}(?:public\s+)?(?:let|var)\s+([A-Za-z0-9_]+)\s*:/);
+    if (match) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#10082)", () => {
+  const swiftFields = parseSwiftStructFieldNames(
+    readFileSync(
+      join(
+        import.meta.dir,
+        "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift",
+      ),
+      "utf8",
+    ),
+    "WebSocketResponse",
+  );
+
+  /** Fields the decoders must keep, with the response types the runner sets them on. */
+  const CARRIED: Record<string, { value: unknown; types: string[] }> = {
+    warning: { value: "runner note", types: ["action_result", "press_key_result"] },
+    verified: { value: true, types: ["press_key_result"] },
+    text: { value: "clipboard text", types: ["clipboard_result"] },
+    pinchPath: { value: "element-anchored", types: ["pinch_result"] },
+    tapDiagnostics: { value: { requested: { x: 1, y: 2 } }, types: ["tap_coordinates_result"] },
+    resolvedStore: {
+      value: "standard",
+      types: ["set_preference_result", "remove_preference_result", "clear_preferences_result"],
+    },
+    effectiveValueDiffers: {
+      value: true,
+      types: ["set_preference_result", "remove_preference_result", "clear_preferences_result"],
+    },
+    perfTiming: {
+      value: { name: "handle", durationMs: 3 },
+      types: [
+        "action_result",
+        "press_key_result",
+        "tap_coordinates_result",
+        "keyboard_result",
+        "rotate_result",
+        "pinch_result",
+        "multi_finger_swipe_result",
+      ],
+    },
+  };
+
+  /** Envelope fields every decoder (or the generic request path) already consumes. */
+  const ENVELOPE = ["type", "requestId", "success", "totalTimeMs", "error"];
+
+  /** Consumed by the runner_busy branch, which turns them into the error message. */
+  const RUNNER_BUSY = ["blockingCommandType", "blockingElapsedMs", "blockingDeadlineRemainingMs"];
+
+  /** Deliberately not surfaced: the host stamps its own receipt time. */
+  const NOT_SURFACED = ["timestamp"];
+
+  test("every Swift WebSocketResponse field is classified", () => {
+    const classified = [...ENVELOPE, ...RUNNER_BUSY, ...NOT_SURFACED, ...Object.keys(CARRIED)];
+    expect([...swiftFields].sort()).toEqual([...classified].sort());
+  });
+
+  for (const [field, { value, types }] of Object.entries(CARRIED)) {
+    for (const type of types) {
+      test(`${type} keeps ${field}`, () => {
+        const message = { type, requestId: REQ, success: true, [field]: value } as WebSocketMessage;
+        const result = decodeCtrlProxyMessage(message)?.result as Record<string, unknown>;
+        expect(result[field]).toEqual(value);
+      });
+    }
+  }
 });
 
 /**

@@ -4,17 +4,8 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
 import { promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  posix,
-  relative,
-  resolve,
-  sep,
-  win32,
-} from "node:path";
+import * as hostPath from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { TextDecoder } from "node:util";
 import {
   AppFileContainer,
@@ -73,6 +64,11 @@ import { findIosSimulatorAppProcess } from "../features/action/CrashApp";
 import { readAndroidPackageProcesses } from "../utils/android-cmdline-tools/androidProcessState";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import {
+  androidRestoreBackupScript,
+  androidRollbackScript,
+  androidSaveBackupScript,
+} from "./androidFileBackup";
 
 export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeout";
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
@@ -793,14 +789,6 @@ function androidAppFilePrefix(appTarget: AppContainersTarget, userId: number): s
     : androidRunAsPrefix(appTarget.appId, userId);
 }
 
-/** Delete newly created files and restore overwritten ones, reporting failure if any step fails. */
-function androidRollbackScript(created: string[], restores: string[]): string {
-  const steps = [...(created.length > 0 ? [`rm -f ${created.join(" ")}`] : []), ...restores].map(
-    (step) => `${step} || rc=1`,
-  );
-  return `rc=0; ${steps.join("; ")}; exit $rc`;
-}
-
 class AndroidAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
@@ -1040,11 +1028,8 @@ class AndroidAppFileProvider
     // Save the previous content before it is replaced so a failed batch can restore it. The copy
     // goes to a `.part` file and is renamed into place, so the backup path only ever exists
     // complete: a failed or killed `cp` leaves the original untouched and at most a `.part`.
-    const backupPart = `${backup}.part`;
     const saveBackup = keepPrevious
-      ? `{ if [ -f ${shellQuote(destination)} ]; then ` +
-        `cp ${shellQuote(destination)} ${shellQuote(backupPart)} && ` +
-        `mv -f ${shellQuote(backupPart)} ${shellQuote(backup)} && echo ${APP_FILE_BACKUP_MARKER}; fi; } && `
+      ? `${androidSaveBackupScript(destination, backup, APP_FILE_BACKUP_MARKER)} && `
       : "";
     const cleanupCommands = [
       ...(target.kind === "external" ? [] : [`shell rm -f ${shellQuote(staging)}`]),
@@ -1089,10 +1074,7 @@ class AndroidAppFileProvider
         // backup is a no-op when the destination was never replaced. A partial copy never reaches
         // the backup path, so the intact destination is left alone and only the `.part` is removed.
         cleanupCommands.push(
-          `${prefix} sh -c ${shellQuote(
-            `rm -f ${shellQuote(backupPart)}; ` +
-              `if [ -f ${shellQuote(backup)} ]; then mv -f ${shellQuote(backup)} ${shellQuote(destination)}; fi`,
-          )}`,
+          `${prefix} sh -c ${shellQuote(androidRestoreBackupScript(destination, backup))}`,
         );
       }
       await this.cleanupStaging(adb, cleanupCommands, request.destinationPath, cleanupFailures);
@@ -1628,9 +1610,62 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   private tempIndex = 0;
 
   constructor(
-    private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
+    private readonly simctlFactory: (
+      device: BootedDevice,
+    ) => Pick<SimCtlClient, "executeCommandArgs">,
     private readonly fileSystem: AppFileFileSystem,
   ) {}
+
+  /** Read only the same managed namespace used by putAppFile. */
+  async listNamespace(
+    device: BootedDevice,
+    namespace: string,
+    signal?: AbortSignal,
+  ): Promise<LocalFileListEntry[]> {
+    const root = await this.resolveReadPath(device, namespace, undefined, signal);
+    const stats = await this.fileSystem.lstat(root);
+    if (!stats.isDirectory()) {
+      throw new ActionableError("iOS Files namespace is not a directory.");
+    }
+    return (await listLocalFilesWithPaths(root, this.fileSystem, posix)).filter(
+      (entry) => !entry.isDirectory,
+    );
+  }
+
+  async readNamespaceFile(
+    device: BootedDevice,
+    namespace: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<Buffer> {
+    const target = await this.resolveReadPath(device, namespace, path, signal);
+    const stats = await this.fileSystem.lstat(target);
+    if (!stats.isFile() || stats.size > 64 * 1024 * 1024) {
+      throw new ActionableError("iOS Files reads require a regular file of at most 64 MiB.");
+    }
+    return this.fileSystem.readFileBuffer(target);
+  }
+
+  private async resolveReadPath(
+    device: BootedDevice,
+    namespace: string,
+    path?: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    requireIosFilesSimulator(device);
+    const container = await this.resolveContainer({ device, signal });
+    // simctl returns macOS paths regardless of the platform running this reader.
+    const root = posix.resolve(container, "Documents", "automobile");
+    const managed = posix.resolve(root, normalizeUserFilesNamespace(namespace));
+    this.assertBelow(root, managed, posix);
+    const target =
+      path === undefined ? managed : posix.resolve(managed, normalizeAppFileRelativePath(path));
+    if (path !== undefined) {
+      this.assertBelow(managed, target, posix);
+    }
+    await this.assertNoSymlinks(container, target, posix);
+    return target;
+  }
 
   async stageFiles(requests: readonly PutAppFileProviderRequest[]): Promise<void> {
     const normalized = requests.map(normalizeIosFilesRequest);
@@ -1670,20 +1705,24 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     }
   }
 
-  private assertBelow(root: string, target: string): void {
-    const path = relative(root, target);
-    if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+  private assertBelow(root: string, target: string, paths: typeof posix = hostPath): void {
+    const path = paths.relative(root, target);
+    if (!path || path === ".." || path.startsWith(`..${paths.sep}`) || paths.isAbsolute(path)) {
       throw new ActionableError(
         "iOS Files fixture destination must remain strictly below its managed namespace root.",
       );
     }
   }
 
-  private async assertNoSymlinks(container: string, target: string): Promise<void> {
-    const parts = relative(container, target).split(sep);
+  private async assertNoSymlinks(
+    container: string,
+    target: string,
+    paths: typeof posix = hostPath,
+  ): Promise<void> {
+    const parts = paths.relative(container, target).split(paths.sep);
     let current = container;
     for (const part of parts) {
-      current = join(current, part);
+      current = paths.join(current, part);
       let stats: AppFileStats;
       try {
         stats = await this.fileSystem.lstat(current);
@@ -1709,7 +1748,9 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     }
   }
 
-  private async resolveContainer(request: PutAppFileProviderRequest): Promise<string> {
+  private async resolveContainer(
+    request: Pick<PutAppFileProviderRequest, "device" | "signal">,
+  ): Promise<string> {
     const guidance = `Install the managed iOS Files fixture app (${IOS_FILES_FIXTURE_BUNDLE_ID}) on the booted simulator and retry; no alternate storage path is used.`;
     let output: ExecResult;
     try {
@@ -2208,18 +2249,26 @@ export async function listLocalFiles(
   root: string,
   fileSystem: AppFileFileSystem,
 ): Promise<LocalFileListEntry[]> {
+  return listLocalFilesWithPaths(root, fileSystem, hostPath);
+}
+
+async function listLocalFilesWithPaths(
+  root: string,
+  fileSystem: AppFileFileSystem,
+  paths: typeof posix,
+): Promise<LocalFileListEntry[]> {
   const entries: LocalFileListEntry[] = [];
 
   async function visit(dir: string): Promise<void> {
     const children = await fileSystem.readdir(dir);
     for (const child of children) {
-      const childPath = join(dir, child.name);
+      const childPath = paths.join(dir, child.name);
       const stat = await fileSystem.lstat(childPath);
       if (stat.isDirectory()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, true));
+        entries.push(buildLocalListEntry(root, childPath, stat, true, paths));
         await visit(childPath);
       } else if (stat.isFile()) {
-        entries.push(buildLocalListEntry(root, childPath, stat, false));
+        entries.push(buildLocalListEntry(root, childPath, stat, false, paths));
       }
     }
   }
@@ -2240,8 +2289,9 @@ function buildLocalListEntry(
   childPath: string,
   stat: AppFileStats,
   isDirectory: boolean,
+  paths: typeof posix,
 ): LocalFileListEntry {
-  const filePath = relative(root, childPath).replace(/\\/g, "/");
+  const filePath = paths.relative(root, childPath).replace(/\\/g, "/");
   return {
     path: filePath,
     name: posix.basename(filePath),

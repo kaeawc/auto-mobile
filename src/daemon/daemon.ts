@@ -77,12 +77,15 @@ import {
   daemonLiveAcceptanceStartupSecret,
 } from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
+import { processGenerationRecordFields } from "./processGenerationFields";
 import { executionTracker } from "../server/executionTracker";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { NetworkState } from "../server/NetworkState";
+import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -196,7 +199,8 @@ import {
 import {
   interruptVideoRecording,
   listActiveVideoRecordings,
-  stopVideoRecording,
+  setVideoRecordingManagerDependencies,
+  stopVideoRecordingUnattended,
 } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -253,6 +257,12 @@ const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+// How long device-disconnect cleanup waits for a recording's stop before releasing the device.
+// An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
+// unattended stop bounds by up to 10 minutes; the device and its session must not wait that
+// long. This is the stream-copy post-process budget (and the former fixed bound). The stop
+// keeps running in the background under its own unattended ceiling.
+const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
@@ -614,6 +624,7 @@ export class Daemon {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultMockLocationClearRegistry.retireDevice(deviceId);
+        NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
@@ -648,6 +659,7 @@ export class Daemon {
 
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
+    registerNetworkStateSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {
@@ -790,9 +802,11 @@ export class Daemon {
     if (options.actionsDiffObserve) {
       serverConfig.setActionsDiffObserveEnabled(true);
     }
-    if (options.actionsCompactMetadata) {
-      serverConfig.setActionsCompactMetadataEnabled(true);
+    if (options.actionsCompactMetadata !== undefined) {
+      serverConfig.setActionsCompactMetadataEnabled(options.actionsCompactMetadata);
     }
+    // Status/PID records must describe effective behavior, including persisted opt-outs.
+    this.options.actionsCompactMetadata = serverConfig.isActionsCompactMetadataEnabled();
     if (options.actionsNoObserve) {
       serverConfig.setActionsNoObserveEnabled(true);
     }
@@ -1701,6 +1715,14 @@ export class Daemon {
    * ready early. {@link writePidFile} overwrites it with the complete record.
    */
   private async writeEarlyOwnerRecord(): Promise<void> {
+    // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
+    // so the lock-less bind guard can still see the live sibling and restore its
+    // record on refusal instead of unlinking/orphaning it (issue #6232).
+    this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
+    // A DEAD committed owner is carried on this record: if this start dies before
+    // binding, the next start still has proof the leftover socket is reclaimable
+    // (issue #10107).
+    const supersededOwner = this.incumbentOwnerGuard.supersededOwnerForEarlyRecord();
     const pidData: PidFileData = {
       pid: process.pid,
       daemonSessionId: this.daemonSessionId,
@@ -1709,18 +1731,13 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
       options: this.options,
+      ...(supersededOwner === undefined ? {} : { supersededOwner }),
     };
-    // Snapshot any live incumbent BEFORE this overwrite clobbers its PID record,
-    // so the lock-less bind guard can still see the live sibling and restore its
-    // record on refusal instead of unlinking/orphaning it (issue #6232).
-    this.incumbentOwnerGuard.captureIncumbentBeforeOverwrite();
     await this.persistPidFileData(pidData);
     this.incumbentOwnerGuard.recordContenderEarlyOwner(pidData);
     logger.info(`Early daemon owner record written to ${PID_FILE_PATH} (dbPath ${pidData.dbPath})`);
@@ -1741,9 +1758,7 @@ export class Daemon {
       dbPath: getDatabasePath(),
       startedAt: this.generationStartedAt,
       processStartedAt: this.processStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
+      ...processGenerationRecordFields(this.processGenerationToken),
       version: DAEMON_VERSION,
       launchLogPath: this.launchLogPath(),
       assetVersion: resolveAssetVersion(resolvePinnedVersion()),
@@ -2529,6 +2544,7 @@ export class Daemon {
       const discovery = await deviceManager.getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache,
       });
+      discovery.devices = this.devicePool.mapAndroidDiscovery(discovery.devices);
       // Reconciliation can quarantine identity and cancel in-flight work. During
       // allocation, discovery supplies only presence evidence for miss counting.
       if (!planActive) {
@@ -2550,9 +2566,8 @@ export class Daemon {
           this.startDeferredSessionRecoverySweep(planActive);
 
           let discovery = await discoverAndReconcile({ planActive });
-          const bootedDevices = discovery.devices;
           let succeededPlatforms = discovery.succeededPlatforms;
-          let bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
+          let bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
           const activeRecordings = planActive ? [] : await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();
@@ -3077,8 +3092,38 @@ export class Daemon {
       return false;
     }
     this.stoppingRecordings.add(recordingId);
+    const stopped = this.stopOrInterruptRecordingAfterDeviceDisconnect(
+      recordingId,
+      deviceId,
+    ).finally(() => this.stoppingRecordings.delete(recordingId));
+    const stillStopping = new Error("recording stop still running");
     try {
-      await stopVideoRecording(recordingId);
+      return await raceWithDeadline(stopped, {
+        timer: this.timer,
+        timeoutMs: DISCONNECT_RECORDING_STOP_WAIT_MS,
+        label: "Stop recording after device disconnect",
+        timeoutError: () => stillStopping,
+      });
+    } catch (error) {
+      if (error !== stillStopping) {
+        throw error;
+      }
+      // The capture itself ended with the device; what is left is post-processing, bounded by
+      // the unattended stop's own ceiling. The recording stays in `stoppingRecordings` until
+      // it finishes, so releasing the device neither waits for it nor starts a second stop.
+      logger.warn(
+        `[Daemon] Recording ${recordingId} is still finishing after device ${deviceId} disconnected; releasing the device without waiting`,
+      );
+      return true;
+    }
+  }
+
+  private async stopOrInterruptRecordingAfterDeviceDisconnect(
+    recordingId: string,
+    deviceId: string,
+  ): Promise<boolean> {
+    try {
+      await stopVideoRecordingUnattended(recordingId);
       logger.warn(
         `[Daemon] Stopped recording ${recordingId} after device ${deviceId} disconnected`,
       );
@@ -3088,8 +3133,6 @@ export class Daemon {
         `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`,
       );
       return await this.interruptRecordingAfterDeviceDisconnect(recordingId, deviceId);
-    } finally {
-      this.stoppingRecordings.delete(recordingId);
     }
   }
 
@@ -3585,6 +3628,7 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
+      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );

@@ -181,6 +181,38 @@ describe("Plan Utils", () => {
   });
 
   describe("importPlanFromYaml", () => {
+    test("keeps inline highlight description as a tool parameter", () => {
+      const plan = importPlanFromYaml(`
+name: highlight-login
+steps:
+  - tool: highlight
+    elementId: login
+    description: Login button
+    label: Highlight login
+`);
+      expect(plan.steps[0]).toEqual({
+        tool: "highlight",
+        label: "Highlight login",
+        params: { elementId: "login", description: "Login button" },
+      });
+    });
+
+    test("explicit highlight description overrides inline description without creating a label", () => {
+      const plan = importPlanFromYaml(`
+name: highlight-login
+steps:
+  - command: highlight
+    text: Login
+    description: Inline
+    params:
+      description: Explicit
+`);
+      expect(plan.steps[0]).toEqual({
+        tool: "highlight",
+        params: { text: "Login", description: "Explicit" },
+      });
+    });
+
     test("should import a valid YAML plan", () => {
       const yamlContent = `
 name: Test Plan

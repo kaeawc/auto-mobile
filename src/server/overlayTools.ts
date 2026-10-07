@@ -1,3 +1,4 @@
+import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
 import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
@@ -25,7 +26,18 @@ import type {
   OverlayResult,
   OverlayUpdate,
 } from "../features/observe/android/ctrlProxyProtocol";
-import { overlaySpecSchema, type OverlaySpec } from "../features/overlay/overlaySpec";
+import {
+  overlaySpecSchema,
+  placementSchema,
+  type OverlaySpec,
+} from "../features/overlay/overlaySpec";
+import {
+  composeVariantCarousel,
+  parseVariantSelection,
+  variantListSchema,
+  MAX_VARIANTS,
+  MAX_VARIANT_LABEL_LENGTH,
+} from "../features/overlay/overlayVariants";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
 import {
   resolveOverlayDisplayId,
@@ -45,6 +57,24 @@ import { getToolSelectionContext } from "../features/toolSelection/toolSelection
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { deleteInternalToolParams } from "../daemon/constants";
+import {
+  nodeOverlayAssetFileReader,
+  prepareOverlayAssets,
+  uploadOverlayAssets,
+  type OverlayAssetFileReader,
+  type OverlayObservationScreenshotReader,
+  type UploadedOverlayAsset,
+} from "../features/overlay/overlayAssetUploader";
+import type { OverlayAssetUpload } from "../features/overlay/overlayAssets";
+import {
+  missingAssetsWarning,
+  type MissingAssetRepair,
+} from "../features/overlay/overlayMissingAssets";
+import { readObservationScreenshotBytes } from "./observationResources";
+import {
+  MAX_OVERLAY_ASSET_COUNT,
+  MAX_OVERLAY_ASSET_ID_LENGTH,
+} from "../features/overlay/overlayAssets";
 
 // The settled spec is Zod 3; registry/device targeting use Zod 4. The installed
 // MCP SDK converts the original schema, avoiding a second authored spec schema.
@@ -54,20 +84,27 @@ const convertSpec = toJsonSchemaCompat as unknown as (
   schema: ZodTypeAny,
 ) => Record<string, unknown>;
 const advertisedSpec = convertSpec(overlaySpecSchema);
-function rehomeSpecReferences(value: unknown): void {
+function rehomeSpecReferences(value: unknown, property = "spec"): void {
   if (!value || typeof value !== "object") {
     return;
   }
   for (const [key, child] of Object.entries(value)) {
     if (key === "$ref" && typeof child === "string" && child.startsWith("#")) {
-      (value as Record<string, unknown>)[key] = `#/properties/spec${child.slice(1)}`;
+      (value as Record<string, unknown>)[key] = `#/properties/${property}${child.slice(1)}`;
     } else {
-      rehomeSpecReferences(child);
+      rehomeSpecReferences(child, property);
     }
   }
 }
 rehomeSpecReferences(advertisedSpec);
 delete advertisedSpec.$schema;
+const advertisedVariants = convertSpec(variantListSchema);
+rehomeSpecReferences(advertisedVariants, "variants");
+delete advertisedVariants.$schema;
+// Advertise the public variant vocabulary; composeVariantCarousel validates in context.
+const variantsInput = withJsonSchemaOverride(z.unknown(), (jsonSchema) =>
+  Object.assign(jsonSchema, advertisedVariants),
+);
 const specDetailsSchema = specZ.object({ spec: overlaySpecSchema });
 const stateDetailsSchema = overlaySpecSchema.pick({ state: true });
 
@@ -112,10 +149,40 @@ const stateInput = z
     }
   });
 
+const assetsInput = z
+  .array(
+    z
+      .object({
+        id: z
+          .string()
+          .min(1)
+          .max(MAX_OVERLAY_ASSET_ID_LENGTH)
+          .describe("Opaque asset id that spec image nodes reference (image.asset)"),
+        path: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Absolute path of a PNG, JPEG or WebP file the daemon can read"),
+        observation: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be that device's current observation",
+          ),
+      })
+      .strict()
+      .refine((entry) => (entry.path === undefined) !== (entry.observation === undefined), {
+        message: "each asset needs exactly one of path or observation",
+      }),
+  )
+  .min(1)
+  .max(MAX_OVERLAY_ASSET_COUNT);
+
 export const overlaySchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["show", "update", "dismiss", "status", "awaitEvent"]),
+      action: z.enum(["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]),
       spec: specInput
         .optional()
         .describe(
@@ -125,18 +192,54 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .string()
         .optional()
         .describe(
-          "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
+          "show or showVariants: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
         ),
       id: z
         .string()
         .min(1)
         .optional()
         .describe(
-          "Overlay id required for update, dismiss or awaitEvent; must equal spec.id on update",
+          "Overlay id required for update, dismiss, awaitEvent or showVariants; must equal spec.id on update",
+        ),
+      variants: variantsInput
+        .optional()
+        .describe(
+          `showVariants only: 1-${MAX_VARIANTS} alternatives, each {label?, image:{asset,contentScale?}} or {label?, spec:OverlayNode}. Image assets are ids uploaded in the same call through assets, or already on the device.`,
+        ),
+      presentation: z
+        .enum(["fullscreen", "floating"])
+        .optional()
+        .describe("showVariants only: fullscreen (default) or floating controls over the live app"),
+      opacity: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .optional()
+        .describe("showVariants only: window opacity percentage; omitted uses the spec default"),
+      gravity: z
+        .enum(placementSchema.options[2].shape.gravity.options)
+        .optional()
+        .describe("showVariants floating only: default bottomCenter"),
+      offset: z
+        .object({ x: z.number().finite(), y: z.number().finite() })
+        .strict()
+        .optional()
+        .describe("showVariants floating only: offset in dp, default {x:0,y:0}"),
+      waitForSelection: z
+        .boolean()
+        .optional()
+        .describe(
+          `showVariants only: after a successful show, wait for the user's pick and return selection {index, label?}; the wait is ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms (timedOut:true on expiry), independent of the show timeoutMs`,
         ),
       state: stateInput
         .optional()
         .describe("Flat state patch for update; use either spec or state"),
+      assets: assetsInput
+        .optional()
+        .describe(
+          "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+        ),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
       kind: z
@@ -156,7 +259,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
         .positive()
         .optional()
         .describe(
-          `Device request timeout; awaitEvent defaults to ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms, maximum ${MAX_OVERLAY_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result`,
+          `Device request timeout; awaitEvent defaults to ${DEFAULT_OVERLAY_EVENT_TIMEOUT_MS} ms, maximum ${MAX_OVERLAY_EVENT_TIMEOUT_MS} ms; timeout is a successful empty result. showVariants timeoutMs bounds only the show; waitForSelection uses the default event wait`,
         ),
     })
     .strict(),
@@ -170,10 +273,28 @@ export const overlaySchema = addDeviceTargetingToSchema(
     "eventName",
     "kind",
     "afterSequence",
+    "assets",
+    "variants",
+    "presentation",
+    "opacity",
+    "gravity",
+    "offset",
+    "waitForSelection",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
-    show: ["spec", "display"],
-    update: ["id", "spec", "state"],
+    show: ["spec", "display", "assets"],
+    showVariants: [
+      "id",
+      "display",
+      "assets",
+      "variants",
+      "presentation",
+      "opacity",
+      "gravity",
+      "offset",
+      "waitForSelection",
+    ],
+    update: ["id", "spec", "state", "assets"],
     dismiss: ["id", "all"],
     status: [],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
@@ -186,6 +307,9 @@ export const overlaySchema = addDeviceTargetingToSchema(
         message: `${value.action} allows ${allowed[value.action].join(", ") || "no mutation fields"}`,
       });
     }
+  }
+  if (value.action === "showVariants") {
+    validateShowVariantsInput(value, ctx);
   }
   if (value.action === "awaitEvent") {
     validateAwaitEventInput(value, ctx);
@@ -204,6 +328,32 @@ export const overlaySchema = addDeviceTargetingToSchema(
     });
   }
 });
+
+function validateShowVariantsInput(
+  value: z.infer<typeof overlaySchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.id === undefined) {
+    ctx.addIssue({ code: "custom", path: ["id"], message: "showVariants requires id" });
+  }
+  if (value.variants === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["variants"],
+      message: "showVariants requires variants",
+    });
+  }
+  if (
+    value.presentation !== "floating" &&
+    (value.gravity !== undefined || value.offset !== undefined)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["presentation"],
+      message: "gravity and offset require showVariants presentation: floating",
+    });
+  }
+}
 
 function validateAwaitEventInput(value: z.infer<typeof overlaySchema>, ctx: z.RefinementCtx): void {
   if (value.id === undefined) {
@@ -224,6 +374,13 @@ function validateUpdateInput(value: z.infer<typeof overlaySchema>, ctx: z.Refine
       code: "custom",
       path: ["id"],
       message: "update requires id and exactly one of spec or state",
+    });
+  }
+  if (value.assets !== undefined && value.spec === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["assets"],
+      message: "update accepts assets only together with spec",
     });
   }
   if (value.spec === undefined) {
@@ -289,12 +446,38 @@ const overlayEventOutputSchema = z.object({
   pages: z.record(z.string(), z.number().int().nonnegative()),
   timestamp: z.number(),
 });
+const selectionOutputSchema = z.object({
+  index: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(MAX_VARIANTS - 1),
+  label: z.string().max(MAX_VARIANT_LABEL_LENGTH).optional(),
+});
 export const overlayOutputSchema = z.object({
   success: z.boolean(),
   error: z.string().optional(),
-  overlays: z.array(lastResultSchema.extend(eventCountsSchema.shape)).optional(),
+  overlays: z
+    .array(
+      lastResultSchema.extend(eventCountsSchema.shape).extend({
+        pages: z.record(z.string(), z.number().int().nonnegative()).optional(),
+        state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+        lastKnown: z
+          .literal(true)
+          .optional()
+          .describe(
+            "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+          ),
+      }),
+    )
+    .optional(),
   lastResult: lastResultSchema.optional(),
   event: overlayEventOutputSchema.optional(),
+  selection: selectionOutputSchema
+    .optional()
+    .describe(
+      "showVariants waitForSelection only: the picked zero-based index and the label it was shown with, if any",
+    ),
   timedOut: z
     .literal(true)
     .optional()
@@ -303,6 +486,22 @@ export const overlayOutputSchema = z.object({
     .literal("dismissed")
     .optional()
     .describe("The overlay scope ended without a matching event"),
+  uploadedAssets: z
+    .array(z.object({ id: z.string(), mimeType: z.string(), bytes: z.number().int().positive() }))
+    .optional()
+    .describe(
+      "show/update with assets: assets the device confirmed, also present on failure. They stay on the device until the overlay session ends.",
+    ),
+  missingAssets: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "show/update: asset ids the overlay references that the device has no copy of; the overlay is shown with placeholders. Absent when none. Upload them with assets on a show or update with spec.",
+    ),
+  warning: z
+    .string()
+    .optional()
+    .describe("show/update succeeded but needs attention; names what to do about missingAssets"),
   ...eventCountsSchema.shape,
 });
 
@@ -319,10 +518,15 @@ type OverlayClient = Pick<
   | "requestShowOverlay"
   | "requestUpdateOverlay"
   | "requestDismissOverlay"
+  | "requestPutOverlayAsset"
   | "onOverlayEvent"
   | "supportsCommand"
 >;
 export interface OverlayToolDependencies {
+  /** Reads local files named by `assets`; tests inject an in-memory reader. */
+  assetFileReader?: OverlayAssetFileReader;
+  /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
+  observationScreenshotReader?: OverlayObservationScreenshotReader;
   clientFactory?: (device: BootedDevice) => OverlayClient;
   adbFactory?: AdbClientFactory;
   lastRenderedObservation?: OverlayDisplayDependencies["lastRenderedObservation"];
@@ -389,6 +593,158 @@ async function showDisplayId(
   return displayId;
 }
 
+interface AssetStage {
+  uploaded: UploadedOverlayAsset[];
+  /** The validated uploads, kept so a missing asset can be re-sent without re-reading its source. */
+  prepared: OverlayAssetUpload[];
+  failure?: OverlayResult;
+}
+
+interface AssetReaders {
+  assetFileReader: OverlayAssetFileReader;
+  observationScreenshotReader: OverlayObservationScreenshotReader;
+}
+
+/** Upload every `assets` entry before the overlay is sent; a failure ends the call. */
+async function stageAssets(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  readers: AssetReaders,
+  signal: AbortSignal | undefined,
+): Promise<AssetStage> {
+  if (args.assets === undefined) {
+    return { uploaded: [], prepared: [] };
+  }
+  const prepared = await prepareOverlayAssets(
+    args.assets,
+    readers.assetFileReader,
+    readers.observationScreenshotReader,
+  );
+  if ("error" in prepared) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
+  }
+  const outcome = await uploadOverlayAssets(client, prepared.assets, {
+    signal,
+    action: args.action === "show" ? "show" : "update",
+  });
+  return {
+    uploaded: outcome.uploaded,
+    prepared: prepared.assets,
+    ...(outcome.success ? {} : { failure: { success: false, error: outcome.error } }),
+  };
+}
+
+async function runMutation(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  displayId: number | undefined,
+): Promise<OverlayResult> {
+  try {
+    return await mutate(client, args, displayId);
+  } catch (error) {
+    logger.warn("[overlay] Request failed", error);
+    return { success: false, error: toActionableError(error, "Overlay request failed").message };
+  }
+}
+
+interface MissingAssetRetry {
+  result: OverlayResult;
+  repair: MissingAssetRepair;
+}
+
+/**
+ * The upload-then-cleared race: the device finished the show/update but lists assets this same
+ * call uploaded as missing. Re-uploads those once and re-sends once. Bounded: never loops, honours
+ * the abort signal, and keeps the first (successful) result when the repair cannot complete.
+ */
+async function retryMissingAssets(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  stage: AssetStage,
+  first: OverlayResult,
+  signal: AbortSignal | undefined,
+  displayId: number | undefined,
+): Promise<MissingAssetRetry | undefined> {
+  const missing = new Set(first.missingAssets);
+  const again = stage.prepared.filter((asset) => missing.has(asset.id));
+  if (again.length === 0) {
+    return undefined;
+  }
+  const fail = (reason: string): MissingAssetRetry => ({
+    result: first,
+    repair: { kind: "retry-failed", reason },
+  });
+  if (signal?.aborted) {
+    return fail("the request was cancelled");
+  }
+  const upload = await uploadOverlayAssets(client, again, { signal, action: "resend" });
+  if (!upload.success) {
+    return fail(upload.error ?? "upload failed");
+  }
+  if (signal?.aborted) {
+    return fail("the request was cancelled before the overlay was re-sent");
+  }
+  // The re-send targets the display the first send resolved, never a re-resolved one.
+  const second = await runMutation(client, args, displayId);
+  return second.success
+    ? { result: second, repair: { kind: "still-missing" } }
+    : fail(second.error ?? "re-sending the overlay failed");
+}
+
+interface MutationOutcome {
+  result: OverlayResult;
+  warning?: string;
+}
+
+async function sendOverlay(
+  client: OverlayClient,
+  args: z.infer<typeof overlaySchema>,
+  stage: AssetStage,
+  signal: AbortSignal | undefined,
+  displayId: number | undefined,
+): Promise<MutationOutcome> {
+  if (stage.failure) {
+    return { result: stage.failure };
+  }
+  const first = await runMutation(client, args, displayId);
+  if (!first.success || !first.missingAssets?.length) {
+    return { result: first };
+  }
+  const retry = await retryMissingAssets(client, args, stage, first, signal, displayId);
+  const result = retry?.result ?? first;
+  if (!result.missingAssets?.length) {
+    return { result };
+  }
+  return {
+    result,
+    warning: missingAssetsWarning({
+      missing: result.missingAssets,
+      supplied: new Set(stage.prepared.map((asset) => asset.id)),
+      repair: retry?.repair,
+    }),
+  };
+}
+
+/** A refused display ends the call before any asset is uploaded or anything is sent. */
+async function resolveShowDisplay(
+  client: OverlayClient,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+): Promise<{ displayId?: number; failure?: OverlayResult }> {
+  try {
+    return { displayId: await showDisplayId(client, device, args, dependencies) };
+  } catch (error) {
+    logger.warn("[overlay] Request failed", error);
+    return {
+      failure: {
+        success: false,
+        error: toActionableError(error, "Overlay request failed").message,
+      },
+    };
+  }
+}
+
 function clearMutationEvents(
   events: OverlayEventCoordinator,
   scope: OverlayScope,
@@ -417,17 +773,22 @@ function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): ()
   });
 }
 
+type OverlayHandlerDependencies = {
+  store: OverlayStatusStore;
+  events: OverlayEventCoordinator;
+  clientFactory: (device: BootedDevice) => OverlayClient;
+  assetReaders: AssetReaders;
+} & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
+type OverlayOutput = z.infer<typeof overlayOutputSchema>;
+
 async function performMutation(
-  dependencies: {
-    store: OverlayStatusStore;
-    events: OverlayEventCoordinator;
-    clientFactory: (device: BootedDevice) => OverlayClient;
-  } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  dependencies: OverlayHandlerDependencies,
   device: BootedDevice,
   args: Omit<z.infer<typeof overlaySchema>, "action"> & { action: OverlayMutation },
   scope: OverlayScope,
-) {
-  const { store, events, clientFactory } = dependencies;
+  signal?: AbortSignal,
+): Promise<OverlayOutput> {
+  const { store, events, clientFactory, assetReaders } = dependencies;
   const target = args.all
     ? { all: true as const }
     : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
@@ -436,18 +797,12 @@ async function performMutation(
   if (args.action === "show") {
     events.show(scope, target.id!, client);
   }
-  let result: OverlayResult;
-  let displayId: number | undefined;
-  try {
-    displayId = await showDisplayId(client, device, args, dependencies);
-    result = await mutate(client, args, displayId);
-  } catch (error) {
-    logger.warn("[overlay] Request failed", error);
-    result = {
-      success: false,
-      error: toActionableError(error, "Overlay request failed").message,
-    };
-  }
+  const resolved = await resolveShowDisplay(client, device, args, dependencies);
+  const { displayId } = resolved;
+  const stage: AssetStage = resolved.failure
+    ? { uploaded: [], prepared: [], failure: resolved.failure }
+    : await stageAssets(client, args, assetReaders, signal);
+  const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
@@ -456,11 +811,25 @@ async function performMutation(
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);
   }
-  return responseFor({
+  return {
     success: result.success,
     ...(result.error ? { error: result.error } : {}),
     lastResult,
-  });
+    ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
+    ...missingAssetsOutput(result, warning),
+  };
+}
+
+function missingAssetsOutput(
+  result: OverlayResult,
+  warning: string | undefined,
+): { missingAssets?: string[]; warning?: string } {
+  return {
+    ...(result.success && result.missingAssets?.length
+      ? { missingAssets: result.missingAssets }
+      : {}),
+    ...(warning ? { warning } : {}),
+  };
 }
 
 function notifyOverlayWaitProgress(
@@ -482,6 +851,86 @@ function notifyOverlayWaitProgress(
     .catch((error) => {
       logger.warn("[overlay] Wait progress notification failed", error);
     });
+}
+
+/** The coordinator's wait: timeout, cancel, release, removal and dismissal all settle it. */
+async function waitForOverlayEvent(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  client: OverlayClient,
+  query: Pick<
+    z.infer<typeof overlaySchema>,
+    "id" | "eventName" | "kind" | "afterSequence" | "timeoutMs"
+  >,
+  context: { progress?: ProgressCallback; signal?: AbortSignal },
+) {
+  const waiting = events.awaitEvent(scope, query.id!, client, {
+    eventName: query.eventName,
+    kind: query.kind,
+    afterSequence: query.afterSequence,
+    timeoutMs: query.timeoutMs,
+    signal: combineWithAmbientAbort(context.signal),
+  });
+  notifyOverlayWaitProgress(context.progress, false);
+  try {
+    return await waiting;
+  } finally {
+    notifyOverlayWaitProgress(context.progress, true);
+  }
+}
+
+async function showVariants(
+  dependencies: OverlayHandlerDependencies,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  scope: OverlayScope,
+  context: { progress?: ProgressCallback; signal?: AbortSignal },
+): Promise<OverlayOutput> {
+  let spec: OverlaySpec;
+  try {
+    spec = composeVariantCarousel({
+      id: args.id,
+      variants: args.variants,
+      presentation: args.presentation,
+      opacity: args.opacity,
+      gravity: args.gravity,
+      offset: args.offset,
+    });
+  } catch (error) {
+    logger.warn("[overlay] showVariants input rejected", error);
+    return {
+      success: false,
+      error: toActionableError(error, "Invalid showVariants input").message,
+    };
+  }
+  // The carousel goes through the normal show path so the event subscription, sequence epoch,
+  // shown-overlay replacement, display resolution, asset upload and the missing-asset retry
+  // behave exactly as for `show`.
+  const shown = await performMutation(
+    dependencies,
+    device,
+    { ...args, action: "show", spec },
+    scope,
+    combineWithAmbientAbort(context.signal),
+  );
+  if (!shown.success || !args.waitForSelection) {
+    return shown;
+  }
+  // The wait is the default event wait, deliberately not the show request's timeoutMs.
+  const waited = await waitForOverlayEvent(
+    dependencies.events,
+    scope,
+    dependencies.clientFactory(device),
+    { id: args.id, eventName: "selected", kind: "emit" },
+    context,
+  );
+  if (!waited.event) {
+    return { ...shown, ...waited };
+  }
+  const picked = parseVariantSelection(spec, waited.event.payload);
+  return "selection" in picked
+    ? { ...shown, ...waited, selection: picked.selection }
+    : { ...shown, ...waited, success: false, error: picked.error };
 }
 
 function defaultOverlayLifecycle(): OverlayEventLifecycle {
@@ -529,7 +978,16 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
-  const events = new OverlayEventCoordinator(dependencies.timer ?? defaultTimer, store);
+  const events = new OverlayEventCoordinator(
+    dependencies.timer ?? defaultTimer,
+    store,
+    TelemetryRecorder.getInstance(),
+  );
+  const assetReaders: AssetReaders = {
+    assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
+    observationScreenshotReader:
+      dependencies.observationScreenshotReader ?? readObservationScreenshotBytes,
+  };
   const handler = async (
     device: BootedDevice,
     input: unknown,
@@ -566,36 +1024,38 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       });
     }
     if (args.action === "awaitEvent") {
-      const waiting = events.awaitEvent(scope, args.id!, clientFactory(device), {
-        eventName: args.eventName,
-        kind: args.kind,
-        afterSequence: args.afterSequence,
-        timeoutMs: args.timeoutMs,
-        signal: combineWithAmbientAbort(signal),
+      const waited = await waitForOverlayEvent(events, scope, clientFactory(device), args, {
+        progress,
+        signal,
       });
-      notifyOverlayWaitProgress(progress, false);
-      try {
-        return responseFor({ success: true, ...(await waiting) });
-      } finally {
-        notifyOverlayWaitProgress(progress, true);
-      }
+      return responseFor({ success: true, ...waited });
     }
-    return performMutation(
-      {
-        store,
-        events,
-        clientFactory,
-        adbFactory: dependencies.adbFactory,
-        lastRenderedObservation: dependencies.lastRenderedObservation,
-      },
-      device,
-      { ...args, action: args.action },
-      scope,
+    const handlerDependencies: OverlayHandlerDependencies = {
+      store,
+      events,
+      clientFactory,
+      assetReaders,
+      adbFactory: dependencies.adbFactory,
+      lastRenderedObservation: dependencies.lastRenderedObservation,
+    };
+    if (args.action === "showVariants") {
+      return responseFor(
+        await showVariants(handlerDependencies, device, args, scope, { progress, signal }),
+      );
+    }
+    return responseFor(
+      await performMutation(
+        handlerDependencies,
+        device,
+        { ...args, action: args.action },
+        scope,
+        combineWithAmbientAbort(signal),
+      ),
     );
   };
   ToolRegistry.registerDeviceAware(
     "overlay",
-    'Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
+    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

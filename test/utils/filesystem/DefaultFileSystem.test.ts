@@ -36,3 +36,16 @@ test.skipIf(process.platform === "win32")(
     }
   },
 );
+
+test("readFileHead returns only the leading bytes, or the whole file when it is shorter", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "file-head-"));
+  try {
+    const file = join(dir, "data.bin");
+    await writeFile(file, Buffer.from("0123456789"));
+    const files = new DefaultFileSystem();
+    expect((await files.readFileHead(file, 4)).toString("latin1")).toBe("0123");
+    expect((await files.readFileHead(file, 64)).toString("latin1")).toBe("0123456789");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

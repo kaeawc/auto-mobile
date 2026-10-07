@@ -1,7 +1,8 @@
+import { buildSimctlArgs } from "../../utils/ios-cmdline-tools/simctlArgs";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
-import type { VoiceOverResult } from "../../models/AccessibilityResult";
+import type { ScreenReaderToggleOptions, VoiceOverResult } from "../../models/AccessibilityResult";
 import type { IosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector } from "./IosVoiceOverDetector";
 import {
@@ -27,12 +28,44 @@ export class VoiceOverToggle {
       IOSCtrlProxyClient.getInstance(this.device),
   ) {}
 
-  async toggle(enabled: boolean): Promise<VoiceOverResult> {
+  async toggle(enabled: boolean, options?: ScreenReaderToggleOptions): Promise<VoiceOverResult> {
+    await this.reportPreviousState(enabled, options);
     if (!this.isSimulator()) {
       return this.toggleViaSettings(enabled);
     }
 
     return this.toggleViaSimctl(enabled);
+  }
+
+  /**
+   * Hand the caller the state VoiceOver is in before anything is written, so a
+   * session can restore it on release (#10146). Only a confirmed read that differs
+   * from the request is reported: an unreadable state cannot be restored to, and
+   * the toggle still proceeds exactly as before.
+   */
+  private async reportPreviousState(
+    enabled: boolean,
+    options: ScreenReaderToggleOptions | undefined,
+  ): Promise<void> {
+    if (!options?.beforeChange) {
+      return;
+    }
+    let previous: boolean | null = null;
+    try {
+      this.detector.invalidateCache(this.device.deviceId);
+      previous = await this.detector.resolveState(this.device.deviceId, this.clientProvider());
+    } catch (error) {
+      logger.warn(`[VoiceOverToggle] Could not read VoiceOver state: ${errorMessage(error)}`);
+    }
+    if (previous === null) {
+      logger.warn(
+        `[VoiceOverToggle] VoiceOver state on ${this.device.deviceId} was unreadable before the toggle; it will not be restored on session release`,
+      );
+      return;
+    }
+    if (previous !== enabled) {
+      await options.beforeChange(previous);
+    }
   }
 
   /**
@@ -88,35 +121,37 @@ export class VoiceOverToggle {
     // raw out of toggle(), matching TalkBackToggle's graceful contract (#3921).
     const boolValue = enabled ? "YES" : "NO";
     try {
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "write",
-        "com.apple.Accessibility",
-        "VoiceOverTouchEnabled",
-        "-bool",
-        boolValue,
-      ]);
-      await this.processExecutor.executeCommand("xcrun", [
-        "simctl",
-        "spawn",
-        this.device.deviceId,
-        "notifyutil",
-        "-p",
-        "com.apple.accessibility.VoiceOverStatusDidChange",
-      ]);
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "defaults",
+          "write",
+          "com.apple.Accessibility",
+          "VoiceOverTouchEnabled",
+          "-bool",
+          boolValue,
+        ]),
+      );
+      await this.processExecutor.executeCommand(
+        "xcrun",
+        buildSimctlArgs([
+          "spawn",
+          this.device.deviceId,
+          "notifyutil",
+          "-p",
+          "com.apple.accessibility.VoiceOverStatusDidChange",
+        ]),
+      );
       const serviceCommand = enabled
         ? "launchctl kickstart -p system/com.apple.VoiceOverTouch"
         : "launchctl kill SIGTERM system/com.apple.VoiceOverTouch";
       try {
-        await this.processExecutor.executeCommand("xcrun", [
-          "simctl",
-          "spawn",
-          this.device.deviceId,
-          ...serviceCommand.split(" "),
-        ]);
+        await this.processExecutor.executeCommand(
+          "xcrun",
+          buildSimctlArgs(["spawn", this.device.deviceId, ...serviceCommand.split(" ")]),
+        );
       } catch (error) {
         if (enabled || !this.isServiceAlreadyStopped(error)) {
           throw error;

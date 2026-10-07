@@ -1,3 +1,4 @@
+import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as manager from "../../src/server/webrtcStreamManager";
 import { logger } from "../../src/utils/logger";
@@ -77,7 +78,13 @@ class FakePublisher {
   async stop(): Promise<void> {
     this.stopped = true;
   }
-  writeH264Chunk(): void {}
+  h264Events: string[] = [];
+  writeH264Chunk(chunk?: Buffer): void {
+    this.h264Events.push(`chunk:${chunk?.length ?? 0}`);
+  }
+  endOfH264Packet(): void {
+    this.h264Events.push("end");
+  }
   primeH264ParameterSets(sps: Buffer | null, pps: Buffer | null): void {
     this.parameterSetPrimes.push({ sps, pps });
   }
@@ -174,7 +181,10 @@ async function flushPublisherStart(): Promise<void> {
 }
 
 beforeEach(() => {
-  setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
+  setWebRtcStreamManagerDependencies({
+    timer: new FakeTimer(),
+    captureRegistry: createDeviceCaptureRegistry(),
+  });
 });
 
 afterEach(() => {
@@ -926,6 +936,37 @@ describe("webrtcStreamManager", () => {
     expect(descriptor?.lifecycleState).toBe("degraded");
     expect(descriptor?.failure?.code).toBe("capture_runtime_failed");
     expect(descriptor?.fallback).toEqual({ mode: "screenshots", reason: "capture_runtime_failed" });
+  });
+
+  test("signals each source packet boundary to the publisher after its bytes (issue #10150)", async () => {
+    const publishers: FakePublisher[] = [];
+    let emit: ((chunk: Buffer) => void) | undefined;
+    let endPacket: (() => void) | undefined;
+    setWebRtcStreamManagerDependencies({
+      idGenerator: new CountingIdGenerator("id"),
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+      createSource: (options) => {
+        emit = options.onData;
+        endPacket = options.onEncodedAccessUnit;
+        return new FakeSource() as unknown as AndroidH264Source;
+      },
+      resolveVideoJar: async () => null,
+      now: () => new Date("2026-07-11T00:00:00.000Z"),
+    });
+
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await flushPublisherStart();
+
+    // One IDR packet with no trailing start code: its NAL is still held by the splitter.
+    emit?.(Buffer.from([0, 0, 0, 1, 0x65, 0x88, 0x84]));
+    endPacket?.();
+
+    expect(publishers[0].h264Events).toEqual(["chunk:7", "end"]);
+    expect(getWebRtcStreamDescriptor("webrtc_id-1")?.telemetry?.firstIdr).toBeDefined();
   });
 
   test("uses an explicit streamId when provided", async () => {

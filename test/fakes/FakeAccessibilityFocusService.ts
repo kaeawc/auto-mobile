@@ -13,6 +13,7 @@ export class FakeAccessibilityFocusService implements AccessibilityFocusService 
   private setThrows: Error | null = null;
   private clearThrows: Error | null = null;
   private currentFocusThrows: Error | null = null;
+  private currentFocusError: string | null = null;
 
   setSetThrows(err: Error): void {
     this.setThrows = err;
@@ -24,6 +25,14 @@ export class FakeAccessibilityFocusService implements AccessibilityFocusService 
 
   setCurrentFocusThrows(err: Error): void {
     this.currentFocusThrows = err;
+  }
+
+  /**
+   * Mirror the production client: a failed, timed-out or disconnected read-back
+   * resolves an error-carrying result (never throws) — see CtrlProxyFocus.requestCurrentFocus.
+   */
+  setCurrentFocusError(error: string): void {
+    this.currentFocusError = error;
   }
 
   async setAccessibilityFocus(resourceId: string): Promise<void> {
@@ -43,6 +52,9 @@ export class FakeAccessibilityFocusService implements AccessibilityFocusService 
   async requestCurrentFocus(): Promise<CurrentFocusResult> {
     if (this.currentFocusThrows) {
       throw this.currentFocusThrows;
+    }
+    if (this.currentFocusError) {
+      return { focusedElement: null, totalTimeMs: 5000, error: this.currentFocusError };
     }
     return { focusedElement: this.currentFocusElement, totalTimeMs: 1 };
   }

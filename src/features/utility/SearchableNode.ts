@@ -4,6 +4,13 @@ import {
   inheritsOwnerLabel,
 } from "./SearchableLabels";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import {
+  KEYCAP_ID_PATTERN,
+  MIN_FALLBACK_KEYCAPS,
+  isImeOwnedId,
+  resourceIdPackage,
+} from "../observe/android/ImeKeycapIds";
+import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "./ElementParser";
 import type { Element } from "../../models/Element";
@@ -27,6 +34,12 @@ export interface SearchableNode {
   elementId?: string;
   label?: string;
   displayedLabel?: string;
+  /**
+   * The text the element shows, without toggle/description/hint fallbacks: an editable's
+   * typed `value` when it has one (iOS fields keep it apart from the placeholder in `text`),
+   * else `text`. Exact-text comparisons use this so they agree with the skeleton label.
+   */
+  shownText?: string;
   textFields: readonly string[];
   textSources: Readonly<Record<string, string>>;
   capturedTextLength?: number;
@@ -101,10 +114,10 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const capturedValue =
     editable && typeof properties.value === "string" ? properties.value : undefined;
   const value = nonEmptyString(capturedValue);
+  const shownText = [value, text].find(Boolean);
   const label = [
     getToggleContentDescription(properties),
-    value,
-    text,
+    shownText,
     description,
     accessibleLabel,
     iosEditableHint,
@@ -124,6 +137,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     elementId: nativeId ?? nodeKey,
     label,
     displayedLabel,
+    shownText,
     accessibleLabel,
     textSources: Object.fromEntries(
       Object.entries({
@@ -167,6 +181,112 @@ export interface SearchableEntry extends SearchableNode {
   parentIndex?: number;
   rootGroup: number;
   windowRank: number;
+  /**
+   * Present when the node sits in the soft keyboard's input-method window, the
+   * subtree `observe` folds into one `<ime>` row (issues #6871, #10225). The
+   * package is the IME's when the capture names it.
+   */
+  inputMethod?: { package?: string };
+}
+
+/** `AccessibilityWindowInfo.TYPE_INPUT_METHOD`. */
+const INPUT_METHOD_WINDOW_TYPE = 2;
+const IME_PACKAGE_EXTRA = "automobile:imePackage";
+
+/**
+ * Whether `entry` is one of the soft keyboard's own keys — what `observe` folds
+ * into `<ime>` and a client therefore never sees. Framework chrome sharing the
+ * window (`android:id/input_method_nav_back`) stays a visible, targetable row.
+ */
+export function isImeKeyEntry(entry: SearchableEntry): boolean {
+  return entry.inputMethod !== undefined && isImeOwnedId(entry.nativeId, entry.inputMethod.package);
+}
+
+/** Roots of every input-method window, with the package its root reports (if any). */
+function inputMethodWindowRoots(
+  capture: ViewHierarchyResult,
+  parser: ElementParser,
+): Map<ViewHierarchyNode, string | undefined> {
+  const roots = new Map<ViewHierarchyNode, string | undefined>();
+  for (const window of resolveViewHierarchyForSearch(capture)?.windows ?? []) {
+    if (window.type !== INPUT_METHOD_WINDOW_TYPE || !window.hierarchy) {
+      continue;
+    }
+    for (const root of parser.extractWindowRootGroups({ hierarchy: {}, windows: [window] })[0] ??
+      []) {
+      roots.set(root, window.packageName);
+    }
+  }
+  return roots;
+}
+
+/** Share one window's flag between its duplicate entries and name the package once. */
+function settleInputMethod(entries: readonly SearchableEntry[]): void {
+  const bySource = new Map<ViewHierarchyNode, NonNullable<SearchableEntry["inputMethod"]>>();
+  for (const entry of entries) {
+    if (entry.inputMethod) {
+      bySource.set(entry.source, entry.inputMethod);
+    }
+  }
+  for (const entry of entries) {
+    entry.inputMethod ??= bySource.get(entry.source);
+  }
+  const named = new Set(entries.map((entry) => entry.inputMethod?.package).filter(Boolean));
+  if (named.size !== 1) {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.inputMethod && entry.inputMethod.package === undefined) {
+      entry.inputMethod = { package: [...named][0] };
+    }
+  }
+}
+
+function subtreeEnd(entries: readonly SearchableEntry[], root: SearchableEntry): number {
+  let end = root.index + 1;
+  while (end < entries.length && entries[end].depth > root.depth) {
+    end += 1;
+  }
+  return end;
+}
+
+/**
+ * Identify a keyboard from its `key_pos_*` keys when no capture names it — an
+ * older control proxy, or a `uiautomator dump` — by the rule the skeleton uses
+ * (issue #6871): one package, one root group, at least `MIN_FALLBACK_KEYCAPS`
+ * distinct ids. The flag spans the widest node the IME owns around those keys,
+ * so anonymous keys between them are covered too.
+ */
+function markKeycapFallback(entries: readonly SearchableEntry[]): void {
+  const scopes = new Map<string, { pkg: string; ids: Set<string>; keys: SearchableEntry[] }>();
+  for (const entry of entries) {
+    const pkg = KEYCAP_ID_PATTERN.exec(entry.nativeId ?? "")?.[1];
+    if (pkg === undefined) {
+      continue;
+    }
+    // `:` cannot occur in a package name, so the key is unambiguous.
+    const scope = scopes.get(`${entry.rootGroup}:${pkg}`) ?? { pkg, ids: new Set(), keys: [] };
+    scope.ids.add(entry.nativeId!);
+    scope.keys.push(entry);
+    scopes.set(`${entry.rootGroup}:${pkg}`, scope);
+  }
+  for (const { pkg, ids, keys } of scopes.values()) {
+    if (ids.size < MIN_FALLBACK_KEYCAPS) {
+      continue;
+    }
+    const inputMethod = { package: pkg };
+    const last = keys.reduce((max, key) => Math.max(max, subtreeEnd(entries, key)), 0);
+    let span: SearchableEntry = keys[0];
+    for (let at = keys[0].parentIndex; at !== undefined; at = entries[at].parentIndex) {
+      const ancestor = entries[at];
+      if (resourceIdPackage(ancestor.nativeId) === pkg && subtreeEnd(entries, ancestor) >= last) {
+        span = ancestor;
+      }
+    }
+    for (const member of entries.slice(span.index, subtreeEnd(entries, span))) {
+      member.inputMethod = inputMethod;
+    }
+  }
 }
 
 /** One immutable capture's flattened nodes. The capture object is the cache identity. */
@@ -190,6 +310,7 @@ export class SearchableHierarchy {
         windowRoots.map((root) => ({ root, group: ++rootGroup, rank })),
       ),
     ];
+    const imeRoots = inputMethodWindowRoots(capture, this.parser);
     const entries: SearchableEntry[] = [];
     for (const { root, group, rank } of roots) {
       const ancestors: SearchableEntry[] = [];
@@ -200,6 +321,7 @@ export class SearchableHierarchy {
         const properties = this.parser.extractNodeProperties(source);
         const element = this.parser.parseNodeBounds(source) ?? undefined;
         const raw = toSearchable({ ...properties, bounds: nodeBounds(source) });
+        const marker: unknown = properties.extras?.[IME_PACKAGE_EXTRA];
         const entry: SearchableEntry = {
           ...raw,
           bounds: element?.bounds ?? raw.bounds,
@@ -211,10 +333,20 @@ export class SearchableHierarchy {
           parentIndex: ancestors.at(-1)?.index,
           rootGroup: group,
           windowRank: rank,
+          inputMethod:
+            typeof marker === "string" && marker.length > 0
+              ? { package: marker }
+              : imeRoots.has(source)
+                ? { package: imeRoots.get(source) }
+                : ancestors.at(-1)?.inputMethod,
         };
         entries.push(entry);
         ancestors.push(entry);
       });
+    }
+    settleInputMethod(entries);
+    if (!entries.some((entry) => entry.inputMethod)) {
+      markKeycapFallback(entries);
     }
     hoistSearchableLabels(entries);
     attributeSearchableLabels(entries);

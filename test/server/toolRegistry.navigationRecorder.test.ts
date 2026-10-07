@@ -2,8 +2,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test, spyOn } from "
 import { z } from "zod/v4";
 import { stripNavigationInternalParams, ToolRegistryClass } from "../../src/server/toolRegistry";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
+import { reportToolDispatched } from "../../src/utils/ToolDispatchContext";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { createNavigationGraphResolver } from "../../src/features/navigation/deviceNavigationGraph";
+import { createTestDatabase } from "../db/testDbHelper";
 import { NavigationRepository } from "../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import {
@@ -64,6 +67,22 @@ describe("navigation recorder handler outcomes", () => {
       },
       planLifecycleManager: { afterExecution: async () => {} },
     });
+    // Pay the one-time cold-start cost of the first recorded tool call and navigation write
+    // (~5 ms, far more on a loaded runner) outside the per-test budget. beforeEach clears the
+    // graph, so nothing from this throwaway call is visible to a test.
+    registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
+      throw new Error("warmup");
+    });
+    await registry
+      .getTool("tapOn")!
+      .handler({ text: "warmup" })
+      .catch(() => {});
+    timer.setCurrentTime(1_000_000);
+    await navigate("Splash");
+    timer.setCurrentTime(1_011_000);
+    await navigate("Home");
+    await harness.manager.getEdgesFrom("Splash");
+    await harness.manager.getStats();
   });
   beforeEach(async () => {
     await harness.manager.clearAllGraphs();
@@ -167,6 +186,139 @@ describe("navigation recorder handler outcomes", () => {
     });
   });
 
+  describe("dispatch reporting (#10196)", () => {
+    // The tool starts at 1_010_000 and spends 3 s finding its target before the tap.
+    function slowTap(reportDispatch: boolean): () => Promise<{ success: boolean }> {
+      return async () => {
+        timer.setCurrentTime(1_013_000);
+        if (reportDispatch) {
+          reportToolDispatched();
+        }
+        timer.setCurrentTime(1_013_300);
+        await navigate("Home");
+        return { success: true };
+      };
+    }
+
+    test("a tool that reports its dispatch is attributed from it, not from its start", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(true));
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      expect((await harness.manager.getEdgesFrom("Splash"))[0].interaction?.args).toEqual({
+        text: "Continue",
+      });
+    });
+
+    test("a tool that reports nothing is still measured from its start", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), slowTap(false));
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      expect((await harness.manager.getEdgesFrom("Splash"))[0].interaction).toBeUndefined();
+    });
+
+    test("a failed tool that reported its dispatch is still withdrawn", async () => {
+      registry.registerDeviceAware("tapOn", "fake", z.object({}), async () => {
+        reportToolDispatched();
+        return { success: false };
+      });
+
+      await registry.getTool("tapOn")!.handler({ text: "Continue" });
+
+      await expectUnattributedAdvance();
+    });
+  });
+
+  describe("app lifecycle tools forget the app's screen (#10193)", () => {
+    test.each([
+      ["terminateApp", { appId: "com.x" }],
+      ["crashApp", { appId: "com.x" }],
+      ["uninstallApp", { appId: "com.x" }],
+      ["launchApp", { appId: "com.x", coldBoot: true }],
+      ["launchApp", { appId: "com.x", clearAppData: true }],
+      // installApp names an artifact, not the app: installing over a running app restarts it.
+      ["installApp", { artifactPath: "/tmp/app.apk" }],
+    ])("%s %j leaves the next transition without an edge", async (tool, args) => {
+      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      await registry.getTool(tool)!.handler(args);
+
+      timer.setCurrentTime(1_011_000);
+      await navigate("Home");
+
+      expect(await harness.manager.getEdgesFrom("Splash")).toEqual([]);
+    });
+
+    test.each([
+      ["launchApp", { appId: "com.x" }],
+      ["appLifecycle", { appId: "com.x", action: "killBackgrounded" }],
+    ])("%s %j keeps the remembered screen", async (tool, args) => {
+      registry.registerDeviceAware(tool, "fake", z.object({}), async () => ({ success: true }));
+      await registry.getTool(tool)!.handler(args);
+
+      timer.setCurrentTime(1_011_000);
+      await navigate("Home");
+
+      expect((await harness.manager.getEdgesFrom("Splash")).map((edge) => edge.to)).toEqual([
+        "Home",
+      ]);
+    });
+  });
+
+  test("a session's process-replacing call forgets the screen on the manager its prediction reads resolve to (#10193, #10197)", async () => {
+    const sessionId = "session-lifecycle";
+    const sessionDb = await createTestDatabase();
+    const sessionManager = NavigationGraphManager.createForTesting(
+      new NavigationRepository(sessionDb),
+      new TestCoverageRepository(undefined, sessionDb),
+      timer,
+      sessionId,
+    );
+    NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionManager);
+    // The execution target names the session the call ran under, as a real session-bound call does.
+    const restoreTarget = registry.setPipelineOverridesForTesting({
+      executionTargetResolver: {
+        resolveExecutionTarget: async () => ({
+          shouldResolveDevice: true,
+          device: { deviceId: "fake", platform: "android" },
+          sessionUuid: sessionId,
+        }),
+      },
+    });
+    try {
+      await sessionManager.recordNavigationEvent({
+        applicationId: "com.x",
+        destination: "Splash",
+        source: "sdk",
+        arguments: {},
+        metadata: {},
+        timestamp: timer.now(),
+        sequenceNumber: 0,
+      });
+      registry.registerDeviceAware("installApp", "fake", z.object({}), async () => ({
+        success: true,
+      }));
+
+      await registry
+        .getTool("installApp")!
+        .handler({ artifactPath: "/tmp/a.apk", sessionUuid: sessionId });
+
+      // The prediction reader resolves the session's manager from the bound session...
+      const readBy = createNavigationGraphResolver(() => sessionId)({
+        deviceId: "fake",
+        platform: "android",
+      });
+      expect(readBy).toBe(sessionManager);
+      expect(readBy.getCurrentScreen()).toBeNull();
+      // ...and the global manager, which no session call acted on, keeps its screen.
+      expect(harness.manager.getCurrentScreen()).toBe("Splash");
+    } finally {
+      restoreTarget();
+      NavigationGraphManager.resetSession(sessionId);
+      await sessionDb.destroy();
+    }
+  });
+
   test("navigation while a handler is running keeps its tap attribution", async () => {
     const completion = Promise.withResolvers<{ success: boolean }>();
     const started = Promise.withResolvers<void>();
@@ -238,5 +390,11 @@ describe("navigation recorder caller arguments", () => {
       sessionUuidX: "keep",
       session: "keep",
     });
+  });
+
+  test("recordToolCall carries the device the tool call runs on", async () => {
+    record.mockClear();
+    await registry.getTool("tapOn")!.handler({ text: "Continue" });
+    expect(record.mock.calls[0][3]).toBe("fake");
   });
 });

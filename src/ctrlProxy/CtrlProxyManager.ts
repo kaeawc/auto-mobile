@@ -1,4 +1,8 @@
-import { combineWithAmbientAbort, runWithAbortSignal } from "../utils/AbortContext";
+import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
+import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { SingleFlight } from "../utils/cache/SingleFlight";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceLostError } from "../models/DeviceLostError";
@@ -20,7 +24,7 @@ import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, ExecResult } from "../models";
 import { requireBootedDevice } from "../devices/requireBootedDevice";
 import {
   isExplicitPin,
@@ -60,6 +64,17 @@ export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
 // API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
 // another 2 seconds for scheduler and adb polling delay before giving up.
 export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
+/**
+ * Bound on each device write in the rebind's mutating section (remove, force-stop,
+ * re-add, restore). Those writes run under a private signal because the caller's
+ * request signal may already have aborted, so they need a cap of their own.
+ */
+export const REBIND_MUTATION_COMMAND_TIMEOUT_MS = 5_000;
+type RebindFlightKind = "check" | "force";
+interface RebindPlan {
+  withoutCtrlProxy: string;
+  withCtrlProxy: string;
+}
 type AccessibilityServiceState = "bound" | "binding" | "crashed" | "absent" | "unbound";
 /** A rebind inspection failed before any accessibility setting was written. */
 export class CtrlProxyInspectionError extends ActionableError {}
@@ -70,6 +85,7 @@ type ApkOverrideChecksumEntry = {
 };
 const CTRL_PROXY_INSTALL_TIMEOUT_MS = 120_000;
 const CTRL_PROXY_PULL_TIMEOUT_MS = 120_000;
+class CtrlProxyApkStageError extends ActionableError {}
 
 /**
  * Android-specific accessibility-service lifecycle, extending the
@@ -204,8 +220,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // per-device singleton and can interleave — one re-enables while the other
   // force-stops mid-sequence, leaving the health poll observing a state
   // neither caller intended. Concurrent callers instead share one in-flight
-  // rebind and its result.
-  private rebindInFlight: Promise<boolean> | null = null;
+  // rebind and its result. The flight is owned by the manager, not by the first
+  // caller (#10199): it runs under a flight-scoped signal that aborts only when
+  // every waiter has gone, and each waiter observes its own signal.
+  private readonly rebindFlights = new SingleFlight<"rebind", boolean>();
+  private rebindFlightKind: RebindFlightKind = "check";
+  // Settles when the latest flight has finished, so a flight started after every
+  // waiter abandoned its predecessor still waits for that one's restore write.
+  private rebindSettled: Promise<void> = Promise.resolve();
+  // The latest remove -> re-add section, which a cancelled waiter waits out.
+  private rebindMutationSettled: Promise<void> = Promise.resolve();
   private static instances: Map<string, AndroidCtrlProxyManager> = new Map();
   private static expectedChecksumOverride: string | null = null;
   private static readonly apkOverrideChecksums = new Map<string, ApkOverrideChecksumEntry>();
@@ -988,7 +1012,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private async accessibilityServiceState(): Promise<AccessibilityServiceState> {
-    const result = await this.adb.executeCommand("shell dumpsys accessibility");
+    const result = await this.adb.executeCommand(
+      "shell dumpsys accessibility",
+      undefined,
+      DUMPSYS_MAX_BUFFER,
+    );
     const diagnostic = `${result.stdout}\n${result.stderr}`;
     if (isAndroidFrameworkUnavailable(diagnostic)) {
       throw new ActionableError(diagnostic);
@@ -1065,10 +1093,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * the same on-device service.
    */
   async rebindIfUnhealthy(): Promise<boolean> {
-    if (this.rebindInFlight) {
-      return this.rebindInFlight;
-    }
-    return this.trackRebindFlight(this.rebindOrRestartInternal(false));
+    return this.runRebindFlight("check");
   }
 
   /**
@@ -1081,25 +1106,59 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * this into a restart loop.
    */
   async forceRestartProcess(): Promise<boolean> {
-    const inFlight = this.rebindInFlight;
-    if (inFlight) {
-      // A healthy-binding check can finish without changing the process.
-      // Reserve the next flight before awaiting it so another caller cannot
-      // start a settings sequence in between.
-      return this.trackRebindFlight(
-        (async () => (await inFlight) || this.forceRestartIfPresent())(),
-      );
+    for (;;) {
+      const joinedKind = this.rebindFlights.has("rebind") ? this.rebindFlightKind : "force";
+      const restarted = await this.runRebindFlight("force");
+      // A healthy-binding check can finish without changing the process, so a
+      // force request that only joined one runs again once it has settled.
+      if (joinedKind === "force" || restarted) {
+        return restarted;
+      }
     }
-    return this.trackRebindFlight(this.forceRestartIfPresent());
   }
 
-  private trackRebindFlight(work: Promise<boolean>): Promise<boolean> {
-    const flight = work.finally(() => {
-      if (this.rebindInFlight === flight) {
-        this.rebindInFlight = null;
+  /**
+   * Join the shared rebind flight, starting one when none is running. The caller
+   * waits under its OWN signal; the flight itself is not the caller's (#10199).
+   */
+  private async runRebindFlight(kind: RebindFlightKind): Promise<boolean> {
+    const signal = getAbortSignal();
+    if (!this.rebindFlights.has("rebind")) {
+      // SingleFlight starts the task a microtask after registering the flight, so
+      // record the kind here, synchronously, for a same-turn force caller to read.
+      this.rebindFlightKind = kind;
+    }
+    try {
+      return await this.rebindFlights.run(
+        "rebind",
+        (flightSignal) => this.startRebindFlight(kind, flightSignal),
+        signal,
+        { cancelWhenAllWaitersAbort: true },
+      );
+    } catch (error) {
+      if (signal?.aborted) {
+        // Report the cancellation only after the flight's remove -> re-add section
+        // (bounded by its own timeouts) has restored the service.
+        await this.rebindMutationSettled;
       }
-    });
-    this.rebindInFlight = flight;
+      throw error;
+    }
+  }
+
+  private startRebindFlight(kind: RebindFlightKind, flightSignal?: AbortSignal): Promise<boolean> {
+    const previous = this.rebindSettled;
+    const flight = (async () => {
+      await previous;
+      // The flight is created inside the first caller's async context; detach from
+      // that caller's signal so only the flight-scoped signal governs it.
+      return runWithAbortSignal(flightSignal, () =>
+        kind === "force" ? this.forceRestartIfPresent() : this.rebindOrRestartInternal(false),
+      );
+    })();
+    this.rebindSettled = flight.then(
+      () => undefined,
+      () => undefined,
+    );
     return flight;
   }
 
@@ -1140,9 +1199,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   private async rebindOrRestartInternal(force: boolean): Promise<boolean> {
     let rebindAttempted = false;
-    let removalCompleted = false;
-    let readdCompleted = false;
-    let servicesWithCtrlProxy: string | undefined;
     try {
       if (!force) {
         if ((await this.isAccessibilityServiceHealthy()) || this.isBindingWithinGracePeriod()) {
@@ -1150,45 +1206,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         }
       }
 
-      const result = await this.adb.executeCommand(
-        "shell settings get secure enabled_accessibility_services",
-      );
-      const diagnostic = `${result.stdout}\n${result.stderr}`;
-      if (isAndroidFrameworkUnavailable(diagnostic)) {
-        throw new ActionableError(diagnostic);
-      }
-      const otherServices = AndroidCtrlProxyManager.accessibilityServices(result.stdout).filter(
-        (service) => !service.includes(AndroidCtrlProxyManager.PACKAGE),
-      );
-      const servicesWithoutCtrlProxy = otherServices.join(":");
-      servicesWithCtrlProxy = [
-        ...otherServices,
-        AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
-      ].join(":");
-
+      const plan = await this.readRebindPlan();
       rebindAttempted = true;
-      await this.adb.executeCommand(
-        `shell settings put secure enabled_accessibility_services ${shellQuote(servicesWithoutCtrlProxy)}`,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
-      removalCompleted = true;
-      // The old binding attempt ended when its enabled-service entry was removed.
-      this.bindingFirstObservedAt = null;
-      await this.adb.executeCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
-      await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
-      await this.adb.executeCommand(
-        `shell settings put secure enabled_accessibility_services ${shellQuote(servicesWithCtrlProxy)}`,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        true,
-      );
-      readdCompleted = true;
+      await this.rebindServicesShielded(plan, force);
       const healthy = await this.waitForHealthyAfterRebind();
       logger.info(
         force
@@ -1197,12 +1217,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return true;
     } catch (error) {
-      throw await this.rebindFailure(
-        error,
-        force,
-        rebindAttempted,
-        removalCompleted && !readdCompleted ? servicesWithCtrlProxy : undefined,
-      );
+      throw this.rebindFailure(error, force, rebindAttempted);
     } finally {
       if (rebindAttempted) {
         // A rebind changes both the configured and framework-visible state.
@@ -1211,38 +1226,158 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private async rebindFailure(
-    error: unknown,
-    force: boolean,
-    rebindAttempted: boolean,
-    servicesToRestore: string | undefined,
-  ): Promise<ActionableError> {
-    if (servicesToRestore !== undefined) {
-      try {
-        await this.adb.executeCommand(
-          `shell settings put secure enabled_accessibility_services ${shellQuote(servicesToRestore)}`,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          true,
-        );
-      } catch (restoreError) {
-        logger.warn(
-          `[CTRL_PROXY] Failed to restore accessibility services: ${restoreError}`,
-          restoreError,
-        );
-      }
+  private async readRebindPlan(): Promise<RebindPlan> {
+    const result = await this.adb.executeCommand(
+      "shell settings get secure enabled_accessibility_services",
+    );
+    const diagnostic = `${result.stdout}\n${result.stderr}`;
+    if (isAndroidFrameworkUnavailable(diagnostic)) {
+      throw new ActionableError(diagnostic);
     }
+    const otherServices = AndroidCtrlProxyManager.accessibilityServices(result.stdout).filter(
+      (service) => !service.includes(AndroidCtrlProxyManager.PACKAGE),
+    );
+    return {
+      withoutCtrlProxy: otherServices.join(":"),
+      withCtrlProxy: [
+        ...otherServices,
+        AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
+      ].join(":"),
+    };
+  }
+
+  /**
+   * Remove CtrlProxy, force-stop it and add it back. Once the removal write is
+   * sent the re-add is mandatory cleanup, so every write here runs under a
+   * private bounded signal rather than the flight's: a cancelled caller must not
+   * leave CtrlProxy out of enabled_accessibility_services (#10199). A flight that
+   * was abandoned mid-way skips the force-stop but still re-adds the service.
+   */
+  private async rebindServicesShielded(plan: RebindPlan, force: boolean): Promise<void> {
+    // Never begin the remove -> re-add section for a flight nobody waits on.
+    getAbortSignal()?.throwIfAborted();
+    const section = this.removeAndReaddShielded(plan, force);
+    this.rebindMutationSettled = section.then(
+      () => undefined,
+      () => undefined,
+    );
+    await section;
+    getAbortSignal()?.throwIfAborted();
+  }
+
+  private async removeAndReaddShielded(plan: RebindPlan, force: boolean): Promise<void> {
+    try {
+      await this.writeEnabledServicesShielded(plan.withoutCtrlProxy);
+      // The old binding attempt ended when its enabled-service entry was removed.
+      this.bindingFirstObservedAt = null;
+      if (!getAbortSignal()?.aborted) {
+        await this.runShieldedCommand(`shell am force-stop ${AndroidCtrlProxyManager.PACKAGE}`);
+        await this.timer.sleep(AndroidCtrlProxyManager.REBIND_FORCE_STOP_SETTLE_MS);
+      }
+      await this.writeCtrlProxyEnabledShielded(plan.withCtrlProxy);
+    } catch (error) {
+      throw await this.restoreAfterRebindFailure(error, plan.withCtrlProxy, force);
+    }
+  }
+
+  /**
+   * Add CtrlProxy to the list that is configured NOW rather than the one read
+   * before the section began: a service enabled by something else in between (for
+   * example TalkBack through the `accessibility` tool) must not be dropped. The
+   * remembered list is only the fallback when the live one cannot be read.
+   */
+  private async writeCtrlProxyEnabledShielded(rememberedServices: string): Promise<void> {
+    await this.writeEnabledServicesShielded(
+      await this.liveServicesWithCtrlProxy(rememberedServices),
+    );
+  }
+
+  private async liveServicesWithCtrlProxy(rememberedServices: string): Promise<string> {
+    try {
+      const result = await this.runShieldedCommand(
+        "shell settings get secure enabled_accessibility_services",
+      );
+      const diagnostic = `${result.stdout}\n${result.stderr}`;
+      if (isAndroidFrameworkUnavailable(diagnostic)) {
+        throw new ActionableError(diagnostic);
+      }
+      return AndroidCtrlProxyManager.withCtrlProxyService(
+        AndroidCtrlProxyManager.accessibilityServices(result.stdout),
+      );
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Could not read the live enabled_accessibility_services (${errorMessage(error)}); ` +
+          `re-adding CtrlProxy to the remembered service list read before the rebind, which may drop a service enabled since`,
+        error,
+      );
+      return rememberedServices;
+    }
+  }
+
+  private static withCtrlProxyService(services: string[]): string {
+    return [
+      ...services.filter((service) => !service.includes(AndroidCtrlProxyManager.PACKAGE)),
+      AndroidCtrlProxyManager.ACCESSIBILITY_SERVICE_COMPONENT,
+    ].join(":");
+  }
+
+  private writeEnabledServicesShielded(services: string): Promise<unknown> {
+    return this.runShieldedCommand(
+      `shell settings put secure enabled_accessibility_services ${shellQuote(services)}`,
+    );
+  }
+
+  private async runShieldedCommand(command: string): Promise<ExecResult> {
+    const shield = new AbortController();
+    return raceWithDeadline(
+      () => this.adb.executeCommand(command, undefined, undefined, undefined, shield.signal, true),
+      {
+        timer: this.timer,
+        timeoutMs: REBIND_MUTATION_COMMAND_TIMEOUT_MS,
+        label: "CtrlProxy rebind write",
+        onTimeout: () => shield.abort(new ActionableError("CtrlProxy rebind write timed out")),
+      },
+    );
+  }
+
+  /**
+   * Compensating write after a failure past the removal: put CtrlProxy back so the
+   * service is not left disabled (#7859). Returns the error to throw, which names
+   * the stranded state when the restore itself failed.
+   */
+  private async restoreAfterRebindFailure(
+    error: unknown,
+    servicesWithCtrlProxy: string,
+    force: boolean,
+  ): Promise<unknown> {
+    try {
+      await this.writeCtrlProxyEnabledShielded(servicesWithCtrlProxy);
+      return error;
+    } catch (restoreError) {
+      logger.warn(
+        `[CTRL_PROXY] Failed to restore accessibility services: ${restoreError}`,
+        restoreError,
+      );
+      return new ActionableError(
+        `${AndroidCtrlProxyManager.rebindFailureContext(force)}: ${errorMessage(error)}. ` +
+          `Restoring CtrlProxy to enabled_accessibility_services also failed (${errorMessage(restoreError)}), ` +
+          `so CtrlProxy is left disabled on this device until the next rebind or readiness check re-adds it.`,
+        { cause: error },
+      );
+    }
+  }
+
+  private static rebindFailureContext(force: boolean): string {
+    return force
+      ? "Failed to force-restart connected-but-unresponsive CtrlProxy process"
+      : "Failed to rebind crashed or unbound CtrlProxy accessibility service";
+  }
+
+  private rebindFailure(error: unknown, force: boolean, rebindAttempted: boolean): ActionableError {
     if (!rebindAttempted) {
       return new CtrlProxyInspectionError(errorMessage(error));
     }
-    return toActionableError(
-      error,
-      force
-        ? "Failed to force-restart connected-but-unresponsive CtrlProxy process"
-        : "Failed to rebind crashed or unbound CtrlProxy accessibility service",
-    );
+    return toActionableError(error, AndroidCtrlProxyManager.rebindFailureContext(force));
   }
 
   private async waitForHealthyAfterRebind(): Promise<boolean> {
@@ -1562,6 +1697,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf,
       );
     } catch (error) {
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
@@ -1765,7 +1903,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       try {
         result.attemptedInstall = true;
         perf.startOperation("installApk");
-        await this.adb.executeCommand(`install -r -d "${apkPath}"`, CTRL_PROXY_INSTALL_TIMEOUT_MS);
+        await this.executeApkStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
         perf.endOperation("installApk");
         logger.info("[CTRL_PROXY] APK upgraded successfully");
         this.clearAvailabilityCache();
@@ -1775,6 +1913,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       } catch (upgradeError) {
         perf.endOperation("installApk");
+        if (upgradeError instanceof CtrlProxyApkStageError) {
+          this.clearAvailabilityCache();
+          throw upgradeError;
+        }
         const deviceError = this.statusInspectionDeviceError(upgradeError);
         if (deviceError) {
           throw deviceError;
@@ -1788,9 +1930,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     try {
       result.attemptedReinstall = true;
       if (isInstalled) {
-        await this.adb.executeCommand(
+        await this.executeApkStage(
           `shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`,
-          CTRL_PROXY_INSTALL_TIMEOUT_MS,
+          "CtrlProxy APK uninstall for reinstall",
         );
       }
       perf.startOperation("installApk");
@@ -1806,6 +1948,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         status: isInstalled ? "reinstalled" : "installed",
       };
     } catch (reinstallError) {
+      if (reinstallError instanceof CtrlProxyApkStageError) {
+        this.clearAvailabilityCache();
+        throw reinstallError;
+      }
       const reinstallMessage = errorMessage(reinstallError);
       logger.warn(`[CTRL_PROXY] APK reinstall failed: ${reinstallMessage}`, reinstallError);
       this.clearAvailabilityCache();
@@ -1959,14 +2105,44 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Install APK
    */
+  private async executeApkStage(command: string, stage: string): Promise<ExecResult> {
+    return await runPhaseWithSettlement(
+      {
+        timer: this.timer,
+        timeoutMs: CTRL_PROXY_INSTALL_TIMEOUT_MS,
+        signal: getAbortSignal(),
+        graceMs: 0,
+        label: stage,
+        timeoutError: () =>
+          new CtrlProxyApkStageError(
+            `${stage} timed out after ${CTRL_PROXY_INSTALL_TIMEOUT_MS}ms. Retry device acquisition.`,
+          ),
+        defaultAbortError: () =>
+          new CtrlProxyApkStageError(`${stage} cancelled. Retry device acquisition.`),
+        explicitAbortError: (reason) =>
+          new CtrlProxyApkStageError(`${stage} cancelled: ${errorMessage(reason)}`, {
+            cause: reason,
+          }),
+      },
+      async (signal) => {
+        const result = await this.adb.executeCommand(
+          command,
+          CTRL_PROXY_INSTALL_TIMEOUT_MS,
+          undefined,
+          undefined,
+          signal,
+        );
+        signal.throwIfAborted();
+        return result;
+      },
+    );
+  }
+
   async install(apkPath: string): Promise<void> {
     try {
       logger.info("Installing APK", { path: apkPath });
 
-      const result = await this.adb.executeCommand(
-        `install "${apkPath}"`,
-        CTRL_PROXY_INSTALL_TIMEOUT_MS,
-      );
+      const result = await this.executeApkStage(`install "${apkPath}"`, "CtrlProxy APK install");
       const resultString = result.toString().toLowerCase();
 
       if (resultString.includes("failure") || resultString.includes("error")) {
@@ -1983,11 +2159,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // A failed adb install can still have changed package state before the
       // command reported an error.
       this.clearAvailabilityCache();
+      if (error instanceof CtrlProxyApkStageError) {
+        throw error;
+      }
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
       }
-      throw new Error(`Failed to install APK: ${errorMessage(error)}`);
+      throw toActionableError(error, "Failed to install APK");
     }
   }
 

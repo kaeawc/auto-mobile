@@ -25,13 +25,16 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
-import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
+import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { dropMcpRecording } from "./mcpRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
+import { ToolUnavailableError } from "./toolUnavailableError";
+import { stripInternalToolParams } from "./internalToolParams";
+export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
 import { DaemonRestartPendingError } from "../daemon/daemonRestartAdmission";
 import { resolveDirectSessionDevice, unregisterDirectSession } from "./directSessionDeviceRegistry";
@@ -45,8 +48,6 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
-  deleteInternalToolParams,
-  INTERNAL_TOOL_PARAM_NAMES,
 } from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
@@ -311,7 +312,6 @@ import { registerPreferenceTools } from "./preferenceTools";
 import { registerAppFileTools } from "./appFileTools";
 import { registerSessionLogTools } from "./sessionLogTools";
 import { registerDownloadsFixtureTools } from "./downloadsFixtureTools";
-import { registerSharedStorageTools } from "./sharedStorageTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
@@ -548,28 +548,6 @@ function extractInternalAcceptanceDiscoveryOrder(
   return value === "forward" || value === "reverse" ? value : undefined;
 }
 
-export function stripInternalToolParams(params: unknown): unknown {
-  if (!params || typeof params !== "object" || Array.isArray(params)) {
-    return params;
-  }
-
-  // Consult the CANONICAL list rather than an ad-hoc subset: the daemon's
-  // `ide/getNavigationGraph` route forwards `__mcpRequestTimeoutMs` as the ONLY
-  // internal marker, and a guard that omitted the timeout/deadline names left it
-  // on the arguments -- which a `.strict()` input schema (#6712) then rejected
-  // with "Unrecognized key" before the handler ran (#6917 review).
-  if (!INTERNAL_TOOL_PARAM_NAMES.some((name) => name in params)) {
-    return params;
-  }
-
-  const rest = { ...(params as Record<string, unknown>) };
-  // Strips `DAEMON_NON_FINITE_ENCODED_PARAM` too as a safety net: revival already
-  // removes that transport-provenance flag (#5863), but this guards the tool
-  // boundary against any future path that sets it without reviving.
-  deleteInternalToolParams(rest);
-  return rest;
-}
-
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
 // PlanExecutor, #5854 §3) can share the exact MCP-boundary rendering without
 // importing the whole server entrypoint (which would be circular). Re-exported
@@ -616,7 +594,6 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerAppFileTools();
   registerSessionLogTools();
   registerDownloadsFixtureTools();
-  registerSharedStorageTools();
   registerFormTools();
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
@@ -905,7 +882,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const requestMcpSessionId = daemonMode ? extractInternalMcpSessionId(toolParams) : undefined;
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
-    let routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    let routingSessionUuid: string | undefined;
+    try {
+      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+    } catch (error) {
+      // Match the existing tool-error boundary below: the SDK handler alias
+      // is narrower than the protocol's text-only tool error result.
+      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
+    }
     let resolvedImplicitAutolockSessionUuid: string | undefined;
     let connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(sessionId);
     const requestedToolResultsNoStructuredContent = daemonMode
@@ -922,9 +906,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       const registeredTool = ToolRegistry.getRegisteredTool(name);
-      const hint = registeredTool
-        ? ToolRegistry.getToolAvailabilityGateReasons(registeredTool).join("; ")
-        : getRemovedToolHint(name);
+      if (registeredTool) {
+        // Registered but gated: say so structurally so the daemon proxy does not
+        // mistake this for a stale daemon and reset the shared connection (#10177).
+        throw new ToolUnavailableError(
+          name,
+          ToolRegistry.getToolAvailabilityGateReasons(registeredTool),
+        );
+      }
+      const hint = getRemovedToolHint(name);
       throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
     }
 
@@ -1239,7 +1229,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         executionTracker.endExecution(execution.id);
       }
     };
-    const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
+    const requestSignal = combineRequestAbortSignals(
+      execution.abortController.signal,
+      extra.signal,
+    );
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {

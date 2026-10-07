@@ -25,7 +25,7 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`, `stageSharedStorage`, `stageSharedStorageFixtures`, `startTestRecording`,
+`sqlQuery`, `startTestRecording`,
 `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
@@ -570,11 +570,46 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 The Android-only `overlay` tool is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
-`show`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; use a replacement spec to change it.
+
+`showVariants` requires `id` and a nonempty `variants` array (maximum 12).
+Each variant is `{ label?, image: { asset, contentScale? } }` or
+`{ label?, spec: OverlayNode }`, with exactly one content field. Labels are
+limited to 256 characters; image scale is `fit`, `crop`, or `fill`. An image
+variant names an opaque asset ID that already exists on the device or that the
+same call uploads through `assets` (below); a variant never carries a file path,
+URL or screenshot reference itself. Repeated asset IDs are allowed; each image
+use counts toward the contract image limit.
+
+`presentation` defaults to `fullscreen`, showing each alternative with controls.
+`floating` shows only controls over the live app; it does not apply the variant
+content. All supplied content is validated before floating omission. Floating-only
+`gravity` and `offset` default to `bottomCenter` and `{ x: 0, y: 0 }`. Optional
+integer `opacity` (0–100) passes to `window.opacity`; omission uses the spec
+default. The generated horizontal pager has controls inside each page:
+`◀ {page}/{pageCount} ▶ ✓`. Pick emits `selected` with static zero-based
+`{ index, label? }`, without dismissing the overlay. The carousel is shown through
+the normal `show` path, so like any show it replaces another shown overlay on the
+device and starts a fresh event sequence.
+
+By default `showVariants` returns the normal show result immediately. Then use
+`awaitEvent` with `id` and `eventName: "selected"`, or set `waitForSelection: true`
+to wait after a successful show. `timeoutMs` bounds the show request only; the
+selection wait uses the existing 30000 ms event-wait default. The MCP request
+deadline for such a call is the show stage (the request's `timeoutMs`, default
+5000 ms; with `assets`, the upload-and-send budget described under `assets` below),
+plus that 30000 ms wait, plus 30 s of headroom. The wait is the
+`awaitEvent` wait, so cancellation, timeout, session release, device removal and a
+device-side dismissal all settle it. The combined result
+retains `lastResult` and event/count fields, and adds `selection: { index, label? }`
+only on a valid pick. The payload index and label must match a shown variant;
+malformed payloads return `success: false` with a clear error. Timeout and dismissal
+without a pick retain `timedOut: true` and `reason: "dismissed"`, respectively,
+with no selection. Cancellation and progress notifications match `awaitEvent`.
 
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
@@ -584,7 +619,7 @@ no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
-`show` accepts the same optional `display` selector as the tap tools (a panel
+`show` (and `showVariants`) accepts the same optional `display` selector as the tap tools (a panel
 key, a role such as `inner` or `cover`, or `active`), resolved with the same
 precedence: an explicit `display`, then the session display pin, then the default
 display. Omitting it sends no display and behaves exactly as before. A resolved
@@ -596,6 +631,52 @@ panel disappears while the overlay is up (fold), the device dismisses it with
 reason `teardown`; it is never moved to another display. `update` and `dismiss`
 act on the overlay where it is shown and do not take `display`.
 
+`showVariants` accepts `display` and `assets` and treats them exactly like `show`: it
+is a show of the composed carousel, so the same display resolution and refusals, the
+same asset staging and the same single missing-asset re-send apply (the re-send carries
+the same composed spec to the same resolved display). Image variants may reference ids
+uploaded in the same call; uploads happen before the carousel is shown. The same field
+restrictions as `show` apply (`state`, `all`, `eventName`, `kind`, `afterSequence` and
+`spec` are rejected), and, like `show`, it takes the session display pin when `display`
+is omitted.
+
+`display` and `assets` combine on `show`: the display is resolved and checked first, so a
+refused display uploads nothing; assets are then uploaded and the overlay is shown on that
+display. The one missing-asset re-send goes to the same resolved display without re-reading the
+display inventory. `update` with `assets` stays on the display the overlay is already on.
+
+`show`, `showVariants`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
+or `{ id, observation }` that uploads images before the overlay is sent, so no
+separate upload step is needed. `path` is an absolute path the daemon can read
+(relative paths are rejected); `observation` is an
+`automobile:observation/{deviceId}/{observationId}/screenshot` URI (the
+`observationScreenshotResourceUri` that `observe` returns) and resolves exactly
+as reading that resource does: the observation must still be its device's
+current one, a capture still in flight is awaited, and no session ownership is
+needed because the resource itself needs none. Each entry has exactly one of
+the two. The type is detected from the bytes' signature and must be PNG, JPEG
+or WebP, up to 4 MiB per asset, 16 MiB and 32 assets per call, with unique ids.
+Image nodes reference an `id` (`image.asset`; nav items use `image`); the spec
+never carries paths or bytes. Every file is read and checked first, so an
+unreadable file, unsupported format or exceeded cap fails the call with nothing
+sent. Uploads then run one at a time. Any failure (a device refusal, an old
+CtrlProxy without asset support, a cancelled request, or a write that was never
+answered, reported as indeterminate) fails the call before the overlay is shown
+or updated; the error and `uploadedAssets` name the assets already stored, which
+stay on the device until the overlay session ends and are replaced if the call is
+repeated. On success `uploadedAssets` lists each `{ id, mimeType, bytes }`.
+
+When the device accepts a `show` or `update` but lists referenced asset ids it has
+no copy of, the result stays successful and adds `missingAssets` (the ids; absent
+when none) and a `warning` naming what to upload. If the same call supplied
+`assets` for some of those ids (the upload-then-cleared race), they are
+re-uploaded from the bytes already read and the overlay re-sent exactly once; the
+result is the re-sent one. A retry that fails, or a cancelled request, keeps the
+first result and says so in `warning`. The MCP request deadline grows by 15 s per
+asset plus the request's `timeoutMs` (default 5000 ms), doubled for that one
+retry, plus 10 s per `observation` source for a capture still in flight, and
+30 s of headroom.
+
 `status` performs no device request. It reports only overlays successfully
 shown by this host in the current session and device, with their last action,
 result, and host timestamp in milliseconds, plus the logical `displayId` when a
@@ -606,8 +687,15 @@ the id from that device's host records; successful dismiss-all clears that devic
 After an event arrives, each shown entry also reports `pendingCount`, `lastSequence`
 (the highest accepted sequence), and cumulative overflow `droppedCount`. Before any
 event, these optional fields are omitted to preserve existing responses.
+Each shown entry also includes `pages` (pager id to zero-based page index), flat
+`state`, and `lastKnown: true` from its latest accepted `overlay_event`. These
+snapshots survive event consumption, host updates, and failed show attempts; a successful new show clears them
+until another event arrives. Requested state is never reported as observed state.
+Accepted events are pushed once to telemetry under category `overlay`, with
+owning device/session ids, event id, kind, name, sequence, pages and state. This
+telemetry is push-only, with no database persistence or historical backfill.
 A device-side `dismissed` event removes shown presence across that device's host
-sessions. `page_changed` events change only event bookkeeping, not host mutation
+sessions. `page_changed` events update the last known snapshot and event bookkeeping, preserving host mutation
 status. Raw transport disconnects are not observed; session release, device removal,
 and device unbinding clear the corresponding buffers and host status.
 
@@ -677,9 +765,11 @@ The device subscription ends when no nonterminal overlays remain.
 
 `highlight` takes either `shape` (a `circle` with `bounds`) or an `elementId`/`text`
 selector, never both. `elementId` is a resource ID; `text` matches text,
-content description, or placeholder. `selectionStrategy` is `first` (default)
-or `random`. `description` labels the highlight, and `timeoutMs` bounds the
-highlight request (default 5000 ms).
+content description, or placeholder. `selectionStrategy` is `first` (default),
+`random`, or `unique` (ambiguity returns the resolver failure). `container` accepts
+a nested chain with per-level `index` and `selectionStrategy`, resolved outermost
+first through the same resolver as `tapOn`. `description` labels the highlight,
+and `timeoutMs` bounds the highlight request (default 5000 ms).
 
 `explore` accepts positive integer `maxInteractions` (default 200), a positive
 `timeoutMs` (default 300000 ms), `resetToHome` to return home
@@ -795,7 +885,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                                                                                                            |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                                                      |
@@ -944,8 +1034,13 @@ belong inside `container` or `lookFor`; a strategy without a selector and
 malformed recursive selectors are rejected. Existing screen and simple selector
 calls retain their defaults.
 
-This nested-scoping contract is not yet available for `observe` subtree queries
-or `waitFor`.
+`waitFor` accepts nested container scopes. This nested-scoping contract is not yet
+available for `observe` subtree queries.
+
+`pinchOn.container` accepts nested containers with per-level `index` and
+`selectionStrategy` (`first`, `random`, or `unique`; default `first`). Strategy
+selection is supported only inside each container level; `pinchOn` has no
+top-level `selectionStrategy`.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
 100 commands. Each `key` command accepts at most 4 raw modifier entries
@@ -1093,7 +1188,7 @@ Without an owner, iOS selects the first element carrying a matching semantic
 link in document order, then resolves `occurrence` within that element. This
 changes the previous tree-wide counting (#6631). It never skips to a later owner
 when the first lacks the occurrence or link geometry. With multiple candidate
-owners, a successful SDK activation includes a runner `warning` naming the
+owners, a successful SDK activation adds the runner's note to the result's `warnings`, naming the
 selected owner and candidate count; use `container`/`subtext` for a specific owner.
 
 When SDK resolution fails, the XCUITest fallback remains available. Its flat
@@ -1116,10 +1211,8 @@ subtree, or the whole active-window tree when owner-less.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Opt-in discovery; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                                                    |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 fixtures through one target/files contract: private app_containers, bounded platform-qualified user_files, or media_library. Default-enabled for every storage target; see the canonical call shape below.                                                                                                                                                                                                                                                                                                                                            |
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 📥 <code>stageSharedStorage</code>                                                               | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 📥 <code>stageSharedStorageFixtures</code>                                                       | Deprecated alias of putAppFile target.domain user_files (Android Downloads); remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 📁 <code>stageSessionDownloads</code>                                                            | Deprecated session-bound alias of putAppFile target.domain user_files (Android Downloads); retains session ownership checks and remains until equivalent workflows are device-verified.                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults. On iOS, requires `appId` and selects the store with `suite` (not `name`/`fileName`); omitted/`Standard` uses the default store. Uses an already connected embedded SDK, with simulator plist fallback when permitted.                                                                                                                                                                                                                                                                                  |
 | 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file. For iOS, an empty `name`, "standard" (any case), or the app bundle id selects standard UserDefaults; other names select a valid suite. Names must have no leading or trailing whitespace. Android uses a SharedPreferences file name without `.xml`. iOS write results include `resolvedStore` when supported by the SDK and runner. `setKeyValue` returns `effectiveValueDiffers: true` and appends a warning when the write persisted but the app reads a different effective value due to an override; remove/clear never produce this warning. |
@@ -1171,7 +1264,11 @@ false; Android only).
 when opening the URL displays an intent chooser.
 
 `sqlQuery.databasePath` selects the database path; for iOS SDK databases, use the
-absolute registered path reported by the App Databases resource.
+absolute registered path reported by the App Databases resource. On Android,
+`sqlQuery` rows and the table-data resource return integers within ±(2^53 - 1) as
+JSON numbers; an integer outside that range is returned as its exact decimal
+string, and the response lists the zero-based columns that hold such strings in
+`bigIntegerColumns` so they can be told apart from TEXT.
 `getDataStore.adapterName` and `listDataStores.adapterName` select the name under
 which the host app registered its AutoMobile SDK DataStore adapter.
 
@@ -1203,6 +1300,29 @@ merely command dispatch or process disappearance.
 
 <details class="example" markdown="1">
 <summary>putAppFile canonical call shape and platform-qualified examples</summary>
+
+**Breaking change:** `stageSharedStorage` and `stageSharedStorageFixtures` have been removed.
+Replace either call with default-enabled `putAppFile`:
+
+```json
+{
+  "name": "putAppFile",
+  "arguments": {
+    "target": {
+      "domain": "user_files",
+      "namespace": "fixtures",
+      "reset": false,
+      "indexMedia": true
+    },
+    "files": [{ "destinationPath": "fixture.txt", "contentText": "fixture" }]
+  }
+}
+```
+
+Move `namespace`, `reset`, and `indexMedia` into `target`; keep `files` and device/session
+options at the top level. Each file requires `destinationPath` and exactly one of
+`sourcePath`, `contentText`, or `contentBase64`. Set `indexMedia: true` to preserve the
+removed tools' Android indexing default; `putAppFile` defaults it to false.
 
 Every target uses `target` plus a non-empty `files` array. Each file has a
 normalized relative `destinationPath` and exactly one of `sourcePath`,
@@ -1328,18 +1448,13 @@ Returned write/list file URIs continue to use these aliases. Paths are normalize
 percent-encoded by segment, and cannot traverse out of the target.
 
 Session enablement currently controls MCP discovery only; an unlisted tool stays
-callable. `putAppFile` stays default-disabled; the legacy defaults stay unchanged
-(`stageSharedStorage` true, `stageSharedStorageFixtures` and `stageSessionDownloads` false).
-The target policy resolves each exact tool name as session override, then startup
-default, then its registration default, and OR-combines effective names:
-app_containers and media_library use only `putAppFile`; user_files uses
-`putAppFile`, `stageSharedStorage`, or `stageSharedStorageFixtures`. Disabling an
-alias suppresses its default; disabling `putAppFile` does not veto an enabled alias.
-A default session therefore enables only the user_files target policy. Legacy
-enablement never enables private writes or lists `putAppFile` in discovery.
-Stored overrides on legacy names are honored in place, read without migration or
-deletion. `stageSessionDownloads` retains its separate session-bound policy and
-is not a grant in the unified target resolver. No new MCP call gate is introduced.
+callable. `putAppFile` is default-enabled for app_containers, user_files, and
+media_library. All domains resolve only its session override, then startup default,
+then registration default. An explicit false override disables all three target
+policies. Stored overrides under removed tool names are ignored without migration
+or deletion. `stageSessionDownloads` stays default-disabled with its separate
+session-bound policy and does not grant unified target enablement. No new MCP call
+gate is introduced.
 
 </details>
 
@@ -1418,7 +1533,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🔠 <code>displayConfig</code>                                                  | Reads or sets font/text scale, effective display density, and light/dark theme for adaptive-layout and large-font accessibility testing. Android supports all three fields (density overrides are best-effort on physical devices); the iOS Simulator supports theme only, via `simctl ui appearance`; physical iOS is unsupported. Android reset restores font scale and density to device defaults and restores night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Android reset never forces light. Omitted from discovery by default — select it with `setToolEnabled` (case-sensitive `displayConfig`) or `--enable-tool displayConfig`; direct calls by name remain available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator; duration must be an integer from 1 to 1,798,000 ms, and Android intensity must be from 1 to 1,000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an Android emulator phone call or incoming SMS.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -1549,7 +1664,7 @@ reset never forces light mode. The in-memory record survives feature instances,
 is cleared after a confirmed restore, and is lost when the process restarts.
 Failed restores keep the record for retry. The iOS Simulator reset continues to
 restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
-`shake.duration` is the shake duration in milliseconds (default 1000).
+`shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
@@ -1559,7 +1674,14 @@ Android buttons, each with `label` and `actionId`.
 `wakeAndUnlock.pin` supplies a secure Android unlock credential; it may be omitted
 if one is already remembered for the session and is ignored on iOS.
 
-`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`.
+`changeLocalization.timeZone` accepts a zone ID such as `America/Los_Angeles`. A malformed
+ID, a wrong-case spelling of a known zone (the device looks IDs up case-sensitively), or a
+bare UTC offset such as `+05:00` is refused before anything is written. Android also accepts
+Java custom IDs such as `GMT+5` or `GMT-08:00`. An ID shaped like `Area/Location` that the
+host does not know is still sent, with a note that the host could not validate it, and the
+device read-back decides whether it took effect. A successful change reports
+`timeZoneWarning`: the stored value read back, which does not confirm that running apps
+observe the new zone.
 `timeFormat` selects `"12"` or `"24"`, and `textDirection` selects `ltr` or `rtl`.
 `calendarSystem` accepts calendar identifiers such as `gregory`, `japanese`,
 `buddhist`, or `islamic-civil`. `restartApp` is the iOS bundle ID to relaunch
@@ -1573,7 +1695,21 @@ unchanged. `shake.intensity` sets Android shake intensity (default 100).
 `sendSms.phoneNumber` specifies the sender's number.
 `postNotification.channelId` supplies the Android channel ID or iOS APNs category.
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
-image path for `bigPicture`.
+image path for `bigPicture`. The host reads only the file's first bytes and
+rejects files over 16 MiB. It accepts PNG, JPEG, WebP, GIF and BMP everywhere,
+and HEIF/HEIC (decoded on Android 8.0+) and AVIF (Android 14+) with a warning,
+because the app falls back to showing the notification without the image on a
+device that cannot decode them.
+
+#### postNotification SDK compatibility
+
+The app's SDK receiver reports `0` (failed), `1` (posted) or `2` (posted, but the
+requested big picture could not be loaded, so it was shown without it). The host
+maps `2` to `success: true` with a warning and fails closed on any code it does
+not know, naming the code. A host older than the app's SDK predates code `2`, so
+an image-less `bigPicture` post that was actually posted is reported as
+`success: false` and a retry would post a duplicate. Update the host (AutoMobile)
+before, or together with, the SDK in the app.
 
 `biometricAuth.modality` selects `any` (default), `fingerprint`, or `face`.
 `fingerprintId` defaults to 1 for match/error and 2 for fail/cancel.
@@ -1591,6 +1727,20 @@ identifier from `automobile:devices/images`.
 booting the OS and `automationReadyTimeoutMs` for installing, updating, starting,
 and verifying the automation runner. Each defaults to 180000 ms; their sum,
 including defaults for omitted fields, must not exceed 890000 ms.
+
+`setDeviceResources` and `provisionDevice.resources` results include `requested`
+and an independent `observed` full-platform resource snapshot after configuration,
+including unrequested groups. No read path yields `unsupported` with a reason;
+failed reads yield `unknown`. Explicit opposite enabled/disabled states set
+`success: false` and name the resources in `observationContradictions`, using the
+existing MCP error response (provisioning retains the device/session). Unknown or
+unsupported observations do not add failures. Existing mutation fields retain
+their shape and meaning. Observation uses at most half the remaining resource deadline and shares the abort
+signal; exhausted reads report `unknown`, and provisioning replay refreshes it.
+Identical package and launchctl reads are reused only within one observation.
+Cancellation after mutation carries the completed result on the propagated error
+as `deviceResourceResult` (including any restore receipt). Non-abort observation errors are
+logged and omit `observed` while retaining the mutation result.
 
 `provisionDevice.operationId` is a caller-generated idempotency key.
 `deleteDevice.operationId` is a caller-generated idempotency and diagnostic
@@ -1752,6 +1902,14 @@ allowed); `slowThresholdMs` is the positive duration threshold in milliseconds
 at or above which a request counts as slow.
 
 `clearMockNetwork.mockId` selects one mock to clear; omit it to clear all.
+Mock rules and error simulation are kept per device. When a session is released
+or leaves a device, only the rules and simulation that session installed are
+removed, and the rest of the device's set is pushed to it. Rules and a
+simulation installed without a session (direct mode), or by another session, are
+never removed by a session release, even on the same device; sessionless state
+has no automatic lifetime and stays until `clearMockNetwork`, a cancelled or
+expired simulation, or removal of the device. A replaced simulation belongs to
+the session that installed the replacement.
 `getNetworkGraph.sinceSeconds` sets the lookback in seconds, and `minRequests`
 sets the minimum request count.
 
@@ -1762,6 +1920,11 @@ sets the minimum request count.
 
 `executePlan.planContent` contains YAML plan content (also accepts a `base64:`
 prefix). `startStep` is the start step index (default 0).
+Nested `executePlan` calls run on the enclosing plan's session/device. Remove
+`devices`/`device` labels from the nested call and device declarations from its
+YAML; otherwise execution fails before label allocation with: "Nested executePlan
+cannot use devices/device labels. Remove the labels; nested plans run on the
+enclosing plan's session/device."
 `deviceAllocationTimeoutMs` is the device allocation timeout in milliseconds
 (default 300000). For multi-device failures, `abortStrategy` selects `immediate`
 (default) or `finish-current-step`. `testMetadata` supplies test identity
@@ -1774,7 +1937,12 @@ snapshots to the step debug trace; multi-device plans ignore this capture option
 lifts. `criticalSection.deviceCount` specifies the devices required at its
 barrier before serial execution.
 
-`recordSteps.planName` names the plan for `action: "end"`.
+`recordSteps.planName` names the plan for `action: "end"`. The end response
+carries a `warnings` list when a call was skipped (a file-staging call with a
+host `sourcePath`, or a param over 64 KiB) or recorded in a weakened form:
+`resetKeychain` is recorded with `confirm: false`, so a replay stops at that
+step until you set `confirm: true` in the plan by hand. A recording whose calls
+were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
 
@@ -1821,11 +1989,11 @@ accept the recording `display` argument.
 
 ## Accessibility & session tools
 
-| Tool                               | What it does                                                                                                                                                                                                                                                                                                       |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it.                            |
-| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                |
-| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`. |
+| Tool                               | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state regardless of feature flags; when `force-accessibility-mode` or `accessibility-auto-detect: off` changes what the action tools assume, `detectionOverride` names it. After enabling TalkBack, reports a detected blocking system runtime permission prompt via `warning` and `blockingPrompt`; AutoMobile does not dismiss it. Use `observe`, then `tapOn` to answer it. |
+| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description.                                                                                                                                                                                                                                                                                                                                                                         |
+| 🔀 <code>setToolEnabled</code>     | Controls which AutoMobile tools appear in `tools/list` for the current MCP session; an omitted tool remains callable directly by name through `tools/call` — one exact name via `toolName`, or a batch via `toolNames`; unknown or hidden names reject the batch, while always-on names are returned in `skipped`.                                                                                                                                          |
 
 ### Accessibility focus selectors
 
@@ -1885,9 +2053,58 @@ index carries `selector.ambiguous: true`, including inert matches and groups
 with a child that can promote to a tap or toggle ancestor. Unique selectors
 carry neither `index` nor `ambiguous`; selectors with an index omit `ambiguous`.
 
+`observe({ project: "full", scope: { focus: ... } })` also accepts the action
+selector vocabulary: exactly one `elementId` or `text`, optional `container`
+(recursive), `index`, and `selectionStrategy`. The shared resolver resolves
+outermost-first through strict descendants, including anonymous wrappers;
+noninteractive containers are valid. `unique` is recommended for intentional
+queries and applies at every unindexed level. Explicit indices override
+uniqueness within the resolver's existing ranked candidate set at that level.
+Scope cannot expose descendants missing from the automation hierarchy.
+
+For example, on Android (resource IDs) or iOS (accessibility identifiers):
+
+```json
+{
+  "project": "full",
+  "scope": {
+    "focus": {
+      "elementId": "item_42",
+      "container": { "elementId": "cart_A" },
+      "selectionStrategy": "unique"
+    }
+  }
+}
+```
+
+The returned `observeScope.focus.chain` lists outermost-to-target selectors and
+`matchCount` at each level, before index selection. Selectors use `elementId` /
+`text` and retain their enclosing `container`, indices, and effective strategy,
+so the final selector can become an action's `container` (for example, tap
+`remove` within that item). Use qualified Android resource IDs when needed.
+No scope metadata is added to an observation that did not request a scope.
+Legacy `{resourceId}` / flat `{text}` anchors retain their exact-ID / substring
+matching, first-node behavior, and unchanged metadata without `chain`. An object
+with `elementId` or `container` is a nested selector; every other object keeps
+the flat `resourceId`/`text` anchor, ignoring extra fields. Boolean foreground-app
+focus keeps its existing metadata.
+As before, scope transforms apply to full projection, not the default skeleton.
+
+A failed new selector returns an empty subtree and `observeScope.focus.matched:
+false`, with the resolver's unchanged `error`. A missing leaf reports
+`Target not found within container`; missing or ambiguous ancestors additionally
+carry `containerFailure: { level, reason: "not-found" | "ambiguous", selector }`.
+Levels are one-based from the outermost container. Successful ancestor levels
+remain in `chain`; target counts are included when its ancestors resolved.
+`observe.waitFor` container timeouts expose the same optional `containerFailure`
+at the top level, alongside the existing `timeoutReason` and candidates.
+
 `observe.waitFor` element conditions (`appear`, `disappear`, `clickable`,
 `textEquals`, `countStable`, and legacy element predicates) accept a nested
 `container` chain and leaf `selectionStrategy: "first" | "random" | "unique"`.
+The `timeout` / `timeoutMs` wait budget is capped at 1,770,000 ms so the wait
+and its 30-second dispatch/report allowance fit within the caller's 30-minute
+request limit.
 Each container names exactly one `elementId` or `text` and may carry its own
 zero-based `index`, `selectionStrategy`, and enclosing `container`. The outermost
 container resolves first; later levels and the leaf search only strict descendants
@@ -2002,6 +2219,15 @@ users have it, the call fails and asks for `userId`. If the device's users canno
 user 0 is used (with a warning). The result always reports the `userId` that was read or
 written. `userId` is rejected for other scopes.
 
+`setKeyValue`, `removeKeyValue` and `clearKeyValueFile` accept the same optional `userId` on
+Android. It applies to their direct-file fallback (the `run-as` XML edit used when the SDK route
+is disabled by inspection or mutation policy) and resolve the default identically: an explicit
+`userId` wins, otherwise user 0 when the package is installed for it, else the one other running
+user that has it (several such users: the call fails and asks for `userId`). The SDK route itself is not user-scoped.
+The mutation queue is keyed per user, so the same file in two users never serializes together.
+`userId` is rejected on iOS devices. The `automobile:devices/{deviceId}/storage/...` entries
+resource has no input, so its `run-as` fallback reads the same default user.
+
 ### iOS UserDefaults preferences
 
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),
@@ -2113,7 +2339,8 @@ A stale launch observation may be replaced by `observationOmitted` containing
 actionable errors; a successful launch with unverified foreground still returns
 its verification fields.
 
-`terminateApp` reports `success`, `packageName`, and `wasForeground`, with optional
+`terminateApp` reports `success` and `packageName`, with optional `wasForeground`
+(omitted when the pre-terminate foreground app could not be determined),
 `wasInstalled`, `wasRunning`, `userId`, and action observation metadata. Already
 absent or stopped apps are successful no-ops. Failed terminations throw actionable
 errors.
@@ -2127,3 +2354,22 @@ error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
 `restored`; degraded network writes report capability `partial`. Setter TTL
 rejection and biometric capture failures also return structured failure payloads
 without MCP `isError`.
+
+### Compact action metadata
+
+Action responses compact unchanged metadata by default within a session and device:
+`observation.insets`, `systemInsets`, `backStack`, `gfxMetrics`,
+`displayedTimeMetrics`, `deviceLock`, `accessibilityState`, and `freshness`, plus
+raw `viewHierarchy.insets` and `viewHierarchy.systemInsets`. First delivery,
+a new session, and every device switch send available blocks in full; changed
+blocks reappear. Stale freshness, unstable gfx metrics, and partial back stacks
+remain inline. `backStack.capturedAt` alone does not count as a change.
+A duplicate top-level `element` is omitted when identical to
+`selectedElement.matchedElement` and not required by the output schema.
+Use `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`,
+or feature flag `actions-compact-metadata=false` to restore full metadata.
+`--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
+wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
+Unset or other env values express no preference: proxies relay no compact-metadata
+option and reuse the daemon's effective setting without restarting it.
+`observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).

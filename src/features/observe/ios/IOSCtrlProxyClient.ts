@@ -1,3 +1,4 @@
+import type { CtrlProxyMagicTapResult } from "./types";
 import type { IOSDispatchResult } from "./CtrlProxyDispatch";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
@@ -211,7 +212,8 @@ type IosSdkCapability =
   | "network_fault_rules"
   | "network_error_simulation"
   | "database"
-  | "highlight";
+  | "highlight"
+  | "magic_tap";
 
 interface IosSdkCapabilities {
   bundleId: string;
@@ -412,7 +414,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   requestTapCoordinates(
     x: number,
@@ -422,7 +425,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult>;
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>>;
 
   requestDrag(
     x1: number,
@@ -447,7 +451,9 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult>;
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<CtrlProxySetTextResult>;
 
@@ -605,6 +611,12 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult>;
+
+  requestMagicTap(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult>;
 
   requestActivateAccessibilityLink(
     text: string,
@@ -1264,11 +1276,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /**
-   * Test-only accessor for the currently bound session (or null when unbound).
-   * Mirrors the Android client so isolation tests can pin the routing invariant.
+   * The session currently receiving this device's navigation events, or null when
+   * unbound. Mirrors the Android client.
    */
-  public getBoundSessionIdForTesting(): string | null {
+  public getBoundSessionId(): string | null {
     return this.boundSessionId;
+  }
+
+  /** Test-only alias kept for isolation tests that pin the routing invariant. */
+  public getBoundSessionIdForTesting(): string | null {
+    return this.getBoundSessionId();
   }
 
   /**
@@ -2025,7 +2042,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     try {
       // Always sync mock rules on reconnect. Sending an empty list clears
       // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
-      const rules = buildNetworkMockRules(NetworkState.getInstance());
+      const rules = buildNetworkMockRules(NetworkState.getInstance(), this.device.deviceId);
       // sendMessage returns false (and logs) when the socket is not open.
       return this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }))
         ? "sent"
@@ -2050,7 +2067,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return;
     }
     try {
-      const sim = NetworkState.getInstance().simulation;
+      const sim = NetworkState.getInstance().getSimulation(this.device.deviceId);
       if (sim === null) {
         this.sendMessage(
           JSON.stringify({
@@ -2173,7 +2190,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
               capability === "network_fault_rules" ||
               capability === "network_error_simulation" ||
               capability === "database" ||
-              capability === "highlight",
+              capability === "highlight" ||
+              capability === "magic_tap",
           ),
         ),
       };
@@ -2270,6 +2288,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       network_error_simulation: "set_network_error_simulation",
       database: "execute_sql",
       highlight: "add_highlight",
+      magic_tap: "request_magic_tap",
     };
     return this.isCommandSupported(commandByCapability[capability]);
   }
@@ -2303,6 +2322,16 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       logger.debug(`[IOSCtrlProxyClient] mock-rule sync skipped: ${error.message}`);
       return "superseded";
     }
+  }
+
+  /**
+   * Push THIS device's mock rules and error simulation from the host store.
+   * Used after a session release clears the store (issue #10061); the
+   * reconnect path runs the same two syncs.
+   */
+  public async syncNetworkStateFromHost(): Promise<void> {
+    await this.syncNetworkMockRulesIfAvailable();
+    this.syncNetworkErrorSimulationToDevice();
   }
 
   private syncHierarchyCadenceToDevice(): void {
@@ -3675,6 +3704,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Delegated Public Methods - Gestures
   // ===========================================================================
 
+  // oxlint-disable-next-line max-params -- Positional tap signature shared with the delegate.
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -3683,7 +3713,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,
-  ): Promise<CtrlProxyTapResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
     return this.gestures.requestTapCoordinates(
       x,
       y,
@@ -3692,6 +3723,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       perf,
       frameContext,
       signal,
+      onDispatch,
     );
   }
 
@@ -3705,7 +3737,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
-  ): Promise<CtrlProxySwipeResult> {
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
     return this.gestures.requestSwipe(
       x1,
       y1,
@@ -3715,7 +3748,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       timeoutMs,
       perf,
       contextOptions,
-      undefined,
+      onDispatch,
       signal,
     );
   }
@@ -3759,16 +3792,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<CtrlProxyPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    return this.gestures.requestPinchWithDispatch(
+      {
+        centerX,
+        centerY,
+        distanceStart,
+        distanceEnd,
+        rotationDegrees,
+        duration,
+        timeoutMs,
+        perf,
+        signal,
+      },
+      onDispatch,
     );
   }
 
@@ -4056,6 +4095,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, options);
+  }
+
+  /** Invoke Magic Tap directly through the foreground app's in-app SDK. */
+  async requestMagicTap(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyMagicTapResult> {
+    return this.voiceOver.requestMagicTap(timeoutMs, perf, signal);
   }
 
   /**

@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import os from "os";
 import path from "path";
-import { toActionableError } from "../models/ActionableError";
+import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolveDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
@@ -82,6 +82,36 @@ export function resolveAutoMobileLogsDir(
   return path.join(
     resolveAutoMobileBaseDir(env, homeDir, daemonLaunchWorkingDirectory),
     TEMP_SUBDIRS.LOGS,
+  );
+}
+
+/**
+ * Fail loudly when a unit test is about to write into the DEFAULT, home-based
+ * logs directory (the user's real `~/.auto-mobile/logs`, where a resident
+ * daemon's own logs live). Armed only under `NODE_ENV=test` (what `bun test`
+ * sets), mirroring the real-DB guard in `src/db/database.ts`, and silent when
+ * the test redirected logs with a log-dir or data-dir override.
+ *
+ * @param env - Environment to inspect (injectable for tests)
+ */
+export function assertUnitTestLogsDirIsolated(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.NODE_ENV !== "test") {
+    return;
+  }
+  // Same `??` precedence as resolveAutoMobileLogsDir/resolveAutoMobileBaseDir: an
+  // empty AUTOMOBILE_* value shadows its AUTO_MOBILE_* twin there, so it must here too.
+  const overrides = [
+    env.AUTOMOBILE_LOG_DIR ?? env.AUTO_MOBILE_LOG_DIR,
+    env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR,
+  ];
+  if (overrides.some((value) => value !== undefined && value.trim().length > 0)) {
+    return;
+  }
+  throw new ActionableError(
+    "Unit test is about to write to the real AutoMobile logs directory " +
+      `(${resolveAutoMobileLogsDir(env)}). Unit tests must never touch the user's ` +
+      "~/.auto-mobile: point AUTOMOBILE_DATA_DIR (or AUTOMOBILE_LOG_DIR) at a temp " +
+      "directory the test removes.",
   );
 }
 

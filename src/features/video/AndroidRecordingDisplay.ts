@@ -38,12 +38,13 @@ export function rejectedScreenrecordDisplayFlag(
 export async function probeScreenrecordDisplayFlag(
   tracker: { exitPromise: Promise<void>; exitState: ProcessExitState; stderr: string[] },
   timer: Timer,
+  timeoutMs = 20,
 ): Promise<boolean> {
   const probeTimeout = new Error("screenrecord display flag probe timed out");
   try {
     await raceWithDeadline(tracker.exitPromise, {
       timer,
-      timeoutMs: 20,
+      timeoutMs,
       label: "screenrecord display flag probe",
       timeoutError: () => probeTimeout,
     });

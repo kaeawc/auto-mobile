@@ -100,6 +100,24 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         return await postHighlight(path: "/highlight", body: body)
     }
 
+    public func performMagicTap() async -> Bool? {
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: "/accessibility/magic-tap", body: Data("{}".utf8)),
+                transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            return try JSONDecoder().decode(MagicTapPayload.self, from: data).handled
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .debug("Magic Tap bridge unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     // MARK: - Private
 
     private func fetchDecoded(path: String) async -> SdkViewHierarchy? {
@@ -185,4 +203,8 @@ private struct SetNetworkFaultRulesBody: Encodable {
 private struct AddHighlightBody: Encodable {
     let id: String
     let shape: HighlightShape
+}
+
+private struct MagicTapPayload: Decodable {
+    let handled: Bool
 }

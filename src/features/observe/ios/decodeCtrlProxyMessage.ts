@@ -215,6 +215,8 @@ function decodeImeActionResult(message: WebSocketMessage): unknown {
     action: (message as { action?: string }).action,
     totalTimeMs: message.totalTimeMs ?? 0,
     error: message.error,
+    // action_result carries the semantic-link owner-ambiguity note here (#10082).
+    warning: message.warning,
     perfTiming: message.perfTiming,
   };
 }
@@ -450,6 +452,18 @@ const messageDecoders = new Map<
   ["hinge_angle_result", decodeHingeAngleResult],
   ["ime_action_result", decodeImeActionResult],
   ["action_result", decodeImeActionResult],
+  [
+    "magic_tap_result",
+    (message) => ({
+      success: message.success ?? false,
+      available: message.available ?? false,
+      handled: message.handled,
+      unsupported: message.unsupported ?? false,
+      requiresVoiceOver: false,
+      error: message.error,
+      totalTimeMs: message.totalTimeMs ?? 0,
+    }),
+  ],
   ["voiceover_state_result", decodeVoiceoverStateResult],
   ["voiceover_set_result", decodeVoiceoverSetResult],
   ["highlight_response", decodeHighlightResponse],

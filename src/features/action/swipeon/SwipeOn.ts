@@ -5,10 +5,12 @@ import {
 } from "../../observe/cache/ObserveCacheRegistry";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchyCapture";
 import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
-import { executeAndroidSearchDrag } from "./androidSearchDrag";
+import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
+import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
+import { isDeviceLostError } from "../../../models/DeviceLostError";
 import {
   withStaleDisplay,
   StaleDisplayError,
@@ -16,6 +18,7 @@ import {
 } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { SwipeSearchCancelledError } from "./searchCancellation";
 import {
   BaseVisualChange,
   INTERMEDIATE_OBSERVATION_OPTIONS,
@@ -115,6 +118,11 @@ const DISPLAY_SWIPE_OPTIONS = [
 type DisplayTalkBackState = { enabled: boolean; unknownWarning?: string };
 
 /** Unknown TalkBack state keeps the raw swipe but reports the default route's warning once. */
+/** A confirmed swipe, or one dispatched without a reply (#9972), may have moved the screen. */
+function swipeMayHaveMoved(result: Pick<SwipeResult, "success" | "outcomeIndeterminate">): boolean {
+  return result.success || result.outcomeIndeterminate === true;
+}
+
 function withUnknownTalkBackWarning(result: SwipeOnResult, warning?: string): SwipeOnResult {
   if (!warning || result.warnings?.includes(warning)) {
     return result;
@@ -439,26 +447,43 @@ export class SwipeOn extends BaseVisualChange {
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
     let totalDuration = duration;
     if (boomerang) {
-      if (boomerang.apexPauseMs > 0) {
-        await this.timer.sleep(boomerang.apexPauseMs);
-      }
-      target.assertCurrent();
-      throwIfAborted(signal);
       const returnDuration = getReturnDuration({
         forwardDuration: duration,
         returnSpeed: boomerang.returnSpeed,
       });
-      await this.dispatchDisplaySwipeLeg({
-        x1: x2,
-        y1: y2,
-        x2: x1,
-        y2: y1,
-        duration: returnDuration,
-        target,
-        useCtrlProxy,
-        signal,
-      });
       totalDuration += boomerang.apexPauseMs + returnDuration;
+      // The forward leg landed: a pause cancel, a failed return leg or a throw must say so (#9973).
+      const returnResult = await runBoomerangReturnLeg({
+        timer: this.timer,
+        apexPauseMs: boomerang.apexPauseMs,
+        signal,
+        returnSwipe: () =>
+          this.dispatchDisplayReturnLeg({
+            x1: x2,
+            y1: y2,
+            x2: x1,
+            y2: y1,
+            duration: returnDuration,
+            target,
+            useCtrlProxy,
+            signal,
+          }),
+      });
+      if (!returnResult.success) {
+        return this.withAutoTargetDecision({
+          result: {
+            ...returnResult,
+            targetType,
+            x1,
+            y1,
+            x2,
+            y2,
+            duration: totalDuration,
+            warning,
+          },
+          decision,
+        });
+      }
     }
     return this.withAutoTargetDecision({
       result: {
@@ -713,6 +738,40 @@ export class SwipeOn extends BaseVisualChange {
     }
   }
 
+  /** The TalkBack executor exposes no send point, so its swipes are counted as attempted. */
+  private executeDisplayTalkBackSwipe(input: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    duration: number;
+    direction: SwipeDirection;
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    searchDragState?: AndroidSearchDragState;
+    signal?: AbortSignal;
+    onDispatched?: () => void;
+  }): Promise<SwipeResult> {
+    input.onDispatched?.();
+    return this.talkBackExecutor.executeSwipeGesture(
+      input.x1,
+      input.y1,
+      input.x2,
+      input.y2,
+      input.direction,
+      null,
+      {
+        displayFence: { assertCurrent: input.target.assertCurrent },
+        duration: input.duration,
+        scrollMode: input.options.scrollMode,
+        searchDragState: input.searchDragState,
+      },
+      undefined,
+      undefined,
+      input.signal,
+    );
+  }
+
   private async searchOnAndroidDisplay({
     options,
     target,
@@ -781,7 +840,7 @@ export class SwipeOn extends BaseVisualChange {
       signal,
       strategy: {
         observe,
-        swipe: async ({ previousObservation, searchDragState, ...coordinates }) => {
+        swipe: async ({ previousObservation, searchDragState, onDispatched, ...coordinates }) => {
           const result = await this.observedInteraction(
             async () => {
               const fallback = async () => {
@@ -791,28 +850,21 @@ export class SwipeOn extends BaseVisualChange {
                   target,
                   useCtrlProxy: false,
                   signal,
+                  onDispatched,
                 });
                 dispatched = true;
                 return { ...coordinates, success: true };
               };
               const gesture = await (talkBack.enabled
-                ? this.talkBackExecutor.executeSwipeGesture(
-                    coordinates.x1,
-                    coordinates.y1,
-                    coordinates.x2,
-                    coordinates.y2,
-                    direction.direction as SwipeDirection,
-                    null,
-                    {
-                      displayFence: { assertCurrent: target.assertCurrent },
-                      duration: coordinates.duration,
-                      scrollMode: options.scrollMode,
-                      searchDragState,
-                    },
-                    undefined,
-                    undefined,
+                ? this.executeDisplayTalkBackSwipe({
+                    ...coordinates,
+                    direction: direction.direction as SwipeDirection,
+                    options,
+                    target,
+                    searchDragState,
                     signal,
-                  )
+                    onDispatched,
+                  })
                 : useCtrlProxy
                   ? executeAndroidSearchDrag({
                       ...coordinates,
@@ -822,6 +874,7 @@ export class SwipeOn extends BaseVisualChange {
                       displayId: target.displayId === 0 ? undefined : target.displayId,
                       beforeSend: target.assertCurrent,
                       fallback,
+                      onDispatched,
                       onIndeterminate: (cause) => {
                         throw new DispatchedObservationError(cause);
                       },
@@ -867,6 +920,31 @@ export class SwipeOn extends BaseVisualChange {
     return withUnknownTalkBackWarning(result, talkBack.unknownWarning);
   }
 
+  /**
+   * Return leg of a display-addressed boomerang as a SwipeResult, so a plain dispatch failure
+   * reaches `runBoomerangReturnLeg` as a result it can mark partially applied. Cancellation, device
+   * loss and stale-display errors stay thrown: the callers branch on those types.
+   */
+  private async dispatchDisplayReturnLeg(
+    options: Parameters<SwipeOn["dispatchDisplaySwipeLeg"]>[0],
+  ): Promise<SwipeResult> {
+    const { x1, y1, x2, y2, duration, signal } = options;
+    try {
+      await this.dispatchDisplaySwipeLeg(options);
+      return { success: true, x1, y1, x2, y2, duration };
+    } catch (error) {
+      throwIfAborted(signal);
+      if (isDeviceLostError(error) || error instanceof StaleDisplayError) {
+        throw error;
+      }
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+      logger.warn(`swipeOn display return leg failed: ${errorMessage(error)}`, error);
+      return { success: false, error: errorMessage(error), x1, y1, x2, y2, duration };
+    }
+  }
+
   private async dispatchDisplaySwipeLeg(options: {
     x1: number;
     y1: number;
@@ -876,8 +954,10 @@ export class SwipeOn extends BaseVisualChange {
     target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
     useCtrlProxy: boolean;
     signal?: AbortSignal;
+    /** Fires as the gesture is handed to the device, after the pre-send checks. */
+    onDispatched?: () => void;
   }): Promise<void> {
-    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal } = options;
+    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal, onDispatched } = options;
     target.assertCurrent();
     throwIfAborted(signal);
     if (useCtrlProxy) {
@@ -890,7 +970,7 @@ export class SwipeOn extends BaseVisualChange {
         undefined,
         undefined,
         undefined,
-        undefined,
+        onDispatched,
         signal,
         target.displayId === 0 ? undefined : target.displayId,
         target.assertCurrent,
@@ -906,6 +986,7 @@ export class SwipeOn extends BaseVisualChange {
         target.displayId,
         signal,
         target.assertCurrent,
+        { onDispatch: onDispatched },
       );
     }
   }
@@ -980,6 +1061,10 @@ export class SwipeOn extends BaseVisualChange {
               );
         }
       } catch (error) {
+        // throwIfAborted would replace this with a generic cancellation that loses the swipe count.
+        if (error instanceof SwipeSearchCancelledError) {
+          throw error;
+        }
         throwIfAborted(signal);
         if (error instanceof Error && error.name === "AbortError") {
           throw error;
@@ -1161,6 +1246,9 @@ export class SwipeOn extends BaseVisualChange {
       return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
       perf.end();
+      if (error instanceof SwipeSearchCancelledError) {
+        throw error;
+      }
       throwIfAborted(signal);
 
       logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
@@ -1459,7 +1547,8 @@ export class SwipeOn extends BaseVisualChange {
           throw new ActionableError(swipeResult.error ?? "iOS lock-screen swipe failed");
         }
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }
@@ -1580,7 +1669,8 @@ export class SwipeOn extends BaseVisualChange {
               ),
         );
         throwIfAborted(signal);
-        if (this.device.platform === "ios" && swipeResult.success) {
+        // An unconfirmed swipe may still have scrolled, so the next read must not be pre-swipe.
+        if (this.device.platform === "ios" && swipeMayHaveMoved(swipeResult)) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
         }

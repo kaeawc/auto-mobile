@@ -7,11 +7,14 @@ import { sendIOSPressCommand, type IOSDispatchResult } from "./CtrlProxyDispatch
  */
 
 import {
+  DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
   SharedGestureDelegate,
+  type PinchRequest,
   type TapDiagnosticParameters,
 } from "../shared/SharedGestureDelegate";
-import type { DelegateContext } from "./types";
+import type { CtrlProxyTapResult, DelegateContext } from "./types";
 import type { GestureTimingResult } from "../shared/types";
+import type { SendCommandOptions } from "../DeviceServiceUtils";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger, LogLevel } from "../../../utils/logger";
 import {
@@ -44,6 +47,49 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       strategy === "displayTargetedObserved"
       ? { diagnostics: true, tapStrategy: strategy }
       : { diagnostics: true };
+  }
+
+  /**
+   * A swipe written to the runner whose reply is late or lost has very likely scrolled the
+   * screen, so it reports `dispatched`/`acknowledged` like the other iOS dispatch commands. A
+   * runner reply, including a refusal, is acknowledged; a timeout or socket close is not.
+   */
+  protected override sendSwipeCommand(
+    options: SendCommandOptions<GestureTimingResult>,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return sendIOSPressCommand(this.context, options);
+  }
+
+  /**
+   * A tap written to the socket whose reply is late or lost may still have landed, so it is
+   * reported as dispatched-but-unacknowledged (never as a plain failure) the way presses are.
+   * A runner reply, including a refusal, stays acknowledged; a tap never sent stays a plain
+   * failure. The iOS client has no display routing, so `displayId` and `beforeSend` are unused.
+   */
+  // oxlint-disable-next-line max-params -- Keeps the shared delegate's positional tap signature.
+  override async requestTapCoordinates(
+    x: number,
+    y: number,
+    duration: number = 0,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+    perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<CtrlProxyTapResult>> {
+    return sendIOSPressCommand(
+      this.context,
+      this.tapCommandOptions({
+        x,
+        y,
+        duration,
+        timeoutMs,
+        perf,
+        frameContext,
+        signal,
+        onDispatch,
+      }),
+    );
   }
 
   /**
@@ -83,6 +129,21 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       onDispatch,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Multi-finger swipe",
+    });
+  }
+
+  /**
+   * Send a two-finger pinch. A request the runner never answered (socket close, timeout or
+   * cancellation after the send) is reported `dispatched` and not `acknowledged`, and not retryable:
+   * the pinch may already have zoomed the screen.
+   */
+  async requestPinchWithDispatch(
+    request: PinchRequest,
+    onDispatch?: () => void,
+  ): Promise<IOSDispatchResult<GestureTimingResult>> {
+    return sendIOSPressCommand(this.context, {
+      ...this.pinchCommandOptions(request),
+      onDispatch,
     });
   }
 }

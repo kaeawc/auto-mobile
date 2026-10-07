@@ -68,7 +68,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileNotifications {
   public final void reset$auto_mobile_sdk();
   public final boolean post(java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
   public static boolean post$default(dev.jasonpearson.automobile.sdk.AutoMobileNotifications, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List, java.lang.String, int, java.lang.Object);
-  public final boolean postWithContext$auto_mobile_sdk(android.content.Context, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
+  public final dev.jasonpearson.automobile.sdk.NotificationPostResult postWithContext$auto_mobile_sdk(android.content.Context, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
 }
 Compiled from "AutoMobileSDK.kt"
 public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
@@ -250,6 +250,15 @@ public final class dev.jasonpearson.automobile.sdk.NotificationAction {
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
+}
+Compiled from "AutoMobileNotifications.kt"
+public final class dev.jasonpearson.automobile.sdk.NotificationPostResult extends java.lang.Enum<dev.jasonpearson.automobile.sdk.NotificationPostResult> {
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult POSTED;
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult POSTED_WITHOUT_IMAGE;
+  public static final dev.jasonpearson.automobile.sdk.NotificationPostResult FAILED;
+  public static dev.jasonpearson.automobile.sdk.NotificationPostResult[] values();
+  public static dev.jasonpearson.automobile.sdk.NotificationPostResult valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.NotificationPostResult> getEntries();
 }
 Compiled from "AutoMobileNotifications.kt"
 public final class dev.jasonpearson.automobile.sdk.NotificationStyle$Companion {
@@ -496,6 +505,11 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDoc
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument(int, int, java.util.List, dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy, kotlinx.serialization.internal.SerializationConstructorMarker);
   public static final kotlin.Lazy[] access$get$childSerializers$cp();
 }
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityJsonKt {
+  public static final java.lang.String toSnapshotJson(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public static final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult decodeSdkCapabilitySnapshot(java.lang.String);
+}
 Compiled from "SdkCapabilities.kt"
 public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry {
   public static final int $stable;
@@ -515,6 +529,33 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityReg
   public static final java.util.Set access$getHostManagedCapabilities$cp();
   public static final java.util.LinkedHashMap access$getDefaultDescriptors$cp();
   public static final java.util.Set access$getReservedCapabilities$cp();
+}
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure implements dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure(java.lang.String);
+  public final java.lang.String getReason();
+  public final java.lang.String component1();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure copy(java.lang.String);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Failure, java.lang.String, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "SdkCapabilityJson.kt"
+public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success implements dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
+  public static final int $stable;
+  public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument getDocument();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument component1();
+  public final dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success copy(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument);
+  public static dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success copy$default(dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult$Success, dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDocument, int, java.lang.Object);
+  public java.lang.String toString();
+  public int hashCode();
+  public boolean equals(java.lang.Object);
+}
+Compiled from "SdkCapabilityJson.kt"
+public interface dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitySnapshotResult {
 }
 Compiled from "SdkCapabilities.kt"
 public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState$Companion {
@@ -1791,6 +1832,7 @@ public final class dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriv
   public static final java.lang.String CHANGES_PATH = "changes";
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations);
   public dev.jasonpearson.automobile.sdk.storage.SharedPreferencesDriverImpl(android.content.Context, dev.jasonpearson.automobile.sdk.storage.FileSystemOperations, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public final java.lang.String getProcessToken$auto_mobile_sdk();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.PreferenceFileDescriptor> getPreferenceFiles();
   public java.util.List<dev.jasonpearson.automobile.sdk.storage.KeyValuePair> getPreferences(java.lang.String);
   public void registerOnChangeListener(dev.jasonpearson.automobile.sdk.storage.OnPreferenceChangeListener);

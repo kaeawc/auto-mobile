@@ -4,11 +4,16 @@ import type { VideoRecordingConfigInput } from "../models";
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import { shouldSkipCtrlProxyDownload } from "../utils/ctrlProxyDownloadControl";
 import {
+  EVENT_ALL_MARKERS_FLAG,
   hasEventAllMarkersCliOverride,
   parseEventAllMarkersConfig,
 } from "../utils/eventAllMarkers";
 import { parseOutputReductionFlags } from "../utils/outputReductionFlags";
-import { parseToolOutputsDirConfig } from "../utils/toolOutputArtifacts";
+import {
+  parseToolOutputsDirConfig,
+  TOOL_OUTPUTS_DIR_FLAG,
+  TOOL_OUTPUT_DIR_FLAG_ALIAS,
+} from "../utils/toolOutputArtifacts";
 import { resolveDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
@@ -70,6 +75,16 @@ const cliOptions = {
   "disable-tool": { type: "string" as const, multiple: true },
 };
 
+// Value-taking options resolved outside the scalar-option walk below.
+const externalValueFlags = [
+  ...Object.entries(cliOptions)
+    .filter(([, option]) => option.type === "string")
+    .map(([name]) => `--${name}`),
+  EVENT_ALL_MARKERS_FLAG,
+  TOOL_OUTPUTS_DIR_FLAG,
+  TOOL_OUTPUT_DIR_FLAG_ALIAS,
+];
+
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
 // A declarative parser migration is separate behavior-changing work.
@@ -94,6 +109,7 @@ export function parseArgs(
   const noProxy = hasFlag("no-proxy") || hasFlag("direct");
   const noDaemon = hasFlag("no-daemon");
   const daemonCommandIndex = args.indexOf("--daemon");
+  const daemonRequested = daemonCommandIndex >= 0;
   const daemonCommand = daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] : undefined;
   const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
   const debugPerf =
@@ -147,9 +163,11 @@ export function parseArgs(
   return {
     cliMode,
     cliArgs,
+    invalidInvocation: scalarOptions.invalidInvocation,
     daemonPort: scalarOptions.daemonPort,
     daemonHost: scalarOptions.daemonHost,
     initialSessionUuid: scalarOptions.initialSessionUuid,
+    livenessOwnerToken: scalarOptions.livenessOwnerToken,
     debugPerf,
     debug,
     strictPort,
@@ -167,6 +185,7 @@ export function parseArgs(
     videoRecordingDefaults,
     runnerReadinessTimeoutMs: scalarOptions.runnerReadinessTimeoutMs,
     daemonMode,
+    daemonRequested,
     daemonCommand,
     daemonArgs,
     skipCtrlProxyDownload,
@@ -319,9 +338,11 @@ function createVideoRecordingDefaults(log: ParseLogger) {
 }
 
 interface ScalarOptions {
+  invalidInvocation?: string;
   daemonPort?: number;
   daemonHost?: string;
   initialSessionUuid?: string;
+  livenessOwnerToken?: string;
   a11yLevel?: string;
   a11yFailureMode?: string;
   a11yMinSeverity?: string;
@@ -343,13 +364,16 @@ function parseValueOptions(
     planExecutionLockScopeExplicit: false,
     runnerReadinessTimeoutMs,
   };
+  const daemonIndex = args.indexOf("--daemon");
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--cli") {
       break;
     }
     const connection = parseConnectionOption(args, i, log, options);
     if (connection !== undefined) {
-      i = connection;
+      // Invalid scalar values still belong to their option; keep the existing
+      // warning/default behavior rather than diagnosing them as stray commands.
+      i = Math.max(connection, optionValueEnd(args, i));
       continue;
     }
     const accessibility = parseAccessibilityOption(args, i, log, options);
@@ -365,9 +389,40 @@ function parseValueOptions(
     const recording = parseVideoOption(args, i, log, video);
     if (recording !== undefined) {
       i = recording;
+      continue;
     }
+    i = inspectInvocationToken(args, i, daemonIndex, options);
   }
   return options;
+}
+
+function optionValueEnd(args: string[], i: number): number {
+  return args[i + 1] !== undefined && !args[i + 1].startsWith("--") ? i + 1 : i;
+}
+
+function inspectInvocationToken(
+  args: string[],
+  i: number,
+  daemonIndex: number,
+  options: ScalarOptions,
+): number {
+  // These values are resolved by Node's parser or the shared flag helpers.
+  // Output-reduction flags are boolean and do not consume a following word.
+  if (externalValueFlags.includes(args[i])) {
+    return optionValueEnd(args, i);
+  }
+  // Command tails belong to their command parser. The scalar walk still
+  // resolves daemon startup options, but must not reject command arguments.
+  if (daemonIndex >= 0 && i >= daemonIndex) {
+    return i;
+  }
+  if (args[i].startsWith("--cli=")) {
+    options.invalidInvocation ??=
+      "Invalid CLI invocation. Use --cli <tool> instead of --cli=<tool>.";
+  } else if (!args[i].startsWith("-")) {
+    options.invalidInvocation ??= `Unexpected argument: ${args[i]}; did you mean --cli ${args[i]}?`;
+  }
+  return i;
 }
 
 function parseConnectionOption(
@@ -392,18 +447,39 @@ function parseConnectionOption(
     } else {
       log.warn(`Invalid host: ${host}`);
     }
-  } else if (arg === "--initial-session-uuid") {
-    const sessionUuid = args[i + 1];
-    if (sessionUuid && !sessionUuid.startsWith("--")) {
-      options.initialSessionUuid = sessionUuid;
-      i++;
-    } else {
-      log.warn(`Invalid initial session UUID: ${sessionUuid}`);
-    }
   } else {
-    return undefined;
+    return parseSessionBindingOption(args, i, log, options);
   }
   return i;
+}
+
+/** The proxy's device-session binding flags: which session, and under which owner token. */
+function parseSessionBindingOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+): number | undefined {
+  const arg = args[i];
+  const value = args[i + 1]?.trim();
+  const hasValue = value !== undefined && value.length > 0 && !value.startsWith("--");
+  if (arg === "--initial-session-uuid") {
+    if (!hasValue) {
+      log.warn(`Invalid initial session UUID: ${args[i + 1]}`);
+      return i;
+    }
+    options.initialSessionUuid = args[i + 1];
+    return i + 1;
+  }
+  if (arg === "--liveness-owner-token") {
+    if (!hasValue) {
+      log.warn("--liveness-owner-token requires a non-empty value");
+      return i;
+    }
+    options.livenessOwnerToken = value;
+    return i + 1;
+  }
+  return undefined;
 }
 
 function parseAccessibilityOption(

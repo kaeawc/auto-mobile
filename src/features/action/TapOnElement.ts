@@ -1,3 +1,5 @@
+import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
+import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
@@ -8,7 +10,10 @@ import {
   ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS,
   ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
 } from "./freshTapHierarchy";
-import type { TalkBackTargetContext } from "../talkback/resourceIdActionError";
+import {
+  isSemanticActionRejected,
+  type TalkBackTargetContext,
+} from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
@@ -78,6 +83,7 @@ import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
   getVisionEnrichedError,
@@ -108,6 +114,11 @@ import {
 } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
+import {
+  isOwnOverlayNode,
+  resolveOverlayTapUnderSystemBar,
+  type OverlayBarTapDecision,
+} from "./overlayTapUnderSystemBars";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
   getToggleContentDescription,
@@ -147,6 +158,7 @@ import {
   androidDisplayTapDispatch,
   dispatchAndroidCoordinateTap,
   dispatchIosCoordinateTap,
+  dispatchIosSecondTap,
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
@@ -206,6 +218,8 @@ const IOS_STATUS_BAR_CLASSES = new Set([
 ]);
 
 /** Internal action context; never part of the public tapOn schema. */
+type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
+
 type ResolvedAndroidTapOptions = DisplayFenceOption & {
   resolvedHierarchy?: ViewHierarchyResult;
   /** Receives non-fatal cautions (for example a double tap whose taps started too far apart). */
@@ -379,6 +393,10 @@ function appendDisabledElementWarning(
  */
 function warningsField(warnings: string[]): { warnings?: string[] } {
   return warnings.length ? { warnings } : {};
+}
+
+function withActivationWarning(warnings: string[], warning: string | undefined): string[] {
+  return warning ? [...warnings, warning] : warnings;
 }
 
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
@@ -706,6 +724,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
   }
 
+  /** Judge an Android tap on one of CtrlProxy's own overlay controls against the system bars (#10086). */
+  private overlayBarTapDecision(
+    hierarchy: ViewHierarchyResult,
+    element: Element,
+    point: { x: number; y: number },
+  ): OverlayBarTapDecision {
+    if (this.device.platform !== "android") {
+      return { kind: "proceed", point };
+    }
+    const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
+    return resolveOverlayTapUnderSystemBar({
+      hierarchy,
+      ownedByOverlay: isOwnOverlayNode(hierarchy, owner),
+      bounds: element.bounds,
+      point,
+    });
+  }
+
   private resolveImeSafeTapPoint(
     element: Element,
     hierarchy: ViewHierarchyResult,
@@ -750,7 +786,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     owner?: Element,
     viewHierarchy?: ViewHierarchyResult,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; warning?: string }> {
     const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
       if (result.dispatched && result.acknowledged !== true) {
         // A lost reply may mean the screen navigated; discard the pre-activation tree.
@@ -808,7 +844,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
       confirmActivation(result, () => this.invalidateIosCacheOnSuccess({ success: true }));
       this.invalidateIosCacheOnSuccess(result);
-      return { success: result.success, error: result.error };
+      // The runner's "first of N candidate owners" note must reach the caller (#10082).
+      return {
+        success: result.success,
+        error: result.error,
+        warning: result.warning,
+      };
     }
     return {
       success: false,
@@ -1362,15 +1403,33 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     context: TapPointContext,
   ): { x: number; y: number } | null {
     const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    if (this.device.platform !== "ios" && pointInTapBounds(point, visibleBounds)) {
-      return point;
-    }
     const { left, top, right, bottom } = visibleBounds;
     const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
     if (this.device.platform !== "ios") {
-      return ime
-        ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
-        : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const proposed = pointInTapBounds(point, visibleBounds)
+        ? point
+        : ime
+          ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
+          : this.geometry.getElementCenter({ bounds: visibleBounds });
+      const safe = applicationWindowSafeTapPoint(
+        hierarchy,
+        target,
+        visibleBounds,
+        proposed,
+        ime && {
+          left: ime.bounds[0],
+          top: ime.bounds[1],
+          right: ime.bounds[2],
+          bottom: ime.bounds[3],
+        },
+      );
+      if (!safe.point) {
+        throw new TapTargetUnavailableError(
+          `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
+          "no-visible-tap-area",
+        );
+      }
+      return safe.point;
     }
     const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
     const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
@@ -1726,9 +1785,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
-        (options.selectionStrategy !== "unique" &&
-          options.index === undefined &&
-          !options.container?.container) ||
+        (!isStrictlyScoped(options) && options.index === undefined) ||
         !this.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
@@ -1791,7 +1848,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           : "tap";
     const lookupAction = options.subtext
       ? "inspect"
-      : options.selectionStrategy === "unique" || options.container?.container
+      : isStrictlyScoped(options)
         ? intentAction
         : options.action === "focus"
           ? "focus-input"
@@ -3148,12 +3205,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     observeResult?: ObserveResult,
     containerFound: boolean = true,
     signal?: AbortSignal,
+    selection?: ElementSelectionResult,
   ): Promise<never> {
     if (options.container && !containerFound) {
       const containerLabel = options.container.elementId
         ? `elementId '${options.container.elementId}'`
         : `text '${options.container.text}'`;
-      throw new ActionableError(`Container element not found with provided ${containerLabel}`);
+      throw new ActionableError(
+        options.container.elementId?.startsWith("s2-")
+          ? `Container element id '${options.container.elementId}' is stale; re-observe and use the id from the new observation.`
+          : `Container element not found with provided ${containerLabel}`,
+      );
     }
 
     const containerHint = options.container
@@ -3174,7 +3236,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     } else if (options.accessibilityLink) {
       baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
     } else {
-      baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+      baseError = options.elementId?.startsWith("s2-")
+        ? `Element id '${options.elementId}' is stale; re-observe and use the id from the new observation.${containerHint}`
+        : `Element not found with provided elementId '${options.elementId}'${containerHint}`;
+    }
+
+    if (selection?.onlyKeyboardKeyMatch) {
+      throw new TapTargetUnavailableError(
+        `${baseError}. The only match is a soft-keyboard key, which observe does not list; ` +
+          "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
+        "not-found",
+      );
     }
 
     if (this.visionConfig.enabled && observeResult) {
@@ -3230,8 +3302,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const scopedOptions = {
       container: container.container,
       index: container.index,
-      strategy:
-        options.selectionStrategy === "unique" ? ("unique" as const) : container.selectionStrategy,
+      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
     };
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
@@ -3608,6 +3679,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ...context,
       onWarning: (warning) => displayWarnings.push(warning),
     });
+    // Everything that waits for the target is behind us. Report BEFORE the command goes out, the
+    // earliest moment the gesture can take effect: reporting once it returns could put the
+    // dispatch after the navigation event it caused (#10196).
+    reportToolDispatched();
     await dispatchAction(point);
     if (preTapHash && this.strategy.retryTapIfNoChange) {
       await this.retryTapIfNoChange(
@@ -3742,7 +3817,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         }
         // Vision screenshots are not display-aware. Omit the observation to keep
         // the shared base error without invoking default-display vision fallback.
-        await this.handleElementNotFound(options, undefined, outcome.containerFound, signal);
+        await this.handleElementNotFound(
+          options,
+          undefined,
+          outcome.containerFound,
+          signal,
+          outcome.selection,
+        );
       } catch (error) {
         logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
         return {
@@ -4104,6 +4185,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 bounds: { left: 0, top: 0, right: 0, bottom: 0 },
               } as Element,
               activatedSubtext: { text: options.accessibilityLink, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
 
@@ -4163,6 +4245,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               observeResult,
               searchOutcome.containerFound,
               signal,
+              searchOutcome.selection,
             );
           }
           const liveSelection = await this.refreshEnsureCheckedSelection(
@@ -4206,6 +4289,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               selectedElement: selectedElementMetadata,
               searchUntil: searchOutcome.stats,
               activatedSubtext: { text: options.subtext.text, occurrence },
+              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
             };
           }
           const initialTapPoint = this.geometry.getElementCenter(element);
@@ -4352,19 +4436,24 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 "Scroll it into view with swipeOn, then retry tapOn.",
             );
           }
-          const tapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
-            options,
-            screenSize,
-            chromeElements: [
-              this.matchedTapElement(
-                finalSelection,
+          const visibleTapPoint = this.resolveVisibleTapPoint(
+            tapElement,
+            viewHierarchy,
+            visibleBounds,
+            {
+              options,
+              screenSize,
+              chromeElements: [
+                this.matchedTapElement(
+                  finalSelection,
+                  tapElement,
+                  requestedAction === "focus" ? { ...options, action: "focus" } : options,
+                ),
                 tapElement,
-                requestedAction === "focus" ? { ...options, action: "focus" } : options,
-              ),
-              tapElement,
-            ],
-          });
-          if (!tapPoint) {
+              ],
+            },
+          );
+          if (!visibleTapPoint) {
             throw this.invisibleMatchFailure(
               finalSelection,
               options,
@@ -4373,6 +4462,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               "Matched element has no unobstructed visible tap area. " +
                 "Dismiss the keyboard or scroll it into view, then retry tapOn.",
             );
+          }
+          const barDecision = this.overlayBarTapDecision(
+            viewHierarchy,
+            tapElement,
+            visibleTapPoint,
+          );
+          if (barDecision.kind === "refuse") {
+            throw new ActionableError(
+              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile overlay control is under the ${barDecision.bar} and the touch would not reach it. ` +
+                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+            );
+          }
+          const tapPoint = barDecision.point;
+          if (barDecision.warning) {
+            activationWarnings.push(barDecision.warning);
           }
           const tapBounds = tapElement.bounds;
           logger.info(
@@ -4392,8 +4496,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(viewHierarchy) : null;
           let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
-          // Platform-specific tap execution
+          // Platform-specific tap execution. Everything that waits for the target (search,
+          // pre-tap refresh) is behind us: the navigation graph measures from here (#10196).
           await perf.track("executeTap", async () => {
+            reportToolDispatched();
             switch (this.device.platform) {
               case "android":
                 screenReaderNavigation = await this.executeAndroidTap(
@@ -4435,7 +4541,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
-                  { displayFence: fence },
+                  { displayFence: fence, signal },
                 );
                 break;
               default:
@@ -4534,6 +4640,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
           element: result.element,
+          effect: postTap.effect,
           signal,
         });
         if (selectedElements.length > 0) {
@@ -4643,7 +4750,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return undefined;
     }
 
-    if (options?.container?.container || options?.selectionStrategy === "unique") {
+    if (isStrictlyScoped(options)) {
       await this.executeScopedAndroidTap({
         action,
         x,
@@ -5038,7 +5145,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * Default (#3936): directly activate the target via ACTION_CLICK — deterministic,
    * no cursor stepping — then fall back to a coordinate gesture, then ADB.
    * When `options.screenReaderNavigation` is set (opt-in fidelity mode, #3937),
-   * drive the TalkBack cursor by swipe navigation to the target before activating.
+   * move the TalkBack cursor onto the target with ACTION_ACCESSIBILITY_FOCUS (never a swipe, #10209)
+   * before activating.
    * For longPress, tries ACTION_LONG_CLICK first, then coordinate gesture, then ADB.
    */
   /**
@@ -5168,21 +5276,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     // Long press returned above; the remaining actions are tap and doubleTap.
     if (this.isScreenReaderNavigationEnabled(options)) {
-      // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
-      // navigation to the target, then activate.
+      // Opt-in fidelity mode (#3937): move the TalkBack cursor onto the target with
+      // ACTION_ACCESSIBILITY_FOCUS, then activate. A failure after the focus request was sent
+      // throws; only a failure before anything was dispatched returns here and may fall back.
       const result = await this.talkBackStrategy.executeTap(
         this.device.deviceId,
         element,
         driver,
         fence,
+        signal,
       );
 
       if (result.success) {
+        // A focus-navigation gesture is acknowledged, not confirmed as an activation.
+        this.reportTalkBackActivationWarning(result, options, action);
         return result.screenReaderNavigation;
       }
 
       logger.warn(
-        `[TapOnElement] Focus navigation failed (${result.error}), ` +
+        `[TapOnElement] Focus navigation unavailable (${result.error}); nothing was dispatched, ` +
           `falling back to coordinate-based tap at (${x}, ${y})`,
       );
       screenReaderNavigation = result.screenReaderNavigation;
@@ -5273,17 +5385,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
     if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, {
-        displayFence: fence,
-      });
+      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
       return;
     }
 
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fenceOptions);
   }
 
   /**
@@ -5294,9 +5403,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: IosTapOptions = {},
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
+    const { displayFence: fence, signal } = fenceOptions;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
 
@@ -5306,20 +5415,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Double tap - perform two taps
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       await this.timer.sleep(200);
 
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
+      await dispatchIosSecondTap(client, { x, y }, tapDuration, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       // Once beforeSend lands, also pass this as the dispatch's beforeSend.
       fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
   }
@@ -5346,9 +5455,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fenceOptions?: DisplayFenceOption,
+    fenceOptions?: IosTapOptions,
   ): Promise<void> {
-    const fence = this.readOptionalDisplayFence(fenceOptions);
+    const { displayFence: fence, signal } = this.readIosTapOptions(fenceOptions);
     // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label =
       (element["ios-accessibility-label"] as string | undefined) ??
@@ -5359,7 +5468,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (!label) {
       logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
       return;
     }
 
@@ -5386,7 +5498,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
           `falling back to coordinate tap at (${x}, ${y})`,
       );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, {
+        displayFence: fence,
+        signal,
+      });
     }
   }
 
@@ -5395,6 +5510,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw indeterminateTapError(result.error);
     }
     this.invalidateIosCacheOnSuccess(result);
+  }
+
+  private readIosTapOptions(options?: IosTapOptions): IosTapOptions {
+    return options ?? {};
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {
@@ -5538,7 +5657,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (result.success) {
         return true;
       }
-      if (hasAccessibilityAction(element.actions, "long_click")) {
+      const rejected = await isSemanticActionRejected({
+        advertised: hasAccessibilityAction(element.actions, "long_click"),
+        error: result.error,
+        needsNodeSelector,
+        selected: element,
+        // Fresh and unfiltered, like the target guard: the cached tree may predate the miss.
+        readHierarchy: () =>
+          this.accessibilityService.getAccessibilityHierarchy(
+            undefined,
+            undefined,
+            true,
+            undefined,
+            true,
+            signal,
+          ),
+      });
+      // The hierarchy reader turns cancellation into null; never degrade it to a press.
+      throwIfAborted(signal);
+      if (rejected) {
         throw new ActionableError(
           `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
         );

@@ -1,3 +1,5 @@
+import type { OverlayEvent } from "../observe/android/ctrlProxyProtocol";
+import type { OverlayScope } from "../overlay/OverlayStatusStore";
 import { logger } from "../../utils/logger";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
 import { NetworkState } from "../../server/NetworkState";
@@ -25,7 +27,8 @@ export type TelemetryCategory =
   | "storage"
   | "layout"
   | "performance"
-  | "toolcall";
+  | "toolcall"
+  | "overlay";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -298,21 +301,24 @@ export class TelemetryRecorder {
     });
   }
 
-  async recordNavigationEvent(event: {
-    timestamp: number;
-    applicationId: string | null;
-    destination: string;
-    source: string | null;
-    arguments: Record<string, string> | null;
-    metadata: Record<string, string> | null;
-    triggeringInteraction?: {
-      type: string;
-      elementText?: string;
-      elementResourceId?: string;
-    } | null;
-    screenshotUri?: string | null;
-  }): Promise<void> {
-    const { deviceId, sessionId } = this.snapshotContext();
+  async recordNavigationEvent(
+    event: {
+      timestamp: number;
+      applicationId: string | null;
+      destination: string;
+      source: string | null;
+      arguments: Record<string, string> | null;
+      metadata: Record<string, string> | null;
+      triggeringInteraction?: {
+        type: string;
+        elementText?: string;
+        elementResourceId?: string;
+      } | null;
+      screenshotUri?: string | null;
+    },
+    origin?: { deviceId?: string | null },
+  ): Promise<void> {
+    const { deviceId, sessionId } = this.contextFor(origin?.deviceId);
     const input: RecordNavigationEventInput = { deviceId, sessionId, ...event };
 
     if (this.buffer) {
@@ -480,8 +486,42 @@ export class TelemetryRecorder {
     });
   }
 
+  /** Push-only overlay interactions; ownership comes from the event coordinator. */
+  recordOverlayEvent(scope: OverlayScope, event: OverlayEvent): void {
+    this.pushToSocket({
+      category: "overlay",
+      timestamp: event.timestamp,
+      deviceId: scope.deviceId,
+      sessionId: scope.sessionUuid ?? null,
+      data: {
+        id: event.id,
+        sequence: event.sequence,
+        kind: event.kind,
+        name: event.name,
+        pages: { ...event.pages },
+        state: { ...event.state },
+      },
+    });
+  }
+
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {
     return { deviceId: this.deviceId, sessionId: this.sessionId };
+  }
+
+  /**
+   * The context for an event whose source knows its device (#10195). The ambient context is
+   * whichever device last called `setContext`, so a source that knows better passes its own
+   * device; the ambient session is only valid for the ambient device.
+   */
+  private contextFor(originDeviceId: string | null | undefined): {
+    deviceId: string | null;
+    sessionId: string | null;
+  } {
+    const ambient = this.snapshotContext();
+    if (originDeviceId === undefined || originDeviceId === ambient.deviceId) {
+      return ambient;
+    }
+    return { deviceId: originDeviceId, sessionId: null };
   }
 
   private pushToSocket(event: TelemetryEvent): void {

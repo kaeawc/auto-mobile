@@ -22,6 +22,11 @@ import {
   DEFAULT_OVERLAY_EVENT_TIMEOUT_MS,
   MAX_OVERLAY_EVENT_TIMEOUT_MS,
 } from "../../src/features/overlay/overlayEventTimeout";
+import {
+  DEFAULT_OVERLAY_ASSET_TIMEOUT_MS,
+  MAX_OVERLAY_ASSET_COUNT,
+} from "../../src/features/overlay/overlayAssets";
+import { OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS } from "../../src/server/observationResourceUris";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
@@ -1552,6 +1557,41 @@ describe("argument budget deadline gaps", () => {
       }
       expect(resolve({ action: "awaitEvent", timeoutMs: 60_000 }, 1_000_000)).toBe(1_000_000);
     });
+    test("show and update with assets budget the upload and send twice for the one retry", () => {
+      const assets = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: `a${i}`, path: `/x/${i}.png` }));
+      const perAsset = DEFAULT_OVERLAY_ASSET_TIMEOUT_MS;
+      for (const action of ["show", "update"]) {
+        expect(resolve({ action, assets: assets(1) })).toBe(2 * (perAsset + 5_000) + headroom);
+        expect(resolve({ action, assets: assets(4) })).toBe(2 * (4 * perAsset + 5_000) + headroom);
+        expect(resolve({ action, assets: assets(4), timeoutMs: 20_000 })).toBe(
+          2 * (4 * perAsset + 20_000) + headroom,
+        );
+      }
+      // The tool rejects more than the contract maximum, so the budget stops growing there.
+      expect(resolve({ action: "show", assets: assets(500) })).toBe(
+        2 * (MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000) + headroom,
+      );
+    });
+    test("observation sources add one capture wait each", () => {
+      const assets = [
+        { id: "a", path: "/x/a.png" },
+        { id: "b", observation: "automobile:observation/d/o/screenshot" },
+        { id: "c", observation: "automobile:observation/d/p/screenshot" },
+        null,
+        "junk",
+      ];
+      expect(resolve({ action: "show", assets })).toBe(
+        2 * (5 * DEFAULT_OVERLAY_ASSET_TIMEOUT_MS + 5_000) +
+          2 * OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS +
+          headroom,
+      );
+    });
+    test("show without usable assets keeps the default deadline", () => {
+      for (const assets of [undefined, [], "x", null, {}]) {
+        expect(resolve({ action: "show", assets })).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+      }
+    });
     test("hostile tool names never reach a resolver", () => {
       for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
         expect(
@@ -1563,6 +1603,93 @@ describe("argument budget deadline gaps", () => {
           }),
         ).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       }
+    });
+    test("showVariants waitForSelection budgets the show, the default wait and headroom", () => {
+      const waiting = { action: "showVariants", id: "panel", waitForSelection: true };
+      const show = 5_000;
+      expect(resolve(waiting)).toBe(show + DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+      expect(resolve(waiting)).toBeGreaterThan(DEFAULT_OVERLAY_EVENT_TIMEOUT_MS);
+      // timeoutMs bounds only the show request: it extends the show stage, never the wait.
+      expect(resolve({ ...waiting, timeoutMs: 45_000 })).toBe(
+        45_000 + DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+      );
+      for (const timeoutMs of MALFORMED_MCP_BUDGETS) {
+        const result = resolve({ ...waiting, timeoutMs });
+        if (timeoutMs !== Number.MAX_SAFE_INTEGER) {
+          expect(result).toBe(show + DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom);
+        }
+      }
+    });
+    describe("showVariants with assets", () => {
+      const assets = (count: number) =>
+        Array.from({ length: count }, (_, i) => ({ id: `a${i}`, path: `/x/${i}.png` }));
+      const perAsset = DEFAULT_OVERLAY_ASSET_TIMEOUT_MS;
+      test("matches show when it does not wait", () => {
+        for (const count of [1, 4]) {
+          expect(resolve({ action: "showVariants", id: "p", assets: assets(count) })).toBe(
+            resolve({ action: "show", assets: assets(count) }),
+          );
+        }
+        expect(
+          resolve({ action: "showVariants", id: "p", assets: assets(2), timeoutMs: 20_000 }),
+        ).toBe(2 * (2 * perAsset + 20_000) + headroom);
+      });
+      test("adds the upload budget, show, selection wait and headroom when it waits", () => {
+        const waiting = { action: "showVariants", id: "p", waitForSelection: true };
+        expect(resolve({ ...waiting, assets: assets(3) })).toBe(
+          2 * (3 * perAsset + 5_000) + DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        );
+        expect(resolve({ ...waiting, assets: assets(3), timeoutMs: 20_000 })).toBe(
+          2 * (3 * perAsset + 20_000) + DEFAULT_OVERLAY_EVENT_TIMEOUT_MS + headroom,
+        );
+        expect(resolve({ ...waiting, assets: assets(3) })).toBeGreaterThan(
+          resolve({ action: "showVariants", id: "p", assets: assets(3) }),
+        );
+      });
+      test("observation sources add one capture wait each", () => {
+        const sources = [
+          { id: "a", path: "/x/a.png" },
+          { id: "b", observation: "automobile:observation/d/o/screenshot" },
+        ];
+        expect(
+          resolve({ action: "showVariants", id: "p", waitForSelection: true, assets: sources }),
+        ).toBe(
+          OBSERVATION_SCREENSHOT_CAPTURE_WAIT_TIMEOUT_MS +
+            2 * (2 * perAsset + 5_000) +
+            DEFAULT_OVERLAY_EVENT_TIMEOUT_MS +
+            headroom,
+        );
+      });
+      test("stops growing at the contract maximum and ignores unusable assets", () => {
+        expect(resolve({ action: "showVariants", id: "p", assets: assets(500) })).toBe(
+          2 * (MAX_OVERLAY_ASSET_COUNT * perAsset + 5_000) + headroom,
+        );
+        for (const value of [undefined, [], "x", null, {}]) {
+          expect(resolve({ action: "showVariants", id: "p", assets: value })).toBe(
+            DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+          );
+        }
+      });
+      test("a larger request timeout still wins", () => {
+        expect(
+          resolve(
+            { action: "showVariants", id: "p", waitForSelection: true, assets: assets(2) },
+            1_000_000,
+          ),
+        ).toBe(1_000_000);
+      });
+    });
+    test("showVariants without a true waitForSelection keeps the default deadline", () => {
+      for (const waitForSelection of [undefined, false, "true", 1, null]) {
+        expect(resolve({ action: "showVariants", id: "panel", waitForSelection })).toBe(
+          DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+        );
+      }
+    });
+    test("a larger request timeout still wins over the showVariants wait", () => {
+      expect(
+        resolve({ action: "showVariants", id: "panel", waitForSelection: true }, 1_000_000),
+      ).toBe(1_000_000);
     });
   });
   test("putAppFile legacy single-file shape uses one push floor", () => {
@@ -1674,6 +1801,17 @@ describe("executePlan deadline derived from the plan's steps (#9882)", () => {
     });
     expect(resolvePlan(content)).toBe(3 * observeWaitMs(300_000) + HEADROOM_MS);
     expect(resolvePlan(content)).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("base64 plan budgets match plain YAML and oversized encoded content saturates", () => {
+    const yamlContent =
+      "name: p\nsteps:\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n  - tool: observe\n    params:\n      waitFor:\n        elementId: x\n        timeout: 480000\n";
+    const plainBudget = resolvePlan(yamlContent);
+    expect(plainBudget).toBeGreaterThan(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+    expect(resolvePlan(`base64:${Buffer.from(yamlContent).toString("base64")}`)).toBe(plainBudget);
+    expect(resolvePlan(`base64:${"A".repeat(MAX_EXECUTE_PLAN_BUDGET_CONTENT_CHARS)}`)).toBe(
+      MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
   });
 
   test("parallel device tracks take the longest track's sum, not the total", () => {

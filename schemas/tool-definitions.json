@@ -1,7 +1,7 @@
 [
   {
     "name": "accessibility",
-    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device.",
+    "description": "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device, regardless of feature flags: enabled is what the device reports. When force-accessibility-mode or accessibility-auto-detect: off changes what the action tools assume, detectionOverride names it ({ mode: forced-on | auto-detect-off, effectiveEnabled }); it is absent otherwise.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -61,6 +61,20 @@
             }
           },
           "required": ["kind", "package", "activity"],
+          "additionalProperties": false
+        },
+        "detectionOverride": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["forced-on", "auto-detect-off"]
+            },
+            "effectiveEnabled": {
+              "type": "boolean"
+            }
+          },
+          "required": ["mode", "effectiveEnabled"],
           "additionalProperties": false
         }
       },
@@ -181,6 +195,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -715,6 +730,12 @@
         "fileName": {
           "description": "Deprecated alias for name",
           "type": "string"
+        },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",
@@ -2039,8 +2060,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -2166,8 +2185,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -3037,29 +3054,36 @@
           "type": "string"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; outermost resolves first, with per-level index and selectionStrategy",
           "anyOf": [
             {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
+              "$ref": "#/$defs/__schema0"
             },
             {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "description": "Container resource ID",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["elementId"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "description": "Container text",
+                      "type": "string"
+                    }
+                  },
+                  "required": ["text"],
+                  "additionalProperties": false
                 }
-              },
-              "required": ["text"],
-              "additionalProperties": false
+              ]
             }
           ]
         },
@@ -3070,7 +3094,7 @@
         "selectionStrategy": {
           "description": "Selection strategy when multiple match (default: first)",
           "type": "string",
-          "enum": ["first", "random"]
+          "enum": ["first", "random", "unique"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -3084,7 +3108,61 @@
           "type": "string"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {
@@ -3838,6 +3916,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -3904,7 +3983,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -3934,6 +4013,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -4000,7 +4080,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -4238,6 +4318,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -5082,6 +5163,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -5328,6 +5410,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -6600,6 +6683,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -8019,6 +8103,12 @@
                     "type": "null"
                   }
                 ]
+              },
+              "transportAliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
@@ -8296,7 +8386,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
+    "description": "Android synthetic s2- element ids are valid only for the observation that returned them; re-observe before using an id after the screen changes. Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -8493,10 +8583,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -8809,7 +8901,7 @@
           "type": "object",
           "properties": {
             "focus": {
-              "description": "Scope to a subtree: true = foreground app; {resourceId|text} = anchor.",
+              "description": "Scope to a subtree: true = foreground app; objects with elementId or container use the recursive action selector; all other objects keep the legacy resourceId/text anchor with extras ignored.",
               "anyOf": [
                 {
                   "type": "boolean"
@@ -8826,7 +8918,10 @@
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/__schema0"
                 }
               ]
             },
@@ -8950,6 +9045,7 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -9694,6 +9790,7 @@
                   "type": "object",
                   "properties": {
                     "elementId": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "label": {
@@ -9760,7 +9857,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -9789,6 +9886,7 @@
                   "type": "object",
                   "properties": {
                     "elementId": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "label": {
@@ -9855,7 +9953,7 @@
                       }
                     },
                     "occluded": {
-                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                       "type": "boolean",
                       "const": true
                     },
@@ -11479,6 +11577,7 @@
             "type": "object",
             "properties": {
               "elementId": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "label": {
@@ -11545,7 +11644,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -11575,6 +11674,7 @@
             "type": "object",
             "properties": {
               "elementId": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "label": {
@@ -11641,7 +11741,7 @@
                 }
               },
               "occluded": {
-                "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                 "type": "boolean",
                 "const": true
               },
@@ -11981,6 +12081,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12227,6 +12328,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12473,6 +12575,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12746,6 +12849,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -12994,6 +13098,7 @@
                 "type": "string"
               },
               "view-id": {
+                "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                 "type": "string"
               },
               "content-desc": {
@@ -13389,6 +13494,20 @@
                 }
               },
               "required": ["kind", "package", "activity"],
+              "additionalProperties": false
+            },
+            "detectionOverride": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["forced-on", "auto-detect-off"]
+                },
+                "effectiveEnabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["mode", "effectiveEnabled"],
               "additionalProperties": false
             }
           },
@@ -14054,10 +14173,12 @@
               "enum": ["first", "random", "unique"]
             },
             "timeout": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             },
             "timeoutMs": {
-              "type": "number"
+              "type": "number",
+              "maximum": 1770000
             }
           },
           "anyOf": [
@@ -14274,14 +14395,14 @@
   },
   {
     "name": "overlay",
-    "description": "Show, update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
+    "description": "Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["show", "update", "dismiss", "status", "awaitEvent"]
+          "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
           "description": "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
@@ -15399,13 +15520,1111 @@
           "additionalProperties": false
         },
         "display": {
-          "description": "show only: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
+          "description": "show or showVariants: panel key, role, or active to show the overlay on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising overlay_display_id_v1; a disconnected panel is refused.",
           "type": "string"
         },
         "id": {
-          "description": "Overlay id required for update, dismiss or awaitEvent; must equal spec.id on update",
+          "description": "Overlay id required for update, dismiss, awaitEvent or showVariants; must equal spec.id on update",
           "type": "string",
           "minLength": 1
+        },
+        "variants": {
+          "description": "showVariants only: 1-12 alternatives, each {label?, image:{asset,contentScale?}} or {label?, spec:OverlayNode}. Image assets are ids uploaded in the same call through assets, or already on the device.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "image": {
+                "type": "object",
+                "properties": {
+                  "asset": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "contentScale": {
+                    "type": "string",
+                    "enum": ["fit", "crop", "fill"]
+                  }
+                },
+                "required": ["asset"],
+                "additionalProperties": false
+              },
+              "spec": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "testTag": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "onTap": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["emit"]
+                                },
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "payload": {}
+                              },
+                              "required": ["type", "name"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["setPage"]
+                                },
+                                "pager": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "page": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": ["next", "prev"]
+                                    },
+                                    {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 2147483647
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": ["type", "pager", "page"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["setState"]
+                                },
+                                "key": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                },
+                                "value": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": ["type", "key", "value"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["dismiss"]
+                                }
+                              },
+                              "required": ["type"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      },
+                      "style": {
+                        "type": "object",
+                        "properties": {
+                          "width": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": ["fill", "wrap"]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "dp": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": ["dp"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "height": {
+                            "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/width"
+                          },
+                          "padding": {
+                            "type": "object",
+                            "properties": {
+                              "top": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "bottom": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "start": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "end": {
+                                "type": "number",
+                                "minimum": 0
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "background": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                          },
+                          "cornerRadius": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "border": {
+                            "type": "object",
+                            "properties": {
+                              "width": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                              }
+                            },
+                            "required": ["width", "color"],
+                            "additionalProperties": false
+                          },
+                          "alpha": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "alignment": {
+                            "type": "string",
+                            "enum": [
+                              "topStart",
+                              "topCenter",
+                              "topEnd",
+                              "centerStart",
+                              "center",
+                              "centerEnd",
+                              "bottomStart",
+                              "bottomCenter",
+                              "bottomEnd"
+                            ]
+                          },
+                          "arrangement": {
+                            "type": "string",
+                            "enum": [
+                              "start",
+                              "center",
+                              "end",
+                              "spaceBetween",
+                              "spaceAround",
+                              "spaceEvenly"
+                            ]
+                          },
+                          "spacing": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "textSize": {
+                            "type": "number",
+                            "minimum": 0.000001
+                          },
+                          "fontWeight": {
+                            "type": "integer",
+                            "minimum": 100,
+                            "maximum": 900
+                          },
+                          "color": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                          },
+                          "textAlign": {
+                            "type": "string",
+                            "enum": ["start", "center", "end", "justify"]
+                          },
+                          "maxLines": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "fontFamily": {
+                            "type": "string",
+                            "enum": ["default", "sansSerif", "serif", "monospace"]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "visibleWhen": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          },
+                          "equals": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["key", "equals"],
+                        "additionalProperties": false
+                      },
+                      "anchor": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["bounds"]
+                              },
+                              "bounds": {
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "type": "number"
+                                  },
+                                  "width": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  },
+                                  "height": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": ["x", "y", "width", "height"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["type", "bounds"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["element"]
+                              },
+                              "selector": {
+                                "type": "object",
+                                "properties": {
+                                  "elementId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "testTag": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "container": {
+                                    "type": "object",
+                                    "properties": {
+                                      "elementId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      },
+                                      "index": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 2147483647
+                                      },
+                                      "selectionStrategy": {
+                                        "type": "string",
+                                        "const": "unique"
+                                      },
+                                      "container": {
+                                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor/anyOf/1/properties/selector/properties/container"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "alignment": {
+                                "type": "string",
+                                "enum": ["cover", "top", "bottom", "start", "end"]
+                              },
+                              "offset": {
+                                "type": "object",
+                                "properties": {
+                                  "x": {
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["x", "y"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["type", "selector", "alignment"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "safeAreaPadding": {
+                        "type": "object",
+                        "properties": {
+                          "edges": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["top", "bottom", "start", "end"]
+                            },
+                            "minItems": 1,
+                            "maxItems": 4
+                          },
+                          "types": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["systemBars", "cutout", "ime"]
+                            },
+                            "minItems": 1,
+                            "maxItems": 3
+                          }
+                        },
+                        "required": ["edges", "types"],
+                        "additionalProperties": false
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["box"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 0
+                      }
+                    },
+                    "required": ["type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["row"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 0
+                      }
+                    },
+                    "required": ["type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["column"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 0
+                      }
+                    },
+                    "required": ["type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["text"]
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["type", "text"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["image"]
+                      },
+                      "asset": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "contentScale": {
+                        "type": "string",
+                        "enum": ["fit", "crop", "fill"]
+                      }
+                    },
+                    "required": ["type", "asset"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["icon"]
+                      },
+                      "name": {
+                        "type": "string",
+                        "enum": [
+                          "home",
+                          "search",
+                          "settings",
+                          "person",
+                          "favorite",
+                          "add",
+                          "close",
+                          "check",
+                          "arrow_back",
+                          "arrow_forward",
+                          "chevron_left",
+                          "chevron_right",
+                          "menu",
+                          "more_vert",
+                          "share",
+                          "edit",
+                          "delete",
+                          "info",
+                          "warning",
+                          "notifications",
+                          "star",
+                          "shopping_cart",
+                          "help",
+                          "refresh",
+                          "done",
+                          "cancel",
+                          "play_arrow",
+                          "pause",
+                          "stop",
+                          "mail",
+                          "phone",
+                          "location_on",
+                          "calendar_today",
+                          "visibility",
+                          "lock",
+                          "logout"
+                        ]
+                      }
+                    },
+                    "required": ["type", "name"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["spacer"]
+                      }
+                    },
+                    "required": ["type"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["textField"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "placeholder": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["type", "stateKey"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["scroll"]
+                      },
+                      "axis": {
+                        "type": "string",
+                        "enum": ["vertical", "horizontal"],
+                        "default": "vertical"
+                      },
+                      "child": {
+                        "$ref": "#/properties/variants/items/properties/spec"
+                      }
+                    },
+                    "required": ["type", "child"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["pager"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": ["id", "type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["tabBar"]
+                      },
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "icon": {
+                              "type": "string",
+                              "enum": [
+                                "home",
+                                "search",
+                                "settings",
+                                "person",
+                                "favorite",
+                                "add",
+                                "close",
+                                "check",
+                                "arrow_back",
+                                "arrow_forward",
+                                "chevron_left",
+                                "chevron_right",
+                                "menu",
+                                "more_vert",
+                                "share",
+                                "edit",
+                                "delete",
+                                "info",
+                                "warning",
+                                "notifications",
+                                "star",
+                                "shopping_cart",
+                                "help",
+                                "refresh",
+                                "done",
+                                "cancel",
+                                "play_arrow",
+                                "pause",
+                                "stop",
+                                "mail",
+                                "phone",
+                                "location_on",
+                                "calendar_today",
+                                "visibility",
+                                "lock",
+                                "logout"
+                              ]
+                            },
+                            "image": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["label"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 32
+                      },
+                      "pager": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "scrollable": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["type", "items"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["bottomNav"]
+                      },
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/10/properties/items/items"
+                        },
+                        "minItems": 2,
+                        "maxItems": 5
+                      },
+                      "pager": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      }
+                    },
+                    "required": ["type", "items"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["bottomSheet"]
+                      },
+                      "openWhen": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          },
+                          "equals": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["key", "equals"],
+                        "additionalProperties": false
+                      },
+                      "detents": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["half", "full"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "dp": {
+                                  "type": "number",
+                                  "minimum": 0.000001
+                                }
+                              },
+                              "required": ["dp"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      },
+                      "scrim": {
+                        "type": "string",
+                        "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                      },
+                      "dragHandle": {
+                        "type": "boolean"
+                      },
+                      "dismissOnSwipe": {
+                        "type": "boolean"
+                      },
+                      "child": {
+                        "$ref": "#/properties/variants/items/properties/spec"
+                      }
+                    },
+                    "required": ["type", "openWhen", "detents", "child"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "presentation": {
+          "description": "showVariants only: fullscreen (default) or floating controls over the live app",
+          "type": "string",
+          "enum": ["fullscreen", "floating"]
+        },
+        "opacity": {
+          "description": "showVariants only: window opacity percentage; omitted uses the spec default",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "gravity": {
+          "description": "showVariants floating only: default bottomCenter",
+          "type": "string",
+          "enum": [
+            "topStart",
+            "topCenter",
+            "topEnd",
+            "centerStart",
+            "center",
+            "centerEnd",
+            "bottomStart",
+            "bottomCenter",
+            "bottomEnd"
+          ]
+        },
+        "offset": {
+          "description": "showVariants floating only: offset in dp, default {x:0,y:0}",
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "waitForSelection": {
+          "description": "showVariants only: after a successful show, wait for the user's pick and return selection {index, label?}; the wait is 30000 ms (timedOut:true on expiry), independent of the show timeoutMs",
+          "type": "boolean"
         },
         "state": {
           "description": "Flat state patch for update; use either spec or state",
@@ -15425,6 +16644,35 @@
                 "type": "boolean"
               }
             ]
+          }
+        },
+        "assets": {
+          "description": "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "minItems": 1,
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "description": "Opaque asset id that spec image nodes reference (image.asset)",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "path": {
+                "description": "Absolute path of a PNG, JPEG or WebP file the daemon can read",
+                "type": "string",
+                "minLength": 1
+              },
+              "observation": {
+                "description": "Instead of path: an observation screenshot URI, automobile:observation/{deviceId}/{observationId}/screenshot (the observationScreenshotResourceUri that observe returns); it must still be that device's current observation",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": false
           }
         },
         "all": {
@@ -15449,7 +16697,7 @@
           "maximum": 9007199254740991
         },
         "timeoutMs": {
-          "description": "Device request timeout; awaitEvent defaults to 30000 ms, maximum 60000 ms; timeout is a successful empty result",
+          "description": "Device request timeout; awaitEvent defaults to 30000 ms, maximum 60000 ms; timeout is a successful empty result. showVariants timeoutMs bounds only the show; waitForSelection uses the default event wait",
           "type": "integer",
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991
@@ -15535,6 +16783,41 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "pages": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "state": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                }
+              },
+              "lastKnown": {
+                "description": "Pages and state are the last accepted overlay_event snapshot, not a live device query",
+                "type": "boolean",
+                "const": true
               }
             },
             "required": ["lastAction", "success", "timestamp"],
@@ -15643,6 +16926,23 @@
           "required": ["id", "sequence", "kind", "name", "payload", "state", "pages", "timestamp"],
           "additionalProperties": false
         },
+        "selection": {
+          "description": "showVariants waitForSelection only: the picked zero-based index and the label it was shown with, if any",
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 11
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 256
+            }
+          },
+          "required": ["index"],
+          "additionalProperties": false
+        },
         "timedOut": {
           "description": "awaitEvent reached its timeout without a matching event; success remains true",
           "type": "boolean",
@@ -15652,6 +16952,39 @@
           "description": "The overlay scope ended without a matching event",
           "type": "string",
           "const": "dismissed"
+        },
+        "uploadedAssets": {
+          "description": "show/update with assets: assets the device confirmed, also present on failure. They stay on the device until the overlay session ends.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string"
+              },
+              "bytes": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["id", "mimeType", "bytes"],
+            "additionalProperties": false
+          }
+        },
+        "missingAssets": {
+          "description": "show/update: asset ids the overlay references that the device has no copy of; the overlay is shown with placeholders. Absent when none. Upload them with assets on a show or update with spec.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "warning": {
+          "description": "show/update succeeded but needs attention; names what to do about missingAssets",
+          "type": "string"
         },
         "pendingCount": {
           "description": "Unconsumed events, including events excluded by filters or cursor",
@@ -15821,7 +17154,7 @@
           "type": "boolean"
         },
         "container": {
-          "description": "Scope search to a container",
+          "description": "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {
@@ -16364,6 +17697,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -16430,7 +17764,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -16460,6 +17794,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -16526,7 +17861,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -16764,6 +18099,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -17608,6 +18944,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -17854,6 +19191,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -19085,6 +20423,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -19718,8 +21057,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -20600,6 +21937,13 @@
         "durationMs": {
           "type": "number"
         },
+        "warnings": {
+          "description": "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "error": {
           "type": "string"
         },
@@ -20662,6 +22006,12 @@
         "key": {
           "description": "Key",
           "type": "string"
+        },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",
@@ -20789,6 +22139,12 @@
         "lockOrientation": {
           "description": "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
           "type": "boolean"
+        },
+        "display": {
+          "description": "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "platform": {
           "type": "string",
@@ -21179,6 +22535,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -21245,7 +22602,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -21275,6 +22632,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -21341,7 +22699,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -21579,6 +22937,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -22423,6 +23782,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -22669,6 +24029,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -23894,6 +25255,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -24419,6 +25781,70 @@
                   }
                 },
                 "required": ["observedGeneration", "currentGeneration", "retry"],
+                "additionalProperties": false
+              },
+              "imeFailure": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "unsupportedCapability",
+                      "activationBinding",
+                      "commit",
+                      "verification",
+                      "transport",
+                      "restoration"
+                    ]
+                  },
+                  "cause": {
+                    "type": "string"
+                  },
+                  "expectedText": {
+                    "type": "string"
+                  },
+                  "observedText": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "focusedFieldClass": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "textMayHaveBeenApplied": {
+                    "type": "boolean"
+                  },
+                  "committedUnits": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "verifiedGraphemes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "stage",
+                  "cause",
+                  "expectedText",
+                  "observedText",
+                  "focusedFieldClass",
+                  "textMayHaveBeenApplied"
+                ],
                 "additionalProperties": false
               },
               "backend": {
@@ -25862,6 +27288,12 @@
             "UNKNOWN"
           ]
         },
+        "userId": {
+          "description": "Android only: user whose copy of the app the direct-file (run-as) fallback edits (e.g. a work profile). Defaults to user 0 when the app is installed for it; otherwise to the one other running user that has it (an error asks for userId if several do). The SDK route is not user-scoped.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -26195,8 +27627,6 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
-            "stageSharedStorage",
-            "stageSharedStorageFixtures",
             "startTestRecording",
             "swipeOn",
             "systemTray",
@@ -26288,8 +27718,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "stageSharedStorage",
-              "stageSharedStorageFixtures",
               "startTestRecording",
               "swipeOn",
               "systemTray",
@@ -26493,12 +27921,16 @@
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration ms (default 1000)",
-          "type": "number"
+          "description": "Shake duration ms (1-1798000, default 1000)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1798000
         },
         "intensity": {
-          "description": "Shake intensity (Android; default 100)",
-          "type": "number"
+          "description": "Shake intensity on Android (1-1000, default 100); ignored on iOS",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 1000
         },
         "platform": {
           "type": "string",
@@ -26695,150 +28127,6 @@
         }
       },
       "required": ["sessionUuid", "directory", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "stageSharedStorage",
-    "description": "Deprecated alias of putAppFile with target.domain \"user_files\"; retained until device verification. Stage host-file, UTF-8, or base64 fixtures into one bounded Android Downloads namespace for system pickers.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "description": "Android platform",
-          "default": "android",
-          "type": "string",
-          "const": "android"
-        },
-        "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
-        },
-        "reset": {
-          "description": "Remove only this declared namespace before writing",
-          "default": false,
-          "type": "boolean"
-        },
-        "indexMedia": {
-          "description": "Request Android media indexing for media files",
-          "default": true,
-          "type": "boolean"
-        },
-        "files": {
-          "description": "Files to stage into the namespace",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourcePath": {
-                "description": "Host file path",
-                "type": "string",
-                "minLength": 1
-              },
-              "contentText": {
-                "description": "UTF-8 content",
-                "type": "string"
-              },
-              "contentBase64": {
-                "description": "Base64 content",
-                "type": "string"
-              },
-              "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
-              }
-            },
-            "required": ["destinationPath"],
-            "additionalProperties": false
-          }
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["namespace", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "stageSharedStorageFixtures",
-    "description": "Deprecated alias of putAppFile with target.domain \"user_files\"; retained until device verification. Stage files in an isolated Android Download namespace for system picker workflows.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "description": "Android platform",
-          "default": "android",
-          "type": "string",
-          "const": "android"
-        },
-        "namespace": {
-          "description": "One caller-named child directory beneath Downloads",
-          "type": "string"
-        },
-        "reset": {
-          "description": "Remove only this declared namespace before writing",
-          "default": false,
-          "type": "boolean"
-        },
-        "indexMedia": {
-          "description": "Request Android media indexing for media files",
-          "default": true,
-          "type": "boolean"
-        },
-        "files": {
-          "description": "Files to stage into the namespace",
-          "minItems": 1,
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "sourcePath": {
-                "description": "Host file path",
-                "type": "string",
-                "minLength": 1
-              },
-              "contentText": {
-                "description": "UTF-8 content",
-                "type": "string"
-              },
-              "contentBase64": {
-                "description": "Base64 content",
-                "type": "string"
-              },
-              "destinationPath": {
-                "description": "Path relative to the declared Downloads namespace",
-                "type": "string"
-              }
-            },
-            "required": ["destinationPath"],
-            "additionalProperties": false
-          }
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "required": ["namespace", "files"],
       "additionalProperties": false
     }
   },
@@ -27987,6 +29275,7 @@
               "type": "string"
             },
             "view-id": {
+              "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
               "type": "string"
             },
             "content-desc": {
@@ -28501,6 +29790,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -28567,7 +29857,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -28597,6 +29887,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -28663,7 +29954,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -28901,6 +30192,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -29745,6 +31037,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -29991,6 +31284,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -31455,7 +32749,7 @@
           "type": "object",
           "properties": {
             "reachable": {
-              "description": "Whether swipe cursor navigation reached the target",
+              "description": "Whether the accessibility cursor was moved onto the target",
               "type": "boolean"
             },
             "traversalOrder": {
@@ -31519,6 +32813,7 @@
                     "type": "string"
                   },
                   "view-id": {
+                    "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                     "type": "string"
                   },
                   "content-desc": {
@@ -31709,7 +33004,7 @@
               }
             },
             "focusTrapDetected": {
-              "description": "Whether cursor navigation got stuck or failed to converge",
+              "description": "Always false: a cursor that cannot be moved onto the target fails the call instead",
               "type": "boolean"
             }
           },
@@ -31722,6 +33017,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {
@@ -32177,6 +33473,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -32243,7 +33540,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32273,6 +33570,7 @@
                     "type": "object",
                     "properties": {
                       "elementId": {
+                        "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                         "type": "string"
                       },
                       "label": {
@@ -32339,7 +33637,7 @@
                         }
                       },
                       "occluded": {
-                        "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                        "description": "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
                         "type": "boolean",
                         "const": true
                       },
@@ -32577,6 +33875,7 @@
                         "type": "object",
                         "properties": {
                           "elementId": {
+                            "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                             "type": "string"
                           },
                           "label": {
@@ -33421,6 +34720,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -33667,6 +34967,7 @@
                       "type": "string"
                     },
                     "view-id": {
+                      "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
                       "type": "string"
                     },
                     "content-desc": {
@@ -34907,6 +36208,7 @@
       "additionalProperties": {},
       "$defs": {
         "__schema0": {
+          "description": "Android synthetic s2- ids are valid only for the observation that returned them; re-observe after the screen changes.",
           "type": "object",
           "properties": {
             "bounds": {

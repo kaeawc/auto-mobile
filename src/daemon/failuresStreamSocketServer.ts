@@ -1,3 +1,4 @@
+import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
@@ -8,6 +9,7 @@ import type {
   TimeAggregation,
 } from "./failuresStreamSocketTypes";
 import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import { FAILURES_STREAM_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
   normalizeStreamLimit,
   normalizeStreamSinceId,
@@ -88,6 +90,8 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
 > {
+  /** `acknowledge` ships an id list the protocol does not bound, so allow more than the default. */
+  protected readonly maxFrameBytes = FAILURES_STREAM_MAX_FRAME_BYTES;
   private readonly repository: FailuresStreamRepository;
 
   constructor(
@@ -248,25 +252,16 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   }
 }
 
-let socketServer: FailuresStreamSocketServer | null = null;
+const socketServer = new SocketServerSingleton<FailuresStreamSocketServer>();
 
 export function getFailuresStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
+  return socketServer.instance?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
 }
 
 export async function startFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    socketServer = new FailuresStreamSocketServer();
-  }
-  if (!socketServer.isListening()) {
-    await socketServer.start();
-  }
+  await socketServer.start(() => new FailuresStreamSocketServer());
 }
 
 export async function stopFailuresStreamSocketServer(): Promise<void> {
-  if (!socketServer) {
-    return;
-  }
-  await socketServer.close();
-  socketServer = null;
+  await socketServer.stop();
 }

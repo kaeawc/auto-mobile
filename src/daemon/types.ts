@@ -112,6 +112,43 @@ export function sanitizeDaemonRequestFailureCause(
 export const DAEMON_SESSION_NOT_FOUND_CODE = "daemon_session_not_found";
 
 export const DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE = "liveness_owner_superseded";
+/** A token-bearing keeper tick reached an unowned session; only an explicit claim can adopt it. */
+export const DAEMON_LIVENESS_OWNER_UNOWNED_CODE = "liveness_owner_unowned";
+/** Release authorization failed: the supplied token is not the current owner. */
+export const DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE = "liveness_owner_not_owner";
+
+/**
+ * A tool call reached a session whose owner's lease expired and that is held inside its suspect
+ * window (#10051). Its owner can still restore it with a heartbeat, so a proxy treats this as
+ * "recovery is still possible" rather than as a loss (#10053).
+ */
+export const DAEMON_SESSION_SUSPECT_CODE = "daemon_session_suspect";
+
+/** A claim from a different token was rejected because the owner's lease is live (#10050). */
+export const DAEMON_LIVENESS_OWNER_CONFLICT_CODE = "liveness_owner_conflict";
+
+/**
+ * An external `--daemon heartbeat` keeper tried to heartbeat or claim a session a stdio/HTTP proxy
+ * owns. Liveness flows harness -> proxy -> daemon only, so the keeper is refused (#10054).
+ */
+export const DAEMON_LIVENESS_OWNER_IS_PROXY_CODE = "liveness_owner_is_proxy";
+/**
+ * The daemon registers the requested tool but its availability gate (debug-only,
+ * embedded-SDK-only, plan-only) rejects the call. Carried as the response `code`
+ * so the proxy never mistakes a gated tool for a stale daemon (issue #10177); a
+ * reconnect cannot change a gate. Daemons that predate it send no code.
+ */
+export const DAEMON_TOOL_UNAVAILABLE_CODE = "daemon_tool_unavailable";
+
+/** True for an error carrying the gate marker (a daemon response `code`, or the proxy's own error). */
+export function isGatedToolErrorCode(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === DAEMON_TOOL_UNAVAILABLE_CODE
+  );
+}
 
 export const BOUND_SESSION_LOSS_CODE = "bound_session_lost";
 
@@ -318,10 +355,20 @@ export interface DaemonStatus {
    */
   processStartedAt?: number;
   /**
-   * Stable OS-derived identity for this process generation. Optional so PID
-   * records written before generation tokens remain readable.
+   * Stable OS-derived identity for this process generation (Linux, or a legacy
+   * `darwin:` token from an older daemon). Optional so PID records written
+   * before generation tokens remain readable. Read through
+   * `recordedProcessGenerationToken`, never directly: Darwin publishes its
+   * zone-free token under {@link processGenerationTokenUtc} instead.
    */
   processGenerationToken?: string;
+  /**
+   * Zone-free Darwin (`darwin-utc:`) generation token. A separate field so a
+   * daemon build that predates it sees no token rather than a `darwin:`-vs-
+   * `darwin-utc:` mismatch it would read as a recycled PID (see
+   * `processGenerationFields.ts`).
+   */
+  processGenerationTokenUtc?: string;
   /** Daemon version */
   version?: string;
   /** Concrete CtrlProxy asset version resolved from AUTOMOBILE_VERSION at daemon start */
@@ -349,6 +396,21 @@ export interface DaemonStatus {
 /**
  * PID file contents
  */
+/**
+ * The last COMMITTED owner of a control socket, proven dead when a later
+ * start's early-owner record overwrote its PID record (issue #10107). The early
+ * record carries it so a start that dies before binding, or a `--daemon stop`,
+ * does not erase the only proof that lets the next start's bind guard reclaim
+ * the socket the dead owner left behind. Dropped by the next committed record.
+ */
+export interface SupersededSocketOwner {
+  pid: number;
+  /** Token compared with the live PID's, so a recycled PID still reads as dead. */
+  processGenerationToken?: string;
+  /** Zone-free Darwin token; see {@link PidFileData.processGenerationTokenUtc}. */
+  processGenerationTokenUtc?: string;
+}
+
 export interface PidFileData {
   /** Process ID */
   pid: number;
@@ -377,10 +439,19 @@ export interface PidFileData {
    */
   processStartedAt?: number;
   /**
-   * Stable OS-derived identity for this process generation. Optional for
-   * backward compatibility with PID files written before this field existed.
+   * Stable OS-derived identity for this process generation (Linux, or a legacy
+   * `darwin:` token from an older daemon). Optional for backward compatibility
+   * with PID files written before this field existed. Read through
+   * `recordedProcessGenerationToken`, never directly.
    */
   processGenerationToken?: string;
+  /**
+   * Zone-free Darwin (`darwin-utc:`) generation token, published INSTEAD of
+   * {@link processGenerationToken} on Darwin so older builds, which compare that
+   * field strictly against their own time-zone-dependent token, see no token
+   * and keep treating this daemon as live (see `processGenerationFields.ts`).
+   */
+  processGenerationTokenUtc?: string;
   /** Daemon version */
   version: string;
   /**
@@ -397,6 +468,8 @@ export interface PidFileData {
   buildId?: string;
   /** Options used to start the daemon */
   options?: DaemonOptions;
+  /** Dead former committed socket owner carried by an uncommitted early record. */
+  supersededOwner?: SupersededSocketOwner;
 }
 
 /**

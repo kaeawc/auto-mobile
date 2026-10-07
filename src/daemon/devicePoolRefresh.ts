@@ -42,6 +42,14 @@ export function deviceListRefreshFailureMessage(failure: string): string {
 
 /** Live pool state is read at each use, including after awaits. */
 export interface DevicePoolRefreshPort {
+  needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
+  normalizeAndroidDiscovery?(
+    devices: readonly BootedDevice[],
+    assignmentLockHeld: boolean,
+    isCurrent: () => boolean,
+    completeAndroidSnapshot: boolean,
+  ): Promise<BootedDevice[]>;
+  isAndroidTransportAssignable?(device: BootedDevice): boolean;
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
   getDevices(): Map<string, PooledDevice>;
@@ -73,6 +81,11 @@ export interface DevicePoolRefreshPort {
     succeededSources?: Set<DiscoverySource>,
   ): Promise<number | undefined>;
   notifyDeviceReady(deviceId: string): void;
+  /** Lift recovery reservations a fresh observation of this generation decides. */
+  liftUnconfirmedRecoveringAndroidImages(
+    discovery: BootedDeviceDiscovery,
+    refreshGeneration: number,
+  ): Promise<void>;
 }
 
 /** Owns discovery scheduling, fresh observations, and generation fences. */
@@ -124,10 +137,7 @@ export class DevicePoolRefresh {
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
-      // Log environment for debugging CI issues
-      const androidHome = process.env.ANDROID_HOME || "(not set)";
-      const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
-      logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
+      this.logDiscoveryEnvironment();
 
       perf.startOperation("deviceDiscovery");
       const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("either", {
@@ -135,7 +145,14 @@ export class DevicePoolRefresh {
         bypassIosDeviceListCache: true,
       });
       perf.endOperation("deviceDiscovery");
-      const bootedDevices = discovery.devices;
+      const bootedDevices = this.discoveryNeedsTransportNormalization(discovery.devices)
+        ? await this.pool.normalizeAndroidDiscovery!(
+            discovery.devices,
+            assignmentLockHeld,
+            () => refreshGeneration === this.refreshGeneration,
+            discovery.succeededPlatforms.has("android"),
+          )
+        : discovery.devices;
       const discoveryTime = this.pool.getTimer().now() - startTime;
       logger.info(
         `Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`,
@@ -171,6 +188,9 @@ export class DevicePoolRefresh {
               removalGenerationAtDiscoveryStart,
             )
           ) {
+            return undefined;
+          }
+          if (this.pool.isAndroidTransportAssignable?.(device) === false) {
             return undefined;
           }
           this.pool.clearAutoStartSuppressionForBootedDevice(device);
@@ -219,6 +239,9 @@ export class DevicePoolRefresh {
         this.notifyRefreshedDeviceReady(device.deviceId, added);
       }
       perf.endOperation("poolUpdate");
+      // After the pool update, so a still-running AVD is already pooled when its
+      // unconfirmed recovery reservation lifts.
+      await this.pool.liftUnconfirmedRecoveringAndroidImages(discovery, refreshGeneration);
 
       if (addedCount > 0 || removedCount > 0) {
         logger.info(
@@ -247,6 +270,19 @@ export class DevicePoolRefresh {
       this.inFlightRefreshFloors.delete(refreshGeneration);
       this.pruneDeviceRemovalStamps();
     }
+  }
+
+  private logDiscoveryEnvironment(): void {
+    const androidHome = process.env.ANDROID_HOME || "(not set)";
+    const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
+    logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
+  }
+
+  private discoveryNeedsTransportNormalization(devices: readonly BootedDevice[]): boolean {
+    return (
+      this.pool.normalizeAndroidDiscovery !== undefined &&
+      this.pool.needsAndroidTransportNormalization?.(devices) === true
+    );
   }
 
   private currentRefreshCompleteness(

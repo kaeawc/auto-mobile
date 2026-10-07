@@ -1,5 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import {
+  SimctlIosFilesFixtureContainer,
+  nodeAppFileFileSystem,
+  IOS_FILES_FIXTURE_BUNDLE_ID,
+} from "../../src/server/appFileService";
+import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
+import * as hostPath from "node:path";
 import { createSharedStorageReadServiceForTesting } from "../../src/server/sharedStorageReadService";
 import type { SharedStorageUserResolver } from "../../src/server/sharedStorageReadService";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -456,5 +463,215 @@ describe("SharedStorageReadService.read", () => {
       }),
     ).rejects.toThrow();
     expect(executor.getExecutedCommands()).toEqual([]);
+  });
+});
+
+describe("bounded storage-domain readers", () => {
+  test("Android media lists only automobile-media and preserves user_files", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse(
+      "-exec stat",
+      execResult("3|1690000000|/storage/emulated/0/Download/automobile-media/photo.png\n"),
+    );
+    const service = serviceWith(executor);
+    const listing = await service.list({
+      deviceId: androidDevice.deviceId,
+      namespace: "automobile-media",
+      domain: "media_library",
+    });
+    expect(listing.observation).toBe("complete");
+    expect(listing.files[0]?.resourceUri).toBe(
+      "automobile:devices/emulator-5554/storage-domains/media_library/automobile-media/photo.png",
+    );
+    for (const method of ["list", "read"] as const) {
+      const result = await service[method]({
+        deviceId: androidDevice.deviceId,
+        namespace: "other",
+        path: "a.txt",
+        domain: "media_library",
+      });
+      expect(result.observation).toBe("unsupported");
+    }
+    expect(executor.getExecutedCommands().some((command) => command.includes("/other"))).toBe(
+      false,
+    );
+    executor.setCommandResponse("-exec stat", execResult(""));
+    expect(
+      (await service.list({ deviceId: androidDevice.deviceId, namespace: "other" }))
+        .downloadsDirectory,
+    ).toBe("/storage/emulated/0/Download/other");
+  });
+
+  test("Android media reads text, binary, and missing observations", async () => {
+    const executor = new FakeAdbExecutor();
+    const service = serviceWith(executor);
+    const request = {
+      deviceId: androidDevice.deviceId,
+      namespace: "automobile-media",
+      path: "photo.png",
+      domain: "media_library" as const,
+    };
+    executor.setCommandResponse("base64", execResult(Buffer.from("hello").toString("base64")));
+    expect((await service.read(request)).text).toBe("hello");
+    executor.setCommandResponse("base64", execResult("AAH/"));
+    const binary = await service.read(request);
+    expect(binary.blob).toBe("AAH/");
+    expect(binary.byteCount).toBe(3);
+    expect(binary.mimeType).toBe("image/png");
+    expect(binary.resourceUri).toBe(
+      "automobile:devices/emulator-5554/storage-domains/media_library/automobile-media/photo.png",
+    );
+    executor.setCommandResponse("base64", execResult("__AUTOMOBILE_FILE_MISSING__"));
+    expect((await service.read(request)).observation).toBe("missing");
+    executor.setCommandResponse("-exec stat", execResult("__AUTOMOBILE_NS_MISSING__"));
+    expect((await service.list(request)).observation).toBe("missing");
+  });
+});
+
+describe("iOS Simulator bounded fixture reads", () => {
+  function harness() {
+    const device: BootedDevice = {
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+      platform: "ios",
+      name: "Simulator",
+    };
+    const simctl = new FakeSimCtlClient();
+    simctl.setContainerPath(IOS_FILES_FIXTURE_BUNDLE_ID, "/fixture");
+    const files = new Map<string, Buffer>([
+      ["/fixture/Documents/automobile/run/note.txt", Buffer.from("hello")],
+      ["/fixture/Documents/automobile/run/photo.png", Buffer.from([0, 1, 255])],
+    ]);
+    const symlinks = new Set<string>();
+    const reads: string[] = [];
+    const directories = new Set([
+      "/fixture/Documents",
+      "/fixture/Documents/automobile",
+      "/fixture/Documents/automobile/run",
+    ]);
+    const reader = new SimctlIosFilesFixtureContainer(() => simctl, {
+      ...nodeAppFileFileSystem,
+      lstat: async (path) => {
+        if (!files.has(path) && !directories.has(path) && !symlinks.has(path)) {
+          throw Object.assign(new Error("missing namespace/file"), { code: "ENOENT" });
+        }
+        return {
+          size: files.get(path)?.length ?? 0,
+          mtime: new Date(0),
+          isFile: () => files.has(path) && !symlinks.has(path),
+          isDirectory: () => directories.has(path) && !symlinks.has(path),
+        };
+      },
+      readdir: async (path) =>
+        [...new Set([...files.keys(), ...directories, ...symlinks])]
+          .filter(
+            (file) => file.startsWith(`${path}/`) && !file.slice(path.length + 1).includes("/"),
+          )
+          .map((file) => ({ name: file.slice(path.length + 1) })),
+      readFileBuffer: async (path) => {
+        reads.push(path);
+        return files.get(path)!;
+      },
+    });
+    const service = createSharedStorageReadServiceForTesting({
+      deviceResolver: async () => device,
+      iosFixtureReader: reader,
+    });
+    const request = { deviceId: device.deviceId, namespace: "run" };
+    return { service, request, simctl, symlinks, reads, files, directories };
+  }
+
+  test("lists only the fixture namespace using fake simctl and filesystem", async () => {
+    const { service, request, simctl } = harness();
+    const listing = await service.list(request);
+    expect(listing.observation).toBe("complete");
+    expect(listing.files.map((file) => file.path)).toEqual(["note.txt", "photo.png"]);
+    expect(listing.files[0]?.resourceUri).toContain("/storage-domains/user_files/run/note.txt");
+    expect(listing.files[0]?.byteCount).toBe(5);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+  });
+
+  test("reads UTF-8 and binary content with hashes", async () => {
+    const { service, request, reads } = harness();
+    const text = await service.read({ ...request, path: "note.txt" });
+    expect(text.text).toBe("hello");
+    expect(text.sha256).toBe(createHash("sha256").update("hello").digest("hex"));
+    const binary = await service.read({ ...request, path: "photo.png" });
+    expect(binary.blob).toBe("AAH/");
+    expect(binary.text).toBeUndefined();
+    expect(binary.mimeType).toBe("image/png");
+    expect(reads.every((path) => path.startsWith("/fixture/Documents/automobile/run/"))).toBe(true);
+  });
+
+  test("keeps Simulator paths POSIX when host path functions use Windows semantics", async () => {
+    const spies = [
+      spyOn(hostPath, "resolve").mockImplementation(hostPath.win32.resolve),
+      spyOn(hostPath, "join").mockImplementation(hostPath.win32.join),
+      spyOn(hostPath, "relative").mockImplementation(hostPath.win32.relative),
+      spyOn(hostPath, "isAbsolute").mockImplementation(hostPath.win32.isAbsolute),
+    ];
+    try {
+      expect(hostPath.join("/fixture", "Documents")).toBe("\\fixture\\Documents");
+      const { service, request, files, directories, symlinks, reads } = harness();
+      directories.add("/fixture/Documents/automobile/run/nested");
+      files.set("/fixture/Documents/automobile/run/nested/note.txt", Buffer.from("nested"));
+      const listing = await service.list(request);
+      expect(listing.observation).toBe("complete");
+      expect(listing.files.map((file) => file.path)).toEqual([
+        "note.txt",
+        "photo.png",
+        "nested/note.txt",
+      ]);
+      expect((await service.read({ ...request, path: "nested/note.txt" })).text).toBe("nested");
+      expect(reads).toEqual(["/fixture/Documents/automobile/run/nested/note.txt"]);
+      reads.length = 0;
+      for (const path of ["../secret", "..\\secret", "/secret", "\\\\host\\share\\secret"]) {
+        await expect(service.read({ ...request, path })).rejects.toThrow();
+      }
+      symlinks.add("/fixture/Documents/automobile/run/nested");
+      expect((await service.read({ ...request, path: "nested/note.txt" })).observation).toBe(
+        "unavailable",
+      );
+      symlinks.add("/fixture/Documents/automobile/run");
+      expect((await service.list(request)).observation).toBe("unavailable");
+      expect(reads).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
+  test("missing files and namespaces remain typed missing observations", async () => {
+    const { service, request } = harness();
+    expect((await service.read({ ...request, path: "gone.txt" })).observation).toBe("missing");
+    expect((await service.list({ ...request, namespace: "unstaged" })).observation).toBe("missing");
+    expect(
+      (await service.read({ ...request, namespace: "unstaged", path: "note.txt" })).observation,
+    ).toBe("missing");
+  });
+
+  test("rejects traversal and refuses symlinks without reading their targets", async () => {
+    const { service, request, symlinks, reads } = harness();
+    await expect(service.read({ ...request, path: "../../secret" })).rejects.toThrow();
+    await expect(service.list({ ...request, namespace: "../secret" })).rejects.toThrow();
+    symlinks.add("/fixture/Documents/automobile/run");
+    expect((await service.read({ ...request, path: "note.txt" })).observation).toBe("unavailable");
+    expect((await service.list(request)).observation).toBe("unavailable");
+    expect(reads).toEqual([]);
+  });
+
+  test("media list/read is unsupported with the recorded reason and no device command", async () => {
+    const { service, request, simctl, reads } = harness();
+    for (const method of ["list", "read"] as const) {
+      const result = await service[method]({
+        ...request,
+        path: "photo.png",
+        domain: "media_library",
+      });
+      expect(result.observation).toBe("unsupported");
+      expect(result.reason).toContain("simctl addmedia");
+    }
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+    expect(reads).toEqual([]);
   });
 });

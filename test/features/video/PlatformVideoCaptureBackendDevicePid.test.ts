@@ -7,7 +7,9 @@ import type {
   RecordingHandle,
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
+import { VideoCaptureFinalizationError } from "../../../src/features/video/VideoRecorderService";
 import { logger } from "../../../src/utils/logger";
+import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -17,6 +19,8 @@ const RECORDING_ID = "pid-rec";
 const DEVICE_FILE = `/sdcard/auto-mobile-${RECORDING_ID}.mp4`;
 const OUR_CMDLINE = `screenrecord\u0000--bit-rate\u0000100\u0000--time-limit\u0000180\u0000${DEVICE_FILE}\u0000`;
 const PROBE = "shell 'cat /proc/4321/cmdline 2>/dev/null; true'";
+const STAT = `shell stat -c %s ${DEVICE_FILE}`;
+const PIDOF = 'shell \'pidof screenrecord; printf "pidof-status:%s\\n" "$?"\'';
 
 describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
   let tempDir: string;
@@ -59,8 +63,10 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
       device: { platform: "android", deviceId: "pid-device", name: "Pixel" },
     };
     const handle = await backend.start(config);
-    // Let the buffered launch stdout reach the pid reader.
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Let the buffered launch stdout reach the pid reader. A real macrotask turn rather than
+    // setImmediate: start's settle probe leaves a FakeTimer dispatch immediate queued, and
+    // an immediate-based flush here lost that chain, hanging the later fake sleeps.
+    await defaultTimer.sleep(0);
     return handle;
   }
 
@@ -172,6 +178,76 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
       await backend.stop(handle);
 
       expectNoNameBasedKill();
+    });
+  });
+
+  // #10019: with the pid known, exit of THIS recorder is confirmed from that pid, never
+  // from a device-wide pidof that an unrelated screenrecord keeps answering.
+  describe("zero-byte exit confirmation by pid (#10019)", () => {
+    function arrangeZeroByte(probeAnswers: string[]): void {
+      const client = factory.getFakeClient();
+      client.setCommandResult(STAT, "0");
+      // Alive for the stop signal, then whatever the exit confirmation sees.
+      client.setCommandResultSequence(PROBE, probeAnswers);
+      // An unrelated recorder is running on the device.
+      client.setCommandResult(PIDOF, "9999\npidof-status:0\n");
+    }
+
+    test("releases a zero-byte recording while an unrelated screenrecord runs", async () => {
+      const handle = await startRecording("4321\n");
+      arrangeZeroByte([OUR_CMDLINE, ""]);
+
+      const error = await backend.stop(handle).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(VideoCaptureFinalizationError);
+      expect(error).toMatchObject({
+        retainOwnership: false,
+        message: expect.stringContaining("no usable video"),
+      });
+      expect(commands()).not.toContain(PIDOF);
+      expect(commands().filter((command) => command.includes("kill"))).toEqual([
+        "shell kill -2 4321",
+      ]);
+      expect(factory.getFakeClient().wasSpawned(`rm ${DEVICE_FILE}`)).toBe(true);
+    });
+
+    test("treats a pid reused by another process as exited", async () => {
+      const handle = await startRecording("4321\n");
+      arrangeZeroByte([OUR_CMDLINE, "com.example.app\u0000--flag\u0000"]);
+
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: false });
+      expect(commands()).not.toContain(PIDOF);
+    });
+
+    test("retains the recording while its own recorder pid is still running", async () => {
+      const handle = await startRecording("4321\n");
+      arrangeZeroByte([OUR_CMDLINE]);
+
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
+      expect(commands()).not.toContain(PIDOF);
+      expect(factory.getFakeClient().wasSpawned(`rm ${DEVICE_FILE}`)).toBe(false);
+    });
+
+    test("retains the recording when the pid probe cannot be read", async () => {
+      const handle = await startRecording("4321\n");
+      arrangeZeroByte([OUR_CMDLINE]);
+      factory.getFakeClient().setCommandError(PROBE, new Error("device offline"));
+      const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+      try {
+        await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
+        expect(warnings(warn)).toContain("Could not confirm device recorder pid 4321 exit");
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    test("an unknown pid still uses the device-wide pidof check", async () => {
+      const handle = await startRecording("warning: something\n");
+      factory.getFakeClient().setCommandResult(STAT, "0");
+      factory.getFakeClient().setCommandResult(PIDOF, "9999\npidof-status:0\n");
+
+      await expect(backend.stop(handle)).rejects.toMatchObject({ retainOwnership: true });
+      expect(commands()).toContain(PIDOF);
     });
   });
 

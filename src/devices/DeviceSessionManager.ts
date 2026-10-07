@@ -5,9 +5,11 @@ import {
   type DeviceExecutionBinding,
 } from "../server/deviceExecutionBinding";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import {
   ActionableError,
   BootedDevice,
+  DeviceInfo,
   Platform,
   SomePlatform,
   toActionableError,
@@ -63,6 +65,8 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
 import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
@@ -342,6 +346,7 @@ export function deviceReadinessRank(level: DeviceReadinessLevel): number {
 export type ResolvedDeviceIdentity = Pick<BootedDevice, "deviceId" | "name" | "observedAt">;
 
 export interface DeviceReadyOptions {
+  sessionId?: string;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -376,6 +381,13 @@ export interface DeviceSessionManagerOptions {
   runnerProvisionTimeoutMs?: number;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   idGenerator?: IdGenerator;
+}
+
+/** What a lifecycle-start operation may do to keep its AVD lease past its own return. */
+interface LifecycleStartHold {
+  lease: VirtualDeviceLifecycleLease;
+  /** Keeps the lease held until `settlement` settles, though the operation has already returned. */
+  holdLeaseUntil: (settlement: Promise<unknown>) => void;
 }
 
 export class DeviceSessionManager implements DeviceSessionManager {
@@ -1124,7 +1136,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (state.didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }
@@ -1443,7 +1455,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       if (didSetup) {
         const timings = perf.getTimings();
         if (timings) {
-          storeSetupTiming(deviceId, timings);
+          storeSetupTiming(deviceId, timings, options?.sessionId);
         }
       }
     }
@@ -1508,11 +1520,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return await this.withLifecycleStart(
       { platform: "android", stableId: deviceImage.name },
       options,
-      async (signal) => {
+      async (signal, hold) => {
         perf.startOperation("startDevice");
         const childProcess = await runWithAbortSignal(
           signal,
-          async () => await this.deviceUtils.startDevice(deviceImage),
+          async () => await this.startDeviceOwningCancelledLaunch(deviceImage, hold),
         );
         const processTracker = childProcess ? trackProcess(childProcess) : undefined;
         perf.endOperation("startDevice");
@@ -1733,7 +1745,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private async withLifecycleStart<T>(
     identity: StableVirtualDeviceIdentity | VirtualDeviceLifecycleIdentity,
     options: DeviceReadyOptions | undefined,
-    operation: (signal: AbortSignal) => Promise<T>,
+    operation: (signal: AbortSignal, hold: LifecycleStartHold) => Promise<T>,
   ): Promise<T> {
     const lifecycleLease = await this.lifecycleCoordinator.reserve(
       "kind" in identity ? identity : { kind: "stable", ...identity },
@@ -1743,10 +1755,50 @@ export class DeviceSessionManager implements DeviceSessionManager {
         signal: options?.signal,
       },
     );
+    const held: Promise<unknown>[] = [];
     try {
-      return await this.runWithLifecycleLease(lifecycleLease, options, operation);
+      return await this.runWithLifecycleLease(lifecycleLease, options, (signal) =>
+        operation(signal, {
+          lease: lifecycleLease,
+          holdLeaseUntil: (settlement) => {
+            held.push(settlement);
+          },
+        }),
+      );
     } finally {
-      lifecycleLease.release();
+      if (held.length === 0) {
+        lifecycleLease.release();
+      } else {
+        // An emulator this start spawned is still shutting down and holds its AVD
+        // lock files: the stable key is not free until it is confirmed gone (#10075).
+        void Promise.allSettled(held).then(() => lifecycleLease.release());
+      }
+    }
+  }
+
+  /**
+   * Starts the device, and when the launch is cancelled after the emulator was
+   * spawned, takes the child from the cancellation error and terminates it with the
+   * shared SIGTERM -> bounded wait -> SIGKILL escalation, holding the AVD lease until
+   * its exit is confirmed. The launch rejects the moment the request aborts, so
+   * without this the lease would be released while the child is still shutting down
+   * and a following start of the same AVD could spawn a second emulator (#10075).
+   */
+  private async startDeviceOwningCancelledLaunch(
+    image: DeviceInfo,
+    hold: LifecycleStartHold,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await this.deviceUtils.startDevice(image);
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        hold.holdLeaseUntil(
+          terminateOwnedEmulatorProcess(error.process, image.name, this.runnerReadinessTimer, {
+            markHeldByUnkillableProcess: (pid) => hold.lease.markHeldByUnkillableProcess?.(pid),
+          }).then((outcome) => (outcome.state === "survived" ? outcome.gone : undefined)),
+        );
+      }
+      throw error;
     }
   }
 

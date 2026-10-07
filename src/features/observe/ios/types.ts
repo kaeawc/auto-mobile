@@ -137,6 +137,9 @@ export interface WebSocketMessage {
   id?: number;
   supportedCommands?: string[];
   supportedFeatures?: string[];
+  handled?: boolean;
+  unsupported?: boolean;
+  requiresVoiceOver?: boolean;
   available?: boolean;
   bundleId?: string;
   capabilities?: string[];
@@ -189,7 +192,12 @@ export interface CtrlProxyScreenshotResult {
 export type CtrlProxySwipeResult = GestureTimingResult;
 
 /** Tap coordinates result */
-export type CtrlProxyTapResult = BaseResult & { tapDiagnostics?: CtrlProxyTapDiagnostics };
+export type CtrlProxyTapResult = BaseResult & {
+  tapDiagnostics?: CtrlProxyTapDiagnostics;
+  /** Host-side dispatch metadata, as on presses: written to the socket / answered by the runner. */
+  dispatched?: boolean;
+  acknowledged?: boolean;
+};
 
 /** Optional, best-effort runner readings; these are resolved locations, not delivered touches. */
 export interface CtrlProxyTapDiagnostics {
@@ -334,6 +342,8 @@ export interface CtrlProxyActionResult {
   action?: string;
   totalTimeMs?: number;
   error?: string;
+  /** Runner note on a successful action, e.g. a semantic link tap that chose the first of several candidate owners. */
+  warning?: string;
   /** Host-side dispatch/confirmation metadata; absent for other action helpers. */
   dispatched?: boolean;
   acknowledged?: boolean;
@@ -416,4 +426,13 @@ export interface HierarchyDelegateContext extends DelegateContext {
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
   /** Prevent the response for this request from being forwarded to the observation stream. */
   suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
+}
+
+/** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */
+export interface CtrlProxyMagicTapResult extends BaseResult {
+  /** Undefined if the runner could not reply; false means SDK support is absent. */
+  available?: boolean;
+  handled?: boolean;
+  unsupported: boolean;
+  requiresVoiceOver: false;
 }

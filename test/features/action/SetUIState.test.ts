@@ -3561,3 +3561,23 @@ describe("SetUIState post-success observation refresh is bounded by the result d
     expect(fakeTimer.now()).toBeLessThanOrEqual(transportDeadlineMs);
   });
 });
+
+describe("SetUIState stale synthetic selector errors", () => {
+  test("unmatched synthetic ids require re-observe while plain ids keep their error", () => {
+    const command = new SetUIState({ name: "test", platform: "android", deviceId: "test" }, null, {
+      timer: new FakeTimer(),
+    });
+    const results = command["collectResults"](
+      [],
+      [
+        { selector: { elementId: "s2-3340048129449c01-2" }, value: "test" },
+        { selector: { elementId: "example:id/missing" }, value: "test" },
+      ],
+      new Set(),
+    );
+    expect(results[0].error).toBe(
+      "Element id 's2-3340048129449c01-2' is stale; re-observe and use the id from the new observation.",
+    );
+    expect(results[1].error).toBe('Element not found: elementId="example:id/missing"');
+  });
+});

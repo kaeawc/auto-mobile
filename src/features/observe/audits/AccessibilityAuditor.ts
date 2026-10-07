@@ -1,88 +1,48 @@
-import path from "path";
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { pathExists } from "../../../utils/filesystem/DefaultFileSystem";
-import { statAsync } from "../../../utils/io";
-import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
-import { ScreenshotCache } from "../../../utils/screenshot/ScreenshotCache";
-import { screenshotFileBelongsToDevice } from "../../../utils/screenshot/screenshotFormats";
-import { WcagAudit } from "../../accessibility/WcagAudit";
-import { DefaultElementParser } from "../../utility/ElementParser";
+import { WcagAudit, capAccessibilityViolations } from "../../accessibility/WcagAudit";
+import { projectAuditElements } from "../../accessibility/AuditElementProjection";
+import type { ContrastChecker } from "../../accessibility/ContrastChecker";
 import type { BootedDevice, ObserveResult } from "../../../models";
-import type { Element } from "../../../models/Element";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { AccessibilityAuditConfig } from "../../../models/AccessibilityAudit";
 
 export interface AccessibilityAuditorOptions {
   device: BootedDevice;
-  /** Resolves the latest screenshot path for visual checks */
-  screenshotPathResolver?: () => Promise<string | undefined>;
+  /**
+   * Resolves the screenshot captured for exactly this observation. Returning
+   * undefined skips the contrast check; it must never name another capture.
+   */
+  screenshotPathResolver?: (observationId: string) => Promise<string | undefined>;
   /** Allow tests to stub the config gate */
   getConfig?: () => AccessibilityAuditConfig | null;
+  /** Allow tests to read screenshot pixels through an injected image backend */
+  contrastChecker?: ContrastChecker;
 }
 
 /**
- * Fallback used when the per-device screenshot state has no cached path —
- * scans the screenshots tempdir for the most recent screenshot by mtime
- * (.png/.jpg/.jpeg/.webp — the Android CtrlProxy path writes .jpg).
+ * Confirms the screenshot recorded for THIS observation is still on disk.
  *
- * Every device (and every agent process sharing the temp dir) writes into the
- * same flat directory, so the scan MUST be filtered by `deviceId` whenever the
- * caller knows which device it is auditing: otherwise device B's audit can
- * compare device A's newer frame against B's hierarchy and report WCAG
- * violations for pixels that were never on B's screen (#6599).
+ * The contrast check may only sample pixels captured for the observation being
+ * audited. There is deliberately no device-wide "latest screenshot" or
+ * temp-directory scan fallback: with `screenshot: "none"`, or a failed,
+ * cancelled or superseded capture, such a fallback hands back an earlier
+ * screen's image and reports contrast findings for the wrong screen (#10037).
+ * Callers pass the per-observation path (`getPathForObservation`), or nothing.
  */
-export async function findLatestScreenshotPath(deviceId?: string): Promise<string | undefined> {
-  try {
-    const cacheDir = getTempDir(TEMP_SUBDIRS.SCREENSHOTS);
-    const allFiles = await ScreenshotCache.getScreenshotFiles(cacheDir);
-    const imageFiles =
-      deviceId === undefined
-        ? allFiles
-        : allFiles.filter((filePath) =>
-            screenshotFileBelongsToDevice(path.basename(filePath), deviceId),
-          );
-    if (imageFiles.length === 0) {
-      return undefined;
-    }
-
-    const fileStats = await Promise.all(
-      imageFiles.map(async (fullPath) => {
-        const stat = await statAsync(fullPath);
-        return { path: fullPath, mtime: stat.mtime };
-      }),
-    );
-
-    fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-
-    return fileStats[0]?.path;
-  } catch (error) {
-    logger.warn(`[AccessibilityAudit] Failed to get latest screenshot: ${error}`);
+export async function resolveObservationScreenshotPath(
+  observationPath: string | null | undefined,
+): Promise<string | undefined> {
+  if (!observationPath) {
     return undefined;
   }
-}
-
-/**
- * Helper that mirrors RealObserveScreen.getLatestScreenshotPath: first checks
- * the per-device cached path (via the supplied accessor), then falls back to
- * scanning the screenshots tempdir.
- */
-export async function resolveLatestScreenshotPath(
-  getCachedPath?: () => string | null | undefined,
-  deviceId?: string,
-): Promise<string | undefined> {
   try {
-    const cachedPath = getCachedPath?.();
-    if (cachedPath) {
-      const exists = await pathExists(cachedPath);
-      if (exists) {
-        return cachedPath;
-      }
-    }
+    return (await pathExists(observationPath)) ? observationPath : undefined;
   } catch (error) {
-    logger.warn(`[AccessibilityAudit] Failed to check cached screenshot: ${error}`);
+    logger.warn(`[AccessibilityAudit] Failed to check observation screenshot: ${error}`);
+    return undefined;
   }
-  return findLatestScreenshotPath(deviceId);
 }
 
 /**
@@ -92,13 +52,14 @@ export async function resolveLatestScreenshotPath(
  */
 export class AccessibilityAuditor {
   private readonly device: BootedDevice;
-  private readonly screenshotPathResolver: () => Promise<string | undefined>;
+  private readonly screenshotPathResolver: (observationId: string) => Promise<string | undefined>;
   private readonly getConfig: () => AccessibilityAuditConfig | null;
+  private readonly contrastChecker: ContrastChecker | undefined;
 
   constructor(opts: AccessibilityAuditorOptions) {
     this.device = opts.device;
-    this.screenshotPathResolver =
-      opts.screenshotPathResolver ?? (() => resolveLatestScreenshotPath());
+    this.contrastChecker = opts.contrastChecker;
+    this.screenshotPathResolver = opts.screenshotPathResolver ?? (() => Promise.resolve(undefined));
     this.getConfig = opts.getConfig ?? (() => serverConfig.getAccessibilityAuditConfig());
   }
 
@@ -135,16 +96,18 @@ export class AccessibilityAuditor {
         );
 
         // Initialize audit
-        const wcagAudit = new WcagAudit();
+        const wcagAudit = new WcagAudit(undefined, undefined, this.contrastChecker);
 
-        // Extract elements directly from view hierarchy for audit
-        const elementParser = new DefaultElementParser();
-        const allElements: Element[] = elementParser
-          .flattenViewHierarchy(result.viewHierarchy!)
-          .map((entry) => entry.element);
+        // Extract elements directly from view hierarchy for audit, noting which
+        // clickable containers are labelled by merged descendant text.
+        const {
+          elements: allElements,
+          descendantLabelled,
+          windowIds,
+        } = projectAuditElements(result.viewHierarchy!);
 
-        // Get screenshot path if available (from TakeScreenshot cache)
-        const screenshotPath = await this.screenshotPathResolver();
+        // Only this observation's own capture may feed the contrast check
+        const screenshotPath = await this.screenshotPathResolver(result.observationId);
 
         // Run the audit
         const auditResult = await wcagAudit.audit(
@@ -153,11 +116,16 @@ export class AccessibilityAuditor {
           screenshotPath,
           result.activeWindow!.appId,
           auditConfig,
-          { density: result.viewHierarchy!.density, windows: result.viewHierarchy!.windows },
+          {
+            density: result.viewHierarchy!.density,
+            windows: result.viewHierarchy!.windows,
+            descendantLabelled,
+            elementWindowIds: windowIds,
+          },
         );
 
-        // Attach audit result to observe result
-        result.accessibilityAudit = auditResult;
+        // Attach audit result to observe result, bounded for output
+        result.accessibilityAudit = capAccessibilityViolations(auditResult);
 
         if (!auditResult.summary.passed) {
           logger.warn(

@@ -18,8 +18,10 @@ import {
   TestExecutionStatus,
   TestStepRecord,
 } from "../db/testExecutionRepository";
+import { PlanPartitioner } from "../utils/plan/PlanPartitioner";
 import { PlanSchemaValidator } from "../utils/plan/PlanSchemaValidator";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
+import { decodePlanYamlContent } from "../utils/plan/planYaml";
 
 type NormalizedPlanDevices = ReturnType<typeof normalizePlanDevices>;
 import { buildDeviceLabelMap, registerDeviceLabelMap } from "./deviceLabelMapping";
@@ -120,6 +122,12 @@ export interface PlanExecutionDependencies {
 interface VideoState {
   warnings?: string[];
   androidSession?: AndroidSegmentedPlanVideoSession;
+  /**
+   * True when the Android session rotates segments from its own timer rather than from the
+   * per-step hook. Multi-device plans run their tracks concurrently and never call the step
+   * hook, so only the session's timer can rotate ahead of screenrecord's 180 s cap (#10026).
+   */
+  androidTimerDriven?: boolean;
   iosRecordingId?: string;
 }
 
@@ -308,6 +316,8 @@ export function convertPerDeviceSkippedStepsToRecords(
  * throws) wrap the whole sequence in {@link execute}.
  */
 export class PlanExecutionOrchestrator {
+  // Capture before planTools installs this invocation's own planRequest context.
+  private readonly nestedInPlan = getToolSelectionContext()?.planRequest !== undefined;
   private readonly device: BootedDevice;
   private readonly request: PlanExecutionRequest;
   private readonly progress?: ProgressCallback;
@@ -465,7 +475,7 @@ export class PlanExecutionOrchestrator {
 
     if (yamlContent.startsWith("base64:")) {
       this.perfLog("Decoding base64 plan content");
-      yamlContent = Buffer.from(yamlContent.substring(7), "base64").toString("utf-8");
+      yamlContent = decodePlanYamlContent(yamlContent);
       this.perfLog(`Base64 content decoded (${yamlContent.length} bytes)`);
     }
 
@@ -491,10 +501,18 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Plan YAML schema validation passed");
 
     this.perfLog("Parsing plan from YAML");
-    const plan = importPlanFromYaml(yamlContent);
+    const plan = importPlanFromYaml(yamlContent, { platform: this.request.platform });
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);
+    if (
+      this.nestedInPlan &&
+      (this.request.devices?.length || this.request.device || this.normalizedDevices.labels.length)
+    ) {
+      throw new ActionableError(
+        "Nested executePlan cannot use devices/device labels. Remove the labels; nested plans run on the enclosing plan's session/device.",
+      );
+    }
     this.reconcileDeviceLists();
     return plan;
   }
@@ -713,7 +731,12 @@ export class PlanExecutionOrchestrator {
             ? { rollbackVideoRecordingStart: this.videoRecorder.rollbackVideoRecordingStart }
             : {}),
         });
-        await session.startFirstSegment();
+        // Sequential plans rotate between steps (never mid-step). A partitioned plan's tracks
+        // run concurrently, so no step boundary is quiescent and executeDeviceTrack never calls
+        // the hook; the session's own timer rotates instead, and one session-level timer cannot
+        // be raced by several tracks.
+        state.androidTimerDriven = PlanPartitioner.isMultiDevicePlan(plan);
+        await (state.androidTimerDriven ? session.start() : session.startFirstSegment());
         state.androidSession = session;
         this.perfLog("Android segmented video recording started");
       } else {
@@ -763,7 +786,7 @@ export class PlanExecutionOrchestrator {
     if (this.request.captureObserveSteps) {
       options.captureObserveSteps = this.request.captureObserveSteps;
     }
-    if (video.androidSession) {
+    if (video.androidSession && !video.androidTimerDriven) {
       options.onBeforePlanStep = video.androidSession.onBeforePlanStep;
     }
     return Object.keys(options).length > 0 ? options : undefined;

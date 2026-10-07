@@ -38,6 +38,8 @@ import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager"
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
 
+import { getPerfWindowBuffer } from "../../../../src/features/performance/PerfWindowBuffer";
+
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
     expect(getRequiredIosRunnerFeatureFlags({ AUTOMOBILE_VERSION: "0.0.66" })).toEqual([]);
@@ -55,6 +57,34 @@ describe("IOSCtrlProxyClient", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
+
+  test("runner performance updates stay out of the app perfSnapshot buffer", () => {
+    const buffer = getPerfWindowBuffer();
+    buffer.clear(testDevice.deviceId);
+    const record = spyOn(buffer, "record");
+    const server = new DeviceDataStreamSocketServer(undefined, fakeTimer);
+    const push = spyOn(server, "pushPerformanceUpdate").mockImplementation(() => {});
+    installDeviceDataStreamSocketServerForTesting(server);
+    try {
+      ctrlProxyClient["handlePerformanceUpdate"]({
+        timestamp: fakeTimer.now(),
+        fps: 12,
+        frameTimeMs: 83,
+        jankFrames: 9,
+        cpuUsagePercent: 70,
+        memoryUsageMb: 200,
+      });
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(record).not.toHaveBeenCalled();
+      expect(buffer.snapshot(testDevice.deviceId, fakeTimer.now(), 1000).fps).toBeNull();
+      expect(buffer.snapshot(testDevice.deviceId, fakeTimer.now(), 1000).jank).toBeNull();
+    } finally {
+      installDeviceDataStreamSocketServerForTesting(null);
+      push.mockRestore();
+      record.mockRestore();
+      buffer.clear(testDevice.deviceId);
+    }
+  });
 
   beforeEach(function () {
     // Create fake timer with auto-advance for fast tests
@@ -759,12 +789,11 @@ describe("IOSCtrlProxyClient", function () {
     test("does not issue SDK-backed syncs when the foreground app has no SDK server", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -887,13 +916,12 @@ describe("IOSCtrlProxyClient", function () {
     test("syncs SDK-backed state after capability detection", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.startSimulation("tlsFailure", 20, 4);
-      state.addMock({
+      state.startSimulation(testDevice.deviceId, "tlsFailure", 20, 4);
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 3,
-        remaining: 3,
         statusCode: 201,
         responseHeaders: { "X-Test": "yes" },
         responseBody: '{"ok":true}',
@@ -953,21 +981,67 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("does not push another device's rules or simulation on connect (#10061)", async function () {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      state.startSimulation("emulator-5554", "tlsFailure", 20, 4);
+      state.addMock("emulator-5554", {
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        statusCode: 201,
+        responseHeaders: {},
+        responseBody: "{}",
+        contentType: "application/json",
+      });
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: [
+              "get_sdk_capabilities",
+              "set_network_mock_rules",
+              "set_network_error_simulation",
+            ],
+          }),
+        );
+        await respondToSdkCapabilityQuery(socket, true, "com.example.sdk");
+
+        const sync = socket.sentMessages.map((message) => JSON.parse(message));
+        expect(sync).toContainEqual({ type: "set_network_mock_rules", rules: [] });
+        expect(sync).toContainEqual({ type: "set_network_error_simulation", enabled: false });
+        expect(sync.some((message) => message.enabled === true)).toBe(false);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("syncs mock rules for legacy runners that advertise the command", async function () {
       serverConfig.setNetworkMockableEnabled(true);
       const state = NetworkState.getInstance();
-      state.addMock({
+      state.addMock(testDevice.deviceId, {
         host: "api\\.example\\.com",
         path: "/v1/items",
         method: "GET",
         limit: 1,
-        remaining: 1,
         statusCode: 200,
         responseHeaders: {},
         responseBody: "{}",
         contentType: "application/json",
       });
-      state.startSimulation("timeout", 10, 2);
+      state.startSimulation(testDevice.deviceId, "timeout", 10, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -1283,7 +1357,7 @@ describe("IOSCtrlProxyClient", function () {
 
   describe("SDK capability transitions", function () {
     test("refreshes capabilities and syncs simulation after launching an SDK-enabled app", async function () {
-      NetworkState.getInstance().startSimulation("timeout", 20, 2);
+      NetworkState.getInstance().startSimulation(testDevice.deviceId, "timeout", 20, 2);
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
@@ -3987,7 +4061,8 @@ describe("IOSCtrlProxyClient", function () {
         // Register an in-flight request over the live socket. A long timeout keeps
         // it pending so it can only settle via the port-change cancellation, never
         // by timing out during the test.
-        const inFlight = testClient.requestSwipe(0, 0, 10, 10, 300, 60000);
+        // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
+        const inFlight = testClient.requestDrag(0, 0, 10, 10, 0, 300, 0, 60000);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

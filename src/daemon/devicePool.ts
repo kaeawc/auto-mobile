@@ -1,4 +1,10 @@
+import type { Environment } from "./poolConfig";
 import { notifyDeviceIdentityReplaced } from "../utils/deviceIncarnation";
+import { AndroidTransportAliases, type AndroidTransportRouting } from "../utils/androidSerial";
+import {
+  androidTransportIdentityAdbFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
@@ -22,6 +28,7 @@ import {
   type SessionRecoveryTarget,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
+import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
@@ -436,6 +443,9 @@ export interface ShutdownIdentityReservation {
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
+/** Bound on the adb state read that decides a recovery reservation's lift (#10074). */
+const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
+
 /** Evidence belongs only to the entry captured before this target's discovery. */
 export interface TargetDeviceDiscoverySnapshot {
   capturedEntry: PooledDevice | undefined;
@@ -598,6 +608,8 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface DevicePoolDependencies {
+  androidAdbFactory?: AdbClientFactory;
+  env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
   sessionManager: SessionManager;
@@ -656,6 +668,10 @@ function createMissingDeviceLiveness(
   factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
 ): MissingDeviceLiveness {
   return factory ? factory(port) : new MissingDeviceLiveness(port);
+}
+
+function createAndroidTransportAliases(factory?: AdbClientFactory): AndroidTransportAliases {
+  return new AndroidTransportAliases(factory ?? androidTransportIdentityAdbFactory);
 }
 
 function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
@@ -752,6 +768,11 @@ export class DevicePool {
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
+  private readonly androidTransportAliases: AndroidTransportAliases;
+  private androidAliasObservation = 0;
+  private androidAliasAppliedObservation = 0;
+  private androidAliasRetirement = 0;
+  private androidAliasAppliedDevices: BootedDevice[] = [];
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
@@ -887,6 +908,7 @@ export class DevicePool {
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
 
   constructor({
+    env,
     sessionManager,
     daemonSessionId,
     timer = defaultTimer,
@@ -917,10 +939,12 @@ export class DevicePool {
     runtimeIdentityFactory,
     deviceShutdownReservationsFactory,
     deviceSessionContinuityEnabled,
+    androidAdbFactory,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
     this.recoveryRetryRefresh = new TTLCache(timer, {
       ttlMs: this.RECOVERY_RETRY_REFRESH_INTERVAL_MS,
       maxEntries: 1,
@@ -965,7 +989,7 @@ export class DevicePool {
     this.idleDeviceReaper = this.createIdleDeviceReaper();
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
-    this.autolockManager = this.createAutolockManager();
+    this.autolockManager = this.createAutolockManager(env);
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
@@ -1103,21 +1127,24 @@ export class DevicePool {
 
   private registerSessionReleaseHandlers(): void {
     this.sessionManager.setRecoveryExpiryReleaseHandler({
-      release: (sessionId, reason, attempt) => {
+      release: (sessionId, reason, attempt, options) => {
         const recoveryRelease = this.recoveryCoordinator.releaseFailedRecoveryOnExpiry(
           sessionId,
           reason,
           attempt,
+          options,
         );
         if (recoveryRelease) {
+          options.deviceReleaseManaged = true;
           return recoveryRelease;
         }
         const terminalRelease = this.sessionManager.getTerminalReleaseSnapshot(sessionId);
         if (!terminalRelease || !this.sessionManager.hasSession(sessionId)) {
           return undefined;
         }
-        // A retained explicit-release fence upgrades the expiry reason, so its
-        // notification captures ownership instead of freeing the device below.
+        // This handler returns the device after the attempt, including when a
+        // retained terminal fence upgrades the expiry's diagnostic reason.
+        options.deviceReleaseManaged = true;
         let releasedDeviceId: string | null = null;
         return releaseSessionAndDevice(
           this.sessionManager,
@@ -1139,9 +1166,10 @@ export class DevicePool {
     // release callers retain their ordered cleanup and release flow, while
     // connection ownership and autolock metadata are removed when their session
     // ends.
-    this.sessionManager.onSessionRelease((sessionId, deviceId, releaseReason) => {
+    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
       this.clearMcpSessionOwnership(sessionId);
-      if (releaseReason === "lazy-expiry" || releaseReason === "cleanup-expired") {
+      // An expiry handler that owns the ordered release consumes its capture after the attempt.
+      if (options.expiryOrigin && !options.deviceReleaseManaged) {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
         this.captureReleasedDevice(sessionId, deviceId);
@@ -1183,6 +1211,12 @@ export class DevicePool {
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
         this.shouldRebootDisconnectedAndroidDevice(device),
+      mapAndroidDiscovery: (devices) => this.androidTransportAliases.mapDiscovery(devices, true),
+      needsAndroidTransportNormalization: (devices) =>
+        devices.some((device) => device.platform === "android") &&
+        this.needsAndroidTransportNormalization(devices),
+      isTransportEmulator: (deviceId) =>
+        this.androidTransportAliases.avdName(deviceId) !== undefined,
       matchesRuntimeIdentity: (device, booted) =>
         this.runtimeIdentity.matchesRuntimeIdentity(device, booted),
       reconcilePooledIdentityResolution: (device, booted) =>
@@ -1214,6 +1248,11 @@ export class DevicePool {
 
   private createRefreshPort(): DevicePoolRefreshPort {
     return {
+      normalizeAndroidDiscovery: (devices, held, current, complete) =>
+        this.normalizeAndroidDiscovery(devices, held, current, complete),
+      isAndroidTransportAssignable: (device) => this.androidTransportAliases.isAssignable(device),
+      needsAndroidTransportNormalization: (devices) =>
+        this.needsAndroidTransportNormalization(devices),
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
@@ -1243,6 +1282,8 @@ export class DevicePool {
           sources,
         ),
       notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+      liftUnconfirmedRecoveringAndroidImages: (discovery, generation) =>
+        this.recoveryCoordinator.liftUnconfirmedRecoveringAndroidImages(discovery, generation),
     };
   }
 
@@ -1271,7 +1312,7 @@ export class DevicePool {
     };
   }
 
-  private createAutolockManager(): DeviceAutolockManager {
+  private createAutolockManager(env: Environment | undefined): DeviceAutolockManager {
     return new DeviceAutolockManager(
       {
         getSessionManager: () => this.sessionManager,
@@ -1308,11 +1349,17 @@ export class DevicePool {
       },
       this.deviceSessionRepository,
       this.idGenerator,
+      env,
     );
   }
 
   private createRecoveryCoordinator(): DeviceRecoveryCoordinator {
     return new DeviceRecoveryCoordinator({
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
+      getAndroidOfflineDeviceIds: async (deviceIds) =>
+        (await this.deviceManager.getAndroidOfflineDeviceIds?.(deviceIds, {
+          timeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+        })) ?? new Set<string>(),
       getRecoveringSessionLosses: () => this.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
       getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
@@ -1451,12 +1498,13 @@ export class DevicePool {
           this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
           this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
-        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
+        finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner, lateShutdown) =>
           this.recoveryCoordinator.finishAndroidRecoveryAttempt(
             avdName,
             deviceIds,
             retainImage,
             owner,
+            lateShutdown,
           ),
         stopAndroidEmulatorForRecovery: (
           ...[
@@ -1623,11 +1671,17 @@ export class DevicePool {
    * Typically gets devices from --device-list or by querying emulator status.
    */
   async initializeWithDevices(devices: BootedDevice[]): Promise<void> {
+    if (this.needsAndroidTransportNormalization(devices)) {
+      devices = this.mapAndroidDiscovery(devices);
+    }
     const now = this.seedLastUsedAt(this.timer.now());
     const perf = createGlobalPerformanceTracker();
 
     perf.startOperation("populatePool");
     for (const device of devices) {
+      if (!this.androidTransportAliases.isAssignable(device)) {
+        continue;
+      }
       this.clearAutoStartSuppressionForBootedDevice(device);
       // Full: init/reinit replaces the pooled entry and allocates a new incarnation.
       this.notifyDeviceFramesInvalidated(device.deviceId);
@@ -1721,6 +1775,12 @@ export class DevicePool {
     awaitSessionTracking: boolean = true,
     identityEvidence: IdentityEvidence = neutralIdentityEvidence(device),
   ): Promise<void> {
+    device = this.mapAndroidDiscovery([device])[0];
+    if (!this.androidTransportAliases.isAssignable(device)) {
+      throw new ActionableError(
+        `Android transport '${device.deviceId}' has no proven identity. Refresh devices after reconnecting it.`,
+      );
+    }
     this.clearAutoStartSuppressionForBootedDevice(device, sourceImage);
     if (sourceImage) {
       this.intentionalShutdowns.delete(device.deviceId);
@@ -1866,11 +1926,15 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    if (device.platform === "android" && this.androidTransportAliases.retire(deviceId)) {
+      this.androidAliasRetirement++;
+    }
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
     this.sessionManager.retireClockRestoration(deviceId);
     this.sessionManager.retireRotationRestoration(deviceId);
+    this.sessionManager.retireScreenReaderRestoration(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -2741,8 +2805,11 @@ export class DevicePool {
           return undefined;
         }
       }
-      const childProcess = await runWithAbortSignal(signal, () =>
-        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      const childProcess = await this.startCoordinatedDeviceProcess(
+        device,
+        deadlineMs,
+        signal,
+        retainLeaseUntil,
       );
       return await action(childProcess, signal, retainLeaseUntil);
     } finally {
@@ -2755,6 +2822,29 @@ export class DevicePool {
         lifecycleLease.release();
       }
       this.timer.clearTimeout(timeoutHandle);
+    }
+  }
+
+  /**
+   * Starts the device under the coordinated lease. A launch cancelled after the
+   * emulator spawned carries its child on the error; stop it here so the lease is
+   * held until the exit is confirmed (#10075), since `action` never runs for it.
+   */
+  private async startCoordinatedDeviceProcess(
+    device: DeviceInfo,
+    deadlineMs: number,
+    signal: AbortSignal,
+    retainLeaseUntil: (settlement: Promise<unknown>) => void,
+  ): Promise<ChildProcess | null> {
+    try {
+      return await runWithAbortSignal(signal, () =>
+        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+      );
+    } catch (error) {
+      if (isEmulatorLaunchCancelledError(error) && error.process) {
+        await this.cancelCoordinatedDeviceStart(device, error.process, retainLeaseUntil);
+      }
+      throw error;
     }
   }
 
@@ -3327,6 +3417,8 @@ export class DevicePool {
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
+  // rebindSameAvdReplacementSession and the recovery ports may have already
+  // detached the entry: their session fence does not require pooled-entry identity.
   private isPreservedSessionCurrent(session: Session, deviceId: string): boolean {
     return this.sessionManager.isCurrentSession(session) && session.assignedDevice === deviceId;
   }
@@ -3711,7 +3803,7 @@ export class DevicePool {
     return this.getDevicesByPlatform("android").filter(
       (candidate) =>
         candidate !== device &&
-        isAndroidEmulatorSerial(candidate.id) &&
+        this.isPooledAndroidEmulator(candidate.id) &&
         !candidate.identityUnresolved &&
         !isUnresolvedAndroidEmulatorName({
           deviceId: candidate.id,
@@ -3877,7 +3969,14 @@ export class DevicePool {
         }
         const matchingAvd = matchingAvds[0];
         if (!matchingAvd) {
-          return "stopped";
+          return await this.stopRecoveryTargetMissingFromOnlineList({
+            avdName,
+            deviceId: disconnectedDevice.id,
+            adoptOnly,
+            discover,
+            signal,
+            deadlineMs,
+          });
         }
         if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
           if (matchingAvd.deviceId === disconnectedDevice.id) {
@@ -3913,20 +4012,13 @@ export class DevicePool {
           signal,
         });
         signal.throwIfAborted();
-        for (;;) {
-          const devices = await discover();
-          // A same-AVD replacement still holds the image's locks; a different
-          // AVD reusing the old serial must be preserved without another kill.
-          const stillPresent = devices.some((device) => device.name === avdName);
-          if (!stillPresent) {
-            logger.info(
-              `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
-            );
-            return "stopped";
-          }
-          await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
-          signal.throwIfAborted();
-        }
+        return await this.confirmRecoveryStop(
+          avdName,
+          matchingAvd.deviceId,
+          discover,
+          signal,
+          deadlineMs,
+        );
       }));
     try {
       return await raceWithDeadline(startShutdown, {
@@ -3946,6 +4038,110 @@ export class DevicePool {
         retainLeaseUntil(shutdown);
       }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
+    }
+  }
+
+  /**
+   * The AVD is absent from the online-only list before any kill. That is not proof
+   * its emulator stopped: a transport that dropped to adb `offline` leaves the
+   * process running and holding the AVD (#10074, #10100). When the recovery's own
+   * serial is still listed `offline`, send the console kill through the client's
+   * offline handling (`force` is what makes it dispatch to a serial that is attached
+   * but not online; the serial was just probed, so the only residual is a replacement
+   * taking it inside that window), then confirm the exit like any other kill. An
+   * adopt-only recovery never kills: its tracked process already exited. A serial
+   * absent from adb, or an unavailable probe, keeps the earlier answer.
+   */
+  private async stopRecoveryTargetMissingFromOnlineList(options: {
+    avdName: string;
+    deviceId: string;
+    adoptOnly: boolean;
+    discover: () => Promise<BootedDevice[]>;
+    signal: AbortSignal;
+    deadlineMs: number;
+  }): Promise<"stopped"> {
+    const { avdName, deviceId, adoptOnly, discover, signal, deadlineMs } = options;
+    if (
+      adoptOnly ||
+      !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+    ) {
+      return "stopped";
+    }
+    await this.deviceManager.killDevice(
+      { deviceId, name: avdName, platform: "android" },
+      { timeoutMs: Math.max(1, deadlineMs - this.timer.now()), signal, force: true },
+    );
+    signal.throwIfAborted();
+    return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);
+  }
+
+  private async confirmRecoveryStop(
+    avdName: string,
+    deviceId: string,
+    discover: () => Promise<BootedDevice[]>,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<"stopped"> {
+    for (;;) {
+      const devices = await discover();
+      // A same-AVD replacement still holds the image's locks; a different
+      // AVD reusing the old serial must be preserved without another kill.
+      const stillPresent = devices.some((device) => device.name === avdName);
+      // The online-only list also lacks an emulator that dropped to adb `offline`
+      // mid-kill while its process still runs (#10100).
+      if (
+        !stillPresent &&
+        !(await this.isAndroidSerialHeldOffline(avdName, deviceId, signal, deadlineMs))
+      ) {
+        logger.info(
+          `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
+        );
+        return "stopped";
+      }
+      await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+      signal.throwIfAborted();
+    }
+  }
+
+  /**
+   * Whether adb still lists the killed emulator's serial as `offline` (or its
+   * state could not be read), so its absence from the online-only discovery does
+   * not yet confirm the AVD stopped. The same "offline or probe failed means
+   * unconfirmed" rule as the recovery-reservation lift (#10076).
+   */
+  private async isAndroidSerialHeldOffline(
+    avdName: string,
+    deviceId: string,
+    signal: AbortSignal,
+    deadlineMs: number,
+  ): Promise<boolean> {
+    const probe = this.deviceManager.getAndroidOfflineDeviceIds?.bind(this.deviceManager);
+    if (!probe) {
+      return false;
+    }
+    try {
+      const offline = await probe([deviceId], {
+        signal,
+        timeoutMs: Math.max(
+          1,
+          Math.min(ANDROID_OFFLINE_PROBE_TIMEOUT_MS, deadlineMs - this.timer.now()),
+        ),
+      });
+      signal.throwIfAborted();
+      if (offline.has(deviceId)) {
+        logger.info(
+          `[DevicePool] Android AVD '${avdName}' is absent from the booted list but adb still lists ${deviceId} as offline; shutdown not yet confirmed`,
+        );
+      }
+      return offline.has(deviceId);
+    } catch (error) {
+      signal.throwIfAborted();
+      // An unreadable state list cannot prove the serial left `adb devices`.
+      logger.warn(
+        `[DevicePool] adb device-state probe failed while confirming '${avdName}' stopped: ${errorMessage(error)}`,
+        error,
+      );
+      return true;
     }
   }
 
@@ -4591,9 +4787,14 @@ export class DevicePool {
     return result;
   }
 
+  private isPooledEntryCurrent(device: PooledDevice): boolean {
+    return this.devices.get(device.id) === device;
+  }
+
+  // selectAssignableIdleDevice additionally requires eligibility and resolved identity.
   private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === null &&
       this.selectIdleDevice([device]) === device &&
       this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
@@ -4706,6 +4907,11 @@ export class DevicePool {
   private isIdleDeviceEligible(device: PooledDevice): boolean {
     return (
       device.status === "idle" &&
+      this.androidTransportAliases.isAssignable({
+        deviceId: device.id,
+        name: device.name,
+        platform: device.platform,
+      }) &&
       !this.isReservedForAssignment(device) &&
       !this.getDeviceHealthMarker(device.id)
     );
@@ -4990,9 +5196,11 @@ export class DevicePool {
     }
   }
 
+  // createSessionOrRestore / DeviceAutolockManager check the session object and busy
+  // assignment, including a held suspect session; automation admission is separate.
   private isSessionAssignmentCurrent(device: PooledDevice, session: Session): boolean {
     return (
-      this.devices.get(device.id) === device &&
+      this.isPooledEntryCurrent(device) &&
       device.sessionId === session.sessionId &&
       device.status === "busy" &&
       this.sessionManager.getSession(session.sessionId) === session
@@ -5098,13 +5306,15 @@ export class DevicePool {
     logger.info(`Released device ${deviceId} from session ${sessionId}`);
   }
 
+  // releaseCapturedDevice checks assignment generation, but permits release after
+  // the session has left SessionManager and does not require a busy status.
   private isCapturedReleaseCurrent(
     device: PooledDevice,
     expectedSessionId: string,
     expectedAssignmentCount: number,
   ): boolean {
     const deviceId = device.id;
-    if (this.devices.get(deviceId) !== device) {
+    if (!this.isPooledEntryCurrent(device)) {
       logger.debug(`Ignoring stale release for replacement device ${deviceId}`);
       return false;
     }
@@ -6321,6 +6531,72 @@ export class DevicePool {
     return this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, options);
   }
 
+  /** Explicit routing state shared with adb clients; no process-global alias cache. */
+  getAndroidTransportRouting(): AndroidTransportRouting {
+    return this.androidTransportAliases;
+  }
+
+  getAndroidTransportAliases(deviceId: string): string[] {
+    return this.androidTransportAliases.aliases(deviceId);
+  }
+
+  getAndroidTransportAvdName(deviceId: string): string | undefined {
+    return this.androidTransportAliases.avdName(deviceId);
+  }
+
+  mapAndroidDiscovery(devices: readonly BootedDevice[]): BootedDevice[] {
+    return this.androidTransportAliases.mapDiscovery(devices);
+  }
+
+  private isPooledAndroidEmulator(deviceId: string): boolean {
+    return (
+      isAndroidEmulatorSerial(deviceId) ||
+      this.androidTransportAliases.avdName(deviceId) !== undefined
+    );
+  }
+
+  needsAndroidTransportNormalization(devices: readonly BootedDevice[]): boolean {
+    return this.androidTransportAliases.needsNormalization(devices);
+  }
+
+  async normalizeAndroidDiscovery(
+    devices: readonly BootedDevice[],
+    assignmentLockHeld = false,
+    isCurrent: () => boolean = () => true,
+    completeAndroidSnapshot = true,
+  ): Promise<BootedDevice[]> {
+    if (
+      !this.needsAndroidTransportNormalization(devices) ||
+      (!completeAndroidSnapshot && devices.every((device) => device.platform !== "android"))
+    ) {
+      return [...devices];
+    }
+    const observation = ++this.androidAliasObservation;
+    const retirement = this.androidAliasRetirement;
+    const evidence = await this.androidTransportAliases.prepare(devices);
+    const fold = () => {
+      if (!isCurrent()) {
+        return [];
+      }
+      if (observation < this.androidAliasAppliedObservation) {
+        return [...this.androidAliasAppliedDevices];
+      }
+      if (retirement !== this.androidAliasRetirement) {
+        return this.mapAndroidDiscovery(devices);
+      }
+      this.androidAliasAppliedObservation = observation;
+      const normalized = this.androidTransportAliases.fold(
+        devices,
+        evidence,
+        new Set(this.devices.keys()),
+        completeAndroidSnapshot,
+      );
+      this.androidAliasAppliedDevices = normalized;
+      return normalized;
+    };
+    return assignmentLockHeld ? fold() : this.assignmentMutex.runExclusive(fold);
+  }
+
   describesPooledRuntime(expected: Pick<BootedDevice, "deviceId" | "name" | "platform">): boolean {
     return this.runtimeIdentity.describesPooledRuntime(expected);
   }
@@ -6361,8 +6637,8 @@ export class DevicePool {
     return this.autolockManager.attachAutolockSessionToMcpSession(...args);
   }
 
-  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
-    this.autolockManager.assertAutolockAccess(deviceId, sessionUuid);
+  assertAutolockAccess(...args: Parameters<DeviceAutolockManager["assertAutolockAccess"]>): void {
+    this.autolockManager.assertAutolockAccess(...args);
   }
 
   /**
@@ -6576,12 +6852,7 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    );
+    return Array.from(this.devices.values()).filter((device) => this.isIdleDeviceEligible(device));
   }
 
   /**
@@ -6699,7 +6970,7 @@ export class DevicePool {
       (device) =>
         this.stableDeviceIdFor(device) === target.stableDeviceId &&
         (target.androidEmulator === undefined ||
-          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+          this.isPooledAndroidEmulator(device.id) === target.androidEmulator),
     );
     // A recovery target must prove one exact runtime. A duplicate stable identity
     // is ambiguous and must not collapse back to normal pool selection.
@@ -6724,7 +6995,7 @@ export class DevicePool {
       (device) =>
         this.stableDeviceIdFor(device) === target.stableDeviceId &&
         (target.androidEmulator === undefined ||
-          isAndroidEmulatorSerial(device.id) === target.androidEmulator),
+          this.isPooledAndroidEmulator(device.id) === target.androidEmulator),
     );
     if (exactMatches.length !== 1) {
       const { transportReused, transportIdentityUnresolved, absenceAuthoritative } =
@@ -6787,7 +7058,7 @@ export class DevicePool {
           (device.id === target.deviceId ||
             (target.platform === "android" &&
               target.androidEmulator === true &&
-              isAndroidEmulatorSerial(device.id))),
+              this.isPooledAndroidEmulator(device.id))),
       );
     const absenceAuthoritative =
       refreshCompleteness !== undefined &&
@@ -6799,7 +7070,7 @@ export class DevicePool {
     if (device.platform === "ios") {
       return device.id;
     }
-    if (!isAndroidEmulatorSerial(device.id)) {
+    if (!this.isPooledAndroidEmulator(device.id)) {
       return device.id;
     }
     return (
@@ -6829,12 +7100,7 @@ export class DevicePool {
     error: number;
   } {
     const devices = this.getDevicesByPlatform(platform);
-    const idle = devices.filter(
-      (device) =>
-        device.status === "idle" &&
-        !this.isReservedForAssignment(device) &&
-        !this.getDeviceHealthMarker(device.id),
-    ).length;
+    const idle = devices.filter((device) => this.isIdleDeviceEligible(device)).length;
     const assigned = devices.filter(
       (device) => device.status === "busy" || this.isReservedForAssignment(device),
     ).length;

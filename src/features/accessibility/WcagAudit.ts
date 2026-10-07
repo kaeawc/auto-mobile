@@ -20,6 +20,7 @@ import {
   AccessibilityAuditSummary,
 } from "../../models/AccessibilityAudit";
 import { ContrastChecker } from "./ContrastChecker";
+import { isContrastObservable, isInputMethodElement } from "./ContrastCoverage";
 import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { linkWindowRoots } from "../observe/linkWindowRoots";
@@ -32,10 +33,91 @@ export interface WcagBaselineStore {
   clearBaseline(screenId: string): Promise<void>;
 }
 
+const NO_SCREENSHOT_REASON = "no screenshot for this observation";
+
 type AuditHierarchyOptions = {
   density?: number;
   windows?: ViewHierarchyWindowInfo[];
+  /**
+   * Clickable elements whose accessible label is merged from descendant text or
+   * content descriptions (see `projectAuditElements`). They are not flagged as
+   * `missing-content-description`: TalkBack announces the merged child text.
+   */
+  descendantLabelled?: ReadonlySet<Element>;
+  /**
+   * The window each element sits in (see `projectAuditElements`). With `windows` it lets the
+   * contrast check skip text covered by the keyboard or another window (#10220).
+   */
+  elementWindowIds?: ReadonlyMap<Element, number>;
 };
+
+/** Contrast reads screenshot pixels, so text the screenshot does not show cannot be measured. */
+const COVERED_TEXT_REASON =
+  "text elements are covered by the keyboard or another window, or partly hidden, so the screenshot does not show them";
+const OUTSIDE_IMAGE_REASON = "text elements extend beyond the screenshot";
+
+interface ContrastCheckOutcome {
+  violations: WcagViolation[];
+  covered: number;
+  outsideImage: number;
+}
+
+/** One `notEvaluated` entry per reason that skipped text, so a clean result is not read as "checked". */
+function contrastNotEvaluated(
+  outcome: ContrastCheckOutcome,
+): NonNullable<AccessibilityAuditSummary["notEvaluated"]> {
+  return [
+    { count: outcome.covered, reason: COVERED_TEXT_REASON },
+    { count: outcome.outsideImage, reason: OUTSIDE_IMAGE_REASON },
+  ]
+    .filter(({ count }) => count > 0)
+    .map(({ count, reason }) => ({
+      check: "insufficient-contrast" as const,
+      reason: `${count} ${reason}`,
+    }));
+}
+
+/**
+ * Upper bound on emitted `violations`. Each entry carries a full element and
+ * explanation, and a screen with hundreds of small touch targets or contrast
+ * failures would otherwise return every one on every observation (the same
+ * concern `MAX_LAYOUT_WARNINGS` bounds for `layoutWarnings`). Real screens stay
+ * far below this; when it trims, `violationsTruncated` reports the counts.
+ */
+export const MAX_ACCESSIBILITY_VIOLATIONS = 50;
+
+const SEVERITY_RANK: Record<WcagViolation["severity"], number> = { error: 0, warning: 1, info: 2 };
+
+/**
+ * Cap `result.violations` at {@link MAX_ACCESSIBILITY_VIOLATIONS}, keeping the
+ * most severe first (stable within a severity, so detection order is kept) and
+ * reporting the pre-cap total and the omitted count per rule in
+ * `violationsTruncated`. At or under the cap the result is returned unchanged.
+ * `summary` is untouched: it already counts the full set. Applied where the
+ * result is attached to an observation, not inside `audit`, so a result handed
+ * to `saveBaseline` is never silently truncated.
+ */
+export function capAccessibilityViolations(
+  result: AccessibilityAuditResult,
+): AccessibilityAuditResult {
+  const total = result.violations.length;
+  if (total <= MAX_ACCESSIBILITY_VIOLATIONS) {
+    return result;
+  }
+  const ranked = [...result.violations].sort(
+    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity],
+  );
+  const kept = ranked.slice(0, MAX_ACCESSIBILITY_VIOLATIONS);
+  const omittedByType: Partial<Record<ViolationType, number>> = {};
+  for (const violation of ranked.slice(MAX_ACCESSIBILITY_VIOLATIONS)) {
+    omittedByType[violation.type] = (omittedByType[violation.type] ?? 0) + 1;
+  }
+  return {
+    ...result,
+    violations: kept,
+    violationsTruncated: { total, omitted: total - kept.length, omittedByType },
+  };
+}
 
 function promotedWindowRoot(owned: ViewHierarchyNode): ViewHierarchyNode {
   if (nodeAttributes(owned).class || !owned.node) {
@@ -84,8 +166,9 @@ export class WcagAudit {
   constructor(
     timer: Timer = defaultTimer,
     baselineStore: WcagBaselineStore = new BaselineManager(),
+    contrastChecker: ContrastChecker = new ContrastChecker({}, timer),
   ) {
-    this.contrastChecker = new ContrastChecker({}, timer);
+    this.contrastChecker = contrastChecker;
     this.baselineStore = baselineStore;
     this.timer = timer;
   }
@@ -101,23 +184,31 @@ export class WcagAudit {
     config: AccessibilityAuditConfig,
     densityOrOptions?: number | AuditHierarchyOptions,
   ): Promise<AccessibilityAuditResult> {
-    const density =
-      typeof densityOrOptions === "number" ? densityOrOptions : densityOrOptions?.density;
-    const windows = typeof densityOrOptions === "number" ? undefined : densityOrOptions?.windows;
+    const { density, windows, descendantLabelled, elementWindowIds } =
+      typeof densityOrOptions === "number"
+        ? { density: densityOrOptions }
+        : (densityOrOptions ?? {});
+    // Filter once so every audit check excludes positively identified input-method nodes.
+    elements = elements.filter(
+      (element) => !isInputMethodElement(element, elementWindowIds?.get(element), windows),
+    );
     const violations: WcagViolation[] = [];
 
     // Check for missing content descriptions
-    violations.push(...this.checkMissingContentDescriptions(elements));
+    violations.push(...this.checkMissingContentDescriptions(elements, descendantLabelled));
 
     // Check for insufficient contrast ratios (if screenshot available)
+    let contrast: ContrastCheckOutcome | undefined;
     if (screenshotPath) {
-      const contrastViolations = await this.checkContrastRatios(
+      contrast = await this.checkContrastRatios(
         elements,
         screenshotPath,
         config.level,
         config.contrast,
+        density,
+        { windows: windows ?? [], elementWindowIds },
       );
-      violations.push(...contrastViolations);
+      violations.push(...contrast.violations);
     }
 
     // Check for touch target size violations
@@ -144,6 +235,13 @@ export class WcagAudit {
 
     // Generate summary
     const summary = this.generateSummary(violations, filteredViolations, baselinedCount, config);
+    const notEvaluated = contrast
+      ? contrastNotEvaluated(contrast)
+      : // Pixels are required for contrast; say so instead of implying a clean result.
+        [{ check: "insufficient-contrast" as const, reason: NO_SCREENSHOT_REASON }];
+    if (notEvaluated.length > 0) {
+      summary.notEvaluated = notEvaluated;
+    }
 
     return {
       config,
@@ -171,12 +269,21 @@ export class WcagAudit {
   /**
    * Check for clickable/focusable elements without content descriptions
    */
-  private checkMissingContentDescriptions(elements: Element[]): WcagViolation[] {
+  private checkMissingContentDescriptions(
+    elements: Element[],
+    descendantLabelled?: ReadonlySet<Element>,
+  ): WcagViolation[] {
     const violations: WcagViolation[] = [];
 
     for (const element of elements) {
       // Skip if element has text or content-desc
       if (element.text || element["content-desc"]) {
+        continue;
+      }
+
+      // A clickable container is labelled by its descendants' text/content-desc
+      // (the accessibility service announces the merged child text).
+      if (descendantLabelled?.has(element)) {
         continue;
       }
 
@@ -210,21 +317,34 @@ export class WcagAudit {
     elements: Element[],
     screenshotPath: string,
     wcagLevel: string,
-    contrastConfig?: AccessibilityAuditConfig["contrast"],
-  ): Promise<WcagViolation[]> {
+    contrastConfig: AccessibilityAuditConfig["contrast"] | undefined,
+    density: number | undefined,
+    coverage: {
+      windows: readonly ViewHierarchyWindowInfo[];
+      elementWindowIds?: ReadonlyMap<Element, number>;
+    },
+  ): Promise<ContrastCheckOutcome> {
     const violations: WcagViolation[] = [];
 
     // Filter to text elements only
     const textElements = elements.filter((e) => e.text && e.text.trim().length > 0);
 
+    // Only text the screenshot actually shows can be measured: text under the keyboard or another
+    // window would be sampled from that window's pixels and blamed on the app (#10220).
+    const observable = textElements.filter((element) =>
+      isContrastObservable(element, coverage.elementWindowIds?.get(element), coverage.windows),
+    );
+    const covered = textElements.length - observable.length;
+
     // Use batch processing for optimal performance
     const checker = contrastConfig
       ? new ContrastChecker(contrastConfig, this.timer)
       : this.contrastChecker;
-    const results = await checker.checkContrastBatch(
+    const { results, outsideImage } = await checker.checkContrastBatchWithCoverage(
       screenshotPath,
-      textElements,
+      observable,
       wcagLevel as "A" | "AA" | "AAA",
+      density,
     );
 
     // Process results and create violations
@@ -253,7 +373,7 @@ export class WcagAudit {
       }
     }
 
-    return violations;
+    return { violations, covered, outsideImage: outsideImage.length };
   }
 
   /**

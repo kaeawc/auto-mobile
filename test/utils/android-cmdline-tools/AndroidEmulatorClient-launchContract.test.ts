@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
@@ -7,6 +7,10 @@ import {
   parseExtraEmulatorArguments,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { DeviceInfo, ExecResult } from "../../../src/models";
+import { EmulatorLaunchCancelledError } from "../../../src/models/EmulatorLaunchCancelledError";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { FakeFileSystem } from "../../fakes/FakeFileSystem";
+import { resolve } from "node:path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -45,15 +49,23 @@ function createClient(
   const adbFactory: AdbClientFactory = {
     create: (): AdbExecutor => adb,
   };
+  const posterFileSystem = new FakeFileSystem();
+  for (const file of ["poster image.PNG", "poster.jpg", "poster.jpeg"]) {
+    posterFileSystem.setExists(resolve(file), true);
+  }
   const client = new AndroidEmulatorClient(
     async () => execResult(),
     spawnFn as never,
     timer,
     adbFactory,
-    undefined,
+    { readConfig: async () => ({ ramSizeMb: 2048 }) },
     undefined,
     undefined,
     hostPortAvailabilityChecker,
+    undefined,
+    undefined,
+    undefined,
+    posterFileSystem,
   );
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
@@ -74,6 +86,82 @@ afterEach(() => {
 });
 
 describe("AndroidEmulatorClient launch contract", () => {
+  test("adds only back-camera wall poster arguments and resolves spaces as one argument", async () => {
+    const launch = async (cameraPosterPath?: string) => {
+      const child = createChild();
+      let args: string[] = [];
+      const client = createClient((_command, actual) => {
+        args = actual;
+        queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+        return child;
+      });
+      await client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath });
+      child.emit("exit", 0, null);
+      AndroidEmulatorClient.resetLaunchReservationsForTesting();
+      return args;
+    };
+    const baseline = await launch();
+    const poster = await launch("poster image.PNG");
+    expect(poster).toEqual([
+      ...baseline.slice(0, -2),
+      "-camera-back",
+      "virtualscene",
+      "-virtualscene-poster",
+      `wall=${resolve("poster image.PNG")}`,
+      ...baseline.slice(-2),
+    ]);
+    for (const path of ["poster.jpg", "poster.jpeg"]) {
+      expect(await launch(path)).toContain(`wall=${resolve(path)}`);
+    }
+    expect(baseline).not.toContain("-camera-back");
+    expect(baseline).not.toContain("-virtualscene-poster");
+  });
+
+  test("rejects a missing poster or unsupported extension without spawning", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    for (const path of ["missing.png", "poster.gif", ""]) {
+      await expect(
+        client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath: path }),
+      ).rejects.toBeInstanceOf(ActionableError);
+    }
+    expect(spawns).toBe(0);
+  });
+
+  test("rejects conflicting camera arguments without spawning", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    await expect(
+      client.launchEmulator({
+        avdName: "Pixel 9",
+        cameraPosterPath: "poster image.PNG",
+        extraArgs: ["-camera-back", "none"],
+      }),
+    ).rejects.toThrow("cannot be combined");
+    expect(spawns).toBe(0);
+  });
+
+  test("does not adopt a running AVD when a poster was requested", async () => {
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+    spyOn(client, "getBootedDevicesChecked").mockResolvedValue([
+      { name: "Pixel 9", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    await expect(
+      client.launchEmulator({ avdName: "Pixel 9", cameraPosterPath: "poster image.PNG" }),
+    ).rejects.toThrow("unsupported on a running or starting AVD");
+    expect(spawns).toBe(0);
+  });
+
   test("uses a JSON argv array so values containing spaces remain one argument", () => {
     expect(parseExtraEmulatorArguments('["-gpu", "swiftshader indirect"]')).toEqual([
       "-gpu",
@@ -780,6 +868,117 @@ describe("AndroidEmulatorClient launch contract", () => {
     child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
 
     await expect(launch).rejects.toThrow("cancelled");
+  });
+
+  test("hands the spawned child to the owner when cancelled during startup validation (#10075)", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    const signals: string[] = [];
+    // An emulator that ignores SIGTERM: kill() is only recorded, `exit` never fires.
+    child.kill = ((signal?: NodeJS.Signals) => {
+      signals.push(String(signal ?? "SIGTERM"));
+      child.killed = true;
+      return true;
+    }) as ChildProcess["kill"];
+    const timer = new FakeTimer();
+    let spawned = false;
+    const client = createClient(
+      () => {
+        spawned = true;
+        return child;
+      },
+      undefined,
+      undefined,
+      "Pixel 9",
+      timer,
+    );
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    const rejection = launch.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    while (!spawned) {
+      await Promise.resolve();
+    }
+    controller.abort();
+    // No timer advance: the owner gets the child inside its abort grace, not after the 5 s fallback.
+    const error = await rejection;
+
+    expect(error).toBeInstanceOf(EmulatorLaunchCancelledError);
+    expect((error as EmulatorLaunchCancelledError).process).toBe(child);
+    expect(signals).toEqual(["SIGTERM"]);
+
+    // The abandoned validation settling later must not signal again or surface an error.
+    timer.advanceTime(5000);
+    await Promise.resolve();
+    expect(signals).toEqual(["SIGTERM"]);
+  });
+
+  test("carries the child on the cancellation when the emulator exits on SIGTERM (#10075)", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    child.kill = (() => {
+      child.killed = true;
+      child.emit("exit", null);
+      child.emit("close", null);
+      return true;
+    }) as ChildProcess["kill"];
+    let spawned = false;
+    const client = createClient(() => {
+      spawned = true;
+      return child;
+    });
+
+    const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+    const rejection = launch.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    while (!spawned) {
+      await Promise.resolve();
+    }
+    controller.abort();
+
+    const error = await rejection;
+    expect(error).toBeInstanceOf(EmulatorLaunchCancelledError);
+    expect((error as EmulatorLaunchCancelledError).process).toBe(child);
+  });
+
+  test("a launch cancelled before the spawn carries no child (#10075)", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let spawns = 0;
+    const client = createClient(() => {
+      spawns++;
+      return createChild();
+    });
+
+    const error = await client
+      .launchEmulator({ avdName: "Pixel 9", signal: controller.signal })
+      .catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(EmulatorLaunchCancelledError);
+    expect((error as EmulatorLaunchCancelledError).process).toBeNull();
+    expect(spawns).toBe(0);
+  });
+
+  test("bounds the AVD-existence check with the launch's abort signal (#10075)", async () => {
+    const controller = new AbortController();
+    const child = createChild();
+    const client = createClient(() => {
+      queueMicrotask(() => child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n")));
+      return child;
+    });
+    let listSignal: AbortSignal | undefined;
+    spyOn(client, "listAvds").mockImplementation(async (options) => {
+      listSignal = options?.signal;
+      return [{ name: "Pixel 9", platform: "android", isRunning: false }];
+    });
+
+    await client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
+
+    expect(listSignal).toBe(controller.signal);
   });
 
   test("reports cancellation when aborting causes the child to exit during startup validation", async () => {

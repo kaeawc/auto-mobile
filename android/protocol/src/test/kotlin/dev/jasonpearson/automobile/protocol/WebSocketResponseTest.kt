@@ -18,6 +18,24 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `IME action approximation is optional and round trips when present`() {
+    val exact = ImeActionResult(timestamp = 1L, success = true, action = "next", totalTimeMs = 0L)
+    val encoded = json.encodeToString(ImeActionResult.serializer(), exact)
+    assertFalse(encoded.contains("approximated"))
+    assertNull(json.decodeFromString(ImeActionResult.serializer(), encoded).approximated)
+    for (success in listOf(true, false)) {
+      val fallback = exact.copy(success = success, approximated = true)
+      assertEquals(
+        fallback,
+        json.decodeFromString(
+          ImeActionResult.serializer(),
+          json.encodeToString(ImeActionResult.serializer(), fallback),
+        ),
+      )
+    }
+  }
+
+  @Test
   fun `traversal truncation metadata is optional and omitted when null`() {
     val complete = TraversalOrderData(elements = emptyList(), focusedIndex = null, totalCount = 0)
     val encoded = json.encodeToString(TraversalOrderData.serializer(), complete)
@@ -72,6 +90,27 @@ class WebSocketResponseTest {
     assertEquals(
       """{"type":"anr_event","timestamp":1700000000500,"event":{"pid":12345,"processName":"com.example.app","importance":"FOREGROUND","trace":null,"reason":"Input dispatching timed out","packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34}}}""",
       json.encodeToString(WebSocketResponse.serializer(), anr),
+    )
+  }
+
+  @Test
+  fun `serialize handled exception message under the message key`() {
+    val handled: WebSocketResponse =
+      HandledExceptionEvent(
+        timestamp = 1700000001000L,
+        event =
+          HandledExceptionData(
+            exceptionClass = "java.lang.IllegalStateException",
+            message = "cart is empty",
+            stackTrace = "at com.example.Main.run(Main.java:42)",
+            packageName = "com.example.app",
+            deviceInfo = DeviceInfo("Pixel 7", "Google", "14", 34),
+          ),
+      )
+
+    assertEquals(
+      """{"type":"handled_exception_event","timestamp":1700000001000,"event":{"exceptionClass":"java.lang.IllegalStateException","message":"cart is empty","stackTrace":"at com.example.Main.run(Main.java:42)","customMessage":null,"currentScreen":null,"packageName":"com.example.app","appVersion":null,"deviceInfo":{"model":"Pixel 7","manufacturer":"Google","osVersion":"14","sdkInt":34},"applicationId":null}}""",
+      json.encodeToString(WebSocketResponse.serializer(), handled),
     )
   }
 
@@ -492,6 +531,20 @@ class WebSocketResponseTest {
     assertEquals(0, decoded.frameMetrics.totalFrames)
     assertEquals(null, decoded.frameMetrics.fps)
     assertEquals(null, decoded.frameMetrics.jankFrames)
+  }
+
+  @Test
+  fun `overlay result missing assets round trip and are omitted when absent`() {
+    val literal =
+      """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true,"error":null,"missingAssets":["hero","logo"]}"""
+    val decoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(literal))
+    assertEquals(listOf("hero", "logo"), decoded.missingAssets)
+    assertEquals(literal, json.encodeToString<WebSocketResponse>(decoded))
+    // Peers that predate the field: it decodes as absent and is never written back as null.
+    val legacy = """{"type":"overlay_result","timestamp":42,"requestId":"r1","success":true}"""
+    val legacyDecoded = assertIs<OverlayResult>(json.decodeFromString<WebSocketResponse>(legacy))
+    assertNull(legacyDecoded.missingAssets)
+    assertFalse(json.encodeToString<WebSocketResponse>(legacyDecoded).contains("missingAssets"))
   }
 
   @Test

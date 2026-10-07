@@ -1684,6 +1684,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // request already on the wire, so a later response must be discarded rather than auto-pushed.
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   lateCancelledScreenshotRequestIds: Set<string> = new Set();
+  private readonly pendingFocusedInputClickIds: Set<string> = new Set();
 
   // Capture identity bound to each in-flight screenshot request, keyed by requestId (issue #3348).
   // Recorded when the request is SENT and consumed when its response is pushed, so a hierarchy that
@@ -3665,14 +3666,39 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.dispatchActionRequest(
-      "click",
-      (requestId) =>
-        serializeCtrlProxyRequest(ctrlProxyRequests.requestClickFocusedInput({ requestId })),
-      timeoutMs,
-      perf,
-      signal,
-    );
+    try {
+      return await this.dispatchActionRequest(
+        "click",
+        (requestId) => {
+          this.pendingFocusedInputClickIds.add(requestId);
+          return serializeCtrlProxyRequest(
+            ctrlProxyRequests.requestClickFocusedInput({ requestId }),
+          );
+        },
+        timeoutMs,
+        perf,
+        signal,
+      );
+    } finally {
+      this.pendingFocusedInputClickIds.clear();
+    }
+  }
+
+  /**
+   * Very old runners reject the focused-input click during decoding without echoing its id; settle
+   * the pending clicks so the host can fall back instead of timing out.
+   */
+  private settleUnattributedFocusedClickRejection(
+    requestId: string | null | undefined,
+    rejectedCommand: string | undefined,
+    errorText: string,
+  ): void {
+    if (requestId || rejectedCommand !== "request_click_focused_input") {
+      return;
+    }
+    for (const id of this.pendingFocusedInputClickIds) {
+      this.requestManager.resolveError(id, errorText);
+    }
   }
 
   private async dispatchActionRequest(
@@ -5279,6 +5305,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(
         `[CTRL_PROXY] Runner error (requestId: ${message.requestId ?? "none"}): ${errorText}`,
       );
+      this.settleUnattributedFocusedClickRejection(message.requestId, rejectedCommand, errorText);
       if (message.requestId) {
         this.lateCancelledScreenshotRequestIds.delete(message.requestId);
         this.requestManager.resolveError(message.requestId, errorText);

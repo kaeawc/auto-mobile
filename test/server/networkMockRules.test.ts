@@ -25,7 +25,7 @@ describe("buildNetworkMockRules", function () {
 
   test("maps every mock field onto the wire shape", function () {
     const mock = state.addMock(DEVICE, {
-      host: "api\\.example\\.com",
+      host: "^api\\.example\\.com$",
       path: "/v1/items",
       method: "GET",
       limit: 3,
@@ -38,7 +38,7 @@ describe("buildNetworkMockRules", function () {
     expect(buildNetworkMockRules(state, DEVICE)).toEqual([
       {
         mockId: mock.mockId,
-        host: "api\\.example\\.com",
+        host: "^api\\.example\\.com$",
         path: "/v1/items",
         method: "GET",
         limit: 3,

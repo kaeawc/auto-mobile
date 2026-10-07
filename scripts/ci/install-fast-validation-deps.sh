@@ -14,14 +14,22 @@
 # plus exponential-backoff retry turns an indefinite hang into a fast, retried,
 # and ultimately loud failure. The workflow step also carries `timeout-minutes`
 # as a hard backstop.
+#
+# The default Azure Ubuntu mirror can answer `apt-get update` yet stall on the
+# xmlstarlet .deb fetch (exit 124 twice in a row). When the install on the
+# default mirror is exhausted, one more bounded operation re-runs update+install
+# against an alternate mirror (FAST_VALIDATION_DEPS_FALLBACK_MIRROR) using a
+# throwaway sources list, leaving the system sources untouched. When xmlstarlet
+# is already on PATH, both apt operations are skipped.
 set -euo pipefail
 
 # Tunables (overridable for tuning and for the BATS tests).
 #
 # Defaults are sized so the WORST CASE fits the workflow step's
-# `timeout-minutes: 13` backstop: 5 operations x (MAX_ATTEMPTS x
-# (CMD_TIMEOUT + KILL_GRACE) + retry delays) = 5 x (2 x (60 + 10) + 5) = 725s
-# < 780s. Healthy runs finish in seconds; a stalled mirror that cannot answer
+# `timeout-minutes: 15` backstop: 6 operations (apt-get update, apt-get install,
+# the alternate-mirror install fallback, bats clone, bats install, lychee) x
+# (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + retry delays) =
+# 6 x (2 x (60 + 10) + 5) = 870s < 900s. Healthy runs finish in seconds; a stalled mirror that cannot answer
 # in 60s will not answer in 180s either. Keep this arithmetic aligned when
 # changing any of these values or the step timeout.
 CMD_TIMEOUT_SECONDS="${FAST_VALIDATION_DEPS_CMD_TIMEOUT_SECONDS:-60}"
@@ -30,6 +38,9 @@ MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-2}"
 RETRY_BASE_DELAY_SECONDS="${FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS:-5}"
 BATS_CLONE_DIR="${FAST_VALIDATION_DEPS_BATS_CLONE_DIR:-/tmp/bats-core}"
 BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
+XMLSTARLET_COMMAND="${FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND:-xmlstarlet}"
+FALLBACK_MIRROR="${FAST_VALIDATION_DEPS_FALLBACK_MIRROR:-http://archive.ubuntu.com/ubuntu}"
+SELF="${BASH_SOURCE[0]}"
 
 log() {
   echo "[install-fast-validation-deps] $*"
@@ -50,7 +61,7 @@ is_positive_integer() {
 # forever; `timeout` sends SIGTERM on expiry and, after KILL_GRACE_SECONDS,
 # SIGKILL (-k) so a child that ignores SIGTERM cannot linger. A timeout exits
 # 124 and is treated as a retryable failure, as is any other non-zero exit.
-run_with_retry() {
+try_with_retry() {
   local description="$1"
   shift
 
@@ -76,7 +87,8 @@ run_with_retry() {
     fi
 
     if [[ "$attempt" -ge "$MAX_ATTEMPTS" ]]; then
-      die "${description} failed after ${MAX_ATTEMPTS} attempts (last exit ${status})"
+      log "${description} failed after ${MAX_ATTEMPTS} attempts (last exit ${status})"
+      return 1
     fi
 
     log "Retrying ${description} in ${delay}s..."
@@ -84,6 +96,31 @@ run_with_retry() {
     attempt=$((attempt + 1))
     delay=$((delay * 2))
   done
+}
+
+# Like try_with_retry, but a final failure is fatal.
+run_with_retry() {
+  local description="$1"
+  try_with_retry "$@" || die "${description} failed after ${MAX_ATTEMPTS} attempts"
+}
+
+# Re-run update+install of xmlstarlet against FALLBACK_MIRROR with a throwaway
+# sources list (invoked as a subprocess under sudo + timeout; see main).
+install_xmlstarlet_from_fallback_mirror() {
+  local codename="${FAST_VALIDATION_DEPS_UBUNTU_CODENAME:-}"
+  if [[ -z "$codename" && -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091 # system file, not part of the repo.
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
+  fi
+  codename="${codename:-noble}"
+  local list
+  list="$(mktemp)"
+  echo "deb ${FALLBACK_MIRROR} ${codename} main universe" > "$list"
+  local opts=(-o "Dir::Etc::sourcelist=${list}" -o "Dir::Etc::sourceparts=/dev/null")
+  local status=0
+  apt-get update "${opts[@]}" && apt-get install -y "${opts[@]}" xmlstarlet || status=$?
+  rm -f "$list"
+  return "$status"
 }
 
 main() {
@@ -94,8 +131,16 @@ main() {
     fi
   done
 
-  run_with_retry "apt-get update" sudo apt-get update
-  run_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet
+  if command -v "$XMLSTARLET_COMMAND" > /dev/null 2>&1; then
+    log "xmlstarlet already on PATH; skipping apt-get"
+  else
+    run_with_retry "apt-get update" sudo apt-get update
+    if ! try_with_retry "apt-get install xmlstarlet" sudo apt-get install -y xmlstarlet; then
+      log "Default mirror failed; falling back to ${FALLBACK_MIRROR}"
+      run_with_retry "apt-get install xmlstarlet from fallback mirror" \
+        sudo bash "$SELF" --install-xmlstarlet-from-fallback-mirror
+    fi
+  fi
 
   if command -v bats > /dev/null 2>&1; then
     log "bats already on PATH; skipping source install"
@@ -118,4 +163,8 @@ main() {
   log "Fast Validation dependencies ready"
 }
 
-main "$@"
+if [[ "${1:-}" == "--install-xmlstarlet-from-fallback-mirror" ]]; then
+  install_xmlstarlet_from_fallback_mirror
+else
+  main "$@"
+fi

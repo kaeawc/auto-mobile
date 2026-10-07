@@ -68,6 +68,10 @@ STUB
   export PATH="${MOCK_BIN}:${PATH}"
   # Fast, deterministic retries.
   export FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS=1
+  # Hosts may have a real xmlstarlet; probe a name that cannot exist instead.
+  export FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND=xmlstarlet-not-installed-stub
+  export FAST_VALIDATION_DEPS_UBUNTU_CODENAME=noble
+  export FAST_VALIDATION_DEPS_FALLBACK_MIRROR=http://fallback.example.test/ubuntu
 }
 
 teardown() {
@@ -135,7 +139,7 @@ STUB
   [ "$(cat "$LYCHEE_STATE_FILE")" -eq 2 ]
 }
 
-@test "default retry budget fits the documented 13-minute step timeout" {
+@test "default retry budget fits the documented 15-minute step timeout" {
   # Worst case = each retrying operation x (MAX_ATTEMPTS x (CMD_TIMEOUT + KILL_GRACE) + delays).
   # Guard the arithmetic so a future default bump cannot silently exceed the
   # workflow step's timeout-minutes backstop.
@@ -150,9 +154,9 @@ STUB
     delay=$((delay * 2))
   done
   local operation_count step_timeout_minutes
-  operation_count=$(grep -cE '^[[:space:]]*run_with_retry "' "$SCRIPT")
+  operation_count=$(grep -cE '^[[:space:]]*(run|try)_with_retry "' "$SCRIPT")
   step_timeout_minutes=$(grep -oE 'timeout-minutes: [0-9]+' "$SCRIPT" | head -1 | grep -oE '[0-9]+$')
-  [ "$operation_count" -eq 5 ]
+  [ "$operation_count" -eq 6 ]
   local worst_case=$((operation_count * (attempts * (cmd_timeout + kill_grace) + delays)))
   echo "worst_case=${worst_case}s"
   [ "$worst_case" -le "$((step_timeout_minutes * 60))" ]
@@ -198,6 +202,56 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" == *"attempt 2/2"* ]]
   [[ "$output" == *"Fast Validation dependencies ready"* ]]
+}
+
+@test "falls back to the alternate mirror when the default install keeps failing" {
+  # Call 1 = update ok, calls 2-3 = default install fails twice, then the
+  # fallback's update + install succeed. Log every invocation's args.
+  cat > "${MOCK_BIN}/apt-get" <<STUB
+#!/usr/bin/env bash
+calls=0
+[ -f "${STATE_FILE}" ] && calls="\$(cat "${STATE_FILE}")"
+calls=\$((calls + 1))
+echo "\$calls" > "${STATE_FILE}"
+echo "\$*" >> "${MOCK_BIN}/apt-args"
+if [ "\$calls" -eq 2 ] || [ "\$calls" -eq 3 ]; then exit 100; fi
+if [ "\$1" = "update" ] && [ "\$calls" -gt 1 ]; then
+  grep -q "fallback.example.test/ubuntu noble main universe" "\${2#*=}" 2>/dev/null || \
+    grep -q "fallback.example.test/ubuntu noble main universe" "\${3#*=}" 2>/dev/null || exit 99
+fi
+exit 0
+STUB
+  chmod +x "${MOCK_BIN}/apt-get"
+  run bash "$SCRIPT"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"falling back to http://fallback.example.test/ubuntu"* ]]
+  [[ "$output" == *"from fallback mirror"* ]]
+  [[ "$output" == *"Fast Validation dependencies ready"* ]]
+  [ "$(cat "$STATE_FILE")" -eq 5 ]
+}
+
+@test "fails loudly when the fallback mirror also fails" {
+  # The initial `apt-get update` succeeds; every later apt-get call fails.
+  cat > "${MOCK_BIN}/apt-get" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = "update" ] && [ ! -f "$STATE_FILE" ] && { echo 1 > "$STATE_FILE"; exit 0; }
+exit 100
+STUB
+  chmod +x "${MOCK_BIN}/apt-get"
+  run env FAST_VALIDATION_DEPS_MAX_ATTEMPTS=1 bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"from fallback mirror failed after 1 attempts"* ]]
+}
+
+@test "skips apt-get entirely when xmlstarlet is already on PATH" {
+  make_apt_get 99
+  printf '#!/usr/bin/env bash\nexit 0\n' > "${MOCK_BIN}/xmlstarlet"
+  chmod +x "${MOCK_BIN}/xmlstarlet"
+  run env FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND=xmlstarlet bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"xmlstarlet already on PATH"* ]]
+  [ ! -f "$STATE_FILE" ]
 }
 
 @test "fails loudly after exhausting retries" {

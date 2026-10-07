@@ -274,6 +274,14 @@ describe("mask penalty", () => {
     expect(qrMaskPenalty(matrix).finderLike).toBe(40);
   });
 
+  test("a finder core light on both sides scores one pattern, not two", () => {
+    const pattern = "000010111010000";
+    const matrix = grid(15, (row, column) =>
+      row === 0 ? pattern[column] === "1" : (row + column) % 2 === 0,
+    );
+    expect(qrMaskPenalty(matrix).finderLike).toBe(40);
+  });
+
   test("a 30% dark grid scores 40 for balance", () => {
     expect(qrMaskPenalty(grid(10, (row, column) => row * 10 + column < 30)).balance).toBe(40);
   });

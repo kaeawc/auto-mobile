@@ -77,20 +77,24 @@ function blockPenalty(matrix: QrMatrix): number {
   return count * N2;
 }
 
-const FINDER_LIKE_PATTERNS: readonly string[] = ["10111010000", "00001011101"];
+const FINDER_CORE = "1011101";
+const QUIET_RUN = "0000";
 
-/** Rule 3: each 1:1:3:1:1 pattern with four light modules on one side scores N3. */
+/**
+ * Rule 3: each 1:1:3:1:1 core with four light modules on at least one side
+ * scores N3. A core light on both sides is one pattern, not two (as in ZXing).
+ */
 function lineFinderPenalty(line: readonly boolean[]): number {
   const bits = line.map((dark) => (dark ? "1" : "0")).join("");
   let count = 0;
-  for (const pattern of FINDER_LIKE_PATTERNS) {
-    for (
-      let index = bits.indexOf(pattern);
-      index !== -1;
-      index = bits.indexOf(pattern, index + 1)
-    ) {
-      count++;
-    }
+  for (
+    let index = bits.indexOf(FINDER_CORE);
+    index !== -1;
+    index = bits.indexOf(FINDER_CORE, index + 1)
+  ) {
+    const lightBefore = index >= 4 && bits.startsWith(QUIET_RUN, index - 4);
+    const lightAfter = bits.startsWith(QUIET_RUN, index + FINDER_CORE.length);
+    count += lightBefore || lightAfter ? 1 : 0;
   }
   return count * N3;
 }

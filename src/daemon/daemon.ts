@@ -46,6 +46,7 @@ import { DaemonState } from "./daemonState";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
+  DEFAULT_SOCKET_PATH,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
@@ -58,6 +59,16 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
+import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
+import {
+  PrivateDaemonOrphanWatchdog,
+  isPrivateDaemonSocket,
+  resolvePrivateDaemonOrphanIdleMs,
+} from "./privateDaemonOrphanWatchdog";
+import {
+  resolveCtrlProxyForwardLeaseIdleMs,
+  setCtrlProxyForwardLeaseOwnerSocketPath,
+} from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
@@ -417,6 +428,8 @@ export class Daemon {
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
+  private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
+  private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
@@ -843,6 +856,9 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+    // Record our socket in every CtrlProxy forwarding lease we take, so another
+    // AutoMobile process can ask whether we still use the device (#10497).
+    setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
 
     // Publish the owned DB path in the PID file BEFORE opening the DB so the
     // direct-mode DB-ownership guard can tell a same-file collision from an
@@ -1032,6 +1048,8 @@ export class Daemon {
     this.startHealthCheckTimer();
     this.startHeartbeatMonitor();
     this.startNavigationRetentionMonitor();
+    this.startForwardLeaseIdleReleaser();
+    this.startPrivateDaemonOrphanWatchdog();
 
     startupBenchmark.emit("daemon", {
       host: this.host,
@@ -2412,6 +2430,46 @@ export class Daemon {
     this.navigationRetentionMonitor.start();
   }
 
+  /** Give up idle devices' CtrlProxy forwarding leases (#10497). */
+  private startForwardLeaseIdleReleaser(): void {
+    this.forwardLeaseIdleReleaser = new DeviceForwardLeaseIdleReleaser(
+      {
+        heldDeviceIds: () => AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds(),
+        sessionForDevice: (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
+        activeExecutionCount: (deviceId) =>
+          executionTracker.getActiveDeviceExecutionCount(deviceId),
+        hasStreamSubscriber: (deviceId) =>
+          getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false,
+        idleForMs: (deviceId) => executionTracker.getDeviceIdleForMs(deviceId),
+        release: (deviceId) => AndroidCtrlProxyClient.releaseIdleForwardLease(deviceId),
+      },
+      resolveCtrlProxyForwardLeaseIdleMs(),
+      this.timer,
+    );
+    this.forwardLeaseIdleReleaser.start();
+  }
+
+  /** Stop a private daemon that outlived its launcher with nothing using it (#10497). */
+  private startPrivateDaemonOrphanWatchdog(): void {
+    if (process.platform === "win32" || !isPrivateDaemonSocket(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
+      return;
+    }
+    this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
+      {
+        parentPid: () => process.ppid,
+        clientCount: () =>
+          (this.socketServer?.getClientConnectionCount() ?? 0) + this.transports.size,
+        liveSessionCount: () => this.sessionManager.getAllSessions().length,
+        shutdown: () => {
+          setImmediate(() => process.kill(process.pid, "SIGTERM"));
+        },
+      },
+      resolvePrivateDaemonOrphanIdleMs(),
+      this.timer,
+    );
+    this.orphanWatchdog.start();
+  }
+
   private hasActiveSessionExecution(
     sessionId: string,
     query?: ActiveSessionExecutionQuery,
@@ -3758,6 +3816,11 @@ export class Daemon {
     this.navigationRetentionMonitor = null;
     const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
     this.deviceDisconnectMonitor = null;
+    this.orphanWatchdog?.stop();
+    this.orphanWatchdog = null;
+    const forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
+    this.forwardLeaseIdleReleaser = null;
+    await forwardLeaseIdleReleaser?.stop();
     await runShutdownCleanupStages(
       [
         {

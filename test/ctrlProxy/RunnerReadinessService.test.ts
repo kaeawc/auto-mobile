@@ -2264,6 +2264,31 @@ describe("RunnerReadinessService", () => {
     ).rejects.not.toThrow(/runner did not become responsive/);
   });
 
+  test("fails fast on a forwarding-lease conflict instead of retrying to the deadline (#10485)", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 15836, socket /tmp/ovl-priv/daemon.sock) owns CtrlProxy " +
+      "forwarding for emulator-5554 and kept it because it has live session s-1 on emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 60_000,
+        readinessTimeoutMs: 60_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).message).toContain("attempts=1 ");
+    expect((error as RunnerReadinessError).message).toContain("live session s-1");
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
   test("does not flag a terminal connect fault as a deadline exhaustion", async () => {
     const client = new FakeReadinessClient();
     client.connected = false;

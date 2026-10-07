@@ -1061,6 +1061,11 @@ export class RunnerReadinessService {
         connected = await this.runPhase(context, phase, attempts, () =>
           client.waitForConnection(1, 0),
         );
+        if (!connected && client.isLastConnectionFailureForwardingLeaseConflict?.()) {
+          // Another process kept the lease after being asked (#10497); retrying
+          // until the deadline cannot change that, so fail fast (#10485).
+          await this.failUnresponsiveClient(context, client, phase, attempts);
+        }
       }
       if (connected) {
         phase = "runner-health";

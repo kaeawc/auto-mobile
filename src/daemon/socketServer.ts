@@ -7282,6 +7282,11 @@ export class UnixSocketServer {
     return this.server !== null && this.server.listening;
   }
 
+  /** Connected control-socket clients (orphaned private-daemon watchdog, #10497). */
+  getClientConnectionCount(): number {
+    return this.clientSockets.size;
+  }
+
   /**
    * Stop admitting control-socket work while preserving connected notification
    * subscribers. Daemon shutdown uses this barrier before releasing device

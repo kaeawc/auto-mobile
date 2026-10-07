@@ -1162,6 +1162,33 @@ describe("handleDaemonRequest", () => {
     ]);
   });
 
+  test("reports a device's lease status for a would-be lease taker (#10497)", async () => {
+    const state = new FakeDaemonState(
+      sessionManager,
+      new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
+    );
+    spyOn(sessionManager, "getSessionForDevice").mockImplementation((deviceId) =>
+      deviceId === "emulator-5600" ? "session-abc" : null,
+    );
+
+    const response = await handleDaemonRequest(
+      buildRequest("daemon/deviceLeaseStatus", { deviceId: "emulator-5600" }),
+      state,
+    );
+
+    expect(response.success).toBe(true);
+    expect(response.result).toMatchObject({
+      pid: process.pid,
+      deviceId: "emulator-5600",
+      sessionId: "session-abc",
+      activeExecutions: 0,
+      streaming: false,
+    });
+    expect(
+      (await handleDaemonRequest(buildRequest("daemon/deviceLeaseStatus", {}), state)).success,
+    ).toBe(false);
+  });
+
   test("returns an empty device-session list when no devices are connected", async () => {
     const devicePool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
     const state = new FakeDaemonState(sessionManager, devicePool);

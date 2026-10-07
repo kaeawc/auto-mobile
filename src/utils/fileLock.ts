@@ -336,6 +336,45 @@ export function readLockOwnerPid(
 }
 
 /**
+ * Read and parse an exclusive lock file without acquiring or reclaiming it.
+ * Returns `undefined` when the file is missing, unreadable, or empty.
+ */
+export function readExclusiveLockContent(lockFilePath: string): LockContent | undefined {
+  const content = readContendedLockContent(lockFilePath);
+  if (content === undefined || content.length === 0) {
+    return undefined;
+  }
+  return parseLockContent(content);
+}
+
+/**
+ * Take over a lock held by a LIVE owner the caller has judged stale by some
+ * out-of-band evidence (issue #10497: the owner reported no live session, or
+ * its control socket is unreachable). The takeover only succeeds when the lock
+ * still holds exactly the observed owner's PID and token, using the same
+ * rename-then-verify claim as dead-owner reclaim, so a concurrent fresh owner
+ * is never displaced. Returns true when the lock is now held by `options.pid`.
+ */
+export function takeOverExclusiveLock(
+  lockFilePath: string,
+  observedOwner: Pick<LockContent, "pid" | "token">,
+  options: Pick<ExclusiveLockOptions, "pid" | "ownerToken" | "metadata"> = {},
+): boolean {
+  const current = readExclusiveLockContent(lockFilePath);
+  if (current?.pid !== observedOwner.pid || current.token !== observedOwner.token) {
+    return false;
+  }
+  return reclaimExclusiveLock(
+    lockFilePath,
+    options.pid ?? process.pid,
+    options.ownerToken,
+    options.metadata,
+    observedOwner.pid,
+    observedOwner.token,
+  );
+}
+
+/**
  * Release a lock owned by `pid`. Compare-and-delete: the file is removed only if
  * it still holds `pid`, so a reclaim race can't delete a lock that a *different*
  * opener now owns (mirrors `shouldCleanupForExpectedPid` in `daemonFiles.ts`).

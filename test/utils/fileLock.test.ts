@@ -7,7 +7,9 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   formatLockContent,
   parseLockContent,
+  readExclusiveLockContent,
   releaseExclusiveLock,
+  takeOverExclusiveLock,
   tryAcquireExclusiveLock,
 } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
@@ -23,6 +25,27 @@ describe("fileLock primitive", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("takes over a live owner's lock only while it still holds the observed instance (#10497)", () => {
+    expect(tryAcquireExclusiveLock(lockPath, { pid: 100, ownerToken: "old", metadata: "m" })).toBe(
+      true,
+    );
+    const observed = readExclusiveLockContent(lockPath)!;
+    expect(observed).toEqual({ pid: 100, token: "old", metadata: "m" });
+
+    expect(takeOverExclusiveLock(lockPath, { pid: 100, token: "other" }, { pid: 200 })).toBe(false);
+    expect(
+      takeOverExclusiveLock(lockPath, observed, { pid: 200, ownerToken: "new", metadata: "n" }),
+    ).toBe(true);
+    expect(readExclusiveLockContent(lockPath)).toEqual({ pid: 200, token: "new", metadata: "n" });
+    // The displaced owner's release must not delete the new owner's lock.
+    releaseExclusiveLock(lockPath, 100, "old");
+    expect(readExclusiveLockContent(lockPath)?.pid).toBe(200);
+  });
+
+  test("reads no lock content for a missing lock file", () => {
+    expect(readExclusiveLockContent(lockPath)).toBeUndefined();
   });
 
   test("acquires on a fresh path and writes the owner pid", () => {

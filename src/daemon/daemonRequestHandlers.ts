@@ -39,9 +39,11 @@ import {
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+  DAEMON_DEVICE_LEASE_STATUS_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
+import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -261,6 +263,8 @@ async function handleInitializedDaemonRequest(
       return handleReleaseSession(request, state, executions);
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
       return handleListDeviceSessions(request, state);
+    case DAEMON_DEVICE_LEASE_STATUS_METHOD:
+      return handleDeviceLeaseStatus(request, state);
     default:
       return {
         success: false,
@@ -754,6 +758,35 @@ async function handleListDeviceSessions(
     result: {
       deviceSessions,
       totalDeviceSessions: deviceSessions.length,
+    },
+  };
+}
+
+/**
+ * Report whether this daemon still uses a device, so another AutoMobile process
+ * can decide whether to take over its CtrlProxy forwarding lease (#10497).
+ */
+async function handleDeviceLeaseStatus(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid deviceLeaseStatus parameters: ${parsed.error.message}`,
+    };
+  }
+  const { deviceId } = parsed.data;
+  return {
+    success: true,
+    result: {
+      pid: process.pid,
+      deviceId,
+      sessionId: state.getSessionManager().getSessionForDevice?.(deviceId) ?? null,
+      activeExecutions: executionTracker.getActiveDeviceExecutionCount(deviceId),
+      streaming: getDeviceDataStreamServer()?.hasSubscriberForDevice(deviceId) ?? false,
+      idleForMs: executionTracker.getDeviceIdleForMs(deviceId),
     },
   };
 }

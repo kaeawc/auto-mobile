@@ -2059,8 +2059,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result).toMatchObject({ success: true, resolvedMode: expectedMode });
       expect(textClient.commitViaImeCalls).toEqual([]);
       expect(textClient.calls).not.toContain("clear");
-      // eventAll adds one letter-case read-back (unreadable for a password field).
-      expect(observer.calls).toBe(operation === "insert" ? 2 : 1);
+      // A password field gets no letter-case read-back, so its text never reaches a warning.
+      expect(observer.calls).toBe(1);
       if (operation === "replace") {
         expect(textClient.calls).toContain("replace:new");
       }
@@ -2160,6 +2160,77 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(adb.getExecutedCommands()).toContain(
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_P",
     );
+    // #9888: a password is never batched into one `input text` command line.
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input text")),
+    ).toEqual([]);
+  });
+
+  // #9888: a password-field eventAll run is never batched, and no log, warning or error carries
+  // its characters, key codes or adb command lines — only `<password, N characters>` counts.
+  for (const mode of ["eventAll", "auto"] as const) {
+    test(`${mode} on a password field logs and reports no typed characters or key codes`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(31);
+      // A real adb failure quotes the command line, key code included.
+      adb.setCommandError(
+        "KEYCODE_X",
+        new Error("Command failed: adb -s emulator-5554 shell input keyevent KEYCODE_X"),
+      );
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        // The read-back shows the typed text in another case, which would otherwise warn.
+        createObserver(focusedAndroidObservation("zQ9 X", { password: "true" })),
+        { textClient: createTextClient().client },
+      );
+      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+        spyOn(logger, level).mockImplementation(() => {}),
+      );
+      try {
+        const result = await executor.type({ action: "type", text: "Zq9 x", mode });
+
+        expect(result).toMatchObject({ success: false, committedGraphemes: 4 });
+        expect(result.error).toContain("<password, 1 characters>");
+        expect(
+          adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+        ).toEqual([
+          "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_Z",
+          "shell input keyevent KEYCODE_Q",
+          "shell input keyevent KEYCODE_9",
+          "shell input keyevent KEYCODE_SPACE",
+          "shell input keyevent KEYCODE_X",
+        ]);
+        const surfaced = [
+          result.error ?? "",
+          result.warning ?? "",
+          JSON.stringify(spies.map((spy) => spy.mock.calls)),
+        ].join("\n");
+        expect(surfaced).not.toMatch(/KEYCODE|U\+[0-9A-F]{4}|Zq9|zQ9|input keyevent|input text/);
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    });
+  }
+
+  test("eventAll splits a literal %s across two input text calls", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(31);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+    ).toEqual(["shell input text '50%'", "shell input text 's%s1'"]);
   });
 
   test("auto password replace is not pre-checked and sets the whole value", async () => {
@@ -2456,7 +2527,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
     expect(textClient.commitViaImeCalls).toEqual([]);
     expect(adb.getExecutedCommands()).toContain(`shell ime set ${commitImeId}`);
-    expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
+    expect(adb.getExecutedCommands()).toContain("shell input text 'abc'");
   });
 
   test("auto IME does not fall back after a partial commit", async () => {
@@ -2779,7 +2850,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       "shell settings --user 10 delete secure selected_input_method_subtype",
     );
     expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
-    expect(commands).toContain("shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A");
+    expect(commands).toContain("shell input text 'Abc'");
     // The case read-back ran once: one warning, from one bounded series of settled re-reads.
     expect(result.warning?.match(/changed the letter case/g)).toHaveLength(1);
     expect(result.warning).toContain('eventAll typed "Abc"');
@@ -3760,26 +3831,67 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("marks a late eventAll key dispatch exception as partially applied", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("KEYCODE_B", new Error("dispatch rejected"));
+    const { client, calls } = createTextClient();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: createTextClient().client },
+      { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "ab", mode: "eventAll" });
+    const result = await executor.type({ action: "type", text: "a🙂b", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
       partialApplication: true,
-      committedGraphemes: 1,
+      committedGraphemes: 2,
       error: expect.stringContaining("U+0062"),
     });
+    expect(calls).toEqual(["insert:🙂"]);
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
     ]);
   });
+
+  // #9888: one `input text` process carries a printable run, so a failure may have typed part
+  // of it. The result counts only graphemes delivered before the run and is always partial.
+  for (const { label, text, failingCommand, committedGraphemes } of [
+    {
+      label: "first",
+      text: "bc🙂",
+      failingCommand: "shell input text 'bc'",
+      committedGraphemes: 0,
+    },
+    {
+      label: "later",
+      text: "a🙂bc",
+      failingCommand: "shell input text 'bc'",
+      committedGraphemes: 2,
+    },
+  ]) {
+    test(`marks a failed ${label} eventAll input-text run as partial and counts earlier graphemes`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError(failingCommand, new Error("input text rejected"));
+      const { client } = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: client },
+      );
+
+      const result = await executor.type({ action: "type", text, mode: "eventAll" });
+
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedGraphemes,
+        error: expect.stringContaining("could not deliver graphemes U+0062, U+0063"),
+      });
+      expect(adb.getExecutedCommands()).toContain(failingCommand);
+    });
+  }
 
   test("marks an eventOnly dispatch exception after replacement clearing as partial", async () => {
     const adb = new FakeAdbExecutor();
@@ -5179,8 +5291,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           });
           expect(result.success).toBe(true);
           expect(result.warning).toBeUndefined();
-          // Focus check, pre-clear (unreadable password), then the letter-case read-back.
-          expect(h.seq.reads()).toBe(3);
+          // Focus check and pre-clear (unreadable password); a password gets no case read-back.
+          expect(h.seq.reads()).toBe(2);
           expect(h.order.filter((entry) => entry === "clear")).toHaveLength(1);
           const logged = warnedText([...warn.mock.calls, ...info.mock.calls, ...debug.mock.calls]);
           expect(logged).toContain("Focused text is unreadable before the clear");
@@ -5472,21 +5584,12 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
   });
 
   describe("#9888 key-event typing warns about an IME letter-case rewrite", () => {
-    test("pins the emitted key events for mixed case with spaces", async () => {
+    test("sends a mixed-case run with spaces in one input text process", async () => {
       const h = harness(["Ab cD ef"]);
       expect(
         await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
       ).toMatchObject({ success: true });
-      expect(keyCommands(h.adb)).toEqual([
-        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
-        "shell input keyevent KEYCODE_B",
-        "shell input keyevent KEYCODE_SPACE",
-        "shell input keyevent KEYCODE_C",
-        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_D",
-        "shell input keyevent KEYCODE_SPACE",
-        "shell input keyevent KEYCODE_E",
-        "shell input keyevent KEYCODE_F",
-      ]);
+      expect(keyCommands(h.adb)).toEqual(["shell input text 'Ab%scD%sef'"]);
     });
 
     test("a case-only difference stays successful with a warning and is not a partial application", async () => {

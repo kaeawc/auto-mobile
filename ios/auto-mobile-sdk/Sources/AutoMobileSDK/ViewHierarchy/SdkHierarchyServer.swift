@@ -528,9 +528,20 @@
                     server.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
                     return
                 }
-                NetworkMockRuleStore.shared.setRules(payload.rules)
-                server.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+                let rejected = NetworkMockRuleStore.shared.setRules(payload.rules)
+                server.sendResponse(
+                    connection,
+                    statusCode: 200,
+                    body: SdkHierarchyServer.setMockRulesResponseBody(rejected: rejected)
+                )
             }
+        }
+
+        /// `{"status":"ok","rejected":[{"mockId":…,"reason":…}]}`. An SDK that predates the report sends
+        /// only `status`, which the runner reads as "not reported" (issue #10101).
+        static func setMockRulesResponseBody(rejected: [RejectedMockRule]) -> Data {
+            let payload = SetMockRulesResponse(status: "ok", rejected: rejected)
+            return (try? JSONEncoder().encode(payload)) ?? Data("{\"status\":\"ok\"}".utf8)
         }
 
         private func handleNetworkErrorSimulation(_ connection: NWConnection, initialData: Data) {
@@ -793,6 +804,11 @@
 
     private struct SetMockRulesBody: Decodable {
         let rules: [NetworkMockRuleDTO]
+    }
+
+    private struct SetMockRulesResponse: Encodable {
+        let status: String
+        let rejected: [RejectedMockRule]
     }
 
     private struct SetNetworkFaultRulesBody: Decodable {

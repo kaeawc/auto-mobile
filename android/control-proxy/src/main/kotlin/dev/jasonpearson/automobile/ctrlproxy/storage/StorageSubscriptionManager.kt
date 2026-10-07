@@ -1,12 +1,15 @@
 package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import dev.jasonpearson.automobile.protocol.StorageChangeEvent
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.ArrayDeque
@@ -40,6 +43,10 @@ class StorageSubscriptionManager(
   scope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
   private val backgroundCalls: BackgroundCalls = ContentResolverCalls(context, ioDispatcher),
   private val cleanupTimeoutMs: Long = 1_000L,
+  // Waits between the first and the single retry of a DISABLED subscribe reply. Injected so tests
+  // run without a wall-clock sleep; the subscribe path already blocks a background worker.
+  private val retryDelayMs: Long = DISABLED_RETRY_DELAY_MS,
+  private val pause: (Long) -> Unit = { Thread.sleep(it) },
 ) {
 
   /**
@@ -72,6 +79,7 @@ class StorageSubscriptionManager(
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
     private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
+    private const val DISABLED_RETRY_DELAY_MS = 500L
   }
 
   /** State for a single subscription. */
@@ -82,6 +90,9 @@ class StorageSubscriptionManager(
     // (#10069).
     @Volatile var lastSequence: Long = 0,
     @Volatile var processToken: String? = null,
+    // Set when a restart was detected but the app's listener has not been re-armed yet (the
+    // re-arm call failed or the app vanished again). The next fetch for this file retries it.
+    @Volatile var needsRearm: Boolean = false,
   )
 
   /** State for a package being observed. */
@@ -421,6 +432,7 @@ class StorageSubscriptionManager(
         existing.lastSequence = 0
       }
       existing.processToken = token
+      existing.needsRearm = false
       return Result.success(existing.subscription)
     }
 
@@ -450,8 +462,41 @@ class StorageSubscriptionManager(
     return Result.success(subscription)
   }
 
-  /** Calls the SDK's `subscribeToFile`; the success value is the app's process token, if any. */
+  /** Outcome of one `subscribeToFile` provider call. */
+  private class SubscribeCall(val result: Result<String?>, val disabled: Boolean = false)
+
+  /**
+   * Calls the SDK's `subscribeToFile`; the success value is the app's process token, if any.
+   *
+   * A provider call into an app without a process starts that process, and can land before the app
+   * has enabled inspection; the SDK then answers DISABLED although it is embedded and enabled
+   * (#10210). That happens after a force-stop, a swipe-away, a low-memory kill, a crash or a reboot
+   * alike, so the stopped flag cannot tell the cases apart. Retry once after a short delay (the
+   * first call already started the process) before reporting anything about the app.
+   */
   private fun requestSubscribeToFile(packageName: String, fileName: String): Result<String?> {
+    // Read before the call: the call itself starts the process and clears the stopped state.
+    val wasStopped = isPackageStopped(packageName)
+    val first = callSubscribeToFile(packageName, fileName)
+    if (!first.disabled) return first.result
+    if (!pauseBeforeRetry()) return first.result
+    val second = callSubscribeToFile(packageName, fileName)
+    if (!second.disabled) return second.result
+    if (wasStopped) return Result.failure(StorageError.AppStartedByRequest(packageName))
+    return second.result
+  }
+
+  private fun pauseBeforeRetry(): Boolean =
+    try {
+      pause(retryDelayMs)
+      true
+    } catch (e: InterruptedException) {
+      // Shutting down: keep the interrupt for the caller and report the first reply as it was.
+      Thread.currentThread().interrupt()
+      false
+    }
+
+  private fun callSubscribeToFile(packageName: String, fileName: String): SubscribeCall {
     return try {
       val authority = packageName + AUTHORITY_SUFFIX
       val uri = Uri.parse("content://$authority")
@@ -459,21 +504,41 @@ class StorageSubscriptionManager(
       val result = context.contentResolver.call(uri, "subscribeToFile", null, extras)
 
       if (result == null) {
-        Result.failure(StorageError.SdkNotInstalled(packageName))
+        SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
       } else if (!result.getBoolean("success", false)) {
         val error = result.getString("error") ?: "Unknown error"
-        Result.failure(StorageError.SdkError(error))
+        SubscribeCall(
+          Result.failure(StorageError.SdkError(error)),
+          disabled = result.getString("errorType") == "DISABLED",
+        )
       } else {
         val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
-        Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
+        SubscribeCall(
+          Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
+        )
       }
     } catch (e: SecurityException) {
-      Result.failure(StorageError.SdkNotInstalled(packageName))
+      SubscribeCall(Result.failure(StorageError.SdkNotInstalled(packageName)))
     } catch (e: Exception) {
       Log.e(TAG, "Error subscribing to $packageName:$fileName", e)
-      Result.failure(StorageError.SdkError(e.message ?: "Unknown error"))
+      SubscribeCall(Result.failure(StorageError.SdkError(e.message ?: "Unknown error")))
     }
   }
+
+  /**
+   * True when [packageName] is installed but in the stopped state (force-stopped, never launched),
+   * i.e. it has no process. False when it is running, not installed, or not visible to the runner.
+   */
+  private fun isPackageStopped(packageName: String): Boolean =
+    try {
+      @Suppress("DEPRECATION")
+      val flags = context.packageManager.getApplicationInfo(packageName, 0).flags
+      flags and ApplicationInfo.FLAG_STOPPED != 0
+    } catch (e: PackageManager.NameNotFoundException) {
+      // Not installed or not visible: the provider call reports that itself, so no stopped hint.
+      Log.d(TAG, "No package info for $packageName: ${e.message}")
+      false
+    }
 
   private fun rollBackSubscribeToFile(
     packageName: String,
@@ -903,31 +968,94 @@ class StorageSubscriptionManager(
     val firstReply = requestChanges(uri, fileName, subState.lastSequence) ?: return true
     val reportedToken = firstReply.processToken
     val knownToken = subState.processToken
-    var pending = firstReply.changes
-    var advanceCursor = true
-    if (knownToken != null && reportedToken != null && knownToken != reportedToken) {
-      // The app restarted: its sequence counter began again at 1, so the old cursor would hide
-      // every new change. The SDK removes the changes it returns, so the first reply (filtered by
-      // the stale cursor) already holds new-process changes that a re-read will never return
-      // again. Keep them and merge with the read from 0, de-duplicated by sequence number.
+    val restarted = knownToken != null && reportedToken != null && knownToken != reportedToken
+    if (restarted) {
+      // The app restarted: its sequence counter began again at 1 and its listener is gone, so the
+      // old cursor would hide every new change and no further change would ever be queued.
       Log.i(
         TAG,
-        "Inspected app restarted; resetting storage sequence for ${subState.subscription.subscriptionId}",
+        "Inspected app restarted; re-arming storage subscription ${subState.subscription.subscriptionId}",
       )
       subState.lastSequence = 0
       subState.processToken = reportedToken
+      subState.needsRearm = true
+    } else if (knownToken == null) {
+      subState.processToken = reportedToken
+    }
+    // True when the app restarted again between the read and the re-arm: firstReply then belongs to
+    // a dead process, and its sequence numbers must neither be delivered nor advance the cursor.
+    val restartedAgain = subState.needsRearm && rearmListener(packageName, fileName, uri, subState)
+
+    var pending = if (restartedAgain) emptyList() else firstReply.changes
+    var advanceCursor = true
+    if (restarted || restartedAgain) {
+      // The SDK removes the changes it returns, so the first reply (filtered by the stale cursor)
+      // already holds new-process changes that a re-read will never return again. Keep them and
+      // merge with the read from 0, de-duplicated by sequence number. If the re-read failed, its
+      // changes are still queued in the app: deliver the first reply but leave the cursor at 0 so
+      // the next poll reads them.
       val reread = requestChanges(uri, fileName, 0)
-      // If the re-read failed, its changes are still queued in the app. Deliver the first reply
-      // but leave the cursor at 0 so the next poll reads them.
       advanceCursor = reread != null
       pending =
         (pending + reread?.changes.orEmpty())
           .distinctBy { it.sequenceNumber }
           .sortedBy { it.sequenceNumber }
-    } else if (knownToken == null) {
-      subState.processToken = reportedToken
     }
+    return deliverChanges(packageName, fileName, subState, pending, advanceCursor)
+  }
 
+  /**
+   * Tells the manager the app [packageName] showed a window. A freshly started app process shows a
+   * window shortly after it starts, and a restart leaves no push of its own (the old process's
+   * listener is gone and the new one has none until it is re-armed), so this is the liveness signal
+   * that makes an open subscription notice a restart without the client re-subscribing (#10069).
+   *
+   * Cost: nothing while idle (no timer, no polling). A subscribed package triggers one `getChanges`
+   * call per subscribed file per signal, coalesced by the package's conflated worker queue; a
+   * package with no subscription is a single map miss.
+   */
+  fun onPackageActivity(packageName: String) {
+    if (destroyed) return
+    packageObservers[packageName]?.signals?.trySend(Unit)
+  }
+
+  /**
+   * Re-registers the app-side listener in the new process. Leaves [SubscriptionState.needsRearm]
+   * set when the call fails so the next signal retries; a retry happens only when a signal arrives,
+   * never on a timer. Returns true when the re-arm showed the app process changed again.
+   */
+  private suspend fun rearmListener(
+    packageName: String,
+    fileName: String,
+    uri: Uri,
+    subState: SubscriptionState,
+  ): Boolean {
+    val extras = Bundle().apply { putString("fileName", fileName) }
+    val result = backgroundCalls.call(uri, "subscribeToFile", extras)
+    coroutineContext.ensureActive()
+    if (result == null || !result.getBoolean("success", false)) {
+      Log.w(TAG, "Could not re-arm storage subscription $packageName:$fileName; will retry")
+      return false
+    }
+    val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
+    val token = (response as? StorageResponse.SubscriptionResult)?.processToken
+    val changed = token != null && token != subState.processToken
+    if (changed) {
+      // The app restarted again between the read and the re-arm.
+      subState.processToken = token
+      subState.lastSequence = 0
+    }
+    subState.needsRearm = false
+    return changed
+  }
+
+  private fun deliverChanges(
+    packageName: String,
+    fileName: String,
+    subState: SubscriptionState,
+    pending: List<StorageChangeEvent>,
+    advanceCursor: Boolean,
+  ): Boolean {
     for (change in pending) {
       val event =
         PreferenceChangeEvent(
@@ -1012,6 +1140,17 @@ sealed class StorageError(message: String) : Exception(message) {
 
   class InspectionDisabled(packageName: String) :
     StorageError("SharedPreferences inspection is disabled in: $packageName")
+
+  /**
+   * The target app had no process (it was force-stopped) when the subscribe call arrived, so the
+   * call itself started it, and its inspection still had not become available after one retry. The
+   * app is running now, so the reply must not tell the user it is not running (#10210).
+   */
+  class AppStartedByRequest(packageName: String) :
+    StorageError(
+      "app $packageName was not running; this request started it but its storage inspection did " +
+        "not become available. Launch the app normally and subscribe again"
+    )
 
   class FileNotFound(fileName: String) : StorageError("Preferences file not found: $fileName")
 

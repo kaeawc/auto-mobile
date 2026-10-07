@@ -285,6 +285,12 @@ export type A11yActionResult = ActionTimingResult & {
   dispatched?: boolean;
   /** The runner replied, including an explicit refusal. False after a lost reply. */
   acknowledged?: boolean;
+  /**
+   * The node was already in the requested state (e.g. `focus` on a node that already holds
+   * accessibility focus), so the runner sent no action and reported success (#10148). Absent from
+   * runners that predate the flag.
+   */
+  alreadySatisfied?: boolean;
 };
 
 /** Clipboard operation result from accessibility service */

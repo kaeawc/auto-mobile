@@ -141,6 +141,12 @@ export interface WebSocketMessage {
   unsupported?: boolean;
   requiresVoiceOver?: boolean;
   available?: boolean;
+  /** sdk_trigger_result: the SDK's HTTP status and structured error fields. */
+  statusCode?: number;
+  sdkError?: string;
+  reason?: string;
+  registeredModules?: string[];
+  supportedTriggers?: string[];
   bundleId?: string;
   capabilities?: string[];
   data?: XCTestHierarchy;
@@ -434,6 +440,22 @@ export interface HierarchyDelegateContext extends DelegateContext {
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
   /** Prevent the response for this request from being forwarded to the observation stream. */
   suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
+}
+
+/**
+ * Result of relaying a host trigger to the foreground app's in-app SDK `POST /trigger`
+ * route (#1580). `available: false` means the app does not embed the SDK (or the runner
+ * predates the command); `sdkError` carries the SDK's structured error when it answered.
+ */
+export interface CtrlProxySdkTriggerResult extends BaseResult {
+  available: boolean;
+  /** True when the runner does not know `request_sdk_trigger` (older runner build). */
+  unsupported?: boolean;
+  statusCode?: number;
+  sdkError?: string;
+  reason?: string;
+  registeredModules?: string[];
+  supportedTriggers?: string[];
 }
 
 /** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */

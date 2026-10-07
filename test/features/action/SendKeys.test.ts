@@ -3985,6 +3985,21 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(press).toHaveBeenCalledWith("tab", undefined, undefined, ["shift"]);
   });
 
+  test("forwards an IME action warning on semantic keys", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: true, warning: "focus moved" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "next" });
+
+    expect(result).toMatchObject({ success: true, warning: "focus moved" });
+  });
+
   test("rejects Android semantic keys without a focused editable field", async () => {
     const { client, calls } = createTextClient();
     const executor = new DefaultSendKeysCommandExecutor(

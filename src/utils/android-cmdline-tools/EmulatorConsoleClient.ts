@@ -214,7 +214,7 @@ function validatePhoneNumber(phoneNumber: string): string {
   return trimmed;
 }
 
-function validateSmsMessage(message: string): string {
+export function validateSmsMessage(message: string): string {
   // Newlines would terminate the command on the wire; carriage returns and NULs would too.
   if (/[\r\n\0]/.test(message)) {
     throw new ActionableError(

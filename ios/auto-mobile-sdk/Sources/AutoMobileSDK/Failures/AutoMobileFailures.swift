@@ -132,12 +132,12 @@ public final class AutoMobileFailures: Sendable {
         uname(&systemInfo)
         let machine = withUnsafePointer(to: &systemInfo.machine) {
             $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0) ?? "Unknown"
+                String(validatingCString: $0) ?? "Unknown"
             }
         }
         let systemName = withUnsafePointer(to: &systemInfo.sysname) {
             $0.withMemoryRebound(to: CChar.self, capacity: 1) {
-                String(validatingUTF8: $0) ?? "Unknown"
+                String(validatingCString: $0) ?? "Unknown"
             }
         }
         return SdkDeviceInfo(

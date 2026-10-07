@@ -176,6 +176,15 @@ describe("manager tunnel calls with FakeIosTunnelClient", () => {
       },
     ]);
   });
+  test("local undefined uses the service port and remote defined overrides the retained port", async () => {
+    const { manager, fake } = fakeFixture();
+    fake.devicePort = 9100;
+    await manager["startIproxyTunnel"]({ devicePort: undefined });
+    expect(fake.starts[0].devicePort).toBe(8765);
+    keep(spyOn(manager, "useRemoteRunner").mockReturnValue(true));
+    await manager["startIproxyTunnel"]({ devicePort: 9200 });
+    expect(fake.starts[1].devicePort).toBe(9200);
+  });
   test.each(["start", "readiness"])(
     "%s failure propagates without manager cleanup",
     async (path) => {
@@ -291,8 +300,10 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     expect(client.devicePort).toBeNull();
   });
   test("local no-PID and spawn exceptions retain exact errors without a second stop", async () => {
-    const { manager, executor, events, client } = realFixture();
+    const { manager, executor, events, client, timer } = realFixture();
     const noPid = new FakeChildProcess();
+    // Exercise the no-event fallback without a real timer.
+    timer.enableAutoAdvance();
     noPid.pid = undefined;
     noPid.simulateSpawn = () => {};
     keep(spyOn(executor, "spawn").mockReturnValue(noPid));

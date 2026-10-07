@@ -1,16 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createPhoneCallHandler,
+  createSendSmsHandler,
   phoneCallHandler,
-  sendSmsHandler,
   phoneCallSchema,
   sendSmsSchema,
 } from "../../src/server/telephonyTools";
 import { ActionableError, BootedDevice } from "../../src/models";
+import { Telephony } from "../../src/features/action/Telephony";
+import { FakeIosSdkTriggerSender } from "../fakes/FakeIosSdkTriggerSender";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
 // telephonyTools.ts had ZERO test mentions repo-wide (issue #4181, rank 4b).
-// The handlers map a failed Telephony result to an ActionableError. A
-// non-Android device produces a typed failure *before* any network access, so
-// the mapping is exercised with no sockets, no timers, no real emulator.
+// The handlers map a failed Telephony result to an ActionableError. iOS routes
+// to the in-app SDK trigger route (#1580) through an injected fake sender, so
+// the mapping is exercised with no sockets, no timers, no real device.
 const iosDevice: BootedDevice = { name: "iPhone", deviceId: "sim-1", platform: "ios" };
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -18,14 +22,32 @@ const androidDevice: BootedDevice = {
   platform: "android",
 };
 
+function iosHandlers(sender: FakeIosSdkTriggerSender) {
+  const makeTelephony = (device: BootedDevice) =>
+    new Telephony(device, new FakeAdbExecutor(), undefined, () => sender);
+  return {
+    phoneCall: createPhoneCallHandler(makeTelephony),
+    sendSms: createSendSmsHandler(makeTelephony),
+  };
+}
+
+const noSdk = {
+  success: false,
+  available: false,
+  totalTimeMs: 0,
+  error: "The foreground app does not embed the AutoMobile in-app SDK with sdk-trigger support.",
+};
+
 describe("telephonyTools handlers", () => {
-  test("phoneCall raises ActionableError when the platform is unsupported", async () => {
+  test("phoneCall raises ActionableError when the iOS app lacks the SDK", async () => {
+    const sender = new FakeIosSdkTriggerSender();
+    sender.result = noSdk;
+    const { phoneCall } = iosHandlers(sender);
+    const pending = phoneCall(iosDevice, { action: "call", phoneNumber: "5551234567" });
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
     await expect(
-      phoneCallHandler(iosDevice, { action: "call", phoneNumber: "5551234567" }),
-    ).rejects.toBeInstanceOf(ActionableError);
-    await expect(
-      phoneCallHandler(iosDevice, { action: "call", phoneNumber: "5551234567" }),
-    ).rejects.toThrow("Emulator telephony is only supported on Android emulators");
+      phoneCall(iosDevice, { action: "call", phoneNumber: "5551234567" }),
+    ).rejects.toThrow("requires the app under test to embed the AutoMobile iOS SDK");
   });
 
   test("phoneCall raises ActionableError when phoneNumber is missing for a non-hold action", async () => {
@@ -36,13 +58,26 @@ describe("telephonyTools handlers", () => {
     );
   });
 
-  test("sendSms raises ActionableError when the platform is unsupported", async () => {
+  test("sendSms raises ActionableError when the iOS app lacks the SDK", async () => {
+    const sender = new FakeIosSdkTriggerSender();
+    sender.result = noSdk;
+    const { sendSms } = iosHandlers(sender);
     await expect(
-      sendSmsHandler(iosDevice, { phoneNumber: "5551234567", message: "hi" }),
+      sendSms(iosDevice, { phoneNumber: "5551234567", message: "hi" }),
     ).rejects.toBeInstanceOf(ActionableError);
-    await expect(
-      sendSmsHandler(iosDevice, { phoneNumber: "5551234567", message: "hi" }),
-    ).rejects.toThrow("Emulator telephony is only supported on Android emulators");
+  });
+
+  test("iOS success returns the SDK delivery result", async () => {
+    const sender = new FakeIosSdkTriggerSender();
+    const { phoneCall, sendSms } = iosHandlers(sender);
+    const call = await phoneCall(iosDevice, { action: "call", phoneNumber: "5551234567" });
+    const sms = await sendSms(iosDevice, { phoneNumber: "5551234567", message: "hi" });
+    expect(JSON.stringify(call)).toContain("CallKit");
+    expect(JSON.stringify(sms)).toContain("SMS-style notification");
+    expect(sender.requests.map((request) => `${request.module}.${request.trigger}`)).toEqual([
+      "callkit.call",
+      "messages.sms",
+    ]);
   });
 });
 

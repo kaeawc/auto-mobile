@@ -11,7 +11,6 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { Element, ElementBounds } from "../../../../src/models";
 import type { ViewHierarchyResult } from "../../../../src/models";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeElementParser } from "../../../fakes/FakeElementParser";
 import containerFixture from "../../../fixtures/observe/android-container-scope.json";
@@ -25,11 +24,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       bounds,
       "resource-id": "example.app:id/left",
     } as Element;
-    const overlayDetector = new OverlayDetector(
-      new FakeElementFinder(),
-      new FakeElementGeometry(),
-      parser,
-    );
+    const overlayDetector = new OverlayDetector(new FakeElementGeometry(), parser);
 
     overlayDetector.collectOverlayCandidates(
       containerFixture.viewHierarchy as ViewHierarchyResult,
@@ -65,12 +60,7 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
   // that logic is exactly what's under test. Geometry is never exercised by
   // collectOverlayCandidates. Per the repo's interfaces-and-fakes
   // convention, OverlayDetector remains the only concrete collaborator.
-  const detector = () =>
-    new OverlayDetector(
-      new FakeElementFinder(),
-      new FakeElementGeometry(),
-      new FakeElementParser(),
-    );
+  const detector = () => new OverlayDetector(new FakeElementGeometry(), new FakeElementParser());
 
   test("a clickable ancestor of the container is not an overlay (issue repro: root(clickable) > list > row(clickable))", () => {
     const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [

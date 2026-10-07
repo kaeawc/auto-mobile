@@ -38,9 +38,9 @@ import {
   ViewHierarchyResult,
 } from "../../../models";
 import { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
-import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
+import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
-import { DefaultElementFinder } from "../../utility/ElementFinder";
+import { DefaultScrollableElementsQuery } from "../../utility/InteractiveElementQueries";
 import { DefaultElementGeometry } from "../../utility/ElementGeometry";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { ExecuteGesture, type FencedGestureOptions } from "../ExecuteGesture";
@@ -195,7 +195,7 @@ export class SwipeOn extends BaseVisualChange {
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture!: GestureExecutor;
-  private finder!: ElementFinder;
+  private finder!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
   private accessibilityService!: AndroidCtrlProxyClient;
   private accessibilityDetector!: AccessibilityDetector;
@@ -232,7 +232,7 @@ export class SwipeOn extends BaseVisualChange {
     }
 
     // Initialize extracted modules
-    this.overlayDetector = new OverlayDetector(this.finder, this.geometry, parser);
+    this.overlayDetector = new OverlayDetector(this.geometry, parser);
     this.autoTargetSelector = dependencies.autoTargetSelector ?? new AutoTargetSelector();
     this.talkBackExecutor = new TalkBackSwipeExecutor(
       device,
@@ -283,7 +283,7 @@ export class SwipeOn extends BaseVisualChange {
   ) {
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     const parser = dependencies.parser ?? new DefaultElementParser();
-    this.finder = dependencies.finder ?? new DefaultElementFinder();
+    this.finder = dependencies.finder ?? new DefaultScrollableElementsQuery();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;

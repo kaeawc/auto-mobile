@@ -32,6 +32,7 @@ class HierarchyMetadataBuilderTest {
           sdkInt = 35,
           deviceModel = "Pixel",
           isEmulator = true,
+          accessibilityTool = true,
         ),
       )
 
@@ -50,6 +51,7 @@ class HierarchyMetadataBuilderTest {
       assertEquals(35, sdkInt)
       assertEquals("Pixel", deviceModel)
       assertEquals(true, isEmulator)
+      assertEquals(true, accessibilityTool)
     }
   }
 
@@ -84,6 +86,7 @@ class HierarchyMetadataBuilderTest {
         "sdkInt",
         "deviceModel",
         "isEmulator",
+        "accessibilityTool",
       )) {
       assertTrue("shared builder must assign $field", "$field = metadata.$field" in builder)
     }

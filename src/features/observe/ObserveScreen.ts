@@ -507,11 +507,17 @@ export function resolveMissingForegroundWindow(
 function describeStatusBarOnlyCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string,
-): { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } {
+): {
+  foreground: string;
+  ctrlProxyIncomplete: boolean;
+  sdkInt: number | undefined;
+  accessibilityTool: boolean | undefined;
+} {
   return {
     foreground,
     ctrlProxyIncomplete: hierarchy?.ctrlProxyIncomplete === true,
     sdkInt: hierarchy?.sdkInt,
+    accessibilityTool: hierarchy?.accessibilityTool,
   };
 }
 
@@ -550,7 +556,13 @@ function describeIncompleteCapture(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string | undefined,
   confirmedFrameworkErrorDialog: boolean,
-): { sdkInt: number | undefined; reason: CtrlProxyIncompleteReason | undefined } | undefined {
+):
+  | {
+      sdkInt: number | undefined;
+      reason: CtrlProxyIncompleteReason | undefined;
+      accessibilityTool: boolean | undefined;
+    }
+  | undefined {
   if (hierarchy?.ctrlProxyIncomplete !== true) {
     return undefined;
   }
@@ -564,7 +576,11 @@ function describeIncompleteCapture(
   // `ctrlProxyIncompleteReason` names the actual cause so the freshness warning can
   // give cause-appropriate advice (issue #6184); pre-#6172 runners omit it, and the
   // freshness layer treats an absent reason as the historical `null_root` default.
-  return { sdkInt: hierarchy.sdkInt, reason: hierarchy.ctrlProxyIncompleteReason };
+  return {
+    sdkInt: hierarchy.sdkInt,
+    reason: hierarchy.ctrlProxyIncompleteReason,
+    accessibilityTool: hierarchy.accessibilityTool,
+  };
 }
 
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
@@ -3902,9 +3918,7 @@ export class RealObserveScreen implements ObserveScreen {
     foregroundIdentity: Promise<string | undefined>,
     postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
-  ): Promise<
-    { foreground: string; ctrlProxyIncomplete: boolean; sdkInt: number | undefined } | undefined
-  > {
+  ): Promise<ReturnType<typeof describeStatusBarOnlyCapture> | undefined> {
     const foreground = await foregroundIdentity;
     const hierarchy = result.viewHierarchy;
 

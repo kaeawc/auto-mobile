@@ -19,6 +19,7 @@ internal data class HierarchyMetadata(
   val sdkInt: Int,
   val deviceModel: String,
   val isEmulator: Boolean,
+  val accessibilityTool: Boolean? = null,
 )
 
 /** Applies the complete metadata set to hierarchy results from either extraction route. */
@@ -38,5 +39,6 @@ internal object HierarchyMetadataBuilder {
       sdkInt = metadata.sdkInt,
       deviceModel = metadata.deviceModel,
       isEmulator = metadata.isEmulator,
+      accessibilityTool = metadata.accessibilityTool,
     )
 }

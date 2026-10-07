@@ -29,6 +29,7 @@ import { RequestManager } from "../../utils/RequestManager";
 import { RetryExecutor, defaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { CtrlProxyReconnectStatus } from "../../models/CtrlProxyReconnectStatus";
 import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForwardingLeaseConflictError";
+import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { DelegateContext } from "./shared/types";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 
@@ -72,29 +73,6 @@ export function rethrowRealCtrlProxyWebSocketInTestError(error: unknown): void {
   }
 }
 
-const TEST_FILE_ENTRYPOINT = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
-
-/** The running script: the current test file under `bun test`, `dist/src/index.js` (or the compiled binary) otherwise. */
-function currentEntrypoint(): string | undefined {
-  // src/ is type-checked without Bun's globals; read `Bun.main` structurally.
-  const bun = (globalThis as { Bun?: { main?: string } }).Bun;
-  return bun?.main ?? process.argv[1];
-}
-
-/**
- * Whether this process is the `bun test` runner itself. `NODE_ENV=test` alone is
- * not enough: it is inherited by every CLI/daemon child a real-device
- * integration test spawns (`execFile`, `daemonProcessEnvironment`), and those
- * children must dial the device. Under `bun test`, `Bun.main` is the test file
- * being run; in a spawned child it is the child's own entrypoint, which no
- * environment inheritance can turn into a test file.
- */
-function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | undefined): boolean {
-  return (
-    env.NODE_ENV === "test" && entrypoint !== undefined && TEST_FILE_ENTRYPOINT.test(entrypoint)
-  );
-}
-
 /**
  * Fail loudly when a unit test reaches the DEFAULT WebSocket factory, i.e. a real
  * CtrlProxy socket. On a developer machine with an emulator or simulator running,
@@ -110,7 +88,7 @@ function isBunTestRunnerProcess(env: NodeJS.ProcessEnv, entrypoint: string | und
 export function assertUnitTestRealWebSocketAllowed(
   url: string,
   env: NodeJS.ProcessEnv = process.env,
-  entrypoint: string | undefined = currentEntrypoint(),
+  entrypoint: string | undefined = currentProcessEntrypoint(),
 ): void {
   if (!isBunTestRunnerProcess(env, entrypoint) || isRealCtrlProxyWebSocketOptInEnabled(env)) {
     return;
@@ -225,6 +203,7 @@ export abstract class DeviceServiceClient {
   // orphan-naming diagnostic to this exact condition instead of any stored
   // error.
   private lastConnectionFailureIsForwardingLeaseConflict: boolean = false;
+  private lastConnectionFailureIsTransientLeaseConflict: boolean = false;
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
@@ -272,6 +251,8 @@ export abstract class DeviceServiceClient {
   // Injected dependencies
   protected readonly timer: Timer;
   protected readonly requestManager: RequestManager;
+  /** Last fire-and-forget send through {@link sendMessage}. */
+  private lastSendAt: number | undefined;
   protected readonly webSocketFactory: WebSocketFactory;
   protected readonly config: ConnectionConfig;
   protected readonly retryExecutor: RetryExecutor;
@@ -420,6 +401,7 @@ export abstract class DeviceServiceClient {
     this.backgroundReconnectPaused = false;
     this.lastConnectionFailureMessage = undefined;
     this.lastConnectionFailureIsForwardingLeaseConflict = false;
+    this.lastConnectionFailureIsTransientLeaseConflict = false;
   }
 
   public getReconnectStatus(): CtrlProxyReconnectStatus | null {
@@ -872,6 +854,8 @@ export abstract class DeviceServiceClient {
               this.backgroundReconnectPaused = false;
               this.lastConnectionFailureMessage = undefined;
               this.lastConnectionFailureIsForwardingLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
+              this.lastConnectionFailureIsTransientLeaseConflict = false;
               this.markLivenessSeen();
 
               // Start health check monitoring
@@ -995,6 +979,8 @@ export abstract class DeviceServiceClient {
     this.lastConnectionFailureMessage = errorMessage(error);
     this.lastConnectionFailureIsForwardingLeaseConflict =
       error instanceof CtrlProxyForwardingLeaseConflictError;
+    this.lastConnectionFailureIsTransientLeaseConflict =
+      error instanceof CtrlProxyForwardingLeaseConflictError && error.transient;
     logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
     this.onConnectAttemptFailed();
   }
@@ -1041,6 +1027,14 @@ export abstract class DeviceServiceClient {
    */
   public isLastConnectionFailureForwardingLeaseConflict(): boolean {
     return this.lastConnectionFailureIsForwardingLeaseConflict;
+  }
+
+  /**
+   * Whether that lease conflict is a time-based refusal (recent owner use, or
+   * an owner too busy to answer) that a readiness wait should retry (#10485).
+   */
+  public isLastConnectionFailureTransientLeaseConflict(): boolean {
+    return this.lastConnectionFailureIsTransientLeaseConflict;
   }
 
   private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {
@@ -1427,7 +1421,24 @@ export abstract class DeviceServiceClient {
       logger.warn(`[${this.logTag}] Cannot send message: WebSocket not connected`);
       return false;
     }
+    this.lastSendAt = this.timer.now();
     this.ws.send(message);
     return true;
+  }
+
+  /**
+   * Requests in flight through this client and when it was last used, so a
+   * daemon can tell a device it is actively driving from an idle one before
+   * giving up or yielding its CtrlProxy forwarding lease (#10497). Covers every
+   * request-response exchange (tool calls, resource reads, initial frames)
+   * because they all register with the shared request manager.
+   */
+  getRequestActivity(): { inFlightRequests: number; lastActivityAt: number | undefined } {
+    const requestActivityAt = this.requestManager.getLastActivityAt();
+    const lastActivityAt =
+      requestActivityAt === undefined || this.lastSendAt === undefined
+        ? (requestActivityAt ?? this.lastSendAt)
+        : Math.max(requestActivityAt, this.lastSendAt);
+    return { inFlightRequests: this.requestManager.getPendingCount(), lastActivityAt };
   }
 }

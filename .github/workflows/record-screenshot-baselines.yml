@@ -1,20 +1,29 @@
 ---
 name: Record Desktop Screenshot Baselines
 
-# Records the desktop-core Compose screenshot baselines on the reference OS
-# (Linux) and opens a PR with the PNGs. Screenshots are pixel-identical only on
+# Records the Compose screenshot baselines of one module (desktop-core, or the
+# control-proxy overlay renderer) on the reference OS (Linux) and opens a PR
+# with the PNGs. Screenshots are pixel-identical only on
 # one OS because font rasterization differs, so baselines cannot be recorded on a
 # developer's macOS/Windows machine and committed — they must be produced here,
 # on the same ubuntu-latest image (and JDK/font stack) that the
-# `desktop-core-unit-tests` job verifies them against. This is a manual,
-# on-demand job: run it from the Actions tab, review the PNGs in the resulting
-# PR, and merge.
+# `desktop-core-unit-tests` / `kotlin-code-coverage` jobs verify them against.
+# This is a manual, on-demand job: run it from the Actions tab, review the PNGs
+# in the resulting PR, and merge.
 
 "on":
   workflow_dispatch:
     inputs:
+      module:
+        description: "Gradle module whose screenshot baselines to record"
+        required: true
+        type: choice
+        options:
+          - desktop-core
+          - control-proxy
+        default: desktop-core
       test_filter:
-        description: "Gradle --tests pattern for the screenshot tests to record"
+        description: "Gradle --tests pattern (control-proxy: *OverlaySpecContentScreenshotTest)"
         required: true
         type: string
         default: "*ComponentScreenshotTest"
@@ -38,6 +47,12 @@ jobs:
     name: "Record baselines (Linux reference OS)"
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # control-proxy is an Android module, so its JVM tests run as a variant
+      # task; desktop-core is a plain JVM module.
+      GRADLE_TEST_TASK: ${{ inputs.module == 'control-proxy' && ':control-proxy:testDebugUnitTest' || ':desktop-core:test' }}
+      SCREENSHOT_TEST_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/kotlin/dev/jasonpearson/automobile/ctrlproxy/overlay/screenshot' || 'android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot' }}
+      BASELINE_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/resources/screenshots/overlay' || 'android/desktop-core/src/test/resources/screenshots' }}
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -50,11 +65,11 @@ jobs:
       - name: "Record baselines (-Dscreenshot.record=true)"
         uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":desktop-core:test"
+          gradle-tasks: ${{ env.GRADLE_TEST_TASK }}
           # --rerun-tasks forces the tests to actually execute (record mode) even
           # when Gradle would otherwise consider them up to date.
           gradle-flags: '["--tests", "${{ inputs.test_filter }}", "-Dscreenshot.record=true", "--rerun-tasks"]'
-          # Both invocations below run :desktop-core:test in this one job, so
+          # Both invocations below run the same test task in this one job, so
           # they need distinct artifact names or the second 409s.
           artifact-name-suffix: "record"
           gradle-project-directory: "android"
@@ -68,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot/*ScreenshotTest.kt)
+          files=("$SCREENSHOT_TEST_DIR"/*ScreenshotTest.kt)
           if [[ ${#files[@]} -eq 0 ]]; then
             echo "No screenshot test files found to un-pend."
           else
@@ -78,7 +93,7 @@ jobs:
       - name: "Verify baselines pass in normal mode"
         uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":desktop-core:test"
+          gradle-tasks: ${{ env.GRADLE_TEST_TASK }}
           gradle-flags: '["--tests", "${{ inputs.test_filter }}", "--rerun-tasks"]'
           artifact-name-suffix: "verify"
           gradle-project-directory: "android"
@@ -103,6 +118,8 @@ jobs:
           path: |
             android/desktop-core/build/reports/screenshots/
             android/desktop-core/src/test/resources/screenshots/*.png
+            android/control-proxy/build/reports/screenshots/
+            android/control-proxy/src/test/resources/screenshots/overlay/*.png
           if-no-files-found: ignore
           retention-days: 7
 
@@ -110,14 +127,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+          COMMIT_SCOPE: ${{ inputs.module == 'control-proxy' && 'overlay' || 'desktop' }}
         run: |
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add android/desktop-core/src/test/resources/screenshots/ \
-                  android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot/
+          git add "$BASELINE_DIR" "$SCREENSHOT_TEST_DIR"
 
           if git diff --cached --quiet; then
             echo "::notice::No baseline changes to commit — the committed baselines already match."
@@ -126,16 +143,16 @@ jobs:
 
           branch="chore/record-screenshot-baselines-${GITHUB_RUN_ID}"
           git switch -c "$branch"
-          # No [skip ci]: the PR's desktop-core-unit-tests job re-verifies the
+          # No [skip ci]: the PR's module test job re-verifies the
           # recorded baselines on a fresh runner.
-          git commit -m "test(desktop): record screenshot baselines"
+          git commit -m "test($COMMIT_SCOPE): record screenshot baselines"
           git push origin "$branch"
 
           gh pr create \
             --base main \
             --head "$branch" \
-            --title "test(desktop): record screenshot baselines" \
-            --body "Automated screenshot baseline recording from the \`Record Desktop Screenshot Baselines\` workflow (run \`${GITHUB_RUN_ID}\`, filter \`${{ inputs.test_filter }}\`).
+            --title "test($COMMIT_SCOPE): record screenshot baselines" \
+            --body "Automated screenshot baseline recording from the \`Record Desktop Screenshot Baselines\` workflow (run \`${GITHUB_RUN_ID}\`, module \`${{ inputs.module }}\`, filter \`${{ inputs.test_filter }}\`).
 
           Recorded on \`ubuntu-latest\` (the reference OS). **Review the PNGs visually** before merging — they are the source of truth for future screenshot comparisons.
 

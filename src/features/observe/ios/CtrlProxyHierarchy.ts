@@ -18,6 +18,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
+import { IOS_WINDOW_LAYER_EXTRA } from "./iosWindowLayer";
 import { maxObservationAgeMs } from "../observationFreshness";
 import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
 import type {
@@ -1114,15 +1115,15 @@ export class CtrlProxyHierarchy {
     }
     const inIcon = insideSpringBoardIcon || attrs["class"] === "SBIconView";
 
+    // Root node is always kept
+    if (isRoot) {
+      return this.filterRootNode(node, attrs, children, inIcon);
+    }
+
     // Process children first (recursively)
     const filteredChildren = this.filterHierarchyChildren(children, inIcon);
     const compactedChildren = this.dropRedundantStaticTextChildren(attrs, filteredChildren);
     const dedupedChildren = this.dedupeNoiseSiblings(compactedChildren);
-
-    // Root node is always kept
-    if (isRoot) {
-      return this.buildFilteredNode(node, attrs, dedupedChildren);
-    }
 
     // Check if this node is a structural wrapper
     if (this.isStructuralWrapper(attrs, dedupedChildren.length > 0)) {
@@ -1164,6 +1165,62 @@ export class CtrlProxyHierarchy {
       }
     }
     return filteredChildren;
+  }
+
+  /** The root's children are filtered per UIWindow so their window order can be stamped. */
+  private filterRootNode(
+    node: ConvertedNode,
+    attrs: Record<string, unknown>,
+    children: ConvertedNode[],
+    inIcon: boolean,
+  ): ConvertedNode {
+    const { nodes, windowOrigins } = this.filterRootChildren(children, inIcon);
+    const compactedChildren = this.dropRedundantStaticTextChildren(attrs, nodes);
+    const dedupedChildren = this.dedupeNoiseSiblings(compactedChildren);
+    this.stampWindowLayers(dedupedChildren, windowOrigins);
+    return this.buildFilteredNode(node, attrs, dedupedChildren);
+  }
+
+  /** Like filterHierarchyChildren, also recording which root UIWindow each survivor came from. */
+  private filterRootChildren(
+    children: ConvertedNode[],
+    inIcon: boolean,
+  ): { nodes: ConvertedNode[]; windowOrigins: Map<ConvertedNode, number> } {
+    const perChild = children.map((child, index) => ({
+      index,
+      isWindow: nodeAttributes(child)["class"] === "UIWindow",
+      survivors: this.filterHierarchyChildren([child], inIcon),
+    }));
+    return {
+      nodes: perChild.flatMap(({ survivors }) => survivors),
+      windowOrigins: new Map(
+        perChild
+          .filter(({ isWindow }) => isWindow)
+          .flatMap(({ index, survivors }) => survivors.map((node) => [node, index] as const)),
+      ),
+    };
+  }
+
+  /** See iosWindowLayer.ts: stamp front-to-back window order once two windows contribute nodes. */
+  private stampWindowLayers(
+    children: ConvertedNode[],
+    windowOrigins: ReadonlyMap<ConvertedNode, number>,
+  ): void {
+    const windows = [...new Set(children.flatMap((child) => windowOrigins.get(child) ?? []))].sort(
+      (a, b) => b - a,
+    );
+    if (windows.length < 2) {
+      return;
+    }
+    for (const child of children) {
+      const origin = windowOrigins.get(child);
+      if (origin !== undefined) {
+        child.extras = {
+          ...child.extras,
+          [IOS_WINDOW_LAYER_EXTRA]: String(windows.indexOf(origin)),
+        };
+      }
+    }
   }
 
   private buildFilteredNode(

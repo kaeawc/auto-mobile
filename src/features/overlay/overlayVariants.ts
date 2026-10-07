@@ -84,7 +84,9 @@ function variantContent(
 // The control row sits at the window edge, which on a device is usually under a system bar: the
 // status bar for a top-gravity floating window, the navigation bar for fullscreen (#10086). The
 // row keeps its background behind the bars and pads its content into the safe area, so the
-// controls stay reachable, readable over any app, and inside the window's own bounds.
+// controls stay reachable, readable over any app, and inside the window's own bounds. It pads
+// only the edges it touches: inset padding applies the whole inset wherever the row sits, so a
+// bottom row padded for the top inset as well grows by the status-bar height.
 const CONTROL_BACKGROUND = "#CC000000";
 const CONTROL_TEXT_COLOR = "#FFFFFFFF";
 
@@ -102,14 +104,29 @@ function controlText(
   };
 }
 
-function control(variant: Pick<OverlayVariant, "label">, index: number): OverlayNode {
+type SafeAreaEdge = NonNullable<OverlayNode["safeAreaPadding"]>["edges"][number];
+
+/** Fullscreen rows sit at the bottom; floating rows follow the window gravity's vertical edge. */
+function controlEdges(value: z.infer<typeof inputSchema>): SafeAreaEdge[] {
+  const gravity = value.presentation === "floating" ? (value.gravity ?? "bottomCenter") : "bottom";
+  if (gravity.startsWith("top")) {
+    return ["top", "start", "end"];
+  }
+  if (gravity.startsWith("bottom")) {
+    return ["bottom", "start", "end"];
+  }
+  return ["start", "end"];
+}
+
+function control(
+  variant: Pick<OverlayVariant, "label">,
+  index: number,
+  edges: SafeAreaEdge[],
+): OverlayNode {
   return {
     type: "row",
     testTag: `variant-${index}-control`,
-    safeAreaPadding: {
-      types: ["systemBars", "cutout"],
-      edges: ["top", "bottom", "start", "end"],
-    },
+    safeAreaPadding: { types: ["systemBars", "cutout"], edges },
     style: {
       spacing: 12,
       width: "fill",
@@ -170,7 +187,7 @@ export function composeVariantCarousel(input: unknown): OverlaySpec {
   }
   const children = value.variants.map((variant, index): OverlayNode => {
     const content = variantContent(variant, index);
-    const controls = control(variant, index);
+    const controls = control(variant, index, controlEdges(value));
     return {
       type: "box",
       testTag: `variant-${index}-page`,

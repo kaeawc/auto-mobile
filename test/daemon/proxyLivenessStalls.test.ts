@@ -21,6 +21,7 @@ import {
   DAEMON_SESSION_SUSPECT_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+  DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
 } from "../../src/daemon/types";
 import { declaresDeviceSessionSuspect } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
@@ -43,6 +44,7 @@ const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
 };
+const OBSERVED = { content: [{ type: "text", text: JSON.stringify({ observed: true }) }] };
 const DEVICES: Record<string, string> = {
   "android-session": "emulator-5554",
   "ios-session": "sim-1",
@@ -107,8 +109,10 @@ describe("proxy liveness stalls (#10053)", () => {
   let hangUntil: number;
   /** Sessions whose heartbeats the scripted daemon never answers. */
   let hangSessions: Set<string>;
-  /** `observe` is refused with the daemon's suspect-session error. */
-  let suspectObserve: boolean;
+  /** How many more `observe` calls the daemon refuses with its suspect-session error. */
+  let suspectObserveRefusals: number;
+  /** Every `observe` the scripted daemon received, across reconnects. */
+  let observeCalls: number;
   /** `observe` calls for this session never answer: a tool call in flight on the shared socket. */
   let hangObserveFor: string | undefined;
   /** Daemon connections the proxy opened: one more for every time it replaced its socket. */
@@ -134,10 +138,13 @@ describe("proxy liveness stalls (#10053)", () => {
           ? deviceStartResult(androidAcquisitionSession, DEVICES["android-session"])
           : name === "getApple"
             ? deviceStartResult("ios-session", DEVICES["ios-session"])
-            : name === "observe" && suspectObserve
-              ? shapeSuspectResult()
+            : name === "observe"
+              ? observeResult(params.sessionUuid)
               : undefined,
       onCallTool: async (name, params) => {
+        if (name === "observe") {
+          observeCalls += 1;
+        }
         if (name === "observe" && params.sessionUuid === hangObserveFor) {
           await new Promise<void>(() => {});
         }
@@ -168,11 +175,19 @@ describe("proxy liveness stalls (#10053)", () => {
     });
   }
 
-  function shapeSuspectResult() {
-    return shapeToolCallError(new SessionSuspectError("android-session", 8_000), {
+  function shapeSuspectResult(sessionUuid = "android-session") {
+    return shapeToolCallError(new SessionSuspectError(sessionUuid, 8_000), {
       toolName: "observe",
       source: "ProxyServer",
     });
+  }
+
+  function observeResult(sessionUuid: unknown) {
+    if (suspectObserveRefusals > 0) {
+      suspectObserveRefusals -= 1;
+      return shapeSuspectResult(String(sessionUuid));
+    }
+    return OBSERVED;
   }
 
   function createProxy(
@@ -230,7 +245,8 @@ describe("proxy liveness stalls (#10053)", () => {
     hangObserveFor = undefined;
     clientsCreated = 0;
     androidAcquisitionSession = "android-session";
-    suspectObserve = false;
+    suspectObserveRefusals = 0;
+    observeCalls = 0;
     heartbeatsSeen = 0;
     handovers = [];
     for (const [sessionId, deviceId] of Object.entries(DEVICES)) {
@@ -1242,20 +1258,151 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(declaresDeviceSessionSuspect({ content: [{ type: "text", text: "{}" }] })).toBe(false);
     });
 
-    test("the proxy re-heartbeats at once a session the daemon refuses as suspect and fails nothing itself", async () => {
+    /** Let microtasks and the fake daemon's immediate answers run without advancing time. */
+    async function drain(): Promise<void> {
+      for (let turn = 0; turn < 10; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    }
+
+    /** Advance the fake clock in small steps until `pending` settles; returns the elapsed time. */
+    async function advanceUntilSettled(pending: Promise<unknown>, limitMs = 40_000) {
+      let settled = false;
+      void pending.then(
+        () => (settled = true),
+        () => (settled = true),
+      );
+      const startedAt = timer.now();
+      await drain();
+      for (let elapsed = 0; elapsed < limitMs && !settled; elapsed += 250) {
+        await baseTimer.advanceTimeAsync(250);
+        await drain();
+      }
+      return timer.now() - startedAt;
+    }
+
+    test("a call refused as suspect is retried once after the session is restored; the harness never sees the refusal", async () => {
       const proxy = createProxy(5_000);
       await acquire(proxy, "getAndroid");
       heartbeatsSeen = 0;
-      suspectObserve = true;
+      suspectObserveRefusals = 1;
 
       const result = await proxy.callTool("observe", { sessionUuid: "android-session" });
-      for (let turn = 0; turn < 5; turn += 1) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
 
-      // The daemon's refusal reaches the harness unchanged; recovery is the proxy's own business.
+      expect(result).toEqual(OBSERVED);
+      expect(observeCalls).toBe(2);
+      expect(heartbeatsSeen).toBeGreaterThanOrEqual(1);
+      expect(
+        infoSpy.mock.calls.some(([message]) =>
+          String(message).includes(
+            "Recovered daemon_stalled for session android-session after 1 attempt(s)",
+          ),
+        ),
+      ).toBe(true);
+      expect(handovers).toEqual([]);
+    });
+
+    test("a sessionless call routed to the bound session is retried the same way", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      suspectObserveRefusals = 1;
+
+      await expect(proxy.callTool("observe", {})).resolves.toEqual(OBSERVED);
+      expect(observeCalls).toBe(2);
+    });
+
+    test("recovery that hands the session over surfaces the handover instead of the refusal", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      // Another liveness owner took the session while it was suspect: the daemon answers the
+      // recovery heartbeat that this proxy's token was superseded.
+      spyOn(latestClient, "callDaemonMethod").mockRejectedValueOnce(
+        Object.assign(new Error("Another owner holds this session"), {
+          code: DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
+        }),
+      );
+      suspectObserveRefusals = 1;
+
+      const call = proxy.callTool("observe", { sessionUuid: "android-session" });
+      await advanceUntilSettled(call);
+
+      await expect(call).rejects.toBeInstanceOf(DaemonSessionStalledError);
+      await expect(call).rejects.toMatchObject({
+        reason: "proxy_stalled",
+        handover: { code: "proxy_stalled", action: "reacquire_lost_sessions" },
+      });
+      // The retry was answered by the proxy's own record; the daemon saw only the refused call.
+      expect(observeCalls).toBe(1);
+    });
+
+    test("aborting while recovery runs rejects with the abort and never retries", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      hangSessions.add("android-session");
+      suspectObserveRefusals = 1;
+      const controller = new AbortController();
+      const cancelled = new Error("cancelled by client");
+
+      const call = proxy.callTool(
+        "observe",
+        { sessionUuid: "android-session" },
+        undefined,
+        undefined,
+        controller.signal,
+      );
+      await drain();
+      expect(observeCalls).toBe(1);
+      controller.abort(cancelled);
+
+      await expect(call).rejects.toBe(cancelled);
+      await baseTimer.advanceTimeAsync(20_000);
+      expect(observeCalls).toBe(1);
+    });
+
+    test("recovery still running when the reserved window plus one heartbeat timeout ends returns the refusal", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      hangSessions.add("android-session");
+      suspectObserveRefusals = 1;
+
+      const call = proxy.callTool("observe", { sessionUuid: "android-session" });
+      const elapsedMs = await advanceUntilSettled(call);
+      const result = await call;
+
+      expect(declaresDeviceSessionSuspect(result)).toBe(true);
+      expect(observeCalls).toBe(1);
+      // 8 s left in the window plus the 5 s heartbeat request timeout (lease 10 s, interval 5 s).
+      expect(elapsedMs).toBeGreaterThanOrEqual(13_000);
+      expect(elapsedMs).toBeLessThan(13_000 + 500);
+    });
+
+    test("a refusal for a session this proxy does not hold is returned unchanged and not retried", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      heartbeatsSeen = 0;
+      suspectObserveRefusals = 1;
+
+      const result = await proxy.callTool("observe", { sessionUuid: "ios-session" });
+      await drain();
+
+      expect(declaresDeviceSessionSuspect(result)).toBe(true);
+      expect(observeCalls).toBe(1);
+      expect(heartbeatsSeen).toBe(0);
+    });
+
+    test("the proxy re-heartbeats at once a session the daemon refuses as suspect and retries only once", async () => {
+      const proxy = createProxy(5_000);
+      await acquire(proxy, "getAndroid");
+      heartbeatsSeen = 0;
+      suspectObserveRefusals = Number.POSITIVE_INFINITY;
+
+      const result = await proxy.callTool("observe", { sessionUuid: "android-session" });
+      await drain();
+
+      // A second refusal reaches the harness unchanged: exactly one retry, never a loop.
       expect(result.isError).toBe(true);
       expect(declaresDeviceSessionSuspect(result)).toBe(true);
+      expect(observeCalls).toBe(2);
       expect(heartbeatsSeen).toBeGreaterThanOrEqual(1);
       expect(
         infoSpy.mock.calls.some(([message]) =>

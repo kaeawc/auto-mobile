@@ -126,6 +126,34 @@ export function declaresDeviceSessionSuspect(result: unknown): boolean {
   );
 }
 
+/** The session a suspect refusal names and how long the daemon keeps it reserved. */
+export interface DeviceSessionSuspectRefusal {
+  sessionUuid: string;
+  remainingMs: number;
+}
+
+/** The details of a {@link declaresDeviceSessionSuspect} refusal, when it carries them. */
+export function readDeviceSessionSuspectRefusal(
+  result: unknown,
+): DeviceSessionSuspectRefusal | undefined {
+  if (!declaresDeviceSessionSuspect(result)) {
+    return undefined;
+  }
+  const error = readToolEnvelopePayload(result)?.payload?.error;
+  if (
+    !error ||
+    typeof error !== "object" ||
+    !("sessionUuid" in error) ||
+    typeof error.sessionUuid !== "string" ||
+    !("remainingMs" in error) ||
+    typeof error.remainingMs !== "number" ||
+    !Number.isFinite(error.remainingMs)
+  ) {
+    return undefined;
+  }
+  return { sessionUuid: error.sessionUuid, remainingMs: error.remainingMs };
+}
+
 /**
  * The error codes a tool RESULT uses to say the device session it names is gone
  * — emitted as ordinary `isError: true` envelopes by `src/server/index.ts`

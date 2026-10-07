@@ -213,6 +213,24 @@ describe("CoreDeviceCapabilityProbe", () => {
     expect(h.commandInvoker.calls).toHaveLength(3);
   });
 
+  test("supported passes each invocation's output through without memoizing it", async () => {
+    const h = harness();
+    h.commandInvoker.result = { kind: "ok", output: "first listing" };
+    expect(await h.probe.checkSimulatorCommand("sim-1", "info displays", required)).toEqual({
+      kind: "supported",
+      output: "first listing",
+    });
+    h.commandInvoker.result = { kind: "ok", output: "second listing" };
+    expect(await h.probe.checkSimulatorCommand("sim-1", "info displays", required)).toEqual({
+      kind: "supported",
+      output: "second listing",
+    });
+    expect(h.commandInvoker.calls).toHaveLength(2);
+    expect(h.probe.getCapabilities().entries).toEqual([
+      { scope: "sim-1", command: "info displays", status: "supported" },
+    ]);
+  });
+
   test("unsupported without a feature ID and all failed results are retried", async () => {
     const h = harness();
     for (const result of [

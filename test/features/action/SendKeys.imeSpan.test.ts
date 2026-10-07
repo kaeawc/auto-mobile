@@ -286,40 +286,111 @@ test("IME, clear, IME uses the active input connection", async () => {
   expect(h.selections()).toEqual([activate, restore]);
 });
 
-test.each([true, false])(
-  "IME span clear gates input connection delivery: %s",
-  async (supported) => {
-    const h = harness();
-    h.client.supportsImeClearField = async () => supported;
-    let selectionsAtClear: string[] = [];
-    const clear = h.client.clear;
-    h.client.clear = async () => {
-      selectionsAtClear = h.selections();
-      return clear();
-    };
-    const result = await h.action.execute([type("a"), { action: "clear" }, type("b")]);
-    expect(result.success).toBe(true);
-    expect(h.clientCalls).toEqual(["commit:a", supported ? "clearField" : "clear", "commit:b"]);
-    if (!supported) {
-      expect(selectionsAtClear).toEqual([activate]);
+/** A focused field whose text follows IME commits, the IME clear and key-event deletes. */
+function fieldHarness(initial = "old", attributes: Record<string, string> = {}) {
+  let field = initial;
+  const h = harness({
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: {
+            $: { focused: "true", class: "android.widget.EditText", text: field, ...attributes },
+          },
+        },
+      },
+    }),
+  });
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) => {
+    field = args[3] === "clearField" ? "" : field + args[0];
+    return commit(...args);
+  };
+  const execute = h.adb.executeCommand.bind(h.adb);
+  h.adb.executeCommand = async (...args) => {
+    if (args[0].includes("KEYCODE_DEL")) {
+      field = "";
     }
-    expect(h.selections()).toEqual([activate, restore]);
-    expect(h.timer.getSleepHistory()).toEqual([]);
-  },
-);
+    return execute(...args);
+  };
+  const deletes = () =>
+    h.adb.getExecutedCommands().filter((command) => command.includes("KEYCODE_DEL"));
+  return { ...h, deletes, field: () => field };
+}
+
+/** IME mode must never reach the accessibility clear (ACTION_SET_TEXT) (#10408). */
+function expectNoAccessibilityClear(h: ReturnType<typeof harness>) {
+  expect(h.clientCalls.filter((call) => call === "clear" || call.startsWith("replace:"))).toEqual(
+    [],
+  );
+}
+
+test("IME span clear uses the input connection when the capability is present", async () => {
+  const h = fieldHarness();
+  const result = await h.action.execute([type("a"), { action: "clear" }, type("b")]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["commit:a", "clearField", "commit:b"]);
+  expect(h.deletes()).toEqual([]);
+  expectNoAccessibilityClear(h);
+  expect(h.selections()).toEqual([activate, restore]);
+  expect(h.timer.getSleepHistory()).toEqual([]);
+});
+
+test("IME span clear on an older APK deletes with key events, never the accessibility clear", async () => {
+  const h = fieldHarness();
+  h.client.supportsImeClearField = async () => false;
+  let selectionsAtDelete: string[] = [];
+  const execute = h.adb.executeCommand.bind(h.adb);
+  h.adb.executeCommand = async (...args) => {
+    if (args[0].includes("KEYCODE_DEL")) {
+      selectionsAtDelete = h.selections();
+    }
+    return execute(...args);
+  };
+  const result = await h.action.execute([type("a"), { action: "clear" }, type("b")]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["commit:a", "commit:b"]);
+  expect(h.deletes().length).toBeGreaterThan(0);
+  expect(selectionsAtDelete).toEqual([activate]);
+  expect(h.field()).toBe("b");
+  expectNoAccessibilityClear(h);
+  expect(h.selections()).toEqual([activate, restore]);
+});
 
 test.each(["ime", "auto", "imeKeyEvents"] as const)(
-  "clear preceding %s typing falls back on an older APK",
+  "clear preceding %s typing deletes with key events on an older APK",
   async (mode) => {
-    const h = harness();
+    const h = fieldHarness();
     h.client.supportsImeClearField = async () => false;
     const result = await h.action.execute([{ action: "clear" }, { ...type("a"), mode }]);
     expect(result.success).toBe(true);
-    expect(h.clientCalls).toEqual(["clear", "commit:a"]);
+    expect(h.clientCalls).toEqual(["commit:a"]);
+    expect(h.deletes().length).toBeGreaterThan(0);
+    expectNoAccessibilityClear(h);
     expect(h.selections()).toEqual([activate, restore]);
-    expect(h.timer.getSleepHistory()).toEqual([]);
   },
 );
+
+test("IME clear without the capability and without a readable length asks for an APK update", async () => {
+  // An editable custom view whose text CtrlProxy cannot read leaves no deletion budget.
+  const h = harness({
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { focused: "true", class: "com.example.RichEditor", editable: "true" } },
+        },
+      },
+    }),
+  });
+  h.client.supportsImeClearField = async () => false;
+  const result = await h.action.execute([{ action: "clear" }, type("a")]);
+  expect(result.success).toBe(false);
+  expect(result.commands[0]?.error).toContain("Update the CtrlProxy APK");
+  expect(h.clientCalls).toEqual([]);
+  expect(h.adb.getExecutedCommands().some((command) => command.includes("KEYCODE_"))).toBe(false);
+  expect(h.selections()).toEqual([activate, restore]);
+});
 
 test.each(["ime", "auto", "imeKeyEvents"] as const)(
   "clear before a %s type activates the span IME first",
@@ -360,24 +431,29 @@ test("IME replace clears through the input connection before typing", async () =
 
 for (const mode of ["ime", "auto", "imeKeyEvents"] as const) {
   test.each([true, false])(`%s clear capability gates ${mode} replacement`, async (supported) => {
-    const h = harness();
+    const h = fieldHarness();
     h.client.supportsImeClearField = async () => supported;
     const result = await h.action.execute([{ ...type("new"), mode, operation: "replace" }]);
     expect(result.success).toBe(true);
-    expect(h.clientCalls).toEqual([supported ? "clearField" : "clear", "commit:new"]);
+    expect(h.clientCalls).toEqual(supported ? ["clearField", "commit:new"] : ["commit:new"]);
+    expect(h.deletes().length > 0).toBe(!supported);
+    expect(h.field()).toBe("new");
+    expectNoAccessibilityClear(h);
     expect(h.selections()).toEqual([activate, restore]);
-    expect(h.timer.getSleepHistory()).toEqual([]);
   });
 }
 
 test.each(["clear", "replace"] as const)(
-  "legacy accessibility %s failure stops subsequent IME typing",
+  "older-APK key-event %s failure stops subsequent IME typing",
   async (operation) => {
-    const h = harness();
+    const h = fieldHarness();
     h.client.supportsImeClearField = async () => false;
-    h.client.clear = async () => {
-      h.clientCalls.push("clear");
-      return { success: false, error: "clear refused" };
+    const execute = h.adb.executeCommand.bind(h.adb);
+    h.adb.executeCommand = async (...args) => {
+      if (args[0].includes("KEYCODE_DEL")) {
+        throw new Error("key event refused");
+      }
+      return execute(...args);
     };
     const commands: SendKeysCommand[] =
       operation === "clear"
@@ -385,9 +461,9 @@ test.each(["clear", "replace"] as const)(
         : [{ ...type("b"), operation: "replace" }];
     const result = await h.action.execute(commands);
     expect(result.success).toBe(false);
-    expect(h.clientCalls).toEqual(operation === "clear" ? ["commit:a", "clear"] : ["clear"]);
+    expect(h.clientCalls).toEqual(operation === "clear" ? ["commit:a"] : []);
+    expectNoAccessibilityClear(h);
     expect(h.selections()).toEqual([activate, restore]);
-    expect(h.timer.getSleepHistory()).toEqual([]);
   },
 );
 

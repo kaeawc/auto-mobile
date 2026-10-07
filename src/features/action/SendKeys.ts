@@ -79,6 +79,9 @@ import {
 export const SEND_KEYS_MAX_COMMANDS = 100;
 export const SEND_KEYS_MAX_MODIFIERS = 4;
 const ANDROID_FOCUSED_INPUT_ERROR = "Android event delivery requires a focused editable field";
+const IME_CLEAR_FIELD_UNAVAILABLE_ERROR =
+  "IME-mode clear needs the CtrlProxy ime_clear_field_v1 capability, and key-event deletion " +
+  "could not size the focused text. Update the CtrlProxy APK, then retry.";
 const ANDROID_TYPE_FOCUSED_INPUT_ERROR = `${ANDROID_FOCUSED_INPUT_ERROR}. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.`;
 
 // Give posted formatters/recomposition a bounded chance to finish after a mismatch.
@@ -1494,15 +1497,22 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (operation !== "replace" && routing.delivery !== "clearField") {
       return {};
     }
+    const supportsClearField = await this.textClient.supportsImeClearField();
+    this.checkAbort(routing.signal);
+    if (!supportsClearField) {
+      // IME mode never uses the accessibility clear: it breaks a rich-text editor's live
+      // formatting until the editor resets (#10408). Delete with key events instead.
+      const cleared = await this.clearImeFieldWithKeyEvents(routing.signal, routing.display);
+      if (routing.delivery === "clearField") {
+        progress.result = cleared;
+      }
+      return cleared.success && routing.delivery !== "clearField" ? {} : { outcome: cleared };
+    }
     const { result, unchangedWarning } = await this.clearAndVerifyAndroid(
       routing.signal,
       routing.display,
       async () => {
-        const supportsClearField = await this.textClient.supportsImeClearField();
-        this.checkAbort(routing.signal);
-        const cleared = supportsClearField
-          ? await this.textClient.commitViaIme("", null, routing.signal, "clearField")
-          : await this.textClient.clear();
+        const cleared = await this.textClient.commitViaIme("", null, routing.signal, "clearField");
         // Record safety before verification can abort or exhaust the request budget.
         progress.safeToRestore = this.canRestoreAfterImeCommit(cleared, prior, priorSubtype);
         if (routing.delivery === "clearField") {
@@ -1515,6 +1525,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { outcome: this.withTextWarnings(result, [unchangedWarning]) };
     }
     return { warning: unchangedWarning };
+  }
+
+  /**
+   * IME-mode clear for a CtrlProxy without `ime_clear_field_v1`: key-event deletion sized from
+   * the focused field, or an update hint when the length is unknown.
+   */
+  private async clearImeFieldWithKeyEvents(
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    const focusResult = await this.requireFocusedAndroidInput(signal, undefined, display);
+    if (!focusResult.success) {
+      return focusResult;
+    }
+    const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
+    if (textLength === undefined) {
+      return { success: false, error: IME_CLEAR_FIELD_UNAVAILABLE_ERROR };
+    }
+    logger.info("[SendKeys] CtrlProxy lacks ime_clear_field_v1; clearing with key events");
+    return this.clearEventOnlyForReplace(textLength, signal, display);
   }
 
   private async performImeCommit(

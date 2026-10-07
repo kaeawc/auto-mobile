@@ -42,6 +42,7 @@ import {
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { deleteInternalToolParams } from "../daemon/constants";
 import { getRemovedToolActionHint } from "../models/removedTools";
 import {
@@ -629,6 +630,15 @@ type OverlayHandlerDependencies = {
 } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
 type OverlayOutput = z.infer<typeof overlayOutputSchema>;
 
+function mutationTarget(
+  args: Omit<z.infer<typeof overlaySchema>, "action"> & { action: OverlayMutation },
+): { id?: string; all?: true } {
+  if (args.all) {
+    return { all: true as const };
+  }
+  return { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
+}
+
 async function performMutation(
   dependencies: OverlayHandlerDependencies,
   device: BootedDevice,
@@ -637,16 +647,15 @@ async function performMutation(
   signal?: AbortSignal,
 ): Promise<OverlayOutput> {
   const { store, events, clientFactory, assetReaders } = dependencies;
-  const target = args.all
-    ? { all: true as const }
-    : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
+  const target = mutationTarget(args);
   const client = clientFactory(device);
   const shown = store.status(scope).overlays.find((entry) => entry.id === target.id);
   const previouslyShown = shown !== undefined;
   if (args.action === "show") {
     events.show(scope, target.id!, client);
   }
-  const resolved = await resolveShowDisplay(client, device, args, dependencies);
+  const inPlace = args.action === "show" && previouslyShown && args.reset !== true;
+  const resolved = await resolveMutationDisplay(inPlace, client, device, args, dependencies);
   const { displayId } = resolved;
   const stage: AssetStage = resolved.failure
     ? { uploaded: [], prepared: [], failure: resolved.failure }
@@ -656,7 +665,14 @@ async function performMutation(
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
   }
-  const placed = placedDisplay(args, shown, displayId, result.success);
+  const comparable = await comparableRequestedDisplay(
+    inPlace,
+    displayId,
+    device,
+    args,
+    dependencies,
+  );
+  const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = store.record(scope, args.action, target, result, placed.displayId);
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);
@@ -671,6 +687,50 @@ async function performMutation(
 }
 
 /**
+ * A same-id show without reset replaces the overlay in place on the display it is already on, so
+ * the requested or pinned display is irrelevant: resolving it could only fail the call.
+ */
+async function resolveMutationDisplay(
+  inPlace: boolean,
+  client: OverlayClient,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+): Promise<{ displayId?: number; failure?: OverlayResult }> {
+  return inPlace ? {} : resolveShowDisplay(client, device, args, dependencies);
+}
+
+/**
+ * The display an in-place show asked for (a fresh show's resolved one otherwise), resolved only to decide whether to warn that it was
+ * ignored. null means it could not be resolved, which is itself ignored, so it always warns.
+ */
+async function comparableRequestedDisplay(
+  inPlace: boolean,
+  resolvedDisplayId: number | undefined,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+): Promise<number | undefined | null> {
+  if (!inPlace) {
+    return resolvedDisplayId;
+  }
+  if (args.display === undefined) {
+    return undefined;
+  }
+  try {
+    const id = await resolveOverlayDisplayId(device, args.display, {
+      adb: (dependencies.adbFactory ?? defaultAdbClientFactory).create(device),
+      lastRenderedObservation: dependencies.lastRenderedObservation,
+    });
+    return id || undefined;
+  } catch (error) {
+    // The selector is irrelevant to an in-place show, so an unresolvable one only changes the warning.
+    logger.debug(`[overlay] ignored display selector did not resolve: ${errorMessage(error)}`);
+    return null;
+  }
+}
+
+/**
  * The display an accepted mutation leaves the overlay on. A same-id show without reset is replaced
  * in place on the device, on the display it is already on, so a different requested display is
  * ignored and the caller is told so.
@@ -678,13 +738,20 @@ async function performMutation(
 function placedDisplay(
   args: Pick<z.infer<typeof overlaySchema>, "action" | "reset" | "display">,
   shown: OverlayLastResult | undefined,
-  displayId: number | undefined,
+  displayId: number | undefined | null,
   success: boolean,
 ): { displayId?: number; warning?: string } {
-  if (args.action !== "show" || shown?.id === undefined || args.reset === true) {
-    return { displayId };
+  if (args.action !== "show" || shown?.id === undefined) {
+    return { displayId: displayId ?? undefined };
   }
-  if (!success || args.display === undefined || displayId === shown.displayId) {
+  // A refused show, reset or not, leaves the overlay on the display it was already on.
+  if (!success) {
+    return { displayId: shown.displayId };
+  }
+  if (args.reset === true) {
+    return { displayId: displayId ?? undefined };
+  }
+  if (args.display === undefined || displayId === shown.displayId) {
     return { displayId: shown.displayId };
   }
   const where =

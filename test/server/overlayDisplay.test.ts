@@ -170,7 +170,9 @@ describe("overlay display targeting", () => {
     const again = await call({ action: "show", spec, display: "inner" });
     expect(again.success).toBe(true);
     expect(again.warning).toBeUndefined();
-    expect(client.getOverlayHistory()).toMatchObject([{ displayId: 2 }, { displayId: 2 }]);
+    // The in-place replacement carries no display: the device keeps the overlay where it is.
+    expect(client.getOverlayHistory()[0].displayId).toBe(2);
+    expect(client.getOverlayHistory()[1].displayId).toBeUndefined();
   });
 
   test("a same-id show under the pin it was shown with carries no warning", async () => {
@@ -195,6 +197,28 @@ describe("overlay display targeting", () => {
     expect(moved.warning).toBeUndefined();
     expect(moved.lastResult?.displayId).toBe(2);
     expect(client.getOverlayHistory()[1]).toMatchObject({ displayId: 2, reset: true });
+  });
+
+  test("a same-id show ignores a selector that cannot resolve instead of failing", async () => {
+    await call({ action: "show", spec });
+    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    const moved = await call({ action: "show", spec, display: "inner" });
+    expect(moved.success).toBe(true);
+    expect(moved.error).toBeUndefined();
+    expect(moved.warning).toContain("display was ignored");
+    expect(client.getOverlayHistory()).toHaveLength(2);
+    const unknown = await call({ action: "show", spec, display: "nonesuch" });
+    expect(unknown.success).toBe(true);
+    expect(unknown.warning).toContain("display was ignored");
+  });
+
+  test("a failed reset show keeps the display the overlay is still on", async () => {
+    await call({ action: "show", spec, display: "inner" });
+    client.setOverlayResult({ success: false, error: "rejected" });
+    const failed = await call({ action: "show", spec, display: "cover", reset: true });
+    expect(failed.success).toBe(false);
+    expect(failed.lastResult?.displayId).toBe(2);
+    expect((await call({ action: "status" })).overlays).toMatchObject([{ displayId: 2 }]);
   });
 
   test("a show of another id is never in place and never warns about display", async () => {

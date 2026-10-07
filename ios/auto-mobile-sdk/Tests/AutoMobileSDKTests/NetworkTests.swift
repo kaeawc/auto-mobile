@@ -25,10 +25,15 @@ private final class UptimeBox: @unchecked Sendable {
 
 #if DEBUG
     /// Flushes and snapshots network events synchronously from URLProtocol terminal callbacks.
-    private final class EventObservingURLProtocolClient: NSObject, URLProtocolClient {
+    /// `@unchecked Sendable`: the only mutable state is guarded by `lock`.
+    private final class EventObservingURLProtocolClient: NSObject, URLProtocolClient, @unchecked Sendable {
         private let buffer: SdkEventBuffer
         private let collector: EventCollector
-        private(set) var eventsAtTerminalCallback: [any SdkEvent] = []
+        private let lock = NSLock()
+        private var _eventsAtTerminalCallback: [any SdkEvent] = []
+        var eventsAtTerminalCallback: [any SdkEvent] {
+            lock.lock(); defer { lock.unlock() }; return _eventsAtTerminalCallback
+        }
 
         init(buffer: SdkEventBuffer, collector: EventCollector) {
             self.buffer = buffer
@@ -37,7 +42,8 @@ private final class UptimeBox: @unchecked Sendable {
 
         private func captureEvents() {
             buffer.flush()
-            eventsAtTerminalCallback = collector.events
+            let events = collector.events
+            lock.lock(); _eventsAtTerminalCallback = events; lock.unlock()
         }
 
         func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) {}
@@ -1680,7 +1686,8 @@ final class NetworkCaptureRecorderTests: XCTestCase {
 #endif
 
 /// Records `URLProtocolClient` callbacks so a test can assert a stopped protocol makes none.
-private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
+/// `@unchecked Sendable`: `_calls` is guarded by `lock`; everything else is immutable.
+private final class RecordingURLProtocolClient: NSObject, URLProtocolClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [String] = []
     private let onCallback: (@Sendable (URLProtocol) -> Void)?

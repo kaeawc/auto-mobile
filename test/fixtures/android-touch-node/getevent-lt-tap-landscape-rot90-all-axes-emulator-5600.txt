@@ -1,0 +1,10 @@
+# one tap, mCurrentRotation=ROTATION_90 (user_rotation=1), natural (300,900) = same physical point as the portrait all-axes capture; display coords (900,780) on 2400x1080
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1   (events injected with sendevent; every axis value differs from the previous contact so all axes are reported)
+[  190145.114562] EV_ABS       ABS_MT_TRACKING_ID   00000067            
+[  190145.114562] EV_ABS       ABS_MT_POSITION_X    0000238d            
+[  190145.114562] EV_ABS       ABS_MT_POSITION_Y    00002fff            
+[  190145.114562] EV_ABS       ABS_MT_PRESSURE      0000026c            
+[  190145.114562] EV_ABS       ABS_MT_TOUCH_MAJOR   00000009            
+[  190145.114562] EV_SYN       SYN_REPORT           00000000            
+[  190145.270086] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190145.270086] EV_SYN       SYN_REPORT           00000000            

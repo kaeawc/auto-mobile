@@ -1,0 +1,26 @@
+# one swipe up, mCurrentRotation=ROTATION_0, natural (700,1600)->(700,1000)
+# adb -s emulator-5600 shell getevent -lt /dev/input/event1   (events injected with sendevent; every axis value differs from the previous contact so all axes are reported)
+[  190139.057988] EV_ABS       ABS_MT_TRACKING_ID   00000066            
+[  190139.057988] EV_ABS       ABS_MT_POSITION_X    000052f5            
+[  190139.057988] EV_ABS       ABS_MT_POSITION_Y    00005554            
+[  190139.057988] EV_ABS       ABS_MT_PRESSURE      00000262            
+[  190139.057988] EV_ABS       ABS_MT_TOUCH_MAJOR   00000008            
+[  190139.057988] EV_SYN       SYN_REPORT           00000000            
+[  190139.161352] EV_ABS       ABS_MT_POSITION_Y    00005154            
+[  190139.161352] EV_SYN       SYN_REPORT           00000000            
+[  190139.288584] EV_ABS       ABS_MT_POSITION_Y    00004d54            
+[  190139.288584] EV_SYN       SYN_REPORT           00000000            
+[  190139.401541] EV_ABS       ABS_MT_POSITION_Y    00004954            
+[  190139.401541] EV_SYN       SYN_REPORT           00000000            
+[  190139.534005] EV_ABS       ABS_MT_POSITION_Y    00004554            
+[  190139.534005] EV_SYN       SYN_REPORT           00000000            
+[  190139.643901] EV_ABS       ABS_MT_POSITION_Y    00004154            
+[  190139.643901] EV_SYN       SYN_REPORT           00000000            
+[  190139.815916] EV_ABS       ABS_MT_POSITION_Y    00003d54            
+[  190139.815916] EV_SYN       SYN_REPORT           00000000            
+[  190139.957848] EV_ABS       ABS_MT_POSITION_Y    00003954            
+[  190139.957848] EV_SYN       SYN_REPORT           00000000            
+[  190140.080623] EV_ABS       ABS_MT_POSITION_Y    00003554            
+[  190140.080623] EV_SYN       SYN_REPORT           00000000            
+[  190140.208143] EV_ABS       ABS_MT_TRACKING_ID   ffffffff            
+[  190140.208143] EV_SYN       SYN_REPORT           00000000            

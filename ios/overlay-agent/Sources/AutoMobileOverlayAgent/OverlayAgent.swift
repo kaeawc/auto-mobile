@@ -161,9 +161,14 @@ final class OverlayAgent {
                 }
                 result(true, extra: missingAssetsExtra())
             case "dismiss_overlay":
-                if message["all"] as? Bool == true || model.spec?.id == message["id"] as? String {
-                    model.dismiss(reportEvent: false)
+                // Like Android's OverlayController: an id that is not the shown overlay fails, and
+                // the dismissal still emits the terminal `dismissed` event that event waiters
+                // settle on.
+                let all = message["all"] as? Bool == true
+                guard all || (model.spec != nil && model.spec?.id == message["id"] as? String) else {
+                    return result(false, "Unknown overlay id: \(message["id"] ?? "nil")")
                 }
+                model.dismiss(reason: .agent)
                 result(true)
             case "put_overlay_asset":
                 guard let id = message["id"] as? String,
@@ -256,7 +261,7 @@ struct OverlayRootView: View {
     /// Host-owned control the spec cannot remove (#9307).
     private var dismissControl: some View {
         Button {
-            model.dismiss(reportEvent: true)
+            model.dismiss(reason: .user)
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 13, weight: .bold))

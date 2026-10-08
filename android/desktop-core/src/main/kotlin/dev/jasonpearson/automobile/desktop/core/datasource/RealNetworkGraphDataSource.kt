@@ -8,7 +8,6 @@ import java.io.File
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -48,7 +47,10 @@ class RealNetworkGraphDataSource(
   private val readArtifactFile: (String) -> String = { path -> File(path).readText() },
 ) : NetworkGraphDataSource {
   private val json = Json { ignoreUnknownKeys = true }
-  private val hostListSerializer = ListSerializer(NetworkGraphHost.serializer())
+  // The reified serializer<T>() rather than the compiler-plugin-generated companion
+  // `serializer()`: detekt's type-resolution pass does not run the serialization plugin, so the
+  // generated member is unresolved there and reported as compiler errors (#10716).
+  private val hostListSerializer = serializer<List<NetworkGraphHost>>()
 
   override suspend fun getNetworkGraph(): Result<List<NetworkEndpointRow>> {
     val provider =

@@ -201,7 +201,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     },
   );
 
-  test("still binds and heartbeats an awaiting-owner session from a real session tool", async () => {
+  test("forwards an args-named awaiting-owner session without claiming or heartbeating it (#10664)", async () => {
     await sessionManager.createSession(
       BOUND_SESSION,
       "emulator-5554",
@@ -226,11 +226,16 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       await proxy.callTool("tapOn", { sessionUuid: BOUND_SESSION, x: 10, y: 20 });
       await Promise.resolve();
 
+      // Naming a session never claims it: only a minted or startup session is this proxy's to own,
+      // so a session another owner must reclaim stays awaiting that owner.
+      expect(fakeClient.callToolCalls).toEqual([
+        { toolName: "tapOn", params: { sessionUuid: BOUND_SESSION, x: 10, y: 20 } },
+      ]);
       expect(
         fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
-      ).toHaveLength(1);
-      expect(timer.getPendingIntervalCount()).toBe(pendingIntervalsBefore + 1);
-      expect(sessionManager.getSession(BOUND_SESSION)?.ownership).toBe("owned");
+      ).toEqual([]);
+      expect(timer.getPendingIntervalCount()).toBe(pendingIntervalsBefore);
+      expect(sessionManager.getSession(BOUND_SESSION)?.ownership).toBe("awaiting-owner");
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

@@ -562,7 +562,7 @@ describe("DaemonMcpProxy", () => {
       expect(timer.getPendingIntervalCount()).toBe(0);
     });
 
-    test("replays a learned session heartbeat through a recoverable daemon reconnect", async () => {
+    test("replays a startup session heartbeat through a recoverable daemon reconnect", async () => {
       const timer = new FakeTimer();
       const staleClient = new ScriptedDaemonClient({
         daemonMethodError: new DaemonUnavailableError("Daemon socket connection lost"),
@@ -570,7 +570,9 @@ describe("DaemonMcpProxy", () => {
       const freshClient = new FakeDaemonClient();
       const clients: DaemonClientLike[] = [staleClient, freshClient];
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      // Configured at startup, so this proxy claims and heartbeats it (#10664).
       const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "device-session-a",
         clientFactory: () => clients.shift()!,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
@@ -584,17 +586,17 @@ describe("DaemonMcpProxy", () => {
         });
         await timer.advanceTimeAsync(2_000);
 
-        expect(staleClient.callDaemonMethodCalls).toEqual([
-          {
-            method: "daemon/heartbeat",
-            params: {
-              sessionId: "device-session-a",
-              livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
-              livenessOwnerToken: expect.any(String),
-              claimLivenessOwnership: true,
-            },
+        const claim = {
+          method: "daemon/heartbeat",
+          params: {
+            sessionId: "device-session-a",
+            livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
+            livenessOwnerToken: expect.any(String),
+            claimLivenessOwnership: true,
           },
-        ]);
+        };
+        // The best-effort establishment claim, then the keeper tick that finds the socket lost.
+        expect(staleClient.callDaemonMethodCalls).toEqual([claim, claim]);
         expect(staleClient.closeCallCount).toBe(1);
         expect(freshClient.callDaemonMethodCalls).toEqual([
           {
@@ -675,9 +677,15 @@ describe("DaemonMcpProxy", () => {
       const heartbeatStarted = Promise.withResolvers<void>();
       const releaseFirstHeartbeat = Promise.withResolvers<void>();
       const retryHeartbeatCalled = Promise.withResolvers<void>();
+      let staleHeartbeats = 0;
       const staleClient = new FakeDaemonClient({
+        toolResultFor: (toolName) =>
+          toolName === "getAndroid"
+            ? { content: [{ type: "text", text: JSON.stringify({ sessionId: "session-a" }) }] }
+            : undefined,
         onCallDaemonMethod: async (method) => {
-          if (method === "daemon/heartbeat") {
+          // The establishment claim succeeds; the keeper tick after it is the stale one.
+          if (method === "daemon/heartbeat" && ++staleHeartbeats > 1) {
             heartbeatStarted.resolve();
             await releaseFirstHeartbeat.promise;
             throw new Error("Session not found: session-a");
@@ -702,9 +710,8 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        await proxy.callTool("observe", {
-          sessionUuid: "session-a",
-        });
+        // Minted by this proxy, so it is heartbeated; session-b is only named (#10664).
+        await proxy.callTool("getAndroid", {});
         timer.advanceTime(2_000);
         await heartbeatStarted.promise;
 
@@ -4352,11 +4359,14 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        // The unscoped call renews the args-named binding; nothing heartbeats it (#10664).
+        await proxy.callTool("observe", {});
         await proxy.callTool("listDevices", {});
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
           { toolName: "listDevices", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
@@ -4448,7 +4458,10 @@ describe("DaemonMcpProxy", () => {
       // across the old replay-TTL boundary (issue #5411).
       const timer = new FakeTimer();
       const client = new ScriptedDaemonClient({
-        toolResult: { content: [{ type: "text", text: "ok" }] },
+        // A minted session is one this proxy claims and heartbeats (#10664).
+        toolResult: {
+          content: [{ type: "text", text: JSON.stringify({ sessionId: "session-a" }) }],
+        },
         toolErrorByName: new Map([
           ["tapOn", new DaemonUnavailableError("Daemon socket connection lost: connection closed")],
         ]),
@@ -4462,7 +4475,7 @@ describe("DaemonMcpProxy", () => {
       });
 
       try {
-        await proxy.callTool("observe", { sessionUuid: "session-a" });
+        await proxy.callTool("getAndroid", {});
         await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(
           DaemonToolOutcomeUnknownError,

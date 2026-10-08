@@ -844,6 +844,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       daemonManager: matchingDaemonManager(),
       autoStartDaemon: false,
       timer,
+      heartbeatIntervalMs: 1_000,
       idGenerator: new FakeIdGenerator(["old-mcp-token"]),
     });
     const cli = new DaemonMcpProxy({
@@ -855,7 +856,8 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     });
 
     try {
-      await mcp.callTool("observe", { sessionUuid });
+      // The proxy owns the session because it minted it; naming it in args would not claim it (#10664).
+      await mcp.callTool("getAndroid", {});
       await settleAsyncWork();
       expect(initialMcpClient.daemonRequests).toContainEqual({
         id: "continuity-1",
@@ -886,8 +888,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         livenessOwnerToken: "old-mcp-token",
       });
 
-      // The lost reply made that heartbeat a missing acknowledgement, so recovery (#10053) already
-      // re-sent the claim with the same token on the same transport and the daemon acknowledged it.
+      // The establishment heartbeat is best-effort, so its lost reply leaves the claim pending and
+      // the next keeper tick re-sends it with the same token on the same transport.
+      await timer.advanceTimeAsync(1_000);
+      await settleAsyncWork();
       const claimsOnInitialClient = initialMcpClient.daemonRequests.filter(
         (request) => request.params.claimLivenessOwnership === true,
       );
@@ -952,7 +956,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     });
 
     try {
-      await staleProxy.callTool("observe", { sessionUuid });
+      await staleProxy.callTool("getAndroid", {});
       await settleAsyncWork();
       // Past the 5 s lease and the suspect grace window that follows it (#10051).
       const owned = sessionManager.getSession(sessionUuid)!;
@@ -1017,7 +1021,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     });
 
     try {
-      await proxy.callTool("observe", { sessionUuid });
+      await proxy.callTool("getAndroid", {});
       await cli.callTool("observe", { sessionUuid });
       expect(await cli.adoptCliSessionLiveness()).toBeUndefined();
       await cli.close();

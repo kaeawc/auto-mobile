@@ -39,6 +39,15 @@ describe("ownOverlayHidesApp (overlay_window_metadata_v1)", () => {
     expect(ownOverlayHidesApp({ overlayOpaque: true }, false)).toBe(false);
   });
 
+  test("a window without the pair never hides the app once the APK advertises the metadata", () => {
+    // CtrlProxy's highlight window is an own overlay window that never carries the pair.
+    expect(ownOverlayHidesApp({}, true, true)).toBe(false);
+    expect(ownOverlayHidesApp({ overlayPlacement: "fullscreen" }, true, true)).toBe(false);
+    expect(
+      ownOverlayHidesApp({ overlayPlacement: "fullscreen", overlayOpaque: true }, false, true),
+    ).toBe(true);
+  });
+
   test("CtrlProxyHierarchy conversion keeps the fields from the wire window entry", () => {
     const wire = JSON.parse(launcherCapture.rawViewHierarchy.json) as AccessibilityHierarchy;
     wire.windows = wire.windows!.map((entry) =>

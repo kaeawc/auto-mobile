@@ -63,7 +63,11 @@ export function ownOverlayWindows(
  * rendered surface is fully opaque. A sheet, a floating panel or a translucent fullscreen overlay
  * leaves app pixels visible. When the APK did not report both fields (older APK, or opacity
  * unknown) the window says nothing about opacity, so the caller's bounds-based answer
- * (`coversByBounds`: the window spans the target) decides.
+ * (`coversByBounds`: the window spans the target) decides. When the APK advertises
+ * `overlay_window_metadata_v1` (`apkReportsMetadata`), a window without the pair is not the
+ * interactive overlay (CtrlProxy's highlight window is also an own accessibility-overlay window and
+ * is full-screen while an overlay is attached) or its metadata was unavailable, so it is never
+ * taken as hiding the app.
  *
  * `isFullyCoveredByOwnOverlay` (PR for #10446, branch work/orch-v10-10446-host) should call this in
  * place of its bare bounds test.
@@ -71,9 +75,10 @@ export function ownOverlayWindows(
 export function ownOverlayHidesApp(
   window: Pick<ViewHierarchyWindowInfo, "overlayPlacement" | "overlayOpaque">,
   coversByBounds: boolean,
+  apkReportsMetadata = false,
 ): boolean {
   if (window.overlayPlacement === undefined || window.overlayOpaque === undefined) {
-    return coversByBounds;
+    return apkReportsMetadata ? false : coversByBounds;
   }
   return window.overlayPlacement === "fullscreen" && window.overlayOpaque;
 }

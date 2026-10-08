@@ -21,18 +21,50 @@ class OverlayWindowMetadataTest {
     background: String? = "#FF101010",
     opacity: Int = 100,
     alpha: Double? = null,
+    fill: Boolean = true,
   ) =
     OverlaySpec(
       "panel",
       OverlayWindow(placement, opacity),
       root =
         OverlayBoxNode(
-          style = OverlayStyle(background = background, alpha = alpha),
+          style =
+            OverlayStyle(
+              width = if (fill) OverlayDimension.Fill else null,
+              height = if (fill) OverlayDimension.Fill else null,
+              background = background,
+              alpha = alpha,
+            ),
           children = emptyList(),
         ),
     )
 
-  private fun metadata(spec: OverlaySpec) = overlayWindowMetadata(mapOverlaySpec(spec))
+  // The shipped host draws a translucent dismiss bar over fullscreen windows; the cases below that
+  // exercise the surface rules assume an opaque bar so they isolate the root/scrim logic.
+  private fun metadata(spec: OverlaySpec, dismissBarOpaque: Boolean = true) =
+    overlayWindowMetadata(mapOverlaySpec(spec), dismissBarOpaque)
+
+  @Test
+  fun `the translucent fullscreen dismiss bar keeps a fullscreen window from reporting opaque`() {
+    assertEquals(
+      OverlayWindowMetadata("fullscreen", false),
+      overlayWindowMetadata(mapOverlaySpec(spec(OverlayFullscreenPlacement()))),
+    )
+    assertEquals(
+      OverlayWindowMetadata("fullscreen", false),
+      overlayWindowMetadata(
+        mapOverlaySpec(spec(OverlayFullscreenPlacement(scrim = "#FF000000"), background = null))
+      ),
+    )
+  }
+
+  @Test
+  fun `a wrap-content root is not opaque even with a solid background`() {
+    assertEquals(
+      OverlayWindowMetadata("fullscreen", false),
+      metadata(spec(OverlayFullscreenPlacement(), fill = false)),
+    )
+  }
 
   @Test
   fun `fullscreen with an opaque root at full window opacity is opaque`() {
@@ -155,7 +187,7 @@ class OverlayWindowMetadataTest {
     assertNull(controller.windowMetadata())
 
     controller.show("r1", spec(OverlayFullscreenPlacement()))
-    assertEquals(OverlayWindowMetadata("fullscreen", true), controller.windowMetadata())
+    assertEquals(OverlayWindowMetadata("fullscreen", false), controller.windowMetadata())
 
     controller.update(
       "r2",

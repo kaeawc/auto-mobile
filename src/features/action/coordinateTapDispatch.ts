@@ -6,6 +6,7 @@ import {
 } from "./gestureTransportTimeout";
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -53,6 +54,7 @@ export interface IosCoordinateTapClient {
   ): Promise<{
     success: boolean;
     error?: string;
+    errorCode?: string;
     dispatched?: boolean;
     acknowledged?: boolean;
   }>;
@@ -258,8 +260,15 @@ function isUnconfirmedIosTapThrow(
   return dispatched && !(error instanceof ActionableError) && error !== signal?.reason;
 }
 
-/** Written to the socket and not answered; a stale-frame refusal proves the tap was rejected. */
+/**
+ * Written to the socket and not answered, or answered while the runner's gesture was still
+ * executing or finished after its deadline (#10016): the tap can still land. A stale-frame
+ * refusal proves the tap was rejected.
+ */
 function isUnconfirmedIosTapReply(result: IosTapReply, dispatched: boolean): boolean {
+  if (isRunnerGestureOutcomeUnknown(result)) {
+    return true;
+  }
   return (
     (result.dispatched ?? dispatched) &&
     result.acknowledged !== true &&

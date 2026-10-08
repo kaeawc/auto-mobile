@@ -37,6 +37,7 @@ import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalizati
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import {
@@ -96,11 +97,13 @@ type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPin
   /** iOS: the request was written to the runner; a reply was (not) received. */
   dispatched?: boolean;
   acknowledged?: boolean;
+  errorCode?: string;
 };
 
 function isPinchOutcomeIndeterminate(result: ObservedPinchResult): boolean {
   return (
     Boolean(result.error?.startsWith("Pinch timed out after ")) ||
+    isRunnerGestureOutcomeUnknown(result) ||
     (result.dispatched === true && result.acknowledged === false)
   );
 }

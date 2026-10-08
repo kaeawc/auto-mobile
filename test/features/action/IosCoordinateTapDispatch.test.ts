@@ -30,6 +30,14 @@ type TapReply = Awaited<ReturnType<IosCoordinateTapClient["requestTapCoordinates
 
 const INDETERMINATE = "Tap outcome is indeterminate";
 
+// CommandError.gestureBoundExceeded / queryBoundExceeded text as the runner sends it (pinned by
+// runnerErrorCodes.contract.test.ts).
+const STILL_EXECUTING =
+  "Command request_tap exceeded execution bound 4497ms in phase xcuitestGesture after 4499ms; XCUITest call is still executing and the runner stays busy until it returns";
+const QUERY_BOUND =
+  "Command request_hierarchy exceeded execution bound 10000ms after 10000ms waiting on a live XCUITest query; XCUITest call is still executing and the runner stays busy until it returns";
+const ACKED = { success: false, dispatched: true, acknowledged: true } as const;
+
 /** A client whose request marks dispatch (when asked to) and then settles as scripted. */
 function scriptedClient(options: {
   dispatch: boolean;
@@ -103,6 +111,26 @@ describe("dispatchIosCoordinateTap (#9971)", () => {
     });
     await expect(dispatchIosCoordinateTap(client, 1, 2, 50, "frame")).rejects.toThrow(
       "CtrlProxy iOS tap failed: Element gone",
+    );
+  });
+
+  test("an acknowledged reply with the gesture-bound code is indeterminate (#10016)", async () => {
+    const client = scriptedClient({
+      dispatch: true,
+      reply: { ...ACKED, error: "runner said something else", errorCode: "gesture_bound_exceeded" },
+    });
+    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(INDETERMINATE);
+  });
+
+  test("an older runner's gesture-bound wording is indeterminate (#10016)", async () => {
+    const client = scriptedClient({ dispatch: true, reply: { ...ACKED, error: STILL_EXECUTING } });
+    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(INDETERMINATE);
+  });
+
+  test("the query-bound error stays a plain failure (#10016)", async () => {
+    const client = scriptedClient({ dispatch: true, reply: { ...ACKED, error: QUERY_BOUND } });
+    await expect(dispatchIosCoordinateTap(client, 1, 2, 50)).rejects.toThrow(
+      `CtrlProxy iOS tap failed: ${QUERY_BOUND}`,
     );
   });
 
@@ -377,6 +405,30 @@ describe("tapAt on iOS (#9971)", () => {
     expect(result.error).toContain("Do not retry automatically");
   });
 
+  test("tapAt reports a gesture still executing past the bound as indeterminate (#10016)", async () => {
+    for (const reply of [
+      { ...ACKED, error: "x", errorCode: "gesture_bound_exceeded" },
+      { ...ACKED, error: STILL_EXECUTING },
+    ]) {
+      const result = await createIosTapAt(scriptedClient({ dispatch: true, reply })).execute({
+        x: 10,
+        y: 20,
+      });
+      expect(result.error).toStartWith(`Failed to tap at coordinates: ${INDETERMINATE}`);
+      expect(result.error).toContain("Do not retry automatically");
+    }
+  });
+
+  test("tapAt keeps the query-bound error a plain failure (#10016)", async () => {
+    const tapAt = createIosTapAt(
+      scriptedClient({ dispatch: true, reply: { ...ACKED, error: QUERY_BOUND } }),
+    );
+    const result = await tapAt.execute({ x: 10, y: 20 });
+    expect(result.error).toBe(
+      `Failed to tap at coordinates: CtrlProxy iOS tap failed: ${QUERY_BOUND}`,
+    );
+  });
+
   test("a runner refusal is a plain failure", async () => {
     const tapAt = createIosTapAt(
       scriptedClient({
@@ -475,6 +527,37 @@ describe("tapOn on iOS (#9971)", () => {
       await expect(
         tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
       ).rejects.toThrow(INDETERMINATE);
+    } finally {
+      instance.mockRestore();
+    }
+  });
+
+  test("tapOn reports a gesture still executing past the bound as indeterminate (#10016)", async () => {
+    for (const reply of [
+      { error: "x", errorCode: "gesture_bound_exceeded" },
+      { error: STILL_EXECUTING },
+    ]) {
+      const client = new FakeIOSCtrlProxy();
+      client.setTapResult({ ...ACKED, totalTimeMs: 4500, ...reply });
+      const { tapOn, instance } = createTapOn(client);
+      try {
+        await expect(
+          tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
+        ).rejects.toThrow(INDETERMINATE);
+      } finally {
+        instance.mockRestore();
+      }
+    }
+  });
+
+  test("tapOn keeps the query-bound error a plain failure (#10016)", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setTapResult({ ...ACKED, totalTimeMs: 100, error: QUERY_BOUND });
+    const { tapOn, instance } = createTapOn(client);
+    try {
+      await expect(
+        tapOn["executeiOSTapWithCoordinates"]("tap", point.x, point.y, 1000),
+      ).rejects.toThrow(`CtrlProxy iOS tap failed: ${QUERY_BOUND}`);
     } finally {
       instance.mockRestore();
     }

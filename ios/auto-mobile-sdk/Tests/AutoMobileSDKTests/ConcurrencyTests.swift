@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 private final class EventAccumulator: @unchecked Sendable {
     private let lock = NSLock()
@@ -20,7 +20,7 @@ final class ConcurrencyTests: XCTestCase {
         buffer.start()
 
         let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             queue.async {
                 let event = SdkInteractionEvent(interactionType: "event_\(i)")
                 buffer.add(event)
@@ -28,7 +28,7 @@ final class ConcurrencyTests: XCTestCase {
             }
         }
 
-        waitForExpectations(timeout: 2)
+        wait(for: [expectation], timeout: 2)
         buffer.flush()
         buffer.shutdown()
 
@@ -45,7 +45,7 @@ final class ConcurrencyTests: XCTestCase {
         let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
 
         // Add and remove listeners concurrently
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             queue.async {
                 let listener = FakeNavigationListener()
                 sdk.addNavigationListener(listener)
@@ -60,7 +60,7 @@ final class ConcurrencyTests: XCTestCase {
             }
         }
 
-        waitForExpectations(timeout: 2)
+        wait(for: [expectation], timeout: 2)
         sdk.reset()
     }
 
@@ -75,7 +75,7 @@ final class ConcurrencyTests: XCTestCase {
         tracker.setEnabled(true)
 
         let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
-        for i in 0..<10 {
+        for i in 0 ..< 10 {
             queue.async {
                 // Use different timestamps to avoid debounce
                 Thread.sleep(forTimeInterval: Double(i) * 0.15)
@@ -84,7 +84,7 @@ final class ConcurrencyTests: XCTestCase {
             }
         }
 
-        waitForExpectations(timeout: 5)
+        wait(for: [expectation], timeout: 5)
         tracker.reset()
         buffer.shutdown()
     }

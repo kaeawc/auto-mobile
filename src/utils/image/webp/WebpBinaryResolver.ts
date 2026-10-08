@@ -211,7 +211,10 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   }
 
   private async findBundledWindowsBinary(binary: WebpBinary): Promise<string | null> {
-    if (this.platform !== "win32" || this.arch !== "x64") {
+    // Google publishes no native Windows ARM64 libwebp build. Windows on ARM
+    // runs the bundled x64 tools through its built-in x64 emulation, so arm64
+    // reuses the win32-x64 copy.
+    if (this.platform !== "win32" || (this.arch !== "x64" && this.arch !== "arm64")) {
       return null;
     }
 

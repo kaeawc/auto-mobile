@@ -37,8 +37,14 @@ data class OverlaySelector(
 
 @Serializable
 data class OverlayCondition(
-  val key: String,
-  val equals: OverlayScalar,
+  val key: String? = null,
+  val equals: OverlayScalar? = null,
+  val notEquals: OverlayScalar? = null,
+  val gt: Double? = null,
+  val lt: Double? = null,
+  val all: List<OverlayCondition>? = null,
+  val any: List<OverlayCondition>? = null,
+  val not: OverlayCondition? = null,
 )
 
 @Serializable
@@ -71,6 +77,11 @@ data class OverlayBorder(
 data class OverlayStyle(
   val width: OverlayDimension? = null,
   val height: OverlayDimension? = null,
+  val weight: Double? = null,
+  val minWidth: Double? = null,
+  val maxWidth: Double? = null,
+  val minHeight: Double? = null,
+  val maxHeight: Double? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
   /** A dp number or a Material Shapes token. */
@@ -153,6 +164,14 @@ data class OverlaySetStateAction(
   val key: String,
   val value: OverlayScalar,
 ) : OverlayAction()
+
+@SerialName("toggle")
+@Serializable
+data class OverlayToggleAction(val key: String) : OverlayAction()
+
+@SerialName("increment")
+@Serializable
+data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
 
 @SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
 
@@ -272,6 +291,48 @@ data class OverlayTextFieldNode(
   val placeholder: String? = null,
 ) : OverlayNode()
 
+@SerialName("switch")
+@Serializable
+data class OverlaySwitchNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+) : OverlayNode()
+
+@SerialName("checkbox")
+@Serializable
+data class OverlayCheckboxNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+) : OverlayNode()
+
+@SerialName("button")
+@Serializable
+data class OverlayButtonNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val label: String,
+  val variant: String = "filled",
+) : OverlayNode()
+
 @SerialName("scroll")
 @Serializable
 data class OverlayScrollNode(
@@ -389,4 +450,6 @@ data class OverlaySpec(
   val state: Map<String, OverlayScalar>? = null,
   val root: OverlayNode,
   val theme: OverlaySpecTheme? = null,
+  /** `none` opts out of overlay animation; absent or `standard` follows the system scale. */
+  val motion: String? = null,
 )

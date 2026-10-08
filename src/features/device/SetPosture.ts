@@ -315,15 +315,24 @@ async function emulatorConsoleRefusal(
     : undefined;
 }
 
+/** The console's not-foldable refusal of `emu fold`/`emu unfold`, kept for the read-back error. */
+interface NotFoldableRefusal {
+  command: string;
+  reason: string;
+  fallback: string;
+}
+
 /**
  * `emu fold`/`emu unfold`, falling back to the numeric `emu posture` command when the
  * console says the device is not foldable (flip AVDs). Other refusals throw unchanged.
+ * Returns the not-foldable refusal when the fallback ran: a flip AVD then changes posture, but a
+ * plain (non-foldable) AVD accepts the command and stays put, and the read-back must say so.
  */
 async function runEmulatorPostureCommand(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   operation: PostureOperation,
-): Promise<void> {
+): Promise<NotFoldableRefusal | undefined> {
   const { signal, assertCurrent } = operation;
   const fallbackId = EMULATOR_FOLD_FALLBACK_POSTURE_IDS[requested];
   if (fallbackId === undefined) {
@@ -333,12 +342,12 @@ async function runEmulatorPostureCommand(
       POSTURE_REFUSED,
       signal,
     );
-    return;
+    return undefined;
   }
   const command = requested === "closed" ? "emu fold" : "emu unfold";
   const reason = await emulatorConsoleRefusal(adb, command, signal);
   if (reason === undefined) {
-    return;
+    return undefined;
   }
   if (!NOT_FOLDABLE_REFUSAL.test(reason)) {
     throw new ActionableError(
@@ -350,7 +359,9 @@ async function runEmulatorPostureCommand(
   );
   assertCurrent();
   throwIfAborted(signal);
-  await runEmulatorConsoleCommand(adb, `emu posture ${fallbackId}`, POSTURE_REFUSED, signal);
+  const fallback = `emu posture ${fallbackId}`;
+  await runEmulatorConsoleCommand(adb, fallback, POSTURE_REFUSED, signal);
+  return { command, reason, fallback };
 }
 
 const presetRefused = (preset: DisplayPreset): string =>
@@ -363,7 +374,7 @@ async function setEmulatorPosture(
   displayPreset: DisplayPreset | undefined,
   supportsRearDisplay: boolean,
   operation: PostureOperation,
-): Promise<void> {
+): Promise<NotFoldableRefusal | undefined> {
   const { signal, assertCurrent } = operation;
   assertCurrent();
   throwIfAborted(signal);
@@ -375,7 +386,7 @@ async function setEmulatorPosture(
   throwIfAborted(signal);
   let presetPending = Boolean(displayPreset);
   try {
-    await runEmulatorPostureCommand(adb, requested, operation);
+    const notFoldable = await runEmulatorPostureCommand(adb, requested, operation);
     assertCurrent();
     if (displayPreset) {
       throwIfAborted(signal);
@@ -388,6 +399,7 @@ async function setEmulatorPosture(
       );
       assertCurrent();
     }
+    return notFoldable;
   } catch (error) {
     assertCurrent();
     const cancelled = signal?.aborted;
@@ -441,7 +453,7 @@ async function setPhysicalPosture(
 async function observeAndroidPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
-  states: AndroidDeviceState[],
+  { states, notFoldable }: { states: AndroidDeviceState[]; notFoldable?: NotFoldableRefusal },
   timer: Timer,
   observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
   operation: PostureOperation,
@@ -484,6 +496,13 @@ async function observeAndroidPosture(
     );
     assertCurrent();
   } while (true);
+  if (notFoldable) {
+    // A non-foldable AVD refuses fold/unfold and silently accepts the numeric fallback, so the
+    // posture never changes; no device_state override is involved.
+    throw new ActionableError(
+      `This emulator is not foldable: the console answered '${notFoldable.command}' with '${notFoldable.reason}', and the '${notFoldable.fallback}' fallback did not change the posture to '${requested}' after ${ANDROID_POSTURE_TIMEOUT_MS} ms (observed posture is '${observedPosture}'). Use a foldable or flip AVD to change posture.`,
+    );
+  }
   throw new ActionableError(
     `Posture command was sent, but the posture did not change to '${requested}' after ${ANDROID_POSTURE_TIMEOUT_MS} ms; ${hasStateMapping ? `committed state is ${actual ? `'${actual.posture}' (${actual.name}, ${actual.identifier})` : "unknown"}` : `observed posture is '${observedPosture}'`}. Check whether a device_state override is still active.`,
   );
@@ -972,6 +991,7 @@ export class SetPosture {
   ): Promise<SetPostureResult> {
     const { signal } = operation;
     const emulator = isEmulator(this.device);
+    let notFoldable: NotFoldableRefusal | undefined;
     const adb = this.adbFactory.create(this.device);
     const { states, inventoryPostures, supportsOpenedReset } = await readSupportedAndroidStates(
       this.device,
@@ -984,7 +1004,7 @@ export class SetPosture {
     if (requested === "rear_display") {
       await setPhysicalPosture(adb, requested, states, supportsOpenedReset, operation);
     } else if (emulator) {
-      await setEmulatorPosture(
+      notFoldable = await setEmulatorPosture(
         adb,
         requested,
         displayPreset,
@@ -1000,7 +1020,7 @@ export class SetPosture {
     await observeAndroidPosture(
       adb,
       requested,
-      states,
+      { states, notFoldable },
       this.timer,
       () => {
         operation.assertCurrent();

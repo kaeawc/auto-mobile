@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlP
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
+import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
 import {
   restoreScreenReaderState,
   SCREEN_READER_RESTORE_TIMEOUT_MS,
@@ -823,6 +824,23 @@ const DEFAULT_ROTATION_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
   maxDelayMs: 2_000,
 });
+/**
+ * A restore the window manager owns (a foldable re-applying rotation per device state)
+ * can never verify by rewriting the setting, so it ends the retry loop immediately.
+ */
+function isNonRetryableRotationRestoreError(error: unknown): boolean {
+  if (error instanceof RotationSettingManagedError) {
+    return true;
+  }
+  const details: unknown =
+    typeof error === "object" && error !== null && "details" in error ? error.details : undefined;
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    "retryable" in details &&
+    details.retryable === false
+  );
+}
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
  * Overall budget for the restores one release runs through the ambient signal
@@ -4314,6 +4332,10 @@ export class SessionManager {
       return;
     }
     logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(result.error)}`);
+    if (isNonRetryableRotationRestoreError(result.error)) {
+      this.abandonRotationRestore(deviceId, target, result.error, "without retrying");
+      return;
+    }
     let lastError: unknown = result.error;
     for (let attempt = 1; attempt <= ROTATION_RESTORE_RETRY_ATTEMPTS; attempt++) {
       await this.timer.sleep(this.rotationRestoreBackoff.delayForAttempt(attempt));
@@ -4324,6 +4346,10 @@ export class SessionManager {
         await restore();
         return;
       } catch (error) {
+        if (isNonRetryableRotationRestoreError(error)) {
+          this.abandonRotationRestore(deviceId, target, error, `after ${attempt} retries`);
+          return;
+        }
         lastError = error;
         logger.warn(
           `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
@@ -4331,7 +4357,12 @@ export class SessionManager {
         );
       }
     }
-    this.abandonRotationRestore(deviceId, target, lastError);
+    this.abandonRotationRestore(
+      deviceId,
+      target,
+      lastError,
+      `after ${ROTATION_RESTORE_RETRY_ATTEMPTS} retries`,
+    );
   }
 
   /** Release the device from quarantine once the bounded rotation retries are spent. */
@@ -4339,13 +4370,14 @@ export class SessionManager {
     deviceId: string,
     target: PendingRotationRestore,
     lastError: unknown,
+    when: string,
   ): void {
     if (target.removed) {
       return;
     }
     const { userRotation, accelerometerRotation } = target.state;
     logger.warn(
-      `Gave up restoring rotation settings on ${deviceId} after ${ROTATION_RESTORE_RETRY_ATTEMPTS} retries ` +
+      `Gave up restoring rotation settings on ${deviceId} ${when} ` +
         `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"} ` +
         `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
         `A fold or display change during the session can make the recorded settings unverifiable.`,

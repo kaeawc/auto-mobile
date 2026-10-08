@@ -54,9 +54,14 @@ class RotationAdb extends FakeAdbExecutor {
   user: number | null = 2;
   live = 0;
   mismatch = false;
+  /** `cmd device_state print-states` output; empty reads as a single-state device. */
+  deviceStates = "";
   blockRead?: () => Promise<void>;
   override async executeCommand(command: string): Promise<ExecResult> {
     await super.executeCommand(command);
+    if (command === "shell cmd device_state print-states") {
+      return output(this.deviceStates);
+    }
     const words = command.split(" ");
     const key = words[4];
     if (command.startsWith("shell settings get system")) {
@@ -228,6 +233,68 @@ describe("session rotation restoration", () => {
       h.timer.advanceTime(10_000);
       await flush();
       expect(h.restored).toHaveLength(6);
+    } finally {
+      warn.mockRestore();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("a window-manager-managed read-back ends release cleanup without retrying", async () => {
+    const h = harness();
+    const warn = spyOn(logger, "warn");
+    try {
+      const session = await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      h.adb.mismatch = true;
+      h.adb.deviceStates = FOLD_STATES;
+      await h.manager.releaseSession("rotation-session");
+      const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
+      await flush();
+      await pending;
+      expect(h.restored).toHaveLength(1);
+      expect(h.timer.getSleepHistory().filter((ms) => ms !== 150)).toEqual([]);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      expect(session.cacheData.rotation).toBeUndefined();
+      const messages = warn.mock.calls.map(([message]) => String(message));
+      expect(
+        messages.some((m) =>
+          m.startsWith(
+            `Gave up restoring rotation settings on ${device.deviceId} without retrying`,
+          ),
+        ),
+      ).toBe(true);
+      h.timer.advanceTime(10_000);
+      await flush();
+      expect(h.restored).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("a retry that reads back as window-manager-managed stops the remaining retries", async () => {
+    const h = harness();
+    const warn = spyOn(logger, "warn");
+    try {
+      await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      h.adb.mismatch = true;
+      await h.manager.releaseSession("rotation-session");
+      const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
+      await flush();
+      expect(h.restored).toHaveLength(1);
+      // A fold lands before the first retry; that read-back is now managed.
+      h.adb.deviceStates = FOLD_STATES;
+      h.timer.advanceTime(250);
+      await flush();
+      await pending;
+      expect(h.restored).toHaveLength(2);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      const messages = warn.mock.calls.map(([message]) => String(message));
+      expect(messages.some((m) => m.includes("after 1 retries"))).toBe(true);
+      h.timer.advanceTime(10_000);
+      await flush();
+      expect(h.restored).toHaveLength(2);
     } finally {
       warn.mockRestore();
       h.manager.stopCleanupTimer();

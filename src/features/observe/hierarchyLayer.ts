@@ -11,6 +11,7 @@ import {
 } from "../../models/ViewHierarchyResult";
 import { attachRawViewHierarchy, getRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { iosWindowLayer } from "./ios/iosWindowLayer";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { INTERACTIVE_OVERLAY_WINDOW_TYPE, ownOverlayWindows } from "./ownOverlayFocus";
 
@@ -22,9 +23,26 @@ const scopedCache = new WeakMap<
   Partial<Record<HierarchyLayer, ViewHierarchyResult>>
 >();
 
+/**
+ * Accessibility identifier of the host-owned dismiss control the iOS overlay agent always draws in
+ * its own window beside the spec content (`OverlayAgent.swift`). The spec cannot remove it, so it
+ * marks the agent's window in the app's XCUITest hierarchy.
+ */
+const IOS_OVERLAY_DISMISS_IDENTIFIER = "automobile-overlay-dismiss";
+
+/**
+ * The window roots of a capture, each marked `true` when it belongs to AutoMobile's own overlay.
+ * Window roots are never nested.
+ */
+type WindowRoots = Map<ViewHierarchyNode, boolean>;
+
 /** Whether the capture contains one of AutoMobile's own overlay windows. */
 export function hasOwnOverlay(hierarchy: ViewHierarchyResult | undefined): boolean {
-  return ownOverlayWindows(hierarchy).length > 0;
+  if (ownOverlayWindows(hierarchy).length > 0) {
+    return true;
+  }
+  const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
+  return roots !== undefined && [...roots.values()].some(Boolean);
 }
 
 function overlayWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
@@ -33,6 +51,96 @@ function overlayWindowIds(hierarchy: ViewHierarchyResult): Set<number> {
       .map((window) => window.id)
       .filter((id): id is number => Number.isInteger(id)),
   );
+}
+
+/** Android: each root stamped with a `windowId`, an overlay root when the window is CtrlProxy's. */
+function androidWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots {
+  const overlayIds = overlayWindowIds(hierarchy);
+  const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
+  const roots =
+    tree && !hierarchy.hierarchy.error
+      ? collectRoots(tree, (node) => windowIdOf(node) !== undefined)
+      : [];
+  return new Map(roots.map((root) => [root, overlayIds.has(windowIdOf(root)!)]));
+}
+
+function classOf(node: ViewHierarchyNode): unknown {
+  const attributes = nodeAttributes(node);
+  return attributes["class"] ?? attributes["className"];
+}
+
+function isIosWindowRoot(node: ViewHierarchyNode): boolean {
+  return iosWindowLayer(node.extras) !== undefined || classOf(node) === "UIWindow";
+}
+
+/** Ancestors of the first node carrying the agent's dismiss identifier, root first, itself last. */
+function pathToIosDismiss(root: ViewHierarchyNode): ViewHierarchyNode[] | undefined {
+  const path: ViewHierarchyNode[] = [];
+  const visit = (node: ViewHierarchyNode): boolean => {
+    path.push(node);
+    if (
+      nodeAttributes(node)["resource-id"] === IOS_OVERLAY_DISMISS_IDENTIFIER ||
+      childrenOf(node).some(visit)
+    ) {
+      return true;
+    }
+    path.pop();
+    return false;
+  };
+  return visit(root) ? path : undefined;
+}
+
+/** Window roots in document order; descent stops at a root, so roots are never nested. */
+function collectRoots(
+  node: ViewHierarchyNode,
+  isRoot: (node: ViewHierarchyNode) => boolean,
+): ViewHierarchyNode[] {
+  return isRoot(node) ? [node] : childrenOf(node).flatMap((child) => collectRoots(child, isRoot));
+}
+
+/**
+ * iOS: the in-app overlay agent's UIWindow (iphone D2). Captures carry no window ids, so the agent's
+ * window is the one holding its host dismiss control:
+ * - converted captures stamp each window's top-level nodes with its front-to-back layer once two
+ *   windows contribute nodes (`iosWindowLayer.ts`); the overlay is every root sharing the dismiss
+ *   control's layer;
+ * - unconverted XCUITest trees keep the `UIWindow` wrappers; the overlay is the one around it;
+ * - when no window root is stamped the agent's window is the only one contributing nodes (a
+ *   fullscreen overlay hides the app's windows from accessibility), so every top-level node of the
+ *   application is the overlay's.
+ * Undefined when the dismiss control is absent: no overlay is showing, or this is not an iOS capture.
+ */
+function iosWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots | undefined {
+  const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
+  const path = tree && !hierarchy.hierarchy.error ? pathToIosDismiss(tree) : undefined;
+  if (!tree || !path) {
+    return undefined;
+  }
+  const owner = path.find(isIosWindowRoot);
+  if (owner) {
+    const layer = iosWindowLayer(owner.extras);
+    const roots = collectRoots(tree, isIosWindowRoot);
+    return new Map(
+      roots.map((root) => [
+        root,
+        layer === undefined ? root === owner : iosWindowLayer(root.extras) === layer,
+      ]),
+    );
+  }
+  const application = path.find((node) => classOf(node) === "XCUIApplication");
+  if (!application) {
+    return undefined;
+  }
+  return new Map(childrenOf(application).map((root) => [root, true]));
+}
+
+/** Window roots for scoping: Android `windowId` roots, else the iOS overlay agent's window. */
+function windowRootsOf(hierarchy: ViewHierarchyResult): WindowRoots {
+  const android = androidWindowRoots(hierarchy);
+  if ([...android.values()].some(Boolean)) {
+    return android;
+  }
+  return iosWindowRoots(hierarchy) ?? android;
 }
 
 function childrenOf(node: ViewHierarchyNode): ViewHierarchyNode[] {
@@ -48,24 +156,24 @@ function windowIdOf(node: ViewHierarchyNode): number | undefined {
 }
 
 /**
- * Remove every window root whose id is in `excluded`. Untouched subtrees keep
- * their identity so node-identity checks (e.g. `isOwnOverlayNode`) still hold;
- * only the ancestors of a removed root are shallow-copied.
+ * Remove every overlay window root. Untouched subtrees keep their identity so
+ * node-identity checks (e.g. `isOwnOverlayNode`) still hold; only the ancestors
+ * of a removed root are shallow-copied.
  */
 function pruneWindowRoots(
   node: ViewHierarchyNode,
-  excluded: ReadonlySet<number>,
+  roots: WindowRoots,
 ): ViewHierarchyNode | undefined {
-  const windowId = windowIdOf(node);
-  if (windowId !== undefined) {
-    return excluded.has(windowId) ? undefined : node;
+  const isOverlay = roots.get(node);
+  if (isOverlay !== undefined) {
+    return isOverlay ? undefined : node;
   }
   const children = childrenOf(node);
   if (children.length === 0) {
     return node;
   }
   const kept = children.flatMap((child) => {
-    const pruned = pruneWindowRoots(child, excluded);
+    const pruned = pruneWindowRoots(child, roots);
     return pruned ? [pruned] : [];
   });
   if (kept.length === children.length && kept.every((child, index) => child === children[index])) {
@@ -74,16 +182,13 @@ function pruneWindowRoots(
   return { ...node, node: kept };
 }
 
-/** Window roots whose id is in `included`; window roots are never nested. */
-function collectWindowRoots(
-  node: ViewHierarchyNode,
-  included: ReadonlySet<number>,
-): ViewHierarchyNode[] {
-  const windowId = windowIdOf(node);
-  if (windowId !== undefined) {
-    return included.has(windowId) ? [node] : [];
+/** The overlay window roots, in document order; window roots are never nested. */
+function collectOverlayRoots(node: ViewHierarchyNode, roots: WindowRoots): ViewHierarchyNode[] {
+  const isOverlay = roots.get(node);
+  if (isOverlay !== undefined) {
+    return isOverlay ? [node] : [];
   }
-  return childrenOf(node).flatMap((child) => collectWindowRoots(child, included));
+  return childrenOf(node).flatMap((child) => collectOverlayRoots(child, roots));
 }
 
 function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolean {
@@ -101,13 +206,13 @@ function containsFlag(node: ViewHierarchyNode | undefined, flag: string): boolea
 function scopeTree(
   root: ViewHierarchyNode,
   layer: HierarchyLayer,
-  overlayIds: ReadonlySet<number>,
+  windowRoots: WindowRoots,
 ): ViewHierarchyNode {
   if (layer === "app") {
-    return pruneWindowRoots(root, overlayIds) ?? {};
+    return pruneWindowRoots(root, windowRoots) ?? {};
   }
-  const roots = collectWindowRoots(root, overlayIds);
-  if (windowIdOf(root) !== undefined) {
+  const roots = collectOverlayRoots(root, windowRoots);
+  if (windowRoots.has(root)) {
     return roots[0] ?? {};
   }
   return { ...root, node: roots };
@@ -134,13 +239,17 @@ function scopeSingleHierarchy(
   hierarchy: ViewHierarchyResult,
   layer: HierarchyLayer,
 ): ViewHierarchyResult {
-  const overlayIds = overlayWindowIds(hierarchy);
   const overlayWindowSet = new Set(ownOverlayWindows(hierarchy));
   const keepWindow = (window: ViewHierarchyWindowInfo) =>
     layer === "overlay" ? overlayWindowSet.has(window) : !overlayWindowSet.has(window);
-  const windows = hierarchy.windows?.filter(keepWindow);
+  // iOS window entries describe the app, not the agent's UIWindow, so they stay as captured.
+  const windows =
+    overlayWindowSet.size > 0 || layer === "overlay"
+      ? hierarchy.windows?.filter(keepWindow)
+      : hierarchy.windows;
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
-  const scopedTree = tree && !hierarchy.hierarchy.error ? scopeTree(tree, layer, overlayIds) : tree;
+  const scopedTree =
+    tree && !hierarchy.hierarchy.error ? scopeTree(tree, layer, windowRootsOf(hierarchy)) : tree;
   const scoped: ViewHierarchyResult = {
     ...hierarchy,
     hierarchy: (scopedTree ?? hierarchy.hierarchy) as ViewHierarchyResult["hierarchy"],
@@ -163,8 +272,10 @@ function scopeSingleHierarchy(
 
 /**
  * Scope a capture to the app or to AutoMobile's own overlay (issue #9305).
- * Overlay windows are recognized by window type and package (`ownOverlayWindows`);
- * their nodes by the `windowId` CtrlProxy stamps on every window root.
+ * Android overlay windows are recognized by window entry (`ownOverlayWindows`);
+ * their nodes by the `windowId` CtrlProxy stamps on every window root. On iOS
+ * the overlay agent's UIWindow is recognized by its host dismiss control
+ * (`iosWindowRoots`).
  *
  * `undefined` returns the capture unchanged. A capture with no overlay window
  * is returned unchanged for `app` and scoped to nothing for `overlay`. The
@@ -225,12 +336,27 @@ function pointInBounds(
   );
 }
 
-/** Whether one of AutoMobile's own overlay windows covers a screen point. */
+/**
+ * Whether one of AutoMobile's own overlay windows covers a screen point. The iOS agent's window
+ * passes touches through outside its content and dismiss control, so there the overlay's own
+ * top-level nodes are what covers a point.
+ */
 export function ownOverlayCoversPoint(
   hierarchy: ViewHierarchyResult | undefined,
   point: { x: number; y: number },
 ): boolean {
-  return ownOverlayWindows(hierarchy).some((window) => pointInBounds(point, window.bounds));
+  if (ownOverlayWindows(hierarchy).some((window) => pointInBounds(point, window.bounds))) {
+    return true;
+  }
+  const roots = hierarchy ? iosWindowRoots(hierarchy) : undefined;
+  if (!roots) {
+    return false;
+  }
+  const parser = new DefaultElementParser();
+  return [...roots].some(
+    ([root, isOverlay]) =>
+      isOverlay && pointInBounds(point, parser.parseNodeBounds(root)?.bounds ?? undefined),
+  );
 }
 
 /**

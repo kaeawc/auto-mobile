@@ -4,7 +4,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import type { ObserveResult, SkeletonElement } from "../../src/models/ObserveResult";
+import type { ObserveResult } from "../../src/models/ObserveResult";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
 import {
@@ -15,6 +15,7 @@ import {
   runCleanupSteps,
   selectErrorToThrow,
 } from "./foldableRecordingSpan";
+import { freshTapTarget, type TapTarget } from "./foldableTapTarget";
 
 const runLane = process.env.AUTOMOBILE_FOLDABLE_LANE === "1";
 const describeLane = runLane ? describe : describe.skip;
@@ -198,19 +199,8 @@ async function tapAt(sessionUuid: string, x: number, y: number): Promise<ActionR
   return tool<ActionResult>(sessionUuid, "tapAt", ["--x", String(x), "--y", String(y)]);
 }
 
-function tapPoint(observation: ObserveResult): { x: number; y: number; target: SkeletonElement } {
-  const target = observation.skeleton?.find(
-    (item) =>
-      item.affordances.includes("tap") &&
-      item.bounds[2] > item.bounds[0] &&
-      item.bounds[3] > item.bounds[1] &&
-      item.label,
-  );
-  if (!target) {
-    throw new Error("No labeled tappable element on the active panel");
-  }
-  const [left, top, right, bottom] = target.bounds;
-  return { x: Math.floor((left + right) / 2), y: Math.floor((top + bottom) / 2), target };
+function tapPoint(observation: ObserveResult): TapTarget {
+  return freshTapTarget(observation.skeleton);
 }
 
 async function assertStaleTap(sessionUuid: string, previous: ObserveResult): Promise<void> {

@@ -74,6 +74,79 @@ unlock_keyguard() {
   exit 1
 }
 
+# Window titles of the system ANR and crash dialogs currently on screen, one per line.
+system_error_dialogs() {
+  adb -s "${device_id}" shell dumpsys window windows 2>/dev/null \
+    | grep -E '^[[:space:]]*Window #[0-9]+ Window\{' \
+    | grep -oE 'Application (Not Responding|Error): [A-Za-z0-9._:]+' \
+    | sort -u || true
+}
+
+# A slow software-rendered boot can ANR SystemUI or the launcher, and the ANR dialog stays up after
+# the process recovers. It sits centered on the display, where a test that taps the middle of a
+# target lands on "Close app" mid-test; for SystemUI that kills it and re-locks the device (nightly
+# Foldable Posture lane). Cancel such dialogs before tests start. Cancelling an ANR or crash dialog
+# kills its process ("user request after error"), so a cancelled SystemUI dialog waits for SystemUI
+# to restart and then verifies the keyguard again. A dialog that survives only warns.
+systemui_pid() {
+  adb -s "${device_id}" shell pidof com.android.systemui 2>/dev/null | tr -d '[:space:]' || true
+}
+
+wait_for_systemui_restart() {
+  local previous_pid="$1"
+  local attempts="${AUTOMOBILE_SYSTEMUI_RESTART_RETRIES:-30}"
+  local delay="${AUTOMOBILE_SYSTEMUI_RESTART_SLEEP_SECONDS:-1}"
+  local attempt pid
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    pid="$(systemui_pid)"
+    if [[ -n "${pid}" && "${pid}" != "${previous_pid}" ]]; then
+      progress "SystemUI restarted (pid ${previous_pid:-none} -> ${pid})."
+      return 0
+    fi
+    sleep "${delay}"
+  done
+  printf 'warning: SystemUI did not restart after its error dialog was dismissed (pid %s)\n' \
+    "${previous_pid:-none}" >&2
+}
+
+dismiss_system_error_dialogs() {
+  local attempts="${AUTOMOBILE_ERROR_DIALOG_RETRIES:-3}"
+  local delay="${AUTOMOBILE_ERROR_DIALOG_RETRY_SLEEP_SECONDS:-1}"
+  local attempt dialogs initial systemui_before=""
+  local -a broadcast_pids=()
+  initial="$(system_error_dialogs)"
+  if [[ -z "${initial}" ]]; then
+    return 0
+  fi
+  printf '%s\n' "${initial}" > "${diagnostics_dir}/system-error-dialogs.txt"
+  if [[ "${initial}" == *": com.android.systemui"* ]]; then
+    systemui_before="$(systemui_pid)"
+  fi
+  dialogs="${initial}"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    progress "Dismissing system error dialogs (attempt ${attempt}/${attempts}): ${dialogs//$'\n'/, }"
+    # `am broadcast` waits for every receiver, and a still-hung ANR process may be one of them; send
+    # it in the background so the bounded dialog check below decides when to give up.
+    adb -s "${device_id}" shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 &
+    broadcast_pids+=("$!")
+    sleep "${delay}"
+    dialogs="$(system_error_dialogs)"
+    if [[ -z "${dialogs}" ]]; then
+      break
+    fi
+  done
+  kill ${broadcast_pids[@]+"${broadcast_pids[@]}"} 2>/dev/null || true
+  wait ${broadcast_pids[@]+"${broadcast_pids[@]}"} 2>/dev/null || true
+  if [[ "${initial}" == *": com.android.systemui"* ]]; then
+    wait_for_systemui_restart "${systemui_before}"
+    unlock_keyguard
+    dialogs="$(system_error_dialogs)"
+  fi
+  if [[ -n "${dialogs}" ]]; then
+    printf 'warning: system error dialogs are still showing after boot: %s\n' "${dialogs//$'\n'/, }" >&2
+  fi
+}
+
 mkdir -p "${diagnostics_dir}"
 progress "Starting AutoMobile Android boot for AVD '${avd_name}' (deadline ${timeout_ms}ms)."
 set +e
@@ -107,6 +180,7 @@ if ! device_id="$(jq -er '.deviceId | strings | select(length > 0)' "${boot_stdo
   exit 1
 fi
 unlock_keyguard
+dismiss_system_error_dialogs
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "emulator_serial=${device_id}" >> "${GITHUB_OUTPUT}"
 fi

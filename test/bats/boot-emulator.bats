@@ -240,3 +240,103 @@ MOCK
   rm -rf "$diagnostics_dir"
   rm -f "$timeout_commands_file"
 }
+
+# Writes an adb mock whose `dumpsys window windows` shows the given ANR dialog process for the first
+# $DIALOG_SHOWN_CHECKS checks (real dumpsys shape: the window line plus a surface line that repeats
+# the title), whose SystemUI pid becomes 222 once a CLOSE_SYSTEM_DIALOGS broadcast was sent, and
+# whose keyguard shows again after that SystemUI restart.
+write_error_dialog_adb_mock() {
+  export DIALOG_PROCESS="$1" DIALOG_SHOWN_CHECKS="$2" STATE_DIR="${MOCK_BIN}/state"
+  mkdir -p "$STATE_DIR"
+  cat > "${MOCK_BIN}/adb" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ADB_LOG_FILE"
+bump() { local n=0; [[ -f "$STATE_DIR/$1" ]] && n="$(<"$STATE_DIR/$1")"; n=$((n + 1)); printf '%s' "$n" > "$STATE_DIR/$1"; printf '%s' "$n"; }
+case "$*" in
+  *"dumpsys window windows")
+    if (( $(bump dialog-checks) <= DIALOG_SHOWN_CHECKS )); then
+      printf '  Window #6 Window{854b6c9 u0 Application Not Responding: %s}:\n' "$DIALOG_PROCESS"
+      printf '    mSurfaceControl=Surface(name=Application Not Responding: %s)/@0x712fbef\n' "$DIALOG_PROCESS"
+    fi
+    printf '  Window #7 Window{1 u0 com.google.android.apps.nexuslauncher}:\n'
+    ;;
+  *"am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS") touch "$STATE_DIR/broadcast" ;;
+  *"pidof com.android.systemui")
+    if [[ -f "$STATE_DIR/broadcast" ]]; then printf '222\n'; else printf '111\n'; fi
+    ;;
+  *"dumpsys window policy")
+    if [[ -f "$STATE_DIR/broadcast" ]] && (( $(bump policy-after-restart) == 1 )); then
+      printf 'mShowingLockscreen=true\n'
+    else
+      printf 'mShowingLockscreen=false\n'
+    fi
+    ;;
+esac
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+}
+
+run_boot_with_fast_retries() {
+  run env AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${MOCK_BIN}/diagnostics" \
+    AUTOMOBILE_KEYGUARD_RETRY_SLEEP_SECONDS=0 AUTOMOBILE_ERROR_DIALOG_RETRY_SLEEP_SECONDS=0 \
+    AUTOMOBILE_SYSTEMUI_RESTART_SLEEP_SECONDS=0 bash "$SCRIPT"
+}
+
+@test "boot without a system error dialog sends no CLOSE_SYSTEM_DIALOGS broadcast" {
+  write_error_dialog_adb_mock com.google.android.apps.nexuslauncher 0
+
+  run_boot_with_fast_retries
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "emulator-5554" ]
+  if grep -Fq 'CLOSE_SYSTEM_DIALOGS' "$ADB_LOG_FILE"; then
+    echo "a clean boot broadcast CLOSE_SYSTEM_DIALOGS" >&2
+    return 1
+  fi
+  [ ! -e "${MOCK_BIN}/diagnostics/system-error-dialogs.txt" ]
+}
+
+@test "dismisses a boot-time launcher ANR dialog without waiting for SystemUI" {
+  write_error_dialog_adb_mock com.google.android.apps.nexuslauncher 1
+
+  run_boot_with_fast_retries
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "emulator-5554" ]
+  [ "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$ADB_LOG_FILE")" -eq 1 ]
+  if grep -Fq 'pidof com.android.systemui' "$ADB_LOG_FILE"; then
+    echo "a launcher dialog waited for a SystemUI restart" >&2
+    return 1
+  fi
+  [ "$(<"${MOCK_BIN}/diagnostics/system-error-dialogs.txt")" = "Application Not Responding: com.google.android.apps.nexuslauncher" ]
+}
+
+@test "a dismissed SystemUI ANR dialog waits for the restart and re-dismisses the keyguard" {
+  write_error_dialog_adb_mock com.android.systemui 1
+
+  run_boot_with_fast_retries
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "emulator-5554" ]
+  [ "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$ADB_LOG_FILE")" -eq 1 ]
+  [ "$(grep -c 'pidof com.android.systemui' "$ADB_LOG_FILE")" -ge 2 ]
+  # The keyguard the SystemUI restart re-showed is dismissed after the broadcast.
+  [ "$(sed -n '/CLOSE_SYSTEM_DIALOGS/,$p' "$ADB_LOG_FILE" | grep -c 'wm dismiss-keyguard')" -eq 1 ]
+}
+
+@test "a system error dialog that never clears warns after bounded retries and continues" {
+  write_error_dialog_adb_mock com.google.android.apps.nexuslauncher 99
+
+  run env AUTOMOBILE_ERROR_DIALOG_RETRIES=2 AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${MOCK_BIN}/diagnostics" \
+    AUTOMOBILE_KEYGUARD_RETRY_SLEEP_SECONDS=0 AUTOMOBILE_ERROR_DIALOG_RETRY_SLEEP_SECONDS=0 bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: system error dialogs are still showing after boot: Application Not Responding: com.google.android.apps.nexuslauncher"* ]]
+  [[ "$output" == *"emulator-5554" ]]
+  [ "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$ADB_LOG_FILE")" -eq 2 ]
+}

@@ -57,6 +57,12 @@ export interface ReleaseChecksumEntry {
    * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
+  /**
+   * SHA-256 of the universal (arm64 + x86_64) ad-hoc-signed iOS simulator
+   * overlay-agent dylib (#10564). Optional so releases predating its delivery
+   * simply have no verifiable agent.
+   */
+  overlayAgentSha256?: string;
 }
 
 /**
@@ -944,6 +950,30 @@ export function resolveScreenCaptureHelperChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
+}
+
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS simulator overlay agent. */
+export const OVERLAY_AGENT_DYLIB_FILENAME = "AutoMobileOverlayAgent.dylib";
+
+/** Download URL for the iOS simulator overlay-agent dylib. */
+export function resolveOverlayAgentUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    OVERLAY_AGENT_DYLIB_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected dylib SHA-256 for the selected release; empty when unknown. */
+export function resolveOverlayAgentChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.overlayAgentSha256 ?? "";
 }
 
 /**

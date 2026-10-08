@@ -27,6 +27,9 @@ import {
   resolvePinnedVersion,
   resolveRunnerChecksum,
   resolveRunnerChecksumTarget,
+  OVERLAY_AGENT_DYLIB_FILENAME,
+  resolveOverlayAgentChecksum,
+  resolveOverlayAgentUrl,
   resolveScreenCaptureHelperChecksum,
   resolveScreenCaptureHelperUrl,
   resolveVideoJarChecksum,
@@ -508,6 +511,44 @@ describe("screen-capture-helper release delivery", function () {
     expect(RELEASE_CHECKSUM_REGISTRY.length).toBeGreaterThan(0);
     for (const entry of RELEASE_CHECKSUM_REGISTRY) {
       const checksum = entry.screenCaptureHelperSha256 ?? "";
+      expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
+    }
+  });
+});
+
+describe("overlay-agent release delivery (#10564)", function () {
+  const registry: ReleaseChecksumEntry[] = [
+    {
+      version: "0.0.46",
+      apkSha256: "apk46",
+      ipaSha256: "ipa46",
+      runnerSha256: "runner46",
+      overlayAgentSha256: "overlay46",
+    },
+    { version: "0.0.45", apkSha256: "apk45", ipaSha256: "ipa45", runnerSha256: "runner45" },
+  ];
+
+  test("uses the fixed universal simulator dylib asset name", function () {
+    expect(OVERLAY_AGENT_DYLIB_FILENAME).toBe("AutoMobileOverlayAgent.dylib");
+  });
+
+  test("builds a version-pinned release URL", function () {
+    expect(resolveOverlayAgentUrl({}, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.46/${OVERLAY_AGENT_DYLIB_FILENAME}`,
+    );
+    expect(resolveOverlayAgentUrl({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe(
+      `${DEFAULT_ASSET_BASE_URL}/0.0.45/${OVERLAY_AGENT_DYLIB_FILENAME}`,
+    );
+  });
+
+  test("resolves the matching checksum and leaves pre-delivery releases unverifiable", function () {
+    expect(resolveOverlayAgentChecksum({}, registry)).toBe("overlay46");
+    expect(resolveOverlayAgentChecksum({ AUTOMOBILE_VERSION: "0.0.45" }, registry)).toBe("");
+  });
+
+  test("registry overlay-agent checksums are empty or SHA-256 values", function () {
+    for (const entry of RELEASE_CHECKSUM_REGISTRY) {
+      const checksum = entry.overlayAgentSha256 ?? "";
       expect(checksum === "" || /^[a-f0-9]{64}$/.test(checksum)).toBe(true);
     }
   });

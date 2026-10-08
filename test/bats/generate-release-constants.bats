@@ -8,6 +8,7 @@ APK_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+OVERLAY_SHA="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 HELPER_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 
 setup() {
@@ -29,6 +30,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -41,6 +43,7 @@ teardown() {
   grep -q "runnerSha256: \"${RUNNER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q 'runnerSha256Target: "xctest"' "${TEST_ROOT}/src/constants/release.ts"
   grep -q "screenCaptureHelperSha256: \"${HELPER_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "overlayAgentSha256: \"${OVERLAY_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }
 
 @test "writes runnerSha256 in release mode" {
@@ -50,6 +53,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -139,6 +143,7 @@ read_field_for_version() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -150,6 +155,7 @@ read_field_for_version() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -192,6 +198,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -226,6 +233,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -277,6 +285,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -332,6 +341,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -351,6 +361,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -361,6 +372,7 @@ PY
 @test "writes NIGHTLY_CHECKSUM_ENTRY screenCaptureHelperSha256 in checksum-only mode" {
   run env \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -388,6 +400,51 @@ PY
   [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256 must be a valid SHA256"* ]]
 }
 
+# --- iOS simulator overlay-agent release asset (#10564) ---
+
+@test "rejects a release without an overlay-agent checksum" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OVERLAY_AGENT_SHA256"* ]]
+}
+
+@test "rejects a malformed OVERLAY_AGENT_SHA256" {
+  run env \
+    OVERLAY_AGENT_SHA256="not-a-sha" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"OVERLAY_AGENT_SHA256 must be a valid SHA256"* ]]
+}
+
+@test "writes NIGHTLY_CHECKSUM_ENTRY overlayAgentSha256 in checksum-only mode" {
+  run env \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version nightly overlayAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$OVERLAY_SHA" ]
+}
+
+@test "refreshes overlayAgentSha256 for an already-registered version" {
+  run env \
+    RELEASE_VERSION="0.0.46" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [ "$(read_field_for_version 0.0.46 overlayAgentSha256 "${TEST_ROOT}/src/constants/release.ts")" = "$OVERLAY_SHA" ]
+}
+
 # Regression guard for #4683. prepare-release adds the registry entry first, then
 # the release job re-runs this script for the same version. That already-registered
 # path refreshed only runnerSha256/videoJarSha256/screenCaptureHelperSha256, so
@@ -411,6 +468,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    OVERLAY_AGENT_SHA256="$OVERLAY_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]

@@ -4,7 +4,7 @@
 #
 # Usage: verify-artifact-sha256.sh <artifact-path> <platform>
 #
-# Platform is "android", "ios", "videojar", or "screencapturehelper", which
+# Platform is "android", "ios", "videojar", "screencapturehelper", or "overlayagent", which
 # selects the matching checksum from the first (newest) registry entry.
 #
 # Example:
@@ -50,8 +50,10 @@ elif [ "$PLATFORM" = "videojar" ]; then
   FIELD="videoJarSha256"
 elif [ "$PLATFORM" = "screencapturehelper" ]; then
   FIELD="screenCaptureHelperSha256"
+elif [ "$PLATFORM" = "overlayagent" ]; then
+  FIELD="overlayAgentSha256"
 else
-  echo "ERROR: Platform must be 'android', 'ios', 'videojar', or 'screencapturehelper', got '$PLATFORM'"
+  echo "ERROR: Platform must be 'android', 'ios', 'videojar', 'screencapturehelper', or 'overlayagent', got '$PLATFORM'"
   exit 1
 fi
 

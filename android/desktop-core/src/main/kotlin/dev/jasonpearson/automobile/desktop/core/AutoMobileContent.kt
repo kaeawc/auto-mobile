@@ -77,6 +77,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotSocketClien
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDeviceSnapshotActions
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
@@ -197,22 +198,18 @@ internal fun activeDeviceConnectionLostEvent(
 }
 
 /**
- * The daemon session binding for the studio/desktop pane (#10660). Binding reserves the device
- * against CLI/MCP sessions, so it is derived only from an explicit user pick that is still the
- * displayed device. The auto-selected first device is display-only: with a null binding the session
- * loop takes the observer-only `ensureRegistered()` path and never calls `setActiveDevice`, so it
- * cannot grab a device back after an agent releases it.
+ * The device the studio pane shows, as the daemon session's pane list (#10730). Showing a device,
+ * whether the user picked it or it was auto-selected, allocates nothing: the session only watches
+ * it (#10660). The user's first input on it allocates it, so the session can never grab a device
+ * back after an agent releases it.
  */
-internal fun desktopSessionBindingFor(
+internal fun desktopSessionPanesFor(
   isRealMode: Boolean,
-  userSelectedDeviceId: String?,
   activeDeviceId: String?,
   isIos: Boolean,
-): DesktopDaemonSessionBinding? {
-  if (!isRealMode || userSelectedDeviceId == null || userSelectedDeviceId != activeDeviceId) {
-    return null
-  }
-  return DesktopDaemonSessionBinding(userSelectedDeviceId, if (isIos) "ios" else "android")
+): List<DesktopDaemonSessionBinding> {
+  if (!isRealMode || activeDeviceId == null) return emptyList()
+  return listOf(DesktopDaemonSessionBinding(activeDeviceId, if (isIos) "ios" else "android"))
 }
 
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
@@ -833,7 +830,9 @@ fun AutoMobileContent(
     }
   }
 
-  val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
+  val desktopSessionPanes = remember {
+    mutableStateOf<List<DesktopDaemonSessionBinding>>(emptyList())
+  }
   val desktopSocketPath =
     connectedMcpProcess
       ?.takeIf {
@@ -843,7 +842,7 @@ fun AutoMobileContent(
   val desktopSessionState =
     rememberDesktopDaemonSession(
       desktopSocketPath,
-      desktopSessionBinding,
+      desktopSessionPanes,
       hostVisible = hostVisible,
     )
   val desktopDaemonSession = desktopSessionState.session
@@ -872,24 +871,20 @@ fun AutoMobileContent(
       }
     }
 
-  val selectedBinding =
-    desktopSessionBindingFor(
+  val shownPanes =
+    desktopSessionPanesFor(
       isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
-      userSelectedDeviceId = userSelectedDeviceId,
       activeDeviceId = activeDeviceId,
       isIos =
         realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
     )
-  SideEffect { desktopSessionBinding.value = selectedBinding }
-  // Live view and screen sharing need a session the daemon admits on the stream sockets: the one
-  // holding the device, or a registered observer-only session while the pick is only viewed (held
-  // by another session, or released for inactivity), which the daemon admits read-only (#10698).
+  SideEffect { desktopSessionPanes.value = shownPanes }
+  // Live view and screen sharing need a session the daemon admits on the stream sockets. Watching
+  // never requires holding the device (owner decision 2026-10-08): the daemon admits a registered
+  // observer session read-only on any device, whoever owns it (#10698, #10730).
   val desktopSessionReady =
     activeDeviceId != null &&
-      (desktopSessionState.boundDeviceId == activeDeviceId ||
-        (desktopSessionState.isRegistered &&
-          (desktopSessionState.viewingDeviceId == activeDeviceId ||
-            desktopSessionState.idleReleasedDeviceId == activeDeviceId)))
+      (desktopSessionState.boundDeviceId == activeDeviceId || desktopSessionState.isRegistered)
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders
@@ -981,16 +976,15 @@ fun AutoMobileContent(
   // client once it unblocked, and that session's independent error claim could publish a banner
   // into the new context.
   val controlClientProvider by rememberUpdatedState(clientProvider)
-  // Each dispatched input is the user using the device: after an inactivity release it binds the
-  // device again (owner decision 2026-10-08).
-  val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
+  // Input is active tool use and watching is not (#10730): each input allocates its device to the
+  // desktop session before it is sent, on the dispatch thread, and is dropped when it cannot be.
+  val inputAllocation by rememberUpdatedState(desktopSessionState.inputAllocation)
   val deviceControlSession =
     remember(screenshotScope) {
       DeviceControlSession(
         scope = screenshotScope,
         clientProvider = {
-          activeDeviceIdState.value?.let { onUserInteraction(it) }
-          controlClientProvider?.invoke()
+          controlClientProvider?.invoke()?.let { InputAllocatingClient(it, inputAllocation) }
         },
         platform = { controlPlatform.value },
         nowMs = MONOTONIC_NOW_MS,
@@ -2084,23 +2078,36 @@ fun AutoMobileContent(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-              // The picked device is held by another session: this pane only views it and never
-              // takes it on its own (#10660). Take control is the one explicit bind attempt.
-              if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
-                DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
-              }
-              // Released for inactivity: still controllable; the next input re-binds it.
+              val noticeDeviceId = activeDeviceId
+              // An input was refused because another session holds the device: the pane keeps
+              // watching and never takes it on its own (#10660, #10730). Take control is the one
+              // explicit bind attempt.
               if (
-                activeDeviceId != null && desktopSessionState.idleReleasedDeviceId == activeDeviceId
+                noticeDeviceId != null &&
+                  desktopSessionState.heldElsewhereDeviceId == noticeDeviceId
               ) {
-                DeviceIdleReleasedNotice(onTakeControl = desktopSessionState.requestControl)
+                DeviceViewingNotice(
+                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                )
               }
-              // A bind that failed for another reason is an error, not viewing (#10682).
+              // Released after inactivity: still controllable; the next input allocates it again.
+              if (
+                noticeDeviceId != null && desktopSessionState.idleReleasedDeviceId == noticeDeviceId
+              ) {
+                DeviceIdleReleasedNotice(
+                  onTakeControl = { desktopSessionState.requestControl(noticeDeviceId) },
+                )
+              }
+              // A bind that failed for another reason is an error, not held elsewhere (#10682).
               val bindError = desktopSessionState.bindErrorMessage
-              if (activeDeviceId != null && bindError != null) {
+              if (
+                noticeDeviceId != null &&
+                  bindError != null &&
+                  desktopSessionState.bindErrorDeviceId == noticeDeviceId
+              ) {
                 DeviceBindErrorNotice(
                   message = bindError,
-                  onRetry = desktopSessionState.requestControl,
+                  onRetry = { desktopSessionState.requestControl(noticeDeviceId) },
                 )
               }
 

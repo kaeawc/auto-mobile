@@ -142,6 +142,16 @@ The observation and push sockets keep unowned-device-only scope
 takes input only from a frame whose `sessionUuid` names its holder (typed code
 `device_owned_by_other_session`); an unowned device takes input from anyone.
 
+Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
+allowed on any device, whichever session owns it, and watching is not use.
+Desktop input is use. The desktop and IDE clients register an observer session
+that allocates nothing, allocate a device with `setActiveDevice` on the first
+`input/*` to it, and send input under that session, so each input restarts the
+idle window. After an idle release, a daemon restart, or an expiry, the client
+rotates to a fresh observer session and does not re-send the bind; the next
+input allocates the device again. `test/fixtures/desktop-wire/` records these
+exchanges against the real handlers.
+
 Open owner question: is non-persistence acceptable? Clients must register again
 after daemon restart.
 

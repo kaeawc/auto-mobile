@@ -30,6 +30,13 @@ import {
  * Session UUIDs are fixed so the fixtures are deterministic; the Kotlin replay
  * mints them from the fixture's `sessions` map in the order the client creates
  * sessions ("desktop-1", "desktop-2", ...).
+ *
+ * Owner decisions 2026-10-08 (#10730): desktop input is active tool use and
+ * watching is not, and the desktop may watch any device. So the client
+ * registers an observer session that allocates nothing, allocates a device
+ * (`setActiveDevice`) only on the first input to it, and after the daemon drops
+ * the hold (idle release, restart, expiry) rotates to a fresh observer session
+ * and never re-sends the bind on its own.
  */
 
 const FIXTURE_DIR = join(import.meta.dir, "..", "fixtures", "desktop-wire");
@@ -39,6 +46,8 @@ const AGENT = "a0000000-0000-4000-8000-00000000000a";
 // DesktopDaemonSessionComposition.kt HIDDEN_RELEASE_GRACE_MS (10 s) at one heartbeat per 2 s.
 const HIDDEN_GRACE_TICKS = 5;
 const IDLE_WINDOW_TICKS = 120; // > 2 min idle window + one cleanup sweep at 2 s per tick
+const TEN_MINUTES_TICKS = 300;
+const MINUTE_TICKS = 30;
 
 let harness: DesktopWireHarness | undefined;
 
@@ -116,23 +125,79 @@ function isToolError(response: { result?: unknown }): boolean {
   return (response.result as { isError?: boolean } | undefined)?.isError === true;
 }
 
-describe("desktop wire contract (#10669)", () => {
-  test("focus binds the device and heartbeats keep it", async () => {
+/** The client starts watching: an observer registration and its first heartbeats. */
+async function startWatching(
+  wire: DesktopWireHarness,
+  sessionId: string,
+  ticks: number,
+): Promise<void> {
+  const register = await wire.send(
+    "desktop",
+    "register",
+    "daemon/registerSession",
+    registerParams(sessionId),
+  );
+  expect(register.success).toBe(true);
+  await wire.heartbeats("heartbeat-watching", sessionId, ticks);
+}
+
+/**
+ * The first input on a free device: the client allocates it, and only then sends the input under
+ * the same session.
+ */
+async function tapAllocating(
+  wire: DesktopWireHarness,
+  sessionId: string,
+  labels: { bind: string; tap: string },
+  deviceId: string = PIXEL.deviceId,
+): Promise<void> {
+  const bind = await wire.send(
+    "desktop",
+    labels.bind,
+    "tools/call",
+    bindParams(sessionId, deviceId),
+  );
+  expect(isToolError(bind)).toBe(false);
+  const tap = await wire.send("desktop", labels.tap, "input/tap", tapParams(sessionId, deviceId));
+  expect(tap).toMatchObject({ success: true });
+  expect(wire.holderOf(deviceId)).toBe(sessionId);
+}
+
+describe("desktop wire contract (#10669, #10730)", () => {
+  test("watching a focused device for ten minutes allocates nothing", async () => {
     const wire = await startHarness();
-    const bind = await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
-    expect(isToolError(bind)).toBe(false);
+    await startWatching(wire, DESKTOP_1, TEN_MINUTES_TICKS);
+    await wire.send("probe", "nothing-held", "daemon/activeSessions", WHO_HOLDS);
+
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
+    checkFixture(
+      wire.fixture(
+        "watching-allocates-nothing",
+        "A focused pane that is only watched: an observer registration and ten minutes of " +
+          "heartbeats, with no setActiveDevice and nothing held (#10730).",
+        { "desktop-1": DESKTOP_1 },
+      ),
+    );
+  });
+
+  test("the first tap allocates the device, then the tap, then heartbeats only", async () => {
+    const wire = await startHarness();
+    await startWatching(wire, DESKTOP_1, 3);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 5);
     await wire.send("probe", "held", "daemon/activeSessions", WHO_HOLDS);
 
     expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
     checkFixture(
-      wire.fixture("focus-binds-device", "Focus a free device: one bind, then heartbeats only.", {
-        "desktop-1": DESKTOP_1,
-      }),
+      wire.fixture(
+        "first-tap-binds-device",
+        "Watch a free device, then tap it: one bind before the tap, then heartbeats only (#10730).",
+        { "desktop-1": DESKTOP_1 },
+      ),
     );
   });
 
-  test("app start with no click registers an observer and allocates nothing", async () => {
+  test("app start with no pane registers an observer and allocates nothing", async () => {
     const wire = await startHarness();
     const register = await wire.send(
       "desktop",
@@ -149,26 +214,21 @@ describe("desktop wire contract (#10669)", () => {
     checkFixture(
       wire.fixture(
         "no-click-start",
-        "A null binding (no pane focused) registers deviceless and only heartbeats (#10660).",
+        "No pane open: the session registers deviceless and only heartbeats (#10660).",
         { "desktop-1": DESKTOP_1 },
       ),
     );
   });
 
-  test("a device held by another session is refused, viewed, never grabbed, then taken on request", async () => {
+  test("a tap on a device another session holds is refused, then watched, never grabbed, and taken on request", async () => {
     const wire = await startHarness();
     await agentHolds(wire, PIXEL.deviceId);
+    await startWatching(wire, DESKTOP_1, 2);
 
+    // The tap's allocation is refused, so the tap itself is never sent.
     const refused = await wire.send("desktop", "bind-refused", "tools/call", bindParams(DESKTOP_1));
     expect(isToolError(refused)).toBe(true);
     expect(textOf(refused)).toContain(`is already assigned to session ${AGENT}`);
-    const register = await wire.send(
-      "desktop",
-      "register-viewer",
-      "daemon/registerSession",
-      registerParams(DESKTOP_1),
-    );
-    expect(register.success).toBe(true);
     await wire.heartbeats("heartbeat-viewing", DESKTOP_1, 3);
     expect(wire.holderOf(PIXEL.deviceId)).toBe(AGENT);
 
@@ -177,9 +237,10 @@ describe("desktop wire contract (#10669)", () => {
       sessionId: AGENT,
     });
     expect(release.success).toBe(true);
+    // Another tap here is dropped without a frame: nothing retries.
     await wire.heartbeats("heartbeat-after-holder-release", DESKTOP_1, 5);
     await wire.send("probe", "not-grabbed", "daemon/activeSessions", WHO_HOLDS);
-    // Two-sided: the viewer neither held the device while the agent did nor grabbed it after.
+    // Two-sided: the watcher neither held the device while the agent did nor grabbed it after.
     expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
 
     const takeControl = await wire.send(
@@ -190,25 +251,29 @@ describe("desktop wire contract (#10669)", () => {
     );
     expect(isToolError(takeControl)).toBe(false);
     await wire.heartbeats("heartbeat-controlling", DESKTOP_1, 3);
+    const tap = await wire.send("desktop", "tap-controlling", "input/tap", tapParams(DESKTOP_1));
+    expect(tap).toMatchObject({ success: true });
     expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
 
     checkFixture(
       wire.fixture(
         "held-by-another-session",
-        "Focus a device an agent holds: refused bind, observer registration (viewer mode), no " +
-          "grab when the agent releases, one bind on Take control (#10660). The agent's session " +
-          "is kept alive by unrecorded heartbeats while it holds the device.",
+        "Watch a device an agent holds, then tap it: the allocation is refused and the tap " +
+          "dropped, the pane keeps watching, nothing grabs the device when the agent releases " +
+          "it, and Take control binds it once (#10660, #10730). The agent's session is kept " +
+          "alive by unrecorded heartbeats while it holds the device.",
         { "desktop-1": DESKTOP_1, agent: AGENT },
       ),
     );
   });
 
-  test("unfocusing releases the held device and refocusing re-acquires under a fresh session", async () => {
+  test("closing the tapped pane releases the device; reopening it only watches until the next tap", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 2);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
-    const release = await wire.send("desktop", "release-on-unfocus", "daemon/releaseSession", {
+    const release = await wire.send("desktop", "release-on-close", "daemon/releaseSession", {
       sessionId: DESKTOP_1,
     });
     expect(release.success).toBe(true);
@@ -218,20 +283,22 @@ describe("desktop wire contract (#10669)", () => {
       "daemon/registerSession",
       registerParams(DESKTOP_2),
     );
-    await wire.heartbeats("heartbeat-unfocused", DESKTOP_2, 3);
+    await wire.heartbeats("heartbeat-closed", DESKTOP_2, 3);
     await wire.send("probe", "released", "daemon/activeSessions", WHO_HOLDS);
     expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
 
-    const refocus = await wire.send("desktop", "refocus", "tools/call", bindParams(DESKTOP_2));
-    expect(isToolError(refocus)).toBe(false);
-    await wire.heartbeats("heartbeat-refocused", DESKTOP_2, 2);
-    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_2);
+    // The pane opens again: watching only.
+    await wire.heartbeats("heartbeat-reopened", DESKTOP_2, 3);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
+    await tapAllocating(wire, DESKTOP_2, { bind: "bind-on-tap", tap: "tap-reopened" });
+    await wire.heartbeats("heartbeat-tapped", DESKTOP_2, 2);
 
     checkFixture(
       wire.fixture(
-        "unfocus-releases-device",
-        "Unfocus to Empty releases the held session and registers a fresh deviceless one; " +
-          "refocus binds under the fresh session (#10659).",
+        "close-pane-releases-device",
+        "Close the pane of the tapped device: the held session is released and a fresh " +
+          "observer session registers; reopening the pane allocates nothing until the next " +
+          "tap, which binds under the fresh session (#10659, #10730).",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );
@@ -239,7 +306,8 @@ describe("desktop wire contract (#10669)", () => {
 
   test("quitting releases the held device", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
     const release = await wire.send("desktop", "release-on-quit", "daemon/releaseSession", {
@@ -259,9 +327,10 @@ describe("desktop wire contract (#10669)", () => {
     );
   });
 
-  test("hiding the window past the grace releases the device; the first tap re-binds (#10695)", async () => {
+  test("hiding the window past the grace after tapping releases the device; showing it only watches (#10695)", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
     await wire.heartbeats("heartbeat-hidden", DESKTOP_1, HIDDEN_GRACE_TICKS);
 
@@ -280,28 +349,27 @@ describe("desktop wire contract (#10669)", () => {
     expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
 
     // Shown again: nothing binds until the user taps the pane.
-    const tap = await wire.send("desktop", "tap-after-show", "input/tap", tapParams(DESKTOP_2));
-    expect(tap.success).toBe(true);
-    const rebind = await wire.send("desktop", "bind-on-input", "tools/call", bindParams(DESKTOP_2));
-    expect(isToolError(rebind)).toBe(false);
+    await wire.heartbeats("heartbeat-shown", DESKTOP_2, 3);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
+    await tapAllocating(wire, DESKTOP_2, { bind: "bind-on-input", tap: "tap-after-show" });
     await wire.heartbeats("heartbeat-rebound", DESKTOP_2, 2);
-    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_2);
 
     checkFixture(
       wire.fixture(
         "hidden-window-release",
-        "Close the window to the tray (or hide the IDE tool window) past the grace: the session " +
-          "rotates, releasing the device; showing it again binds nothing, and the first tap " +
-          "on the pane binds it under the fresh session (#10695).",
+        "Close the window to the tray (or hide the IDE tool window) past the grace after a " +
+          "tap: the session rotates, releasing the device; showing it again only watches, and " +
+          "the first tap binds it under the fresh session (#10695, #10730).",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );
   });
 
-  test("focusing a held device after a free one releases the free one (#10697)", async () => {
+  test("tapping a held device after a free one releases the free one (#10697)", async () => {
     const wire = await startHarness();
     await agentHolds(wire, PIXEL_FOLD.deviceId);
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
     const refused = await wire.send(
@@ -317,13 +385,6 @@ describe("desktop wire contract (#10669)", () => {
     await wire.send("desktop", "release-previous", "daemon/releaseSession", {
       sessionId: DESKTOP_1,
     });
-    const refusedAgain = await wire.send(
-      "desktop",
-      "bind-held-refused-fresh",
-      "tools/call",
-      bindParams(DESKTOP_2, PIXEL_FOLD.deviceId),
-    );
-    expect(isToolError(refusedAgain)).toBe(true);
     await wire.send(
       "desktop",
       "register-viewer",
@@ -337,45 +398,62 @@ describe("desktop wire contract (#10669)", () => {
     expect(wire.holderOf(PIXEL_FOLD.deviceId)).toBe(AGENT);
     checkFixture(
       wire.fixture(
-        "refused-focus-change",
-        "Focus a free device, then one an agent holds: the refusal leaves the first hold, which " +
-          "the client drops by rotating to a fresh session that views the held device (#10697).",
+        "tap-held-device-releases-previous",
+        "Tap a free device, then one an agent holds: the refusal leaves the first hold, which " +
+          "the client drops by rotating to a fresh observer session that watches the held " +
+          "device without re-sending the bind (#10697, #10730).",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2, agent: AGENT },
       ),
     );
   });
 
-  test("an idle release lapses the heartbeat, and today the lapse rebind re-acquires (#10693)", async () => {
+  test("an idle release after the last tap drops back to watching and never re-binds (#10693, #10730)", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     const healthyTicks = await wire.heartbeatsUntilLapse("heartbeat", DESKTOP_1, IDLE_WINDOW_TICKS);
-    // Released by the 2-minute idle window, not by a missed heartbeat.
+    // Released by the 2-minute idle window after the tap, not by a missed heartbeat.
     expect(healthyTicks).toBeGreaterThanOrEqual(60);
     await wire.send("probe", "idle-released", "daemon/activeSessions", WHO_HOLDS);
     expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
 
-    // The client re-sends its acknowledged binding after a lapse. The idle release is not
-    // terminal (`cleanup-expired`), so the daemon accepts the same UUID and re-binds; #10693 /
-    // #10730 will change one side of this exchange.
-    await wire.send("desktop", "rebind-after-lapse", "tools/call", bindParams(DESKTOP_1));
-    await wire.heartbeats("heartbeat-after-rebind", DESKTOP_1, 2);
-    await wire.send("probe", "after-rebind", "daemon/activeSessions", WHO_HOLDS);
+    // The client rotates to a fresh observer session instead of re-sending its bind.
+    await wire.send("desktop", "release-lapsed", "daemon/releaseSession", {
+      sessionId: DESKTOP_1,
+    });
+    await wire.send(
+      "desktop",
+      "register-fresh",
+      "daemon/registerSession",
+      registerParams(DESKTOP_2),
+    );
+    // Still watching well past another idle window: nothing re-acquires the device.
+    await wire.heartbeats("heartbeat-watching-after-release", DESKTOP_2, IDLE_WINDOW_TICKS);
+    await wire.send("probe", "still-released", "daemon/activeSessions", WHO_HOLDS);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
+
+    // The next tap allocates it again.
+    await tapAllocating(wire, DESKTOP_2, { bind: "bind-on-tap", tap: "tap-after-release" });
+    await wire.heartbeats("heartbeat-after-tap", DESKTOP_2, 2);
 
     checkFixture(
       wire.fixture(
         "idle-release",
-        "Focused with heartbeats but no tool calls or input: the idle window releases the " +
-          "session, the next heartbeat is not found, and the client's lapse rebind follows.",
-        { "desktop-1": DESKTOP_1 },
+        "Tap, then only watch: the idle window releases the session, the next heartbeat is not " +
+          "found, and the client drops back to watching under a fresh observer session with no " +
+          "re-bind, even past another idle window; the next tap allocates the device again " +
+          "(#10693, #10730).",
+        { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );
   });
 
-  test("a tap every minute keeps the focused device's session (#10693)", async () => {
+  test("a tap every minute for ten minutes keeps one allocation (#10693)", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
-    for (let minute = 1; minute <= 4; minute++) {
-      await wire.heartbeats(`heartbeat-minute-${minute}`, DESKTOP_1, 30);
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap-minute-0" });
+    for (let minute = 1; minute <= 10; minute++) {
+      await wire.heartbeats(`heartbeat-minute-${minute}`, DESKTOP_1, MINUTE_TICKS);
       const tap = await wire.send(
         "desktop",
         `tap-minute-${minute}`,
@@ -391,16 +469,17 @@ describe("desktop wire contract (#10669)", () => {
     checkFixture(
       wire.fixture(
         "input-keeps-session",
-        "Pane taps (input/tap) on the focused device count as activity: four minutes of one " +
-          "tap per minute never idle-release the session.",
+        "Pane taps (input/tap) under the desktop session count as activity: one bind on the " +
+          "first tap, then ten minutes of one tap per minute never idle-release the session.",
         { "desktop-1": DESKTOP_1 },
       ),
     );
   });
 
-  test("a daemon restart lapses the heartbeat and the rebind re-acquires", async () => {
+  test("a daemon restart drops back to watching under a fresh session; the next tap re-allocates", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
     await wire.restartDaemon();
@@ -408,29 +487,36 @@ describe("desktop wire contract (#10669)", () => {
       sessionId: DESKTOP_1,
     });
     expect(lapse.success).toBe(false);
-    const rebind = await wire.send(
+    await wire.send("desktop", "release-lapsed", "daemon/releaseSession", {
+      sessionId: DESKTOP_1,
+    });
+    await wire.send(
       "desktop",
-      "rebind-after-lapse",
-      "tools/call",
-      bindParams(DESKTOP_1),
+      "register-fresh",
+      "daemon/registerSession",
+      registerParams(DESKTOP_2),
     );
-    expect(isToolError(rebind)).toBe(false);
-    await wire.heartbeats("heartbeat-after-rebind", DESKTOP_1, 2);
+    await wire.heartbeats("heartbeat-after-restart", DESKTOP_2, 3);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
 
-    expect(wire.holderOf(PIXEL.deviceId)).toBe(DESKTOP_1);
+    await tapAllocating(wire, DESKTOP_2, { bind: "bind-on-tap", tap: "tap-after-restart" });
+    await wire.heartbeats("heartbeat-after-tap", DESKTOP_2, 2);
+
     checkFixture(
       wire.fixture(
         "daemon-restart",
-        "A restarted daemon has no record of the session: the heartbeat is not found and the " +
-          "client's lapse rebind binds again under the same UUID.",
-        { "desktop-1": DESKTOP_1 },
+        "A restarted daemon has no record of the session: the heartbeat is not found, and the " +
+          "client drops back to watching under a fresh observer session instead of re-binding; " +
+          "the next tap allocates the device under it (#10730).",
+        { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );
   });
 
-  test("a stalled client's session expires terminally and its rebind is refused", async () => {
+  test("a stalled client's session expires terminally and the client watches under a fresh session", async () => {
     const wire = await startHarness();
-    await wire.send("desktop", "bind", "tools/call", bindParams(DESKTOP_1));
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
     await wire.heartbeats("heartbeat", DESKTOP_1, 2);
 
     await wire.stall(30_000);
@@ -439,15 +525,6 @@ describe("desktop wire contract (#10669)", () => {
       sessionId: DESKTOP_1,
     });
     expect(lapse.success).toBe(false);
-    const rebind = await wire.send(
-      "desktop",
-      "rebind-refused",
-      "tools/call",
-      bindParams(DESKTOP_1),
-    );
-    expect(isToolError(rebind)).toBe(true);
-    expect(textOf(rebind)).toContain("cannot be reused");
-    // The client rotates: the released session is disposed (and released again, idempotently).
     await wire.send("desktop", "release-rotated", "daemon/releaseSession", {
       sessionId: DESKTOP_1,
     });
@@ -465,24 +542,58 @@ describe("desktop wire contract (#10669)", () => {
       wire.fixture(
         "heartbeat-expiry",
         "The client stops heartbeating (host sleep, hung UI) past the liveness lease: the " +
-          "reaper releases the session terminally, the re-sent bind is refused as released, and " +
-          "the client views the device under a fresh deviceless session.",
+          "reaper releases the session terminally, the next heartbeat is not found, and the " +
+          "client watches under a fresh observer session without re-binding.",
         { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
       ),
     );
   });
 
-  test("a non-ownership bind error is retried and then surfaced (#10696)", async () => {
+  test("a tap after the session was terminally released allocates under a fresh session", async () => {
+    const wire = await startHarness();
+    await startWatching(wire, DESKTOP_1, 1);
+    await tapAllocating(wire, DESKTOP_1, { bind: "bind", tap: "tap" });
+    await wire.heartbeats("heartbeat", DESKTOP_1, 2);
+
+    // Reaped before the client's next heartbeat noticed; the user taps another pane meanwhile.
+    await wire.stall(30_000);
+    expect(wire.holderOf(PIXEL.deviceId)).toBeNull();
+    const refused = await wire.send(
+      "desktop",
+      "bind-refused-released",
+      "tools/call",
+      bindParams(DESKTOP_1, PIXEL_FOLD.deviceId),
+    );
+    expect(isToolError(refused)).toBe(true);
+    expect(textOf(refused)).toContain("cannot be reused");
+    await wire.send("desktop", "release-rotated", "daemon/releaseSession", {
+      sessionId: DESKTOP_1,
+    });
+    await tapAllocating(
+      wire,
+      DESKTOP_2,
+      { bind: "bind-fresh", tap: "tap-fresh" },
+      PIXEL_FOLD.deviceId,
+    );
+    await wire.heartbeats("heartbeat-fresh", DESKTOP_2, 2);
+
+    checkFixture(
+      wire.fixture(
+        "released-session-tap",
+        "A tap on another pane after the reaper terminally released the session: the bind is " +
+          "refused as released, the client rotates, and the waiting tap goes through once the " +
+          "fresh session allocates the device.",
+        { "desktop-1": DESKTOP_1, "desktop-2": DESKTOP_2 },
+      ),
+    );
+  });
+
+  test("a non-ownership bind error on a tap is retried and then surfaced (#10696)", async () => {
     const wire = await startHarness([PIXEL_FOLD]);
+    await startWatching(wire, DESKTOP_1, 1);
     const first = await wire.send("desktop", "bind-error-1", "tools/call", bindParams(DESKTOP_1));
     expect(isToolError(first)).toBe(true);
     expect(textOf(first)).not.toContain("already assigned");
-    await wire.send(
-      "desktop",
-      "register-while-retrying",
-      "daemon/registerSession",
-      registerParams(DESKTOP_1),
-    );
     await wire.heartbeats("heartbeat-1", DESKTOP_1, 1);
     await wire.send("desktop", "bind-error-2", "tools/call", bindParams(DESKTOP_1));
     await wire.heartbeats("heartbeat-2", DESKTOP_1, 1);
@@ -493,8 +604,9 @@ describe("desktop wire contract (#10669)", () => {
     checkFixture(
       wire.fixture(
         "bind-error-not-ownership",
-        "Focus a device the daemon's pool does not have: an ordinary bind error, retried a " +
-          "bounded number of times and surfaced, never treated as another session's hold.",
+        "Tap a device the daemon's pool does not have: the tap is dropped, and the allocation " +
+          "error is retried a bounded number of times and surfaced, never treated as another " +
+          "session's hold.",
         { "desktop-1": DESKTOP_1 },
       ),
     );

@@ -196,9 +196,14 @@ the call runs, and the window restarts when the call ends. An agent that
 acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
 release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
-This includes a passive viewer, such as a desktop or IDE window that only watches
-the device: viewing is not use, so its session is released as `cleanup-expired`
-and the client acquires a fresh session when it next needs one.
+Watching is not use, and desktop input is (owner decisions 2026-10-08, #10730).
+A desktop or IDE window that only watches a device holds no session on it: it
+registers an observer session, which the idle window does not apply to. Its
+first tap, swipe, key or text input on a free device allocates the device, and
+each later input restarts the idle window. When the user stops sending input,
+the daemon releases the device after the window as `cleanup-expired`, and the
+window drops back to watching without re-acquiring it; the next input
+allocates it again.
 `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` (alias `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`)
 changes the window, for example to check idle release live; a value that is not a
 positive base-10 integer is ignored. Set it in both the daemon's and the proxy's

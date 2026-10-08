@@ -61,7 +61,7 @@ class PaneSessionProviderStabilityTest {
 
   private class Root(
     val transport: RecordingDaemonTransport = RecordingDaemonTransport(),
-    val binding: MutableState<DesktopDaemonSessionBinding?>,
+    val panes: MutableState<List<DesktopDaemonSessionBinding>>,
     val device: MutableState<String>,
     /** Stands in for any root state the workspace changes without touching the session. */
     val unrelatedRootState: MutableState<Int> = mutableIntStateOf(0),
@@ -82,7 +82,7 @@ class PaneSessionProviderStabilityTest {
   fun `a device change reconnects only the device-scoped streams, once`() = runComposeUiTest {
     val root = startedRoot()
 
-    root.binding.value = pixelFold
+    root.panes.value = listOf(pixelFold)
     root.device.value = "dev-2"
     mainClock.advanceTimeByFrame()
     repeat(3) { recomposeRoot(root) }
@@ -96,10 +96,10 @@ class PaneSessionProviderStabilityTest {
     runComposeUiTest {
       val root = startedRoot()
 
-      // Daemon restart: the heartbeat is refused and the re-bind is refused once, so the session
-      // is unregistered for one tick, then re-registers.
+      // Daemon restart: the heartbeat is refused and the re-registration is refused once, so the
+      // watching session is unregistered for one tick, then re-registers.
       root.transport.failNext("daemon/heartbeat")
-      root.transport.failNext("tools/call:setActiveDevice")
+      root.transport.failNext("daemon/registerSession")
       tick()
       assertEquals(listOf(1, 1, 1, 1), root.counts.snapshot())
       tick()
@@ -109,7 +109,7 @@ class PaneSessionProviderStabilityTest {
     }
 
   private fun ComposeUiTest.startedRoot(): Root {
-    val root = Root(binding = mutableStateOf(pixel), device = mutableStateOf("dev-1"))
+    val root = Root(panes = mutableStateOf(listOf(pixel)), device = mutableStateOf("dev-1"))
     val graph = fakeGraph()
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
@@ -192,7 +192,7 @@ class PaneSessionProviderStabilityTest {
   private fun rememberSession(root: Root): DesktopDaemonSessionState =
     rememberDesktopDaemonSession(
       socketPath = "in-memory",
-      binding = root.binding,
+      panes = root.panes,
       sessionFactory = {
         DesktopDaemonSession(McpDaemonClient(root.transport, sessionUuid = "desktop-session"))
       },

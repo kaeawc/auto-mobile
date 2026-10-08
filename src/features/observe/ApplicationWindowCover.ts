@@ -174,6 +174,11 @@ export function ownOverlayNodeSources(
   return sources;
 }
 
+function hostsNodes(window: ViewHierarchyWindowInfo): boolean {
+  const children = window.hierarchy?.node;
+  return Array.isArray(children) ? children.length > 0 : children !== undefined;
+}
+
 function windowContains(window: ViewHierarchyWindowInfo, bounds: ElementBounds): boolean {
   const frame = window.bounds;
   return (
@@ -197,7 +202,11 @@ export function isFullyCoveredByOwnOverlay(
   target: Element,
   bounds: ElementBounds,
 ): boolean {
-  const overlays = ownOverlayWindows(hierarchy).filter((window) => windowContains(window, bounds));
+  // The highlight overlay is a full-screen, FLAG_NOT_TOUCHABLE canvas that exposes no nodes, so
+  // coordinate gestures pass through it; only an overlay window that renders nodes can intercept.
+  const overlays = ownOverlayWindows(hierarchy).filter(
+    (window) => hostsNodes(window) && windowContains(window, bounds),
+  );
   if (overlays.length === 0) {
     return false;
   }

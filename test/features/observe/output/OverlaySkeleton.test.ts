@@ -60,6 +60,23 @@ describe("app rows behind a fullscreen overlay (#10446)", () => {
     expect(calendar?.occluded).toBeUndefined();
   });
 
+  test("stay actionable under the node-free non-touchable highlight overlay (#10446)", () => {
+    const hierarchy = capturedOverlayHierarchy();
+    const overlay = hierarchy.windows!.find((w) => w.id === OVERLAY_CAPTURE.overlayWindowId)!;
+    hierarchy.windows!.push({
+      ...overlay,
+      id: 999,
+      windowLayer: (overlay.windowLayer ?? 0) + 1,
+      bounds: { ...OVERLAY_CAPTURE.screen },
+      hierarchy: {},
+    });
+    const projection = project(hierarchy);
+
+    const calendar = projection.skeleton.find((row) => row.label === "Calendar");
+    expect(calendar?.affordances).toContain("tap");
+    expect(calendar?.occluded).toBeUndefined();
+  });
+
   test("stay actionable when no overlay is present", () => {
     const hierarchy = capturedOverlayHierarchy({ fullScreen: true });
     hierarchy.windows = hierarchy.windows!.map((window) =>

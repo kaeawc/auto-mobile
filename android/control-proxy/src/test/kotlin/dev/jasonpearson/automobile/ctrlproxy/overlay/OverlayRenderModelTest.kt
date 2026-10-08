@@ -4,8 +4,11 @@ import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import dev.jasonpearson.automobile.protocol.*
@@ -185,6 +188,11 @@ class OverlayRenderModelTest {
                 listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
               ),
           ),
+        "offset.y" to OverlayStyle(offset = OverlayOffset(0.0, -Double.MAX_VALUE)),
+        "lineHeight" to OverlayStyle(lineHeight = Double.MAX_VALUE),
+        "letterSpacing" to OverlayStyle(letterSpacing = -Double.MAX_VALUE),
+        "cornerRadius.bottomStart" to
+          OverlayStyle(cornerRadius = OverlayCornerRadius.Corners(bottomStart = Double.MAX_VALUE)),
       )
     for ((key, style) in styles) {
       val error =
@@ -193,6 +201,52 @@ class OverlayRenderModelTest {
         }
       assertTrue(error.message.orEmpty().contains("root.style.$key"))
     }
+  }
+
+  @Test
+  fun `text polish and shadow colour map to their Compose values`() {
+    val style =
+      OverlayStyle(
+        shadowColor = "#80FF0000",
+        fontStyle = "italic",
+        textDecoration = "underlineLineThrough",
+        overflow = "ellipsis",
+        lineHeight = 22.0,
+        letterSpacing = 0.25,
+        offset = OverlayOffset(4.0, -2.0),
+      )
+    val mapped = mapOverlaySpec(spec(OverlayTextNode(text = "t", style = style))).root.style
+    assertEquals(style, mapped.source)
+    assertEquals(Color(0x80FF0000), mapped.shadowColor)
+    assertEquals(FontStyle.Italic, mapped.fontStyle)
+    assertEquals(
+      TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough)),
+      mapped.textDecoration,
+    )
+    assertEquals(TextOverflow.Ellipsis, mapped.overflow)
+    val decorations =
+      mapOf(
+        "none" to TextDecoration.None,
+        "underline" to TextDecoration.Underline,
+        "lineThrough" to TextDecoration.LineThrough,
+      )
+    for ((wire, expected) in decorations) {
+      assertEquals(
+        wire,
+        expected,
+        mapOverlayStyle(OverlayStyle(textDecoration = wire)).textDecoration,
+      )
+    }
+    assertEquals(TextOverflow.Visible, mapOverlayStyle(OverlayStyle(overflow = "visible")).overflow)
+  }
+
+  @Test
+  fun `unset text polish keeps Compose defaults and a role shadow colour resolves later`() {
+    val mapped = mapOverlayStyle(OverlayStyle(shadowColor = "primary"))
+    assertNull(mapped.shadowColor)
+    assertEquals(FontStyle.Normal, mapped.fontStyle)
+    assertEquals(TextDecoration.None, mapped.textDecoration)
+    assertEquals(TextOverflow.Clip, mapped.overflow)
   }
 
   @Test

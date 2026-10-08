@@ -103,12 +103,16 @@ data class OverlayStyle(
   val maxHeight: Double? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
-  /** A dp number or a Material Shapes token. */
+  /** A dp number, a Material Shapes token, or per-corner dp radii. */
   val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
   val elevation: Double? = null,
+  /** Hex or colour role tinting the `elevation` shadow; absent keeps the platform shadow colour. */
+  val shadowColor: String? = null,
   val gradient: OverlayGradient? = null,
   val aspectRatio: Double? = null,
+  /** A dp draw offset; it moves the drawn and touchable node without changing its layout slot. */
+  val offset: OverlayOffset? = null,
   val alpha: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
@@ -118,6 +122,16 @@ data class OverlayStyle(
   val color: String? = null,
   val textAlign: String? = null,
   val maxLines: Int? = null,
+  /** Positive sp between baselines. */
+  val lineHeight: Double? = null,
+  /** sp added between letters; negative tightens. */
+  val letterSpacing: Double? = null,
+  /** `none`, `underline`, `lineThrough` or `underlineLineThrough`. */
+  val textDecoration: String? = null,
+  /** `normal` or `italic`. */
+  val fontStyle: String? = null,
+  /** How text past `maxLines` or its width ends: `clip` (default), `ellipsis` or `visible`. */
+  val overflow: String? = null,
   val fontFamily: OverlayFontFamily? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,

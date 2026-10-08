@@ -57,6 +57,39 @@ describe("overlay node contract parity", () => {
     expect(contractFields).toEqual(expect.arrayContaining(COMMON_NODE_FIELDS));
   });
 
+  test("style has the same fields in Zod and the contract", () => {
+    const union = (overlayNodeSchema as unknown as z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>)
+      .schema;
+    const box = (union.options as z.AnyZodObject[])[0];
+    const style = (box.shape.style as z.ZodOptional<z.AnyZodObject>).unwrap();
+    const contractStyle = contract.definitions.style.fields as unknown as ContractFields;
+    expect(Object.keys(style.shape).sort()).toEqual(Object.keys(contractStyle).sort());
+  });
+
+  test("per-corner radii and text polish pass both validators and reject the same inputs", () => {
+    const accepted = spec({
+      type: "text",
+      text: "t",
+      style: {
+        cornerRadius: { topStart: 12, bottomEnd: 0 },
+        shadowColor: "primary",
+        offset: { x: 1, y: -1 },
+        lineHeight: 20,
+        letterSpacing: -0.5,
+        textDecoration: "lineThrough",
+        fontStyle: "italic",
+        overflow: "ellipsis",
+      },
+    });
+    expect(validateOverlaySpec(accepted)).toMatchObject({ success: true });
+    expect(overlaySpecSchema.safeParse(accepted).success).toBe(true);
+    for (const cornerRadius of [{ top: 1 }, { topEnd: -1 }, { topEnd: "large" }]) {
+      const rejected = spec({ type: "text", text: "t", style: { cornerRadius } });
+      expect(validateOverlaySpec(rejected)).toMatchObject({ success: false });
+      expect(overlaySpecSchema.safeParse(rejected).success).toBe(false);
+    }
+  });
+
   test.each(["switch", "checkbox", "button"])("%s accepts transition in both validators", (t) => {
     const node = t === "button" ? { type: t, label: "Go" } : { type: t, stateKey: "on" };
     const candidate = spec({ ...node, transition: "fade" }, { on: false });

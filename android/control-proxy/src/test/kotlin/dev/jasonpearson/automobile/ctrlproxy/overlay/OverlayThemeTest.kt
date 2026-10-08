@@ -297,6 +297,27 @@ class OverlayThemeTest {
   }
 
   @Test
+  fun `per-corner radii decode, round-trip and render with omitted corners square`() {
+    val json = kotlinx.serialization.json.Json
+    val corners =
+      json.decodeFromString(OverlayCornerRadiusSerializer, """{"topStart":16,"topEnd":4.5}""")
+    assertEquals(OverlayCornerRadius.Corners(topStart = 16.0, topEnd = 4.5), corners)
+    assertEquals(
+      """{"topStart":16.0,"topEnd":4.5}""",
+      json.encodeToString(OverlayCornerRadiusSerializer, corners),
+    )
+    assertEquals(
+      RoundedCornerShape(topStart = 16.dp, topEnd = 4.5.dp, bottomEnd = 0.dp, bottomStart = 0.dp),
+      overlayCornerShape(Shapes(), corners),
+    )
+    for (bad in listOf("""{"top":1}""", """{"topStart":-1}""", """{"topStart":"4"}""")) {
+      assertThrows(bad, kotlinx.serialization.SerializationException::class.java) {
+        json.decodeFromString(OverlayCornerRadiusSerializer, bad)
+      }
+    }
+  }
+
+  @Test
   fun `host dismiss colours are translucent and contrast with the scheme`() {
     val dark = overlayDismissColors(true)
     val light = overlayDismissColors(false)

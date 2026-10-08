@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "offset": {
+          "x": 4
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.offset.y"
+}

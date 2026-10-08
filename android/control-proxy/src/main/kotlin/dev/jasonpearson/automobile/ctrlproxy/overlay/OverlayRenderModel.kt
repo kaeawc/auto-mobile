@@ -4,8 +4,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
@@ -25,6 +28,11 @@ data class OverlayRenderStyle(
   /** Font asset id when `fontFamily` is `{asset}`; [fontFamily] is then only the fallback. */
   val fontAsset: String? = null,
   val textAlign: TextAlign,
+  /** Hex `shadowColor`; a role name resolves against the theme during composition. */
+  val shadowColor: Color? = null,
+  val fontStyle: FontStyle = FontStyle.Normal,
+  val textDecoration: TextDecoration = TextDecoration.None,
+  val overflow: TextOverflow = TextOverflow.Clip,
 )
 
 data class OverlayRenderNode(
@@ -303,7 +311,24 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
       "justify" -> TextAlign.Justify
       else -> TextAlign.Start
     },
+    overlayHexColor(style.shadowColor),
+    if (style.fontStyle == "italic") FontStyle.Italic else FontStyle.Normal,
+    overlayTextDecoration(style.textDecoration),
+    when (style.overflow) {
+      "ellipsis" -> TextOverflow.Ellipsis
+      "visible" -> TextOverflow.Visible
+      else -> TextOverflow.Clip
+    },
   )
+
+private fun overlayTextDecoration(value: String?): TextDecoration =
+  when (value) {
+    "underline" -> TextDecoration.Underline
+    "lineThrough" -> TextDecoration.LineThrough
+    "underlineLineThrough" ->
+      TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+    else -> TextDecoration.None
+  }
 
 private fun builtInFontFamily(family: OverlayFontFamily?): FontFamily =
   when ((family as? OverlayFontFamily.Named)?.name) {
@@ -400,9 +425,18 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "padding.start" to style.padding?.start,
       "padding.end" to style.padding?.end,
       "cornerRadius" to (style.cornerRadius as? OverlayCornerRadius.Dp)?.dp,
+      "cornerRadius.topStart" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.topStart,
+      "cornerRadius.topEnd" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.topEnd,
+      "cornerRadius.bottomEnd" to (style.cornerRadius as? OverlayCornerRadius.Corners)?.bottomEnd,
+      "cornerRadius.bottomStart" to
+        (style.cornerRadius as? OverlayCornerRadius.Corners)?.bottomStart,
+      "offset.x" to style.offset?.x,
+      "offset.y" to style.offset?.y,
       "border.width" to style.border?.width,
       "spacing" to style.spacing,
       "textSize" to style.textSize,
+      "lineHeight" to style.lineHeight,
+      "letterSpacing" to style.letterSpacing,
     )
   for ((key, value) in sizes) {
     require(value == null || value.toFloat().isFinite()) {

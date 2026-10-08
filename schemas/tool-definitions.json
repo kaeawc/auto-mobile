@@ -18214,7 +18214,7 @@
           "enum": ["show", "dismiss", "status", "inspect", "awaitEvent"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", plus optional per-role hex overrides in colors such as colors.primary or colors.surface applied over that scheme in light and dark, typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp, none|extraSmall|small|medium|large|extraLarge|full, or per-corner {topStart,topEnd,bottomEnd,bottomStart} dp), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
           "type": "object",
           "properties": {
             "id": {
@@ -18778,6 +18778,28 @@
                                 "extraLarge",
                                 "full"
                               ]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "topStart": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "topEnd": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "bottomEnd": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "bottomStart": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           ]
                         },
@@ -18798,6 +18820,9 @@
                         "elevation": {
                           "type": "number",
                           "minimum": 0
+                        },
+                        "shadowColor": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
                         },
                         "gradient": {
                           "anyOf": [
@@ -18860,6 +18885,9 @@
                           "type": "number",
                           "minimum": 0.000001
                         },
+                        "offset": {
+                          "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
+                        },
                         "alpha": {
                           "type": "number",
                           "minimum": 0,
@@ -18914,6 +18942,25 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 2147483647
+                        },
+                        "lineHeight": {
+                          "type": "number",
+                          "minimum": 0.000001
+                        },
+                        "letterSpacing": {
+                          "type": "number"
+                        },
+                        "textDecoration": {
+                          "type": "string",
+                          "enum": ["none", "underline", "lineThrough", "underlineLineThrough"]
+                        },
+                        "fontStyle": {
+                          "type": "string",
+                          "enum": ["normal", "italic"]
+                        },
+                        "overflow": {
+                          "type": "string",
+                          "enum": ["clip", "ellipsis", "visible"]
                         },
                         "fontFamily": {
                           "anyOf": [

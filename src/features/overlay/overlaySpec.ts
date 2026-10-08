@@ -164,6 +164,15 @@ const CORNER_RADIUS_TOKENS = [
   "extraLarge",
   "full",
 ] as const;
+/** Per-corner dp radii; an omitted corner is square. */
+const cornerRadiiSchema = z
+  .object({
+    topStart: z.number().finite().min(0).optional(),
+    topEnd: z.number().finite().min(0).optional(),
+    bottomEnd: z.number().finite().min(0).optional(),
+    bottomStart: z.number().finite().min(0).optional(),
+  })
+  .strict();
 const colorValueSchema = z.union([
   z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
   z.enum(OVERLAY_COLOR_ROLES),
@@ -223,11 +232,15 @@ const styleSchema = z
     maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
     background: colorValueSchema.optional(),
-    cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
+    cornerRadius: z
+      .union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS), cornerRadiiSchema])
+      .optional(),
     border: borderSchema.optional(),
     elevation: z.number().finite().min(0).optional(),
+    shadowColor: colorValueSchema.optional(),
     gradient: gradientSchema.optional(),
     aspectRatio: z.number().finite().min(1e-6).optional(),
+    offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
       .enum([
@@ -251,6 +264,11 @@ const styleSchema = z
     color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
+    lineHeight: z.number().finite().min(1e-6).optional(),
+    letterSpacing: z.number().finite().optional(),
+    textDecoration: z.enum(["none", "underline", "lineThrough", "underlineLineThrough"]).optional(),
+    fontStyle: z.enum(["normal", "italic"]).optional(),
+    overflow: z.enum(["clip", "ellipsis", "visible"]).optional(),
     fontFamily: z
       .union([
         z.enum(["default", "sansSerif", "serif", "monospace"]),

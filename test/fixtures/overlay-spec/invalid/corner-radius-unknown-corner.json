@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "cornerRadius": {
+          "top": 4
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.cornerRadius.top"
+}

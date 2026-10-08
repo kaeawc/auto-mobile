@@ -458,6 +458,43 @@
         {
           "kind": "enum",
           "values": ["none", "extraSmall", "small", "medium", "large", "extraLarge", "full"]
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "topStart": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "topEnd": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "bottomEnd": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            },
+            "bottomStart": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0
+              },
+              "optional": true
+            }
+          }
         }
       ]
     },
@@ -554,6 +591,13 @@
           },
           "optional": true
         },
+        "shadowColor": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        },
         "gradient": {
           "rule": {
             "kind": "ref",
@@ -566,6 +610,13 @@
             "kind": "number",
             "integer": false,
             "min": 1e-6
+          },
+          "optional": true
+        },
+        "offset": {
+          "rule": {
+            "kind": "ref",
+            "name": "offset"
           },
           "optional": true
         },
@@ -647,6 +698,42 @@
             "integer": true,
             "min": 1,
             "max": 2147483647
+          },
+          "optional": true
+        },
+        "lineHeight": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.000001
+          },
+          "optional": true
+        },
+        "letterSpacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "textDecoration": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "underline", "lineThrough", "underlineLineThrough"]
+          },
+          "optional": true
+        },
+        "fontStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["normal", "italic"]
+          },
+          "optional": true
+        },
+        "overflow": {
+          "rule": {
+            "kind": "enum",
+            "values": ["clip", "ellipsis", "visible"]
           },
           "optional": true
         },

@@ -108,6 +108,45 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `style has the same fields in the Kotlin model and the shared contract`() {
+    val contract =
+      Json.parseToJsonElement(
+          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+            .readBytes()
+            .decodeToString(),
+        )
+        .jsonObject
+    val fields =
+      contract
+        .getValue("definitions")
+        .jsonObject
+        .getValue("style")
+        .jsonObject
+        .getValue("fields")
+        .jsonObject
+        .keys
+    val descriptor = OverlayStyle.serializer().descriptor
+    assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
+  }
+
+  @Test
+  fun `per-corner radii accept only the four named nonnegative corners`() {
+    fun spec(radius: String) =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},""" +
+        """"root":{"type":"box","children":[],"style":{"cornerRadius":$radius}}}"""
+    val accepted = OverlaySpecValidator.validate(spec("""{"topStart":12,"bottomEnd":0}"""))
+    assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
+    assertEquals(
+      OverlayCornerRadius.Corners(topStart = 12.0, bottomEnd = 0.0),
+      (accepted as OverlaySpecValidation.Success).spec.root.style?.cornerRadius,
+    )
+    for (bad in listOf("""{"top":1}""", """{"topEnd":-1}""", """{"topEnd":"large"}""")) {
+      val rejected = OverlaySpecValidator.validate(spec(bad))
+      assertTrue(rejected is OverlaySpecValidation.Failure, bad)
+    }
+  }
+
+  @Test
   fun `button and list item icons accept the full icon set`() {
     for (root in
       listOf(

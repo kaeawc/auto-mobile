@@ -460,7 +460,10 @@ internal fun overlayResolveColor(scheme: ColorScheme, literal: Color?, spec: Str
 internal fun overlayThemedColor(literal: Color?, spec: String?): Color? =
   overlayResolveColor(MaterialTheme.colorScheme, literal, spec)
 
-/** A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step. */
+/**
+ * A `cornerRadius` as a shape: dp as a rounded corner, a token as the theme's Shapes step, and
+ * per-corner radii as a rounded shape with each omitted corner square.
+ */
 internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Shape =
   when (radius) {
     is OverlayCornerRadius.Dp -> RoundedCornerShape(radius.dp.toFloat().dp)
@@ -474,6 +477,13 @@ internal fun overlayCornerShape(shapes: Shapes, radius: OverlayCornerRadius): Sh
         "full" -> RoundedCornerShape(percent = FULL_CORNER_PERCENT)
         else -> RoundedCornerShape(0.dp)
       }
+    is OverlayCornerRadius.Corners ->
+      RoundedCornerShape(
+        topStart = (radius.topStart ?: 0.0).toFloat().dp,
+        topEnd = (radius.topEnd ?: 0.0).toFloat().dp,
+        bottomEnd = (radius.bottomEnd ?: 0.0).toFloat().dp,
+        bottomStart = (radius.bottomStart ?: 0.0).toFloat().dp,
+      )
   }
 
 /** Material You colours need API 31; older devices fall through to the seed or baseline. */

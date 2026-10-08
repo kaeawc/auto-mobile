@@ -163,7 +163,9 @@ one with `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`) before it copies the app to
 signed `.app` to skip the download. The exit codes match the `activate` wrapper
 above. `auto-mobile --cli doctor` reports the same states.
 
-Initial extension and filter approval require macOS interaction. A timeout is an
+Initial extension and filter approval require macOS interaction, unless the Mac
+is MDM-enrolled and has the committed profile from
+[Managed Macs and CI runners](../../docs/using/managed-macs.md) installed (#10595). A timeout is an
 uncertain installation result: inspect `status` and System Settings before
 retrying. Filter configuration acknowledgement alone never reports readiness:
 the controller only reports `ready` after an authenticated read-back. Because

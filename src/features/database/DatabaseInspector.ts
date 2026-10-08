@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice } from "../../models";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
 import { parseJsonKeepingBigIntegers } from "./bigIntegerJson";
 
@@ -95,9 +96,13 @@ export class DatabaseInspector {
    */
   private static readonly BUNDLE_KEYS = ["success", "errorType", "error", "result"];
 
+  /** Pause before the single retry of a DISABLED reply from a cold-started app (#10210). */
+  static readonly COLD_START_RETRY_DELAY_MS = 500;
+
   constructor(
     private device: BootedDevice,
     private adb: AdbExecutor,
+    private timer: Pick<Timer, "sleep"> = defaultTimer,
   ) {}
 
   /**
@@ -177,11 +182,49 @@ export class DatabaseInspector {
       }
     }
 
+    // Read before the call: the call itself starts a dead app's process.
+    const wasRunning = await this.isAppProcessRunning(appId);
+    try {
+      return await this.runContentCall<T>(cmd);
+    } catch (error) {
+      if (wasRunning || !isInspectionDisabled(error)) {
+        throw error;
+      }
+      // A provider call into an app without a process starts that process and can land before
+      // the SDK enables inspection (#10210). The first call already started it: retry once.
+      await this.timer.sleep(DatabaseInspector.COLD_START_RETRY_DELAY_MS);
+      try {
+        return await this.runContentCall<T>(cmd);
+      } catch (retryError) {
+        if (!isInspectionDisabled(retryError)) {
+          throw retryError;
+        }
+        throw new ActionableError(
+          `Database error (DISABLED): ${appId} was not running, so this request started its process, but database inspection did not become available. Launch the app first (launchApp) and retry.`,
+          { cause: retryError },
+        );
+      }
+    }
+  }
+
+  private async runContentCall<T>(cmd: string): Promise<T> {
     const result = await this.adb.executeCommand(cmd);
     const output = [result.stdout, result.stderr]
       .filter((part) => part.trim().length > 0)
       .join("\n");
     return this.parseContentCallResult<T>(output);
+  }
+
+  /** True when the app has a live process; a failed probe counts as not running. */
+  private async isAppProcessRunning(appId: string): Promise<boolean> {
+    try {
+      const result = await this.adb.executeCommand(`shell pidof ${shellQuote(appId)}`);
+      return result.stdout.trim().length > 0;
+    } catch (error) {
+      // pidof exits non-zero when no process matches; that is the expected "not running" answer.
+      logger.debug(`pidof ${appId} found no process: ${error}`);
+      return false;
+    }
   }
 
   /**
@@ -369,4 +412,10 @@ export class DatabaseInspector {
 
     return null;
   }
+}
+
+const DISABLED_ERROR_PREFIX = "Database error (DISABLED):";
+
+function isInspectionDisabled(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith(DISABLED_ERROR_PREFIX);
 }

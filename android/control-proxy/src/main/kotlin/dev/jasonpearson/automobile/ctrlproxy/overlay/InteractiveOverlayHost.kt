@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import android.view.Display
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -29,6 +30,7 @@ import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
@@ -186,7 +188,10 @@ class DefaultInteractiveOverlayHost(
     val displayId: Int,
     var params: WindowManager.LayoutParams,
     var request: InteractiveOverlayRequest,
-  )
+  ) {
+    /** A floating window's screen position as its anchored root last placed it (#9316). */
+    var anchoredOrigin: IntOffset? = null
+  }
 
   @Volatile private var window: Window? = null
   @Volatile private var placement: OverlayPlacement? = null
@@ -252,6 +257,8 @@ class DefaultInteractiveOverlayHost(
     if (touchThroughToken != null) {
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     }
+    // New content places its own anchored root again, so a replaced spec starts from its placement.
+    inPlace?.anchoredOrigin = null
     return if (inPlace != null) updateInPlace(inPlace, request, params)
     else addWindow(target, request, params, replacing = current)
   }
@@ -333,10 +340,46 @@ class DefaultInteractiveOverlayHost(
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
     current.view.alpha = overlayHostChrome(request).windowAlpha
     val target = current.target
+    val geometry = windowGeometry(current)
     current.view.setContent {
-      InteractiveOverlayWindowContent(request) {
-        overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+      CompositionLocalProvider(LocalOverlayWindowGeometry provides geometry) {
+        InteractiveOverlayWindowContent(request) {
+          overlayInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
+        }
       }
+    }
+  }
+
+  /**
+   * Anchors are screen coordinates: nodes subtract the window's screen origin. A floating window
+   * follows its anchored root instead, so it covers the anchor and nothing else (#9316).
+   */
+  private fun windowGeometry(current: Window): OverlayWindowGeometry =
+    OverlayWindowGeometry(
+      originOnScreen = { overlayViewWindowOrigin(current.view) },
+      moveTo =
+        if (current.request.placement is OverlayPlacement.Floating)
+          { origin ->
+            moveAnchored(current, origin)
+          }
+        else null,
+    )
+
+  /** The current window's geometry, as its content sees it; null without a window. */
+  internal fun currentWindowGeometry(): OverlayWindowGeometry? = window?.let(::windowGeometry)
+
+  /**
+   * Called from layout, so the window update is posted rather than re-entering a traversal. An
+   * unchanged origin is ignored, which also ends the relayout the move itself causes.
+   */
+  private fun moveAnchored(current: Window, origin: IntOffset) {
+    if (current.anchoredOrigin == origin) return
+    current.anchoredOrigin = origin
+    mainThread.post {
+      if (window !== current || current.anchoredOrigin != origin) return@post
+      val params = copyParams(current.params)
+      applyAnchoredOrigin(params, origin)
+      update(current, params)
     }
   }
 
@@ -355,6 +398,7 @@ class DefaultInteractiveOverlayHost(
         sdkInt,
         current.request.layer,
       )
+    current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
     return update(current, params)
@@ -500,6 +544,13 @@ class DefaultInteractiveOverlayHost(
   }
 }
 
+/** Places a floating window's top-start corner at [origin], in screen px. */
+private fun applyAnchoredOrigin(params: WindowManager.LayoutParams, origin: IntOffset) {
+  params.gravity = Gravity.TOP or Gravity.START
+  params.x = origin.x
+  params.y = origin.y
+}
+
 enum class OverlayBackDecision {
   /** Not ours: let the view tree and the platform handle the key. */
   PASS,
@@ -600,7 +651,7 @@ fun overlayHostChrome(request: InteractiveOverlayRequest): OverlayHostChrome {
 }
 
 @Composable
-private fun InteractiveOverlayWindowContent(
+internal fun InteractiveOverlayWindowContent(
   request: InteractiveOverlayRequest,
   insetFloor: () -> OverlayInsetFloor,
 ) {

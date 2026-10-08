@@ -913,6 +913,13 @@ export const OVERLAY_PERSISTENCE_REPLAY_CAPABILITY = "overlay_persistence_replay
 export const OVERLAY_SHOW_IN_PLACE_CAPABILITY = "overlay_show_in_place_v1";
 
 /**
+ * Advertised by a CtrlProxy whose overlay renderer lays an anchored node out at its screen-space dp
+ * bounds, relative to its own window's origin (#9316). An older device decodes anchors and ignores
+ * them, so the node would silently render at its normal position.
+ */
+export const OVERLAY_ANCHOR_CAPABILITY = "overlay_anchor_v1";
+
+/**
  * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
  * with `set_network_mock_rules_result` naming the rules the app's regex engine rejected (#10101).
  * The host only waits for that reply when the flag is present.
@@ -945,6 +952,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   OVERLAY_SHOW_IN_PLACE_CAPABILITY,
+  OVERLAY_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   OVERLAY_WINDOW_METADATA_CAPABILITY,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,

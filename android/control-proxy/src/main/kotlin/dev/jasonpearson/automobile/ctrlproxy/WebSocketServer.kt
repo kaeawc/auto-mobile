@@ -343,6 +343,10 @@ class WebSocketServer(
     // show_overlay replaces a same-id overlay in place (display and pager pages kept) unless reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
     add("overlay_show_in_place_v1")
+    // Overlay nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
+    // window's own origin. Older APKs decode anchors and ignore them, so hosts refuse anchors
+    // there.
+    add("overlay_anchor_v1")
     // Window entries for CtrlProxy's own interactive overlay carry overlayPlacement and
     // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
     // send them and the host falls back to bounds.

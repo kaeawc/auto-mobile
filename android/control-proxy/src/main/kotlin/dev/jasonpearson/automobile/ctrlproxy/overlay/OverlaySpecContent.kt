@@ -97,7 +97,7 @@ fun OverlaySpecContent(
 ) {
   OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
-      RenderOverlayNode(root, interact)
+      RenderOverlayNode(root, interact, windowRoot = true)
       modalOverlaySheets(root).forEach { node ->
         key(node.identity) { RenderOverlayModal(node, interact) }
       }
@@ -131,6 +131,7 @@ private fun RenderOverlayNode(
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
 ) {
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
@@ -141,10 +142,10 @@ private fun RenderOverlayNode(
       enter = overlayEnterTransition(node.source.transition),
       exit = overlayExitTransition(node.source.transition),
     ) {
-      RenderOverlayNodeContent(node, interact, weightAxis = weightAxis)
+      RenderOverlayNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis)
+    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
   }
 }
 
@@ -154,8 +155,9 @@ private fun RenderOverlayNodeContent(
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
 ) {
-  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis))
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis, windowRoot))
   // Containers whose children can appear, disappear or change animate their size with them.
   val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
@@ -506,6 +508,7 @@ private fun overlayNodeModifier(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
   weightAxis: OverlayWeightAxis? = null,
+  windowRoot: Boolean = false,
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
@@ -517,31 +520,22 @@ private fun overlayNodeModifier(
       node.role !in OVERLAY_SELECTION_ROLES &&
       node.role !in OVERLAY_MATERIAL_ROLES
   var modifier: Modifier = Modifier
+  // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
+  // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
+  val anchor = node.source?.anchor as? OverlayBoundsAnchor
+  if (anchor != null) {
+    modifier = modifier.overlayAnchor(anchor, currentOverlayWindowGeometry(), windowRoot)
+  }
   // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
   // keep the layout slot it would have had.
   style.offset?.let { modifier = modifier.offset(it.x.toFloat().dp, it.y.toFloat().dp) }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
-  // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
-  // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
-  modifier = sizeConstraintModifier(modifier, style)
-  modifier =
-    dimensionModifier(
-      modifier,
-      style.width,
-      horizontal = true,
-      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
-    )
-  modifier =
-    dimensionModifier(
-      modifier,
-      style.height,
-      horizontal = false,
-      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
-    )
+  // A cover anchor sizes the node to the anchor bounds: authored sizes would only wrap or clamp it.
+  if (anchor == null || !overlayAnchorCovers(anchor))
+    modifier = authoredSizeModifier(modifier, style, weightAxis)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
-  style.aspectRatio?.let { modifier = modifier.aspectRatio(it.toFloat()) }
   val shape =
     overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
   // Before clip/background/border so the shadow is drawn outside the clipped content.
@@ -726,6 +720,31 @@ internal fun overlayPickerValue(node: OverlayRenderNode): String? =
  * A node with no authored size on the main axis of its Row/Column `weight` ([weighted]) takes the
  * weighted space: wrapping its content there would shrink an empty box to nothing (#10537).
  */
+private fun authoredSizeModifier(
+  modifier: Modifier,
+  style: OverlayStyle,
+  weightAxis: OverlayWeightAxis?,
+): Modifier {
+  // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
+  // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
+  var sized = sizeConstraintModifier(modifier, style)
+  sized =
+    dimensionModifier(
+      sized,
+      style.width,
+      horizontal = true,
+      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
+    )
+  sized =
+    dimensionModifier(
+      sized,
+      style.height,
+      horizontal = false,
+      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
+    )
+  return style.aspectRatio?.let { sized.aspectRatio(it.toFloat()) } ?: sized
+}
+
 private fun dimensionModifier(
   modifier: Modifier,
   size: OverlayDimension?,

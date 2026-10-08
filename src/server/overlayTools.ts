@@ -41,6 +41,7 @@ import {
   overlayInspectUnsupportedMessage,
 } from "../features/observe/android/CtrlProxyOverlays";
 import {
+  OVERLAY_ANCHOR_CAPABILITY,
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
@@ -54,6 +55,15 @@ import type {
 } from "../features/observe/android/ctrlProxyProtocol";
 import { overlaySpecSchema, type OverlaySpec } from "../features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../features/overlay/overlayValidation";
+import {
+  hasElementAnchors,
+  hasOverlayAnchors,
+  overlayAnchorPlacementError,
+  resolveOverlayAnchors,
+  type ResolvedOverlayAnchor,
+} from "../features/overlay/overlayAnchors";
+import type { HierarchyCapture } from "../features/observe/HierarchyCapture";
+import { createDeviceHierarchyCapture } from "../features/observe/DeviceHierarchyCapture";
 import {
   grantOverlayAppLayer,
   overlayWindowOptionsUnsupportedMessage,
@@ -444,6 +454,35 @@ export const overlayOutputSchema = z.object({
     .describe(
       "show succeeded but needs attention: names what to do about missingAssets, or that display was ignored by a same-id show",
     ),
+  anchors: z
+    .array(
+      z.object({
+        path: z.string(),
+        alignment: z.enum(["cover", "top", "bottom", "start", "end"]),
+        boundsPx: z.object({
+          left: z.number(),
+          top: z.number(),
+          right: z.number(),
+          bottom: z.number(),
+        }),
+        bounds: z.object({
+          x: z.number(),
+          y: z.number(),
+          width: z.number(),
+          height: z.number(),
+        }),
+      }),
+    )
+    .optional()
+    .describe(
+      "show with element anchors: each anchored node's path and the app element bounds it was resolved to, in px (as observe reports them) and in dp. Resolved once at show; the overlay does not follow later scrolling or layout, so show again to re-anchor.",
+    ),
+  hierarchyUpdatedAt: z
+    .number()
+    .optional()
+    .describe(
+      "show with element anchors: device timestamp of the hierarchy they were resolved against",
+    ),
   deviceDroppedEvents: z
     .number()
     .int()
@@ -496,6 +535,8 @@ export interface OverlayToolDependencies {
   lifecycle?: OverlayEventLifecycle;
   /** Retires the device's cached observation after a show or dismiss lands; tests inject a fake. */
   cacheInvalidator?: DeviceWindowCacheInvalidator;
+  /** Captures the hierarchy element anchors resolve against; tests inject captured hierarchies. */
+  anchorHierarchyCaptureFactory?: (device: BootedDevice) => HierarchyCapture;
 }
 /** MCP name of the on-device prototype tool; `overlay` is its deprecated alias (#10495). */
 export const PROTOTYPE_TOOL_NAME = "prototype";
@@ -591,6 +632,98 @@ async function prepareWindowOptions(
     signal?.throwIfAborted();
   }
   return undefined;
+}
+
+interface AnchorStage {
+  /** The spec to send, element anchors replaced by bounds anchors; absent when unchanged. */
+  spec?: OverlaySpec;
+  anchors?: ResolvedOverlayAnchor[];
+  hierarchyUpdatedAt?: number;
+  failure?: OverlayResult;
+}
+
+const ANCHOR_UNSUPPORTED_MESSAGE = `The connected CtrlProxy does not advertise ${OVERLAY_ANCHOR_CAPABILITY}, so it would ignore anchor and draw the node at its normal position. Nothing was shown. Update the connected CtrlProxy, or remove anchor.`;
+const ANCHOR_DISPLAY_MESSAGE =
+  "Element anchors resolve against the default display's app hierarchy, so they cannot be shown on another display. Nothing was shown. Omit display, or use a bounds anchor in dp.";
+
+/** Throws when the device would ignore the spec's anchors or its placement would clip them. */
+async function assertAnchorsShowable(
+  android: Pick<AndroidOverlayTransport, "supportsCommand">,
+  spec: OverlaySpec,
+  displayId: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!(await android.supportsCommand(OVERLAY_ANCHOR_CAPABILITY))) {
+    throw new ActionableError(ANCHOR_UNSUPPORTED_MESSAGE);
+  }
+  signal?.throwIfAborted();
+  const placementError = overlayAnchorPlacementError(spec);
+  if (placementError) {
+    throw new ActionableError(placementError);
+  }
+  if (displayId && hasElementAnchors(spec)) {
+    throw new ActionableError(ANCHOR_DISPLAY_MESSAGE);
+  }
+}
+
+/** Resolves element anchors against a fresh app hierarchy; bounds anchors pass through. */
+async function resolveElementAnchors(
+  device: BootedDevice,
+  spec: OverlaySpec,
+  request: { timeoutMs?: number; signal?: AbortSignal },
+  dependencies: Pick<OverlayToolDependencies, "anchorHierarchyCaptureFactory">,
+): Promise<AnchorStage> {
+  if (!hasElementAnchors(spec)) {
+    return {};
+  }
+  const capture = (
+    dependencies.anchorHierarchyCaptureFactory ?? ((d) => createDeviceHierarchyCapture(d))
+  )(device);
+  const snapshot = await capture.capture({ freshness: "fresh", ...request });
+  const resolution = resolveOverlayAnchors(spec, snapshot);
+  return {
+    spec: resolution.spec,
+    anchors: resolution.anchors,
+    ...(resolution.hierarchyUpdatedAt === undefined
+      ? {}
+      : { hierarchyUpdatedAt: resolution.hierarchyUpdatedAt }),
+  };
+}
+
+/**
+ * Refuses, before anything is shown, an anchored spec the device would silently mis-place, and
+ * resolves each element anchor against a fresh app hierarchy (the overlay excluded), converting its
+ * px bounds to dp once with the display density (#9316). A missing, ambiguous or off-screen
+ * element fails the show.
+ */
+async function resolveShowAnchors(
+  target: OverlayTarget,
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+  context: { displayId?: number; signal?: AbortSignal },
+  dependencies: Pick<OverlayToolDependencies, "anchorHierarchyCaptureFactory">,
+): Promise<AnchorStage> {
+  const { displayId, signal } = context;
+  const spec = args.action === "show" ? (args.spec as OverlaySpec | undefined) : undefined;
+  // overlayPlatformError refuses anchors off Android, so only Android reaches the device checks.
+  if (!spec || !target.android || !hasOverlayAnchors(spec)) {
+    return {};
+  }
+  try {
+    await assertAnchorsShowable(target.android, spec, displayId, signal);
+    return await resolveElementAnchors(
+      device,
+      spec,
+      { timeoutMs: args.timeoutMs, signal },
+      dependencies,
+    );
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`[overlay] anchor resolution refused the show: ${errorMessage(error)}`);
+    return {
+      failure: { success: false, error: toActionableError(error, "Overlay anchor failed").message },
+    };
+  }
 }
 
 interface AssetStage {
@@ -771,21 +904,38 @@ async function resolveShowDisplay(
   }
 }
 
-/** Display resolution, then window-option support: either refusal ends the call unsent. */
+/**
+ * Display resolution, then window-option support, then anchor resolution: any refusal ends the call
+ * unsent. An in-place show stays on [show.shownDisplayId], so anchors are checked against that.
+ */
 async function preflightMutation(
-  inPlace: boolean,
+  show: { inPlace: boolean; shownDisplayId?: number },
   target: OverlayTarget,
   device: BootedDevice,
   args: z.infer<typeof overlaySchema>,
-  dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
+  dependencies: Pick<
+    OverlayToolDependencies,
+    "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+  >,
   signal: AbortSignal | undefined,
-): Promise<{ displayId?: number; failure?: OverlayResult }> {
-  const resolved = await resolveMutationDisplay(inPlace, target, device, args, dependencies);
+): Promise<AnchorStage & { displayId?: number }> {
+  const resolved = await resolveMutationDisplay(show.inPlace, target, device, args, dependencies);
   if (resolved.failure) {
     return resolved;
   }
   const failure = await prepareWindowOptions(target, device, args, dependencies, signal);
-  return failure ? { displayId: resolved.displayId, failure } : resolved;
+  if (failure) {
+    return { displayId: resolved.displayId, failure };
+  }
+  const anchorDisplayId = show.inPlace ? show.shownDisplayId : resolved.displayId;
+  const anchors = await resolveShowAnchors(
+    target,
+    device,
+    args,
+    { displayId: anchorDisplayId, signal },
+    dependencies,
+  );
+  return { ...resolved, ...anchors };
 }
 
 function clearMutationEvents(
@@ -859,7 +1009,10 @@ type OverlayHandlerDependencies = {
   commits: OverlayCommitGenerations;
   cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
-} & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
+} & Pick<
+  OverlayToolDependencies,
+  "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
+>;
 type OverlayOutput = z.infer<typeof overlayOutputSchema>;
 
 function mutationTarget(
@@ -914,13 +1067,15 @@ async function performMutation(
   // Every display lookup and window-option check happens before staging; nothing is re-resolved
   // after dispatch. A refused show must not reset the event epoch of an overlay still on screen.
   const resolved = await preflightMutation(
-    inPlace,
+    { inPlace, shownDisplayId: shown?.displayId },
     overlayTarget,
     device,
     args,
     dependencies,
     signal,
   );
+  // The device is sent resolved bounds anchors; host status keeps the authored spec's identity.
+  const sendArgs = resolved.spec ? { ...args, spec: resolved.spec } : args;
   if (!resolved.failure) {
     startFreshShowEvents(events, scope, source, { target, args, inPlace });
   }
@@ -931,12 +1086,17 @@ async function performMutation(
   const stage = await stageUnlessRefused(
     resolved.failure,
     overlayTarget,
-    args,
+    sendArgs,
     assetReaders,
     signal,
   );
-  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId, () =>
-    isSuperseded(commits, scope, target, generation),
+  const { result, warning } = await sendOverlay(
+    overlayTarget,
+    sendArgs,
+    stage,
+    signal,
+    displayId,
+    () => isSuperseded(commits, scope, target, generation),
   );
   retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
@@ -955,6 +1115,7 @@ async function performMutation(
     ...(result.error ? { error: result.error } : {}),
     lastResult,
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
+    ...anchorsOutput(resolved),
     ...missingAssetsOutput(result, [warning, placed.warning], legacy),
   };
 }
@@ -1149,6 +1310,18 @@ function placedDisplay(
     displayId: shown.displayId,
     warning: `display was ignored: overlay ${shown.id} is already shown on ${where}, and a show with the same id replaces it in place there. Pass reset: true to show it fresh on the requested display.`,
   };
+}
+
+/** Element anchors as resolved, also reported when the show then failed, so the caller can re-anchor. */
+function anchorsOutput(stage: AnchorStage): Pick<OverlayOutput, "anchors" | "hierarchyUpdatedAt"> {
+  return stage.anchors?.length
+    ? {
+        anchors: stage.anchors,
+        ...(stage.hierarchyUpdatedAt === undefined
+          ? {}
+          : { hierarchyUpdatedAt: stage.hierarchyUpdatedAt }),
+      }
+    : {};
 }
 
 /** [landedWarning] is reported only when the mutation succeeded. */
@@ -1399,6 +1572,11 @@ function overlayPlatformError(
     if (options.appLayer || options.devicePersistence) {
       return new ActionableError(
         'window.layer "app" and window.persistence "device" are Android only; omit them on iOS.',
+      );
+    }
+    if (hasOverlayAnchors(args.spec as OverlaySpec)) {
+      return new ActionableError(
+        "anchor is Android only: the iOS overlay agent would draw the node at its normal position. Remove anchor on iOS.",
       );
     }
   }
@@ -1680,6 +1858,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       now: () => clock.now(),
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
+      anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
     };
     return responseFor(
       await performMutation(
@@ -1693,7 +1872,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.',
+    'Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/toggle/increment/decrement/dismiss. Sizes and anchors use dp. A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the overlay excluded) and converted to dp with the display density; a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp. Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

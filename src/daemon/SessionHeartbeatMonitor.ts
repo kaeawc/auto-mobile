@@ -20,6 +20,8 @@ export interface HeartbeatSessionSource {
    * and cannot have received heartbeats during (#10051). Never past `resumedAt`.
    */
   forgiveDaemonStall?(resumedAt: number, lostMs: number): number;
+  /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
+  setStallProbe?(probe: (() => void) | undefined): void;
 }
 
 type SessionHeartbeatReleaseReason =
@@ -93,6 +95,8 @@ export class SessionHeartbeatMonitor {
   private readonly stallThresholdMs: number;
   /** When the previous scan finished (or the monitor started); undefined until started. */
   private lastScanSettledAt: number | undefined;
+  /** A running scan has already judged its own lateness; a probe mid-scan would count scan time. */
+  private scanInFlight = false;
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -135,10 +139,12 @@ export class SessionHeartbeatMonitor {
 
   start(): void {
     this.lastScanSettledAt ??= this.timer.now();
+    this.sessions.setStallProbe?.(() => this.forgiveStallIfLate());
     this.interval.start();
   }
 
   async stop(): Promise<void> {
+    this.sessions.setStallProbe?.(undefined);
     const settled = await this.interval.stop();
     if (!settled) {
       logger.warn("Session heartbeat monitor did not settle before shutdown timeout");
@@ -170,11 +176,24 @@ export class SessionHeartbeatMonitor {
    * on the strength of that: every session's lease is moved forward by exactly the lateness.
    */
   private forgiveOwnStall(): void {
+    this.forgiveStallIfLate();
+  }
+
+  /**
+   * Idempotent form of the stall check, also run by the session source before each lazy expiry
+   * judgement (#10661). Once a stall is judged, the schedule watermark is moved so the overdue
+   * tick measures only what is still unaccounted for and forgiveness is never applied twice.
+   */
+  private forgiveStallIfLate(): void {
+    if (this.scanInFlight) {
+      return;
+    }
     const now = this.timer.now();
     const lateness = this.scanLatenessMs(now);
     if (lateness === undefined || lateness <= this.stallThresholdMs) {
       return;
     }
+    this.lastScanSettledAt = now - this.checkIntervalMs;
     const forgiven = this.sessions.forgiveDaemonStall?.(now, lateness) ?? 0;
     logger.warn(
       `Heartbeat monitor tick fired ${lateness}ms late; the daemon stalled, so ${forgiven} ` +
@@ -184,6 +203,7 @@ export class SessionHeartbeatMonitor {
 
   private async tickOnce(): Promise<void> {
     this.forgiveOwnStall();
+    this.scanInFlight = true;
     try {
       // Release idle/expired sessions promptly (e.g. autolocked devices whose idle
       // timeout has elapsed). Their idle timeout equals their heartbeat timeout, so
@@ -197,6 +217,7 @@ export class SessionHeartbeatMonitor {
         throw firstFailure.reason;
       }
     } finally {
+      this.scanInFlight = false;
       if (this.lastScanSettledAt !== undefined) {
         this.lastScanSettledAt = this.timer.now();
       }

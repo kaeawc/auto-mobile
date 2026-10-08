@@ -775,23 +775,17 @@ describe("overlay MCP tool", () => {
     ).toHaveLength(1);
   });
 
-  test.each(["show", "dismiss", "status", "awaitEvent"])(
-    "iOS %s fails with Android-only guidance",
-    async (action) => {
-      const input =
-        action === "show"
-          ? { action, spec }
-          : action === "dismiss"
-            ? { action, all: true }
-            : action === "awaitEvent"
-              ? { action, id: "panel" }
-              : { action };
-      const { response, payload } = await call(input, { ...device, platform: "ios" });
-      expect(response.isError).toBe(true);
-      expect(payload.error).toContain("Android only");
-      expect(client.getOverlayHistory()).toEqual([]);
-    },
-  );
+  test.each([
+    [{ action: "show", spec }, "launchApp with overlay: true"],
+    [{ action: "dismiss", all: true }, "launchApp with overlay: true"],
+    [{ action: "awaitEvent", id: "panel" }, "launchApp with overlay: true"],
+    [{ action: "show", spec, reset: true }, "reset is Android only"],
+  ])("iOS %o without an injected agent never reaches CtrlProxy", async (input, guidance) => {
+    const { response, payload } = await call(input, { ...device, platform: "ios" });
+    expect(response.isError).toBe(true);
+    expect(payload.error).toContain(guidance);
+    expect(client.getOverlayHistory()).toEqual([]);
+  });
 
   test.each([
     [{ ...spec, root: { type: "unknown" } }, "root.type", "text"],

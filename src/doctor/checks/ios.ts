@@ -51,6 +51,7 @@ import {
   NetworkFilterStatusInspector,
   type NetworkFilterHostStatus,
 } from "../../features/networkFilter/NetworkFilterInstaller";
+import { detectMdmEnrollment } from "./macMdmEnrollment";
 import { NETWORK_FILTER_INSTALL_COMMAND } from "../../features/networkFilter/networkFilterApp";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
@@ -1561,7 +1562,7 @@ const IOS_NETWORK_FILTER_CHECK = "iOS Network Filter";
 export async function checkIosNetworkFilter(
   dependencies: Pick<
     IosDoctorDependencies,
-    "platform" | "logger" | "networkFilterInspector"
+    "platform" | "logger" | "networkFilterInspector" | "execFile"
   > = createIosDoctorDependencies(),
   probe: DoctorProbeOptions = {},
 ): Promise<CheckResult> {
@@ -1590,10 +1591,34 @@ export async function checkIosNetworkFilter(
       recommendation: `Run \`${NETWORK_FILTER_INSTALL_COMMAND}\` to reinstall and reactivate it.`,
     };
   }
-  return classifyNetworkFilterStatus(status);
+  return classifyNetworkFilterStatus(status, () => isMdmEnrolled(dependencies, probe));
 }
 
-function classifyNetworkFilterStatus(status: NetworkFilterHostStatus): CheckResult {
+/** Best-effort: a failed probe means "unknown", which is treated as not managed. */
+async function isMdmEnrolled(
+  dependencies: Pick<IosDoctorDependencies, "logger" | "execFile">,
+  probe: DoctorProbeOptions,
+): Promise<boolean> {
+  try {
+    const currentProbe = remainingDoctorProbe(probe);
+    const enrollment = await awaitDoctorProbe(currentProbe, () =>
+      detectMdmEnrollment(dependencies.execFile, {
+        signal: currentProbe.signal,
+        timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      }),
+    );
+    return enrollment.enrolled;
+  } catch (error) {
+    // Enrollment only tailors the hint; fall back to the generic System Settings steps.
+    dependencies.logger.debug(`MDM enrollment probe failed: ${errorMessage(error)}`);
+    return false;
+  }
+}
+
+async function classifyNetworkFilterStatus(
+  status: NetworkFilterHostStatus,
+  isManaged: () => Promise<boolean>,
+): Promise<CheckResult> {
   const name = IOS_NETWORK_FILTER_CHECK;
   if (!status.installed) {
     return {
@@ -1615,7 +1640,10 @@ function classifyNetworkFilterStatus(status: NetworkFilterHostStatus): CheckResu
       value: "ready",
     };
   }
-  return networkFilterNotReady(status.report);
+  const state = status.report?.state;
+  // `unavailable` is what the controller reports while approval is still pending.
+  const pendingApproval = state === "approval_required" || state === "unavailable";
+  return networkFilterNotReady(status.report, pendingApproval ? await isManaged() : null);
 }
 
 function networkFilterVersionMismatch(status: NetworkFilterHostStatus): CheckResult {
@@ -1632,17 +1660,34 @@ function networkFilterVersionMismatch(status: NetworkFilterHostStatus): CheckRes
   };
 }
 
-function networkFilterNotReady(report: NetworkFilterHostStatus["report"]): CheckResult {
+const NETWORK_FILTER_MANAGED_MACS_URL = "https://kaeawc.github.io/auto-mobile/using/managed-macs/";
+const NETWORK_FILTER_MDM_PROFILE_PATH = "docs/assets/mdm/automobile-network-filter.mobileconfig";
+
+/** `managed` is null when the state cannot be waiting on approval. */
+function networkFilterNotReady(
+  report: NetworkFilterHostStatus["report"],
+  managed: boolean | null,
+): CheckResult {
   const state = report?.state ?? "unknown";
+  const base =
+    report?.nextSteps ??
+    `Run \`${NETWORK_FILTER_INSTALL_COMMAND}\` to activate it; macOS may then ask for approval in System Settings.`;
+  let recommendation = base;
+  if (managed === true) {
+    recommendation =
+      "This Mac is MDM-enrolled: ask your admin to pre-approve the filter with the " +
+      `${NETWORK_FILTER_MDM_PROFILE_PATH} profile (see ${NETWORK_FILTER_MANAGED_MACS_URL}). ` +
+      `Otherwise: ${base}`;
+  } else if (managed === false) {
+    recommendation = `${base} Managed Macs can pre-approve it via MDM: ${NETWORK_FILTER_MANAGED_MACS_URL}`;
+  }
   return {
     name: IOS_NETWORK_FILTER_CHECK,
     status: "warn",
     message: `Network Extension app installed but not ready (${state})`,
     value: state,
     detail: report?.detail,
-    recommendation:
-      report?.nextSteps ??
-      `Run \`${NETWORK_FILTER_INSTALL_COMMAND}\` to activate it; macOS may then ask for approval in System Settings.`,
+    recommendation,
   };
 }
 

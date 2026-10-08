@@ -286,6 +286,8 @@ export class IosCtrlProxyBuilder {
    */
   private buildInFlight: Promise<CtrlProxyIosBuildResult> | null = null;
   private buildWaiters = 0;
+  /** Platforms whose one-shot pre-launch cache repair ran and has not yet verified. */
+  private readonly failedRunnerRepairs = new Set<IOSCtrlProxyPlatform>();
   private readonly buildFlights = new SingleFlight<"build", CtrlProxyIosBuildResult>();
   // Settles when the latest flight has wound down, so a flight started after every
   // waiter abandoned its predecessor never overlaps that one's remaining work.
@@ -1701,8 +1703,87 @@ export class IosCtrlProxyBuilder {
       await this.requireLocalBuildProducts(platform);
     }
     await this.assertDerivedDataDirOwnedByCurrentUid();
-    await this.assertRunnerBinaryHash(platform, "pre-launch");
+    await this.assertRunnerHashOrRepairCache(platform);
     await this.verifyRunnerCodesign(platform);
+  }
+
+  /**
+   * Pre-launch runner hash gate with a one-shot cache repair (#10650). A
+   * mismatch that is not a stale-cache deferral invalidates the cached release
+   * entry (IPA, metadata, extracted tree), re-downloads and re-verifies the
+   * bundle once, and re-checks the hash. Local builds, vendored bundles, explicit
+   * runner SHA overrides and a disabled download have no trusted source to
+   * repair from, and a platform whose repair already failed is not retried, so
+   * this never loops; those paths fail closed with the recovery step.
+   */
+  private async assertRunnerHashOrRepairCache(platform: IOSCtrlProxyPlatform): Promise<void> {
+    try {
+      await this.assertRunnerBinaryHash(platform, "pre-launch");
+      this.failedRunnerRepairs.delete(platform);
+      return;
+    } catch (error) {
+      if (!(error instanceof ActionableError) || error instanceof CtrlProxyStaleRunnerCacheError) {
+        throw error;
+      }
+      const noSource = this.describeNoRepairSource();
+      if (noSource !== null || this.failedRunnerRepairs.has(platform)) {
+        throw this.withCacheRecoveryStep(error, noSource ?? "a previous re-download did not help");
+      }
+      logger.warn(
+        `[IOSCtrlProxyBuilder] Pre-launch runner hash mismatch for ${platform}; invalidating the cached bundle and re-downloading once`,
+        error,
+      );
+      this.failedRunnerRepairs.add(platform);
+      await this.invalidateCachedBundle();
+      const rebuilt = await this.build(platform);
+      if (!rebuilt.success) {
+        throw this.withCacheRecoveryStep(
+          error,
+          `re-download failed: ${rebuilt.error ?? "unknown"}`,
+        );
+      }
+      try {
+        await this.assertRunnerBinaryHash(platform, "pre-launch");
+      } catch (retryError) {
+        throw this.withCacheRecoveryStep(
+          retryError instanceof ActionableError ? retryError : error,
+          "the re-downloaded bundle still failed verification",
+        );
+      }
+      this.failedRunnerRepairs.delete(platform);
+    }
+  }
+
+  /** Why no trusted re-download source exists, or null when one does. */
+  private describeNoRepairSource(): string | null {
+    if (this.isLocalBuildMode()) {
+      return `${IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} is set, so the products are local builds`;
+    }
+    if (this.getBundlePathOverride() !== null) {
+      return "a vendored bundle path override (AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH/BUNDLE_PATH) is in use";
+    }
+    if (this.hasExplicitRunnerShaOverride()) {
+      return `${IOS_CTRL_PROXY_RUNNER_SHA256_ENV} pins a source-built runner`;
+    }
+    if (isTruthyEnvValue(process.env[SKIP_CTRL_PROXY_DOWNLOAD_ENV])) {
+      return `${SKIP_CTRL_PROXY_DOWNLOAD_ENV} disables downloads`;
+    }
+    return null;
+  }
+
+  private withCacheRecoveryStep(error: ActionableError, reason: string): ActionableError {
+    return new ActionableError(
+      `${error.message} Not repaired automatically: ${reason}. To recover, delete ` +
+        `${this.config.derivedDataPath} and ${this.config.bundleCacheDir} and retry ` +
+        `(the bundle is downloaded again).`,
+    );
+  }
+
+  private async invalidateCachedBundle(): Promise<void> {
+    await fs.rm(this.getBundlePath(), { force: true });
+    await fs.rm(this.getMetadataPath(), { force: true });
+    await this.cleanBuildArtifacts();
+    this.derivedLocalRunnerSha256.clear();
   }
 
   /**

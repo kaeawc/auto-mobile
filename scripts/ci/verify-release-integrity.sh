@@ -110,6 +110,7 @@ check "src/constants/release.ts registry[0].version" "$registry_version"
 runner_sha="$(bun "$RELEASE_READER" runnerSha256 "$RELEASE_TS")"
 runner_sha_target="$(bun "$RELEASE_READER" runnerSha256Target "$RELEASE_TS")"
 screen_capture_helper_sha="$(bun "$RELEASE_READER" screenCaptureHelperSha256 "$RELEASE_TS")"
+overlay_agent_sha="$(bun "$RELEASE_READER" overlayAgentSha256 "$RELEASE_TS")"
 network_filter_sha="$(bun "$RELEASE_READER" networkFilterSha256 "$RELEASE_TS")"
 
 if [ "$runner_sha_target" != "xctest" ]; then
@@ -156,6 +157,12 @@ else
   errors+=("registry[0].screenCaptureHelperSha256 must be a 64-char hex sha256, got '${screen_capture_helper_sha}'")
 fi
 
+if [[ "$overlay_agent_sha" =~ ^[a-f0-9]{64}$ ]]; then
+  echo "  OK  registry[0].overlayAgentSha256 populated"
+else
+  errors+=("registry[0].overlayAgentSha256 must be a 64-char hex sha256, got '${overlay_agent_sha}'")
+fi
+
 if [[ "$network_filter_sha" =~ ^[a-f0-9]{64}$ ]]; then
   echo "  OK  registry[0].networkFilterSha256 populated"
 else
@@ -170,7 +177,7 @@ if [ "${#errors[@]}" -gt 0 ]; then
   done
   echo ""
   echo "All manifests + the checksum registry + the git tag must name the same"
-  echo "version, and the iOS CtrlProxy plus screen-capture-helper and network-filter checksums must be populated, before releasing."
+  echo "version, and the iOS CtrlProxy plus screen-capture-helper, overlay-agent and network-filter checksums must be populated, before releasing."
   exit 1
 fi
 

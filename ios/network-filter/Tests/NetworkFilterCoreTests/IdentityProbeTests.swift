@@ -114,7 +114,10 @@ final class IdentityProbeTests: XCTestCase {
         let probe = IdentityProbe(resolver: resolver, processTable: FakeProcessTable())
         probe.record(sourceAppAuditToken: Data(count: 32), sourceProcessAuditToken: nil)
         var replies = 0
-        ProbeService(probe: probe).snapshot(version: 99, managedSimulators: noManagedSimulators) { data, error in
+        ProbeService(probe: probe, rules: NetworkRuleStore(clock: FakeMonotonicClock())).snapshot(
+            version: 99,
+            managedSimulators: noManagedSimulators
+        ) { data, error in
             replies += 1
             XCTAssertNil(data)
             XCTAssertNotNil(error)
@@ -127,7 +130,7 @@ final class IdentityProbeTests: XCTestCase {
         let probe = IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable())
         probe.record(sourceAppAuditToken: nil, sourceProcessAuditToken: nil)
         var response: Data?
-        let service = ProbeService(probe: probe)
+        let service = ProbeService(probe: probe, rules: NetworkRuleStore(clock: FakeMonotonicClock()))
         XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
         service.snapshot(version: IdentityProbe.version, managedSimulators: noManagedSimulators) { data, error in
             response = data
@@ -140,7 +143,10 @@ final class IdentityProbeTests: XCTestCase {
     }
 
     func testStoppedProviderRejectsLateStartupCompletion() {
-        let service = ProbeService(probe: IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable()))
+        let service = ProbeService(
+            probe: IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable()),
+            rules: NetworkRuleStore(clock: FakeMonotonicClock())
+        )
         let starting = service.stopOrBeginStartup()
         service.stopOrBeginStartup()
         XCTAssertFalse(service.finishStartup(generation: starting, succeeded: true))
@@ -154,7 +160,7 @@ final class IdentityProbeTests: XCTestCase {
         let resolver = FakeResolver()
         let probe = IdentityProbe(resolver: resolver, processTable: FakeProcessTable())
         probe.record(sourceAppAuditToken: Data(count: 32), sourceProcessAuditToken: nil)
-        let service = ProbeService(probe: probe)
+        let service = ProbeService(probe: probe, rules: NetworkRuleStore(clock: FakeMonotonicClock()))
         XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
         resolver.onResolve = {
             XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
@@ -173,7 +179,7 @@ final class IdentityProbeTests: XCTestCase {
         let probe = IdentityProbe(resolver: FakeResolver(), processTable: table)
         probe.record(sourceAppAuditToken: managedApp, sourceProcessAuditToken: managedApp)
         probe.record(sourceAppAuditToken: unmanagedApp, sourceProcessAuditToken: unmanagedApp)
-        let service = ProbeService(probe: probe)
+        let service = ProbeService(probe: probe, rules: NetworkRuleStore(clock: FakeMonotonicClock()))
         XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
         let managed =
             Data(#"[{"deviceSet":"\#(CapturedSimulator.defaultDeviceSet)","udid":"\#(CapturedSimulator.udid)"}]"#.utf8)
@@ -183,7 +189,7 @@ final class IdentityProbeTests: XCTestCase {
             XCTAssertNil(error)
         }
         let snapshot = try JSONDecoder().decode(ProbeSnapshot.self, from: XCTUnwrap(response))
-        XCTAssertEqual(snapshot.version, 2)
+        XCTAssertEqual(snapshot.version, IdentityProbe.version)
         XCTAssertEqual(snapshot.managedSimulators?.map(\.udid), [CapturedSimulator.udid])
         XCTAssertEqual(snapshot.flows.map(\.attribution), [.attributed, .unattributed])
         XCTAssertEqual(snapshot.flows.map(\.method), [.executablePath, .unattributed])
@@ -193,7 +199,10 @@ final class IdentityProbeTests: XCTestCase {
     }
 
     func testBridgeRejectsInvalidManagedSimulatorConfiguration() {
-        let service = ProbeService(probe: IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable()))
+        let service = ProbeService(
+            probe: IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable()),
+            rules: NetworkRuleStore(clock: FakeMonotonicClock())
+        )
         XCTAssertTrue(service.finishStartup(generation: service.stopOrBeginStartup(), succeeded: true))
         for payload in [Data("not json".utf8), Data(#"[{"deviceSet":"relative","udid":"booted"}]"#.utf8)] {
             var replies = 0
@@ -209,12 +218,13 @@ final class IdentityProbeTests: XCTestCase {
     func testVersionOneSnapshotStillDecodes() throws {
         let probe = IdentityProbe(resolver: FakeResolver(), processTable: FakeProcessTable())
         probe.record(sourceAppAuditToken: Data(count: 32), sourceProcessAuditToken: nil)
-        // Strip every version 2 field to reproduce a version 1 payload.
+        // Strip every version 2 and 3 field to reproduce a version 1 payload.
         var object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: JSONEncoder().encode(probe.snapshot())) as? [String: Any]
         )
         object["version"] = 1
         object["managedSimulators"] = nil
+        object["rules"] = nil
         object["flows"] = (object["flows"] as? [[String: Any]])?.map { flow in
             flow.filter { ["sourceApp", "sourceProcess", "delegated"].contains($0.key) }
         }

@@ -46,6 +46,26 @@ describe("prepareOverlayAssets", () => {
     expect(preparedMimeTypes(prepared)).toEqual(["image/png", "image/jpeg", "image/webp"]);
   });
 
+  test("accepts TrueType and OpenType font files by signature and caps them at 2 MiB", async () => {
+    const ttf = Buffer.concat([Buffer.from([0x00, 0x01, 0x00, 0x00]), Buffer.alloc(8)]);
+    const otf = Buffer.concat([Buffer.from("OTTO"), Buffer.alloc(8)]);
+    const big = Buffer.concat([Buffer.from("OTTO"), Buffer.alloc(2 * 1024 * 1024)]);
+    const reader = new FakeOverlayAssetFileReader()
+      .addFile("/f/a.bin", ttf)
+      .addFile("/f/b.ttf", otf)
+      .addFile("/f/big.otf", big);
+    const prepared = await prepareOverlayAssets(
+      [
+        { id: "a", path: "/f/a.bin" },
+        { id: "b", path: "/f/b.ttf" },
+      ],
+      reader,
+    );
+    expect(preparedMimeTypes(prepared)).toEqual(["font/ttf", "font/otf"]);
+    const tooBig = await prepareOverlayAssets([{ id: "big", path: "/f/big.otf" }], reader);
+    expect(preparedError(tooBig)).toContain(`the limit is ${2 * 1024 * 1024}`);
+  });
+
   test("rejects unsupported content, relative paths, directories and missing files", async () => {
     const reader = new FakeOverlayAssetFileReader()
       .addFile("/a/gif.png", Buffer.from("GIF89a-bytes"))

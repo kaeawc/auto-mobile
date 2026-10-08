@@ -11,8 +11,6 @@ import type { InputTextMode } from "./InputText";
 import type { Keyboard } from "./Keyboard";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import { ActionableError } from "../../models/ActionableError";
-import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
-import { DefaultElementFinder } from "../utility/ElementFinder";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
@@ -264,7 +262,6 @@ const RESPONSE_HEADROOM_MS = 3_000;
  */
 export class SetUIState extends BaseVisualChange {
   private fieldTypeDetector: FieldTypeDetector;
-  private finder: ElementFinder;
   private readonly selector: ResolverElementSelector;
   private dependencies: SetUIStateDependencies;
 
@@ -272,7 +269,6 @@ export class SetUIState extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     dependencies: SetUIStateDependencies = {},
-    finder: ElementFinder = new DefaultElementFinder(),
   ) {
     super(device, adb, dependencies.timer ?? defaultTimer);
     this.selector = new ResolverElementSelector(undefined, undefined, {
@@ -280,7 +276,6 @@ export class SetUIState extends BaseVisualChange {
       iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
     });
     this.fieldTypeDetector = dependencies.fieldTypeDetector ?? new FieldTypeDetector();
-    this.finder = finder;
     this.dependencies = dependencies;
   }
 
@@ -1364,8 +1359,10 @@ export class SetUIState extends BaseVisualChange {
     const resourceId = previousElement["resource-id"];
     if (fieldSpec.selector.text && resourceId) {
       return (
-        this.finder.findElementByResourceId(observation.viewHierarchy, resourceId) ??
-        previousElement
+        this.findByResourceId(observation.viewHierarchy, resourceId, {
+          observationScreenSize: observation.screenSize,
+          display: observation.viewHierarchy,
+        }) ?? previousElement
       );
     }
     return previousElement;
@@ -1396,19 +1393,27 @@ export class SetUIState extends BaseVisualChange {
     }
 
     if (selector.elementId) {
-      if (this.device.platform === "android" && selector.elementId.startsWith("s2-")) {
-        // The shared resolver deduplicates one field serialized in multiple roots.
-        return (
-          this.selector.selectByResourceId(viewHierarchy, selector.elementId, {
-            intentAction: "inspect",
-            screenSizeOptions: selector.screenSizeOptions,
-          }).element ?? null
-        );
-      }
-      return this.finder.findElementByResourceId(viewHierarchy, selector.elementId);
+      return this.findByResourceId(viewHierarchy, selector.elementId, selector.screenSizeOptions);
     }
 
     return null;
+  }
+
+  /**
+   * The field node an ID names. `inspect` keeps the node itself (no tap-owner
+   * promotion) and the resolver deduplicates one field serialized in multiple roots.
+   */
+  private findByResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
+  ): Element | null {
+    return (
+      this.selector.selectByResourceId(viewHierarchy, resourceId, {
+        intentAction: "inspect",
+        screenSizeOptions,
+      }).element ?? null
+    );
   }
 
   private findAndroidTextElement(
@@ -1416,7 +1421,12 @@ export class SetUIState extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
-    const matched = this.finder.findElementByText(viewHierarchy, text, undefined, true, false);
+    const matched = this.selector.selectByText(viewHierarchy, text, {
+      intentAction: "inspect",
+      partialMatch: true,
+      caseSensitive: false,
+      screenSizeOptions,
+    }).element;
     if (!matched) {
       return this.selector.selectByText(viewHierarchy, text, {
         intentAction: "focus-input",
@@ -1830,7 +1840,10 @@ export class SetUIState extends BaseVisualChange {
     // hierarchy when the original text no longer identifies it.
     const resourceId = previouslyMatchedElement?.["resource-id"];
     if (!element && resourceId) {
-      element = this.finder.findElementByResourceId(observation.viewHierarchy, resourceId);
+      element = this.findByResourceId(observation.viewHierarchy, resourceId, {
+        observationScreenSize: observation.screenSize,
+        display: observation.viewHierarchy,
+      });
     }
     if (!element) {
       if (fieldType === "text") {

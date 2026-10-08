@@ -20,9 +20,8 @@ export interface ForeignLeaseHolder {
 }
 
 /**
- * Lists CtrlProxy forwarding-lease holders. The production implementation reads
- * the lease lock files introduced by #10506 (`listForwardLeaseHolders`), so the
- * doctor wiring waits for that PR; this seam keeps the check testable meanwhile.
+ * Lists CtrlProxy forwarding-lease holders. The production implementation is
+ * `listForwardLeaseHolders` (lease lock files), wired in `runAutoMobileChecks`.
  */
 export interface ForwardLeaseHolderLister {
   listHolders(): ForeignLeaseHolder[] | Promise<ForeignLeaseHolder[]>;

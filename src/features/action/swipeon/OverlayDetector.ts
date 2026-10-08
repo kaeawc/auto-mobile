@@ -71,7 +71,20 @@ export class OverlayDetector implements OverlayAnalyzer {
       containerNode,
     );
 
+    // A window drawn BELOW the container's own window cannot obstruct it: its
+    // nodes are under the container on screen, so a touch inside the container
+    // lands on the container's window first. Counting them shrank a swipe on a
+    // node inside an AutoMobile overlay window to the few pixels between the
+    // app buttons underneath it (#10752). `rootGroups` is topmost-first, so
+    // every group after the container's is below it. When the container's
+    // window is unknown (no windows, or the node did not resolve), every
+    // window still counts, as before.
+    const containerWindowIndex = this.findContainerWindowIndex(rootGroups, parser, containerNode);
+
     rootGroups.forEach((rootNodes, windowIndex) => {
+      if (containerWindowIndex !== null && windowIndex > containerWindowIndex) {
+        return;
+      }
       const windowRank = totalWindows - windowIndex;
       let nodeOrder = 0;
 
@@ -424,6 +437,40 @@ export class OverlayDetector implements OverlayAnalyzer {
     }
 
     return ancestors;
+  }
+
+  /**
+   * Index in `rootGroups` (topmost-first) of the window whose tree contains
+   * `containerNode` by identity, or null when there is no resolved node or it
+   * sits in no window group. Window trees share node objects with the merged
+   * main hierarchy, so a node resolved from either source is found here.
+   */
+  private findContainerWindowIndex(
+    rootGroups: ViewHierarchyNode[][],
+    parser: ElementParser,
+    containerNode: ViewHierarchyNode | null,
+  ): number | null {
+    if (!containerNode || rootGroups.length < 2) {
+      return null;
+    }
+    const index = rootGroups.findIndex((rootNodes) =>
+      rootNodes.some((rootNode) => this.treeContains(rootNode, parser, containerNode)),
+    );
+    return index === -1 ? null : index;
+  }
+
+  private treeContains(
+    rootNode: ViewHierarchyNode,
+    parser: ElementParser,
+    target: ViewHierarchyNode,
+  ): boolean {
+    let found = false;
+    parser.traverseNode(rootNode, (node: ViewHierarchyNode) => {
+      if (node === target) {
+        found = true;
+      }
+    });
+    return found;
   }
 
   private isClickableNode(nodeProperties: Record<string, unknown>): boolean {

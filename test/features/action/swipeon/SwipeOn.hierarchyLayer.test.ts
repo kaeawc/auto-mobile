@@ -172,6 +172,27 @@ describe("swipeOn layer (#9305)", () => {
     expect(gesture.getSwipeCalls()).toEqual([]);
   });
 
+  for (const layer of [undefined, "overlay"] as const) {
+    test(`swipes across a container inside the overlay with layer ${layer ?? "unset"} (#10752)`, async () => {
+      const { action, gesture } = harness();
+      const result = await action.execute(
+        swipe({
+          direction: "left",
+          container: { elementId: "coverBox" },
+          ...(layer ? { layer } : {}),
+        }),
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(result.warning ?? "").not.toContain("Swipe area reduced");
+      const [call] = gesture.getSwipeCalls();
+      expect(insideOverlay({ x: call.x1, y: call.y1 })).toBe(true);
+      expect(insideOverlay({ x: call.x2, y: call.y2 })).toBe(true);
+      // The app buttons under the overlay used to leave a 7 px safe width.
+      expect(call.x1 - call.x2).toBeGreaterThan(200);
+    });
+  }
+
   test("layer with display is refused before any dispatch", async () => {
     const { action, gesture } = harness();
     const result = await action.execute(

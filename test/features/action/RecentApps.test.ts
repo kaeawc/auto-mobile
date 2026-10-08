@@ -141,7 +141,6 @@ describe("RecentApps", () => {
         timestamp: fakeTimer.now(),
         freshness: { isFresh: fresh, verified: fresh },
       }) as unknown as ObserveResult;
-    const app = (): ObserveResult => createObserveResult(createAppHierarchy());
 
     // Models the hierarchy source: without a minTimestamp floor it serves its
     // cached (stale) tree even when requireFreshExtraction is set.

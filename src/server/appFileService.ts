@@ -79,6 +79,21 @@ const APP_FILE_DIRECTORY_MARKER = "AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY"
 /** Backups removed per device command, matching the other batched file commands. */
 const APP_FILE_BACKUP_DISCARD_CHUNK = 64;
 
+/** Maps the write script's directory-guard failure to an actionable error, else `undefined`. */
+function directoryDestinationError(
+  error: unknown,
+  destinationPath: string,
+  appId: string,
+): ActionableError | undefined {
+  if (!errorMessage(error).includes(APP_FILE_DIRECTORY_MARKER)) {
+    return undefined;
+  }
+  return new ActionableError(
+    `Cannot write ${destinationPath} for ${appId}: the destination is an existing directory. ` +
+      "Choose a file path (for example a name inside that directory).",
+  );
+}
+
 function batchWarning(warnings: Array<string | undefined>): { warning?: string } {
   const unique = [...new Set(warnings.filter((warning): warning is string => !!warning))];
   return unique.length > 0 ? { warning: unique.join(" ") } : {};
@@ -1065,23 +1080,14 @@ class AndroidAppFileProvider
           : `${refuseDirectory}mkdir -p ${shellQuote(posix.dirname(destination))} && ` +
             `cp ${shellQuote(staging)} ${shellQuote(temporary)} && ` +
             `chmod 600 ${shellQuote(temporary)} && ${saveBackup}${replace}`;
-      let output: ExecResult;
-      try {
-        output = await executeAndroidAppFileCommand(
-          adb,
-          `${prefix} sh -c ${shellQuote(command)}`,
-          context,
-          { noRetry: true, signal: request.signal },
-        );
-      } catch (error) {
-        if (errorMessage(error).includes(APP_FILE_DIRECTORY_MARKER)) {
-          throw new ActionableError(
-            `Cannot write ${request.destinationPath} for ${appTarget.appId}: the destination is an existing directory. ` +
-              "Choose a file path (for example a name inside that directory).",
-          );
-        }
-        throw error;
-      }
+      const output = await executeAndroidAppFileCommand(
+        adb,
+        `${prefix} sh -c ${shellQuote(command)}`,
+        context,
+        { noRetry: true, signal: request.signal },
+      ).catch((error: unknown) => {
+        throw directoryDestinationError(error, request.destinationPath, appTarget.appId) ?? error;
+      });
       restoreOnFailure = false;
       onWritten(output.stdout.includes(APP_FILE_BACKUP_MARKER) ? backup : undefined);
     } finally {

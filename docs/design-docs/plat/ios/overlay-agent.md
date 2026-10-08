@@ -125,8 +125,20 @@ transition as a real tap, including on a part identifier.
 | `dialog`, `snackbar`            | Drawn above the author tree inside the overlay window; `<testTag>.confirm`, `.dismiss`, `.action`                |
 
 A segmented `Picker` cannot carry per-segment accessibility identifiers, so segmented buttons
-are drawn as a row of buttons. A dialog's scrim covers the whole window and takes every touch
-while it is open, even for floating or sheet placements; a snackbar takes touches only on
-itself. Material icon names map to SF Symbols; a name without a mapping draws a placeholder.
+are drawn as a row of buttons. A dialog's scrim covers the whole window (below the dismiss
+bar in fullscreen) and takes every touch while it is open, even for floating or sheet
+placements; a snackbar takes touches only on itself. A dialog's title (a header), text, child
+controls and buttons are each their own accessibility element, and the dialog is not marked
+modal, as on Android. Opening or closing a dialog drops keyboard focus in the overlay unless the
+dialog holds a text field; a child taller than the screen scrolls. Material icon names map to
+SF Symbols; a name without a mapping draws a placeholder.
+
+The host's dismiss control (`automobile-overlay-dismiss`, "Dismiss overlay") cannot be removed
+by the spec. In fullscreen it sits in a bar across the top of the window, like Android's
+dismiss bar: the bar clears the status bar and cutout, is only as tall as the 44 pt control, is
+translucent and follows the spec's light or dark theme, and the spec is laid out below it, so
+the control never covers spec content. `safeAreaPadding` inside a fullscreen spec therefore
+sees no top inset. Floating and sheet overlays keep the control at the window's top trailing
+corner.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).

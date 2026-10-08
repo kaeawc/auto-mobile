@@ -21,7 +21,9 @@ import { logger } from "../../../src/utils/logger";
 const CONTROLLER = "/Applications/Test.app/Contents/MacOS/network-filter-controller";
 const SIM_A = "12345678-1234-1234-1234-123456789ABC";
 const SIM_B = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";
-const DEVICE_SET = "/Users/test/Library/Developer/CoreSimulator/Devices";
+// The production helper builds the default set with the host `path.join`, so the
+// expectation must too (backslashes on Windows runners).
+const DEVICE_SET = join("/Users/test", "Library", "Developer", "CoreSimulator", "Devices");
 
 function fixture(name: string): string {
   return readFileSync(

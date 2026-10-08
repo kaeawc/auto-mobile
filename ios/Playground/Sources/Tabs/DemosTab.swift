@@ -148,6 +148,16 @@ struct DemosTab: View {
                     }
 
                     NavigationLink {
+                        SwiftUISemanticLinksCrossOwnerDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Semantic Links (Cross-Owner)",
+                            description: "Same link text under two owning elements",
+                            icon: "link.badge.plus"
+                        )
+                    }
+
+                    NavigationLink {
                         UIKitSemanticLinksDemo()
                     } label: {
                         DemoRow(

@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "checkbox",
+          "stateKey": "absent",
+          "label": "Repeat"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].stateKey"
+}

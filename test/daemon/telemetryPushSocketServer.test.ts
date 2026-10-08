@@ -14,6 +14,7 @@ import * as storage from "../../src/db/storageEventRepository";
 import * as layout from "../../src/db/layoutEventRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
 import { logger } from "../../src/utils/logger";
 import { BODY_TRUNCATION_LIMIT } from "../../src/utils/truncateBodyText";
@@ -771,5 +772,63 @@ describe("TelemetryPushSocketServer backfill characterization", () => {
         expect(messages().map((m) => m.data.category)).toEqual([category, category]);
       },
     );
+  });
+});
+
+class FilterTelemetryServer extends TelemetryPushSocketServer {
+  constructor(timer: FakeTimer) {
+    super("/fake/telemetry-filter.sock", timer);
+  }
+  parse(request: Record<string, unknown>) {
+    return this.parseSubscriptionFilter(request);
+  }
+  matches(request: Record<string, unknown>, event: TelemetryEvent): boolean {
+    return this.matchesFilter(this.parseSubscriptionFilter(request), event);
+  }
+}
+
+describe("TelemetryPushSocketServer serial-scoped subscribe (#10143)", () => {
+  const resolver = new FakeDeviceSessionResolver()
+    .bind("emulator-5554", "uuid-a")
+    .bind("emulator-5556", "uuid-b");
+  const eventFor = (deviceId: string): TelemetryEvent => ({
+    category: "log",
+    timestamp: 1,
+    deviceId,
+    sessionId: "session",
+    data: {},
+    deviceSessionUuid: resolver.resolveUuid(deviceId),
+  });
+  let server: FilterTelemetryServer;
+  beforeEach(() => {
+    server = new FilterTelemetryServer(new FakeTimer());
+    server.setDeviceSessionResolver(resolver);
+  });
+
+  test("a deviceId-only subscribe only matches that device's events", () => {
+    const request = { deviceId: "emulator-5554" };
+    expect(server.parse(request)).toMatchObject({
+      deviceSessionUuid: "uuid-a",
+      deviceId: "emulator-5554",
+    });
+    expect(server.matches(request, eventFor("emulator-5554"))).toBe(true);
+    expect(server.matches(request, eventFor("emulator-5556"))).toBe(false);
+  });
+
+  test("deviceSessionUuid takes precedence over deviceId", () => {
+    const filter = server.parse({ deviceId: "emulator-5554", deviceSessionUuid: "uuid-b" });
+    expect(filter.deviceSessionUuid).toBe("uuid-b");
+  });
+
+  test("a subscribe without deviceId stays an all-devices subscription", () => {
+    const request = {};
+    expect(server.parse(request)).toMatchObject({ deviceSessionUuid: null, deviceId: null });
+    expect(server.matches(request, eventFor("emulator-5556"))).toBe(true);
+  });
+
+  test("an unresolvable or blank deviceId is refused instead of widening to all devices", () => {
+    expect(() => server.parse({ deviceId: "emulator-9999" })).toThrow(/does not identify a live/);
+    expect(() => server.parse({ deviceId: "  " })).toThrow(/non-blank/);
+    expect(() => server.parse({ deviceId: 5 })).toThrow(/non-blank/);
   });
 });

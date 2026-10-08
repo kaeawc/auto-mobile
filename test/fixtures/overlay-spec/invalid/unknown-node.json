@@ -7,7 +7,7 @@
       }
     },
     "root": {
-      "type": "button"
+      "type": "marquee"
     }
   },
   "expectedPath": "root.type"

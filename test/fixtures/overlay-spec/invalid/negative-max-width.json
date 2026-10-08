@@ -1,0 +1,8 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": { "type": "text", "text": "hello", "style": { "maxWidth": -1 } }
+  },
+  "expectedPath": "root.style.maxWidth"
+}

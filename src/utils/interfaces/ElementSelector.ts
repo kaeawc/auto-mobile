@@ -5,7 +5,7 @@ import type { ResolutionAction } from "../../models/ResolutionAction";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
-import type { TextSelectionIntent } from "./ElementFinder";
+import type { TextSelectionIntent } from "./TextSelectionIntent";
 
 export interface ElementSelector {
   resolveContainer?(

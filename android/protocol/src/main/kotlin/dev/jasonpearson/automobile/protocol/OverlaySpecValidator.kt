@@ -510,6 +510,11 @@ object OverlaySpecValidator {
       val stored = state[key] as? JsonPrimitive
       if (value.text("type") == "textField" && stored?.isString != true)
         return fail("$path.stateKey", "Text field requires a string state key")
+      if (
+        value.text("type") in setOf("switch", "checkbox") &&
+          (stored == null || stored.isString || stored.booleanOrNull == null)
+      )
+        return fail("$path.stateKey", "Toggle control requires a boolean state key")
       if (value.text("type") !in setOf("tabBar", "bottomNav")) continue
       val number = stored?.takeIf { !it.isString }?.doubleOrNull
       if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0) {

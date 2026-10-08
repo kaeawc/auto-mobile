@@ -9,6 +9,7 @@ IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 RUNNER_SHA="cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 VIDEO_JAR_SHA="dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 HELPER_SHA="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+FILTER_SHA="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
 setup() {
   TEST_ROOT="$(mktemp -d)"
@@ -29,6 +30,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -50,6 +52,7 @@ teardown() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -139,6 +142,7 @@ read_field_for_version() {
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -150,6 +154,7 @@ read_field_for_version() {
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
   [ "$status" -eq 0 ]
 
@@ -192,6 +197,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -226,6 +232,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -277,6 +284,7 @@ PY
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -332,6 +340,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -351,6 +360,7 @@ PY
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -361,6 +371,7 @@ PY
 @test "writes NIGHTLY_CHECKSUM_ENTRY screenCaptureHelperSha256 in checksum-only mode" {
   run env \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
@@ -377,6 +388,67 @@ PY
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"SCREEN_CAPTURE_HELPER_SHA256"* ]]
+}
+
+# --- network-filter release asset ---
+
+@test "writes networkFilterSha256 into the new registry entry in release mode" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  filter_sha="$(read_field_for_version 99.99.99 networkFilterSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$filter_sha" = "$FILTER_SHA" ]
+}
+
+@test "writes NIGHTLY_CHECKSUM_ENTRY networkFilterSha256 in checksum-only mode" {
+  run env \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  filter_sha="$(read_field_for_version nightly networkFilterSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$filter_sha" = "$FILTER_SHA" ]
+}
+
+@test "inserts networkFilterSha256 for an already-registered version that predates it" {
+  run env \
+    RELEASE_VERSION="0.0.46" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  filter_sha="$(read_field_for_version 0.0.46 networkFilterSha256 "${TEST_ROOT}/src/constants/release.ts")"
+  [ "$filter_sha" = "$FILTER_SHA" ]
+}
+
+@test "rejects a release without a network-filter checksum" {
+  run env \
+    RELEASE_VERSION="99.99.99" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"NETWORK_FILTER_SHA256"* ]]
+}
+
+@test "rejects a malformed NETWORK_FILTER_SHA256" {
+  run env \
+    NETWORK_FILTER_SHA256="not-a-sha" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"NETWORK_FILTER_SHA256 must be a valid SHA256"* ]]
 }
 
 @test "rejects a malformed SCREEN_CAPTURE_HELPER_SHA256" {
@@ -411,6 +483,7 @@ PY
     IOS_CTRL_PROXY_RUNNER_SHA256="$RUNNER_SHA" \
     VIDEO_JAR_SHA256="$VIDEO_JAR_SHA" \
     SCREEN_CAPTURE_HELPER_SHA256="$HELPER_SHA" \
+    NETWORK_FILTER_SHA256="$FILTER_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]

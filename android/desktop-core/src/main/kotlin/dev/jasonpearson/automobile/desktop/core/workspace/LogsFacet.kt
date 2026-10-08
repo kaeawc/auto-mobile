@@ -43,10 +43,12 @@ fun LogsFacet(
   val graph = LocalAutoMobileGraph.current
   val sessionReady = sessionUuidProvider == null || sessionUuidProvider.invoke() != null
   var client by remember(column.deviceId) { mutableStateOf<TelemetryPushClient?>(null) }
-  DisposableEffect(column.deviceId, sessionUuidProvider, sessionReady) {
+  DisposableEffect(column.deviceId, column.deviceSessionUuid, sessionUuidProvider, sessionReady) {
     val connected =
       if (sessionReady) {
-        telemetryClientFactory(column.deviceId).also { it.connect(deviceId = column.deviceId) }
+        telemetryClientFactory(column.deviceId).also {
+          it.connect(deviceId = column.deviceId, deviceSessionUuid = column.deviceSessionUuid)
+        }
       } else null
     client = connected
     onDispose {

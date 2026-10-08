@@ -23,6 +23,13 @@ const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(() =>
 const overlayJsonSchema = z.custom<OverlayJson>(
   (value) => jsonValueSchema.safeParse(value).success,
 );
+// Icon names are the closed list of Material icons the Android renderer bundles
+// (androidx material-icons-extended); the shared contract is the single source.
+const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
+const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
+  message: "Unknown overlay icon name",
+});
+const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
 const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 const offsetSchema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
 const boundsSchema = z
@@ -182,46 +189,7 @@ const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchem
 const itemSchema = z
   .object({
     label: z.string().min(1),
-    icon: z
-      .enum([
-        "home",
-        "search",
-        "settings",
-        "person",
-        "favorite",
-        "add",
-        "close",
-        "check",
-        "arrow_back",
-        "arrow_forward",
-        "chevron_left",
-        "chevron_right",
-        "menu",
-        "more_vert",
-        "share",
-        "edit",
-        "delete",
-        "info",
-        "warning",
-        "notifications",
-        "star",
-        "shopping_cart",
-        "help",
-        "refresh",
-        "done",
-        "cancel",
-        "play_arrow",
-        "pause",
-        "stop",
-        "mail",
-        "phone",
-        "location_on",
-        "calendar_today",
-        "visibility",
-        "lock",
-        "logout",
-      ])
-      .optional(),
+    icon: iconNameSchema.optional(),
     image: z.string().min(1).optional(),
   })
   .strict();
@@ -336,44 +304,8 @@ const iconBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["icon"]),
-    name: z.enum([
-      "home",
-      "search",
-      "settings",
-      "person",
-      "favorite",
-      "add",
-      "close",
-      "check",
-      "arrow_back",
-      "arrow_forward",
-      "chevron_left",
-      "chevron_right",
-      "menu",
-      "more_vert",
-      "share",
-      "edit",
-      "delete",
-      "info",
-      "warning",
-      "notifications",
-      "star",
-      "shopping_cart",
-      "help",
-      "refresh",
-      "done",
-      "cancel",
-      "play_arrow",
-      "pause",
-      "stop",
-      "mail",
-      "phone",
-      "location_on",
-      "calendar_today",
-      "visibility",
-      "lock",
-      "logout",
-    ]),
+    name: iconNameSchema,
+    variant: iconVariantSchema.optional(),
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();

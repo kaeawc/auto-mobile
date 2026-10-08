@@ -170,7 +170,7 @@ private fun RenderOverlayNodeContent(
       )
     }
     "icon" -> {
-      val icon = overlayIcon(node.iconName)
+      val icon = overlayIcon(node.iconName, (node.source as? OverlayIconNode)?.variant)
       if (icon != null)
         Icon(
           icon,

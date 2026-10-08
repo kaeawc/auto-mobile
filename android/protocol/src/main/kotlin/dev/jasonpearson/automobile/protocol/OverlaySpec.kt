@@ -271,6 +271,8 @@ data class OverlayIconNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val name: String,
+  /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
+  val variant: String? = null,
 ) : OverlayNode()
 
 @SerialName("spacer")

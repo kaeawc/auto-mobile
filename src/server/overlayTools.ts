@@ -460,7 +460,11 @@ export interface OverlayEventLifecycle {
     listener: (sessionUuid: string, releasedDeviceId?: string) => void,
   ): () => void;
   subscribeDeviceRemoval(listener: (deviceId: string) => void): () => void;
-  subscribeDeviceUnbound(listener: (deviceId: string) => void): () => void;
+  /**
+   * Returns `undefined` while unbinding cannot be observed yet (the daemon state is not
+   * initialised); the host retries on its next registration or call until it subscribes.
+   */
+  subscribeDeviceUnbound(listener: (deviceId: string) => void): (() => void) | undefined;
 }
 type OverlayClient = AndroidOverlayClient;
 /** The transport for one call; `android` carries the CtrlProxy-only display gate and inspect. */
@@ -794,10 +798,13 @@ function settleShowEvents(
   }
 }
 
-function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
+function subscribeOverlayDeviceUnbound(
+  listener: (deviceId: string) => void,
+): (() => void) | undefined {
   const state = DaemonState.getInstance();
   if (!state.isInitialized()) {
-    return () => {};
+    // The shared host is created before startDaemon initialises DaemonState; the host retries.
+    return undefined;
   }
   const manager = state.getSessionManager();
   // This removable hook observes the same rebind as onSessionDeviceUnbound,
@@ -1348,11 +1355,15 @@ function defaultOverlayLifecycle(): OverlayEventLifecycle {
 /**
  * The single lifecycle mechanism: a released session (and the device its snapshot names),
  * a removed device and an unbound device all clear host status and event buffers.
+ *
+ * The unbound hook may not be available when the host is created (the daemon host is built
+ * before DaemonState initialises), so `ensureSubscribed` retries it until it takes, keeping
+ * exactly one active unbound subscription.
  */
 function subscribeOverlayCleanup(
   lifecycle: OverlayEventLifecycle,
   events: OverlayEventCoordinator,
-): () => void {
+): { ensureSubscribed: () => void; unsubscribe: () => void } {
   const cleanups = [
     lifecycle.subscribeSessionRelease((sessionUuid, releasedDeviceId) => {
       events.releaseSession(sessionUuid);
@@ -1361,12 +1372,27 @@ function subscribeOverlayCleanup(
       }
     }),
     lifecycle.subscribeDeviceRemoval((deviceId) => events.releaseDevice(deviceId)),
-    lifecycle.subscribeDeviceUnbound((deviceId) => events.releaseDevice(deviceId)),
   ];
-  return () => {
-    for (const cleanup of cleanups) {
-      cleanup();
+  let unsubscribeUnbound: (() => void) | undefined;
+  let disposed = false;
+  const ensureSubscribed = () => {
+    if (!disposed && unsubscribeUnbound === undefined) {
+      unsubscribeUnbound = lifecycle.subscribeDeviceUnbound((deviceId) =>
+        events.releaseDevice(deviceId),
+      );
     }
+  };
+  ensureSubscribed();
+  return {
+    ensureSubscribed,
+    unsubscribe: () => {
+      disposed = true;
+      unsubscribeUnbound?.();
+      unsubscribeUnbound = undefined;
+      for (const cleanup of cleanups) {
+        cleanup();
+      }
+    },
   };
 }
 
@@ -1425,6 +1451,8 @@ interface OverlayHost {
   events: OverlayEventCoordinator;
   commits: OverlayCommitGenerations;
   transports: OverlayTransportCache;
+  /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
+  ensureLifecycle(): void;
   dispose(): void;
 }
 
@@ -1435,7 +1463,7 @@ function createOverlayHost(dependencies: OverlayToolDependencies): OverlayHost {
     store,
     TelemetryRecorder.getInstance(),
   );
-  const unsubscribeCleanup = subscribeOverlayCleanup(
+  const cleanup = subscribeOverlayCleanup(
     dependencies.lifecycle ?? defaultOverlayLifecycle(),
     events,
   );
@@ -1445,10 +1473,11 @@ function createOverlayHost(dependencies: OverlayToolDependencies): OverlayHost {
     events,
     commits: new OverlayCommitGenerations(),
     transports: { android: new WeakMap(), ios: new WeakMap() },
+    ensureLifecycle: cleanup.ensureSubscribed,
     dispose: () => {
       if (!disposed) {
         disposed = true;
-        unsubscribeCleanup();
+        cleanup.unsubscribe();
         events.dispose();
       }
     },
@@ -1499,6 +1528,8 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   if (activeRegistration && activeRegistration.host !== host) {
     activeRegistration.dispose();
   }
+  // Per-connection registrations run after DaemonState initialises: pick up the unbound hook.
+  host.ensureLifecycle();
   const { store, events, commits } = host;
   const clientFactory =
     dependencies.clientFactory ??
@@ -1523,6 +1554,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    host.ensureLifecycle();
     const external: Record<string, unknown> =
       input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {};
     deleteInternalToolParams(external);

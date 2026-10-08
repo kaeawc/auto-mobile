@@ -585,6 +585,28 @@ describe("overlay MCP tool", () => {
     }
   });
 
+  test("a host created before daemon init still clears status when a device is unbound after init", async () => {
+    const lifecycle = new FakeOverlayEventLifecycle();
+    // The daemon host is created by the first registration, before DaemonState initialises.
+    lifecycle.setDeviceUnboundAvailable(false);
+    unsubscribe();
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer, lifecycle });
+    expect(lifecycle.getDeviceUnboundListenerCount()).toBe(0);
+    lifecycle.setDeviceUnboundAvailable(true);
+    await call({ action: "show", spec, sessionUuid: "one" });
+    await call({ action: "status", sessionUuid: "one" });
+    // Exactly one unbound subscription, however many calls follow initialisation.
+    expect(lifecycle.getDeviceUnboundListenerCount()).toBe(1);
+    const callsAfterSubscribe = lifecycle.getDeviceUnboundSubscribeCalls();
+    await call({ action: "status", sessionUuid: "one" });
+    expect(lifecycle.getDeviceUnboundSubscribeCalls()).toBe(callsAfterSubscribe);
+    lifecycle.unbindDevice(device.deviceId);
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    unsubscribe();
+    expect(lifecycle.getListenerCount()).toBe(0);
+  });
+
   test("failed shows do not retain subscriptions and failed dismiss preserves buffered events", async () => {
     client.setOverlayResult({ success: false, error: "Refused" });
     await call({ action: "show", spec });

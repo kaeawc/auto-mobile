@@ -10,7 +10,23 @@ export class FakeOverlayEventLifecycle implements OverlayEventLifecycle {
       this.sessions.delete(listener);
     };
   }
-  subscribeDeviceUnbound(listener: (deviceId: string) => void): () => void {
+  private unboundAvailable = true;
+  private unboundSubscribeCalls = 0;
+  /** Models the daemon before DaemonState initialises: unbinding cannot be observed yet. */
+  setDeviceUnboundAvailable(available: boolean): void {
+    this.unboundAvailable = available;
+  }
+  getDeviceUnboundSubscribeCalls(): number {
+    return this.unboundSubscribeCalls;
+  }
+  getDeviceUnboundListenerCount(): number {
+    return this.unbound.size;
+  }
+  subscribeDeviceUnbound(listener: (deviceId: string) => void): (() => void) | undefined {
+    this.unboundSubscribeCalls += 1;
+    if (!this.unboundAvailable) {
+      return undefined;
+    }
     this.unbound.add(listener);
     return () => {
       this.unbound.delete(listener);

@@ -19,7 +19,7 @@ class KeystoreStateProvider : ContentProvider() {
 
   private fun registerCapability() {
     AutoMobileSDK.registerCapability(
-      SdkCapabilityDescriptor("storage.keystore", SdkCapabilityState.DISABLED)
+      SdkCapabilityDescriptor("storage.keystore", SdkCapabilityState.DISABLED),
     )
   }
 

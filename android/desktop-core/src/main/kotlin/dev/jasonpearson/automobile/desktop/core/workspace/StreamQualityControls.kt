@@ -88,7 +88,7 @@ private fun Chip(label: String, accent: Color, onClick: () -> Unit) {
       Modifier.background(accent.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 8.dp, vertical = 3.dp)
+        .padding(horizontal = 8.dp, vertical = 3.dp),
   ) {
     Text(label, fontSize = 9.sp, color = Color.White.copy(alpha = 0.95f))
   }

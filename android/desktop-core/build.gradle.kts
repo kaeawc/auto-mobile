@@ -58,7 +58,7 @@ val generateDesktopBuildInfo =
             const val VERSION: String = "${versionName.get()}"
           }
           """
-            .trimIndent() + "\n"
+            .trimIndent() + "\n",
         )
     }
   }

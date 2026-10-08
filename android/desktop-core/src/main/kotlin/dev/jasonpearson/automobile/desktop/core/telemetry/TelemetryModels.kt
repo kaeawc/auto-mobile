@@ -286,7 +286,7 @@ fun parseTelemetryEvent(
         if (respJson != null) {
           try {
             respHeaders.putAll(
-              telemetryJson.parseToJsonElement(respJson).stringMap("responseHeaders")
+              telemetryJson.parseToJsonElement(respJson).stringMap("responseHeaders"),
             )
           } catch (_: Exception) {}
         }
@@ -539,7 +539,7 @@ enum class EventSeverity(val label: String, val icon: ImageVector, val color: Lo
  *   3000ms)
  */
 fun TelemetryDisplayEvent.classifyEventSeverity(
-  slowNetworkThresholdMs: Long = 3000
+  slowNetworkThresholdMs: Long = 3000,
 ): EventSeverity =
   when (this) {
     is TelemetryDisplayEvent.Failure ->

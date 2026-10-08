@@ -98,7 +98,7 @@ class DaemonRecoveryConfigProviderTest {
   @Test
   fun `content without text uses defaults`() {
     assertDefaultsFor(
-      response(JsonObject(mapOf("contents" to JsonArray(listOf(JsonObject(emptyMap()))))))
+      response(JsonObject(mapOf("contents" to JsonArray(listOf(JsonObject(emptyMap())))))),
     )
   }
 
@@ -178,14 +178,14 @@ class DaemonRecoveryConfigProviderTest {
     assertTrue(
       captured
         .toString(Charsets.UTF_8)
-        .startsWith("Warning: Failed to read ai-recovery config from daemon:")
+        .startsWith("Warning: Failed to read ai-recovery config from daemon:"),
     )
   }
 
   private fun textResponse(text: String, success: Boolean = true): DaemonResponse =
     response(
       JsonObject(
-        mapOf("contents" to JsonArray(listOf(JsonObject(mapOf("text" to JsonPrimitive(text))))))
+        mapOf("contents" to JsonArray(listOf(JsonObject(mapOf("text" to JsonPrimitive(text)))))),
       ),
       success,
     )

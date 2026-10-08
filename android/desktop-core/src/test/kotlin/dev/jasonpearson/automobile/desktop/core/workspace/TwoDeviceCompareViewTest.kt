@@ -215,7 +215,7 @@ class TwoDeviceCompareViewTest {
       // clear so the diff retires instead of comparing the live device against a stale snapshot.
       runOnIdle {
         fakeA.emitDeviceEvent(
-          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost")
+          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost"),
         )
       }
       waitUntil {
@@ -255,7 +255,7 @@ class TwoDeviceCompareViewTest {
       // Device A is lost while its parse is still suspended: the clear bumps A's generation.
       runOnIdle {
         fakeA.emitDeviceEvent(
-          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost")
+          DeviceStreamEvent.DeviceConnectionLost("dev-a", 2L, "connection lost"),
         )
       }
       waitForIdle()

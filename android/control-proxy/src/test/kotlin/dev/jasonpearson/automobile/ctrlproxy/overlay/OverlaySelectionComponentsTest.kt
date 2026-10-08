@@ -51,10 +51,10 @@ class OverlaySelectionComponentsTest {
                     trailing = OverlayListItemCheckbox("wifi"),
                   ),
                   OverlayListItemNode(headline = "More", trailing = OverlayListItemIcon("menu")),
-                )
+                ),
             ),
             state,
-          )
+          ),
         )
         .root
     val (radio, sync, wifi, more) = root.children
@@ -77,7 +77,7 @@ class OverlaySelectionComponentsTest {
           spec(
             OverlayRadioGroupNode(stateKey = "sound", options = options),
             mapOf("sound" to OverlayScalar.Text("")),
-          )
+          ),
         )
         .root
     assertEquals("", root.selectedValue)
@@ -91,7 +91,7 @@ class OverlaySelectionComponentsTest {
         spec(
           OverlayRadioGroupNode(stateKey = "sound", options = options),
           mapOf("sound" to OverlayScalar.Text("chime")),
-        )
+        ),
       )
     runtime.handle(OverlayInteraction.Choose("sound", "beep", listOf(OverlayEmitAction("picked"))))
     assertEquals(OverlayScalar.Text("beep"), runtime.current.state["sound"])
@@ -120,11 +120,11 @@ class OverlaySelectionComponentsTest {
         spec(
           OverlayRadioGroupNode(stateKey = "sound", options = options),
           mapOf("sound" to OverlayScalar.Text("chime")),
-        )
+        ),
       )
     val error = runCatching {
       runtime.handle(
-        OverlayInteraction.Tap(listOf(OverlaySetStateAction("sound", OverlayScalar.Numeric(1.0))))
+        OverlayInteraction.Tap(listOf(OverlaySetStateAction("sound", OverlayScalar.Numeric(1.0)))),
       )
     }
       .exceptionOrNull()

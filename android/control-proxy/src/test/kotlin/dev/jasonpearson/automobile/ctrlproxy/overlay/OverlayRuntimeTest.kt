@@ -46,7 +46,7 @@ class OverlayRuntimeTest {
           OverlayDismissAction,
           OverlayEmitAction("too-late"),
           OverlaySetStateAction("label", OverlayScalar.Text("too-late")),
-        )
+        ),
       )
       assertEquals(listOf(1L, 2L, 3L, 4L), events.map { it.sequence })
       assertEquals(
@@ -107,7 +107,7 @@ class OverlayRuntimeTest {
       val runtime = runtime()
       runtime.handle(OverlayInteraction.SettledPage("pager", 3))
       runtime.replace(
-        runtime.current.spec.copy(state = mapOf("label" to OverlayScalar.Text("patch")))
+        runtime.current.spec.copy(state = mapOf("label" to OverlayScalar.Text("patch"))),
       )
       assertEquals(3, runtime.current.pages["pager"])
       runtime.replace(
@@ -117,9 +117,9 @@ class OverlayRuntimeTest {
               listOf(
                 OverlayPagerNode("pager", children = List(2) { OverlaySpacerNode() }),
                 OverlayPagerNode("new", children = listOf(OverlaySpacerNode())),
-              )
-          )
-        )
+              ),
+          ),
+        ),
       )
       assertEquals(mapOf("pager" to 1, "new" to 0), runtime.current.pages)
       runtime.replace(spec(OverlaySpacerNode()))
@@ -143,7 +143,7 @@ class OverlayRuntimeTest {
         )
       val runtime =
         runtime(
-          spec(OverlayColumnNode(children = nodes), mapOf("tab" to OverlayScalar.Numeric(0.0)))
+          spec(OverlayColumnNode(children = nodes), mapOf("tab" to OverlayScalar.Numeric(0.0))),
         )
       runtime.handle(OverlayInteraction.Select("pager", null, 1))
       runtime.handle(OverlayInteraction.Select(null, "tab", 1))
@@ -166,7 +166,7 @@ class OverlayRuntimeTest {
           spec(
             OverlayTextFieldNode(stateKey = "query", placeholder = "Feedback"),
             mapOf("query" to OverlayScalar.Text("")),
-          )
+          ),
         )
       runtime.handle(OverlayInteraction.TextChange("query", "typed"))
       runtime.handle(OverlayInteraction.TextChange("query", "typed"))
@@ -193,14 +193,14 @@ class OverlayRuntimeTest {
                 openWhen = OverlaySheetCondition("open", true),
                 detents = listOf(OverlayDetent.Half),
               ),
-            )
+            ),
         )
       val runtime =
         runtime(
           spec(
             root,
             mapOf("query" to OverlayScalar.Text(""), "selected" to OverlayScalar.Numeric(0.0)),
-          )
+          ),
         )
       for ((key, value) in
         listOf(
@@ -263,8 +263,8 @@ class OverlayRuntimeTest {
       runtime(
         spec(
           state =
-            mapOf("on" to OverlayScalar.BooleanValue(false), "n" to OverlayScalar.Numeric(1.0))
-        )
+            mapOf("on" to OverlayScalar.BooleanValue(false), "n" to OverlayScalar.Numeric(1.0)),
+        ),
       )
     runtime.handle(tap(OverlayToggleAction("on")))
     runtime.handle(tap(OverlayIncrementAction("n", 2.0)))
@@ -286,7 +286,7 @@ class OverlayRuntimeTest {
           OverlayEmitAction("tapped"),
           OverlaySetStateAction("a", OverlayScalar.Numeric(1.0)),
           OverlayIncrementAction("a"),
-        )
+        ),
       )
       assertEquals(listOf("tapped", "change"), events.map { it.name })
       assertEquals(mapOf("a" to OverlayScalar.Numeric(0.0)), events[0].state)
@@ -301,7 +301,7 @@ class OverlayRuntimeTest {
       tap(
         OverlaySetStateAction("x", OverlayScalar.Numeric(1.0)),
         OverlaySetStateAction("y", OverlayScalar.Text("hi")),
-      )
+      ),
     )
     assertEquals(
       Json.parseToJsonElement("""{"keys":["x","y"],"values":{"x":1.0,"y":"hi"}}"""),
@@ -315,8 +315,8 @@ class OverlayRuntimeTest {
       runtime(
         spec(
           state =
-            mapOf("a" to OverlayScalar.Numeric(1.0), "on" to OverlayScalar.BooleanValue(false))
-        )
+            mapOf("a" to OverlayScalar.Numeric(1.0), "on" to OverlayScalar.BooleanValue(false)),
+        ),
       )
     runtime.handle(tap())
     runtime.handle(tap(OverlaySetStateAction("a", OverlayScalar.Numeric(1.0))))
@@ -332,7 +332,7 @@ class OverlayRuntimeTest {
         spec(
           OverlaySwitchNode(label = "Wi-Fi", stateKey = "on"),
           mapOf("on" to OverlayScalar.BooleanValue(false)),
-        )
+        ),
       )
     runtime.handle(OverlayInteraction.Toggle("on"))
     assertEquals(listOf("change"), events.map { it.name })
@@ -372,7 +372,7 @@ class OverlayRuntimeTest {
           spec(
             OverlayPagerNode("pager", children = listOf(pageText, inner)),
             mapOf("label" to OverlayScalar.Text("old")),
-          )
+          ),
         )
       var model = mapOverlaySpec(runtime.current.spec, runtime.current.pages)
       assertEquals("1/2 old", model.root.children.first().text)
@@ -385,8 +385,8 @@ class OverlayRuntimeTest {
       assertEquals("1/1", model.root.children[1].children.single().text)
       runtime.replace(
         runtime.current.spec.copy(
-          state = runtime.current.state + ("label" to OverlayScalar.Text("patched"))
-        )
+          state = runtime.current.state + ("label" to OverlayScalar.Text("patched")),
+        ),
       )
       assertEquals(
         "2/2 patched",
@@ -401,7 +401,7 @@ class OverlayRuntimeTest {
     delivered = false
     runtime.handle(tap(OverlayEmitAction("dropped")))
     runtime.replace(
-      runtime.current.spec.copy(state = mapOf("patch" to OverlayScalar.BooleanValue(true)))
+      runtime.current.spec.copy(state = mapOf("patch" to OverlayScalar.BooleanValue(true))),
     )
     delivered = true
     runtime.handle(tap(OverlayEmitAction("three")))
@@ -436,8 +436,8 @@ class OverlayRuntimeTest {
                 "flag" to OverlayScalar.BooleanValue(false),
                 "count" to OverlayScalar.Numeric(1.0),
                 "label" to OverlayScalar.Text("x"),
-              )
-          )
+              ),
+          ),
         )
       runtime.handle(
         tap(
@@ -448,7 +448,7 @@ class OverlayRuntimeTest {
           OverlayIncrementAction("label"),
           OverlayIncrementAction("count", by = Double.MAX_VALUE),
           OverlayIncrementAction("count", by = Double.MAX_VALUE),
-        )
+        ),
       )
       assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
       assertEquals(OverlayScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])

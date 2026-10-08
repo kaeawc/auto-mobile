@@ -79,7 +79,9 @@ fun ChatScreen(viewModel: ChatViewModel = viewModel()) {
           ) {
             Box(
               modifier =
-                Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)
+                Modifier.size(40.dp)
+                  .clip(CircleShape)
+                  .background(MaterialTheme.colorScheme.primary),
             ) {
               Text(
                 text = "AI",
@@ -156,7 +158,7 @@ fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
         modifier =
           Modifier.size(32.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .background(MaterialTheme.colorScheme.secondaryContainer),
       ) {
         if (message.profileImageUrl != null) {
           AsyncImage(
@@ -187,7 +189,7 @@ fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
               MaterialTheme.colorScheme.primary
             } else {
               MaterialTheme.colorScheme.surfaceVariant
-            }
+            },
         ),
       shape =
         RoundedCornerShape(
@@ -217,7 +219,7 @@ fun MessageBubble(message: ChatMessage, modifier: Modifier = Modifier) {
       // Profile image for user messages
       Box(
         modifier =
-          Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary)
+          Modifier.size(32.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
       ) {
         Text(
           text = "You",
@@ -314,10 +316,10 @@ fun PreviewMessageBubble() {
             text =
               "Hello! This is a message from the bot. It can be quite long to show how the bubble adapts to different text lengths.",
             isFromUser = false,
-          )
+          ),
       )
       MessageBubble(
-        message = ChatMessage(id = "2", text = "This is my response as a user!", isFromUser = true)
+        message = ChatMessage(id = "2", text = "This is my response as a user!", isFromUser = true),
       )
     }
   }
@@ -351,7 +353,7 @@ fun PreviewChatScreenKeyboardOpen() {
           Modifier.fillMaxWidth()
             .height(240.dp)
             .align(Alignment.BottomCenter)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)),
       ) {
         Text(
           text = "Keyboard Area",

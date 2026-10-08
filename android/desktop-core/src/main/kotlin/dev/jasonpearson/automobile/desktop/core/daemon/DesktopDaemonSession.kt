@@ -16,7 +16,7 @@ class DesktopDaemonSession(
     DesktopSessionRegistration(
       register = {
         check(
-          client.registerSession(requireNotNull(client.sessionUuid), "AutoMobile Desktop").accepted
+          client.registerSession(requireNotNull(client.sessionUuid), "AutoMobile Desktop").accepted,
         ) {
           "Daemon rejected desktop session registration"
         }
@@ -67,7 +67,7 @@ class DesktopDaemonSession(
     fun create(socketPath: String = DaemonSocketPaths.socketPath()): DesktopDaemonSession {
       val sessionUuid = UUID.randomUUID().toString()
       return DesktopDaemonSession(
-        McpDaemonClient(socketPathValue = socketPath, sessionUuid = sessionUuid)
+        McpDaemonClient(socketPathValue = socketPath, sessionUuid = sessionUuid),
       )
     }
   }

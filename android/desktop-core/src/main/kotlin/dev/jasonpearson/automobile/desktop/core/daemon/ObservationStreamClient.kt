@@ -452,7 +452,7 @@ class ObservationStreamClient(
       )
     if (sendRequest(request)) {
       log.info(
-        "Requested observation cadence update (screenshot=$requestedScreenshotIntervalMs, hierarchy=$requestedHierarchyIntervalMs)"
+        "Requested observation cadence update (screenshot=$requestedScreenshotIntervalMs, hierarchy=$requestedHierarchyIntervalMs)",
       )
       return true
     }
@@ -597,7 +597,7 @@ class ObservationStreamClient(
         // Extract packageName from the data if present
         val packageName = extractPackageName(response.data)
         log.info(
-          "Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}"
+          "Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}",
         )
         val update =
           HierarchyStreamUpdate(
@@ -617,7 +617,7 @@ class ObservationStreamClient(
       }
       "screenshot_update" -> {
         log.info(
-          "Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}"
+          "Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}",
         )
         val update =
           ScreenshotStreamUpdate(
@@ -647,7 +647,7 @@ class ObservationStreamClient(
       "navigation_update" -> {
         val navGraph = response.navigationGraph
         log.info(
-          "Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}"
+          "Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}",
         )
         if (navGraph != null) {
           val update =
@@ -665,7 +665,7 @@ class ObservationStreamClient(
       "performance_update" -> {
         val perfData = response.performanceData
         log.info(
-          "Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}"
+          "Performance update received - deviceId=${response.deviceId}, fps=${perfData?.fps}, jankFrames=${perfData?.jankFrames}, touchLatencyMs=${perfData?.touchLatencyMs}, ttiMs=${perfData?.timeToInteractiveMs}",
         )
         if (perfData != null) {
           // When jank is 0 and FPS is below 60, the device is idle (no frames
@@ -740,7 +740,7 @@ class ObservationStreamClient(
               timestamp = response.timestamp ?: System.currentTimeMillis(),
               packageId = packageId,
               buildKey = response.buildKey,
-            )
+            ),
           )
         }
       }
@@ -759,7 +759,7 @@ class ObservationStreamClient(
               retiredUuid = retiredUuid,
               successorUuid = successorUuid,
               timestamp = response.timestamp ?: System.currentTimeMillis(),
-            )
+            ),
           )
         }
       }
@@ -806,7 +806,7 @@ class ObservationStreamClient(
         deviceId = deviceId,
         timestamp = response.timestamp ?: System.currentTimeMillis(),
         error = error,
-      )
+      ),
     )
     log.info("Emitted device connection lost event for $deviceId")
   }
@@ -1000,7 +1000,7 @@ class ObservationStreamClient(
         subscribe = pending.subscribe,
         success = success,
         error = error,
-      )
+      ),
     )
     // A permanent rejection establishes no new daemon state. Redriving an unchanged intent creates
     // a request/error busy loop. But if the user changed their intent while the command's outcome

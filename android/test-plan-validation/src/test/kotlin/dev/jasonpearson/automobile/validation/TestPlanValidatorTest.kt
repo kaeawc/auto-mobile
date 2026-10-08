@@ -47,7 +47,7 @@ class TestPlanValidatorTest {
               mode: set
               instant: 1999-01-01T00:00:00Z
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertFalse(result.valid)
     assertEquals(1, result.errors.size, result.errors.toString())
@@ -74,7 +74,7 @@ class TestPlanValidatorTest {
           - tool: observe
             label: "true"
         """
-            .trimIndent()
+            .trimIndent(),
         )
       assertTrue(result.valid, "$number: ${result.errors}")
     }
@@ -92,7 +92,7 @@ class TestPlanValidatorTest {
     for (value in listOf("null", "Null", "NULL", "~", "", "true", "false", "\"1000\"")) {
       val result =
         TestPlanValidator.validateYaml(
-          "name: scalar-plan\nsteps: [{tool: setDeviceState, clock: {mode: advance, byMs: $value}}]"
+          "name: scalar-plan\nsteps: [{tool: setDeviceState, clock: {mode: advance, byMs: $value}}]",
         )
       assertFalse(result.valid, "$value must not become a number")
     }
@@ -121,7 +121,7 @@ class TestPlanValidatorTest {
         val fields = if (params) "\"params\":{$clock}" else clock
         val result =
           TestPlanValidator.validateYaml(
-            "{\"name\":\"clock-window\",\"steps\":[{\"tool\":\"setDeviceState\",$fields}]}"
+            "{\"name\":\"clock-window\",\"steps\":[{\"tool\":\"setDeviceState\",$fields}]}",
           )
         assertEquals(valid, result.valid, "$instant params=$params")
         if (!valid) {
@@ -148,7 +148,7 @@ class TestPlanValidatorTest {
         val fields = if (params) "\"params\":{$clock}" else clock
         val result =
           TestPlanValidator.validateYaml(
-            "{\"name\":\"clock-fraction\",\"steps\":[{\"tool\":\"setDeviceState\",$fields}]}"
+            "{\"name\":\"clock-fraction\",\"steps\":[{\"tool\":\"setDeviceState\",$fields}]}",
           )
         assertEquals(valid, result.valid, "$instant params=$params")
         if (!valid) {
@@ -159,7 +159,7 @@ class TestPlanValidatorTest {
                 it.message ==
                   "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive, after offset normalization)." &&
                 it.severity == ValidationSeverity.ERROR
-            }
+            },
           )
         }
       }

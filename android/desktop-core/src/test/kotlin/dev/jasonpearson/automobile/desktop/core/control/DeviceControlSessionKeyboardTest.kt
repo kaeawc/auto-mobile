@@ -215,13 +215,13 @@ class DeviceControlSessionKeyboardTest {
     // Declined everywhere: host chords, shifted device keys, untypable characters.
     assertFalse(
       android.wouldForwardKey(
-        DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(meta = true))
-      )
+        DeviceKeyStroke(character = 's', modifiers = DeviceKeyModifiers(meta = true)),
+      ),
     )
     assertFalse(
       android.wouldForwardKey(
-        DeviceKeyStroke(key = DeviceKeyboardKey.Tab, modifiers = DeviceKeyModifiers(shift = true))
-      )
+        DeviceKeyStroke(key = DeviceKeyboardKey.Tab, modifiers = DeviceKeyModifiers(shift = true)),
+      ),
     )
     assertFalse(android.wouldForwardKey(DeviceKeyStroke(character = 'é')))
     // iOS has the same append contract, so printable text is claimed there too.

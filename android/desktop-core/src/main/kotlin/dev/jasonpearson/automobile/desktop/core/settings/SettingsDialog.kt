@@ -70,7 +70,7 @@ fun SettingsPanel(
         .fillMaxWidth()
         .background(MaterialTheme.colorScheme.surface)
         .padding(24.dp)
-        .verticalScroll(rememberScrollState())
+        .verticalScroll(rememberScrollState()),
   ) {
     // Header
     Row(
@@ -84,7 +84,7 @@ fun SettingsPanel(
           Modifier.clickable(onClick = onClose)
             .pointerHoverIcon(PointerIcon.Hand)
             .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
       ) {
         Text("Close", fontSize = 13.sp)
       }
@@ -232,7 +232,7 @@ fun SettingsPanel(
                 else colors.text.normal.copy(alpha = 0.05f),
                 RoundedCornerShape(4.dp),
               )
-              .padding(horizontal = 10.dp, vertical = 6.dp)
+              .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
           Text(
             range,
@@ -398,7 +398,7 @@ private fun FeatureFlagsSection(clientProvider: () -> AutoMobileClient) {
         Modifier.clickable { viewModel.loadFlags() }
           .pointerHoverIcon(PointerIcon.Hand)
           .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-          .padding(horizontal = 10.dp, vertical = 6.dp)
+          .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
       Text("Refresh", fontSize = 12.sp)
     }
@@ -493,7 +493,7 @@ private fun AccessibilityConfigPanel(
         put("failureMode", JsonPrimitive(failureMode))
         put("minSeverity", JsonPrimitive(minSeverity))
         put("useBaseline", JsonPrimitive(useBaseline))
-      }
+      },
     )
   }
 
@@ -563,7 +563,7 @@ private fun OptionSelector(
               else SharedTheme.globalColors.text.normal.copy(alpha = 0.05f),
               RoundedCornerShape(4.dp),
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
       ) {
         Text(
           option,
@@ -617,7 +617,7 @@ private fun IdeSelector(
                 else colors.text.normal.copy(alpha = 0.05f),
                 RoundedCornerShape(4.dp),
               )
-              .padding(horizontal = 10.dp, vertical = 6.dp)
+              .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
           Text(
             displayName,

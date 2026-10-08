@@ -140,7 +140,7 @@ class StorageProtocolTest {
               path = "/data/data/app/shared_prefs/auth.xml",
               entryCount = 2,
             ),
-          )
+          ),
       )
 
     val json = StorageProtocolSerializer.responseToJson(response)

@@ -54,7 +54,7 @@ internal class HungSocketServer(
         if (closed.get()) return
         val reader =
           BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
           )
         checkNotNull(reader.readLine()) { "Client closed before sending its request" }
         received.countDown()
@@ -64,7 +64,7 @@ internal class HungSocketServer(
         } else {
           val writer =
             BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+              OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
             )
           writer.write(replyLine)
           writer.newLine()

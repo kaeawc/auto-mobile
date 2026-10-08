@@ -160,7 +160,7 @@ constructor(
               responseHeaders = dto.responseHeaders,
               responseBody = dto.responseBody,
               contentType = dto.contentType,
-            )
+            ),
           )
         } catch (e: Exception) {
           val reason = "invalid regex: ${e.message}"

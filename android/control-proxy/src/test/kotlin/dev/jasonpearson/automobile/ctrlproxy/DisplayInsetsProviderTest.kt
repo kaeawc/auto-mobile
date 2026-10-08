@@ -161,7 +161,7 @@ class DisplayInsetsProviderTest {
   private fun windowInsets(): WindowInsets =
     WindowInsets.Builder()
       .setDisplayCutout(
-        DisplayCutout(Insets.of(0, 60, 0, 0), null, Rect(120, 0, 280, 60), null, null)
+        DisplayCutout(Insets.of(0, 60, 0, 0), null, Rect(120, 0, 280, 60), null, null),
       )
       .setInsets(WindowInsets.Type.displayCutout(), Insets.of(0, 60, 0, 0))
       .setInsetsIgnoringVisibility(WindowInsets.Type.displayCutout(), Insets.of(0, 60, 0, 0))

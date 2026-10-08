@@ -87,7 +87,7 @@ internal class AutoMobileWebSocket(
           frameType = type,
           payloadSize = size,
           success = success,
-        )
+        ),
       )
     }
   }

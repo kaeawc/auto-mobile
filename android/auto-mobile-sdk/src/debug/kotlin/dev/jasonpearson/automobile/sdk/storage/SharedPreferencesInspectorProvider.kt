@@ -155,7 +155,7 @@ class SharedPreferencesInspectorProvider : ContentProvider() {
     }
     val file = StorageFileInfo(name = storeName, path = "", entryCount = protocolEntries.size)
     return StorageProtocolSerializer.responseToJson(
-      StorageResponse.Preferences(file = file, entries = protocolEntries)
+      StorageResponse.Preferences(file = file, entries = protocolEntries),
     )
   }
 

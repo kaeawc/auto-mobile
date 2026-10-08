@@ -189,11 +189,11 @@ private fun DetectedMcpConnectionSection(
               )
               .clickable {
                 onDataSourceModeChanged(
-                  if (useRealData) DataSourceMode.Fake else DataSourceMode.Real
+                  if (useRealData) DataSourceMode.Fake else DataSourceMode.Real,
                 )
               }
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 8.dp, vertical = 2.dp)
+              .padding(horizontal = 8.dp, vertical = 2.dp),
         ) {
           Text(
             if (useRealData) "ON" else "OFF",

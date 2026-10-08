@@ -403,7 +403,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ) = notImplemented()
 
   override fun getTestTimings(
-    query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
+    query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery,
   ) = notImplemented()
 
   override fun startTestRecording(platform: String) = notImplemented()

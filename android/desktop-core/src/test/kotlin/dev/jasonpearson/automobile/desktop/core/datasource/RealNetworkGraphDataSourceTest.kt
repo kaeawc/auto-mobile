@@ -25,7 +25,7 @@ class RealNetworkGraphDataSourceTest {
           buildJsonObject {
             put("type", "text")
             put("text", bodyJson)
-          }
+          },
         )
       },
     )
@@ -111,7 +111,7 @@ class RealNetworkGraphDataSourceTest {
           "graphSummary": {"hostCount": 1}
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     var requestedPath: String? = null
 
@@ -138,7 +138,7 @@ class RealNetworkGraphDataSourceTest {
     val client = FakeAutoMobileClient()
     client.callToolResult =
       toolResponse(
-        """{"graph": {"artifact": {"path": "/tmp/empty.json"}}, "graphSummary": {"hostCount": 0}}"""
+        """{"graph": {"artifact": {"path": "/tmp/empty.json"}}, "graphSummary": {"hostCount": 0}}""",
       )
 
     val result =

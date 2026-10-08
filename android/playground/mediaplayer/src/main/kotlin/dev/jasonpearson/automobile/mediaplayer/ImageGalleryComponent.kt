@@ -89,7 +89,7 @@ fun ImageCard(imageUrl: String, title: String, modifier: Modifier = Modifier) {
         modifier =
           Modifier.fillMaxWidth()
             .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
       ) {
         AsyncImageWithStates(
           imageUrl = imageUrl,
@@ -219,7 +219,7 @@ fun ImageGalleryComponentPreview() {
           "https://randomuser.me/api/portraits/lego/2.jpg",
           "https://randomuser.me/api/portraits/lego/3.jpg",
           "https://randomuser.me/api/portraits/lego/4.jpg",
-        )
+        ),
     )
   }
 }

@@ -105,7 +105,7 @@ class OverlayLifecycleTest {
       assertEquals(TTL, timer.tasks.single().deadline)
       timer.advance(TTL - 1)
       interact(
-        OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("new"))))
+        OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("new")))),
       )
       assertTrue(timer.tasks.first().cancelled)
       timer.advance(TTL - 1)
@@ -244,8 +244,8 @@ class OverlayLifecycleTest {
       interact(OverlayInteraction.SettledPage("pager", 2))
       interact(
         OverlayInteraction.Tap(
-          listOf(OverlaySetStateAction("label", OverlayScalar.Text("changed")))
-        )
+          listOf(OverlaySetStateAction("label", OverlayScalar.Text("changed"))),
+        ),
       )
       val runtime = checkNotNull(controller.activeRuntime)
       val snapshot = runtime.current
@@ -342,7 +342,7 @@ class OverlayLifecycleTest {
     assertEquals(0f, chrome.contentAlpha, 0f)
     assertTrue(
       overlayHostChrome(mapOverlaySpec(spec().copy(root = OverlaySpacerNode())).request())
-        .dismissVisible
+        .dismissVisible,
     )
     assertFalse(overlayHostChrome(InteractiveOverlayRequest()).dismissVisible)
   }
@@ -428,7 +428,11 @@ class OverlayLifecycleTest {
       runTest {}
       OverlaySpecValidator.validate("{}")
       mapOverlaySpec(
-        OverlaySpec("warm", OverlayWindow(OverlayFullscreenPlacement()), root = OverlaySpacerNode())
+        OverlaySpec(
+          "warm",
+          OverlayWindow(OverlayFullscreenPlacement()),
+          root = OverlaySpacerNode(),
+        ),
       )
     }
   }

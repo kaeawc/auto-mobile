@@ -31,7 +31,7 @@ private fun resultFrame(
       if (requestId != null) put("requestId", requestId)
       content()
       if (perfTiming != null) put("perfTiming", perfTiming)
-    }
+    },
   )
 
 internal fun swipeResultFrame(
@@ -149,7 +149,7 @@ internal fun overlayResultFrame(
       success = success,
       error = error,
       missingAssets = missingAssets.ifEmpty { null },
-    )
+    ),
   )
 
 internal fun overlayStatusFrame(
@@ -164,7 +164,7 @@ internal fun overlayStatusFrame(
       success = true,
       overlays = overlays,
       droppedEvents = droppedEvents,
-    )
+    ),
   )
 
 internal fun overlayEventFrame(event: OverlayEvent): String =

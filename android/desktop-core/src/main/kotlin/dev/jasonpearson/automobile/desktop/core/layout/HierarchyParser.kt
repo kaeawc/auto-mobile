@@ -332,7 +332,7 @@ private fun parseChildren(
     }
     is JsonObject -> {
       listOfNotNull(
-        parseJsonObjectNode(childrenElement, parentDepth, 0, elementMap, parentMap, idDepthOffset)
+        parseJsonObjectNode(childrenElement, parentDepth, 0, elementMap, parentMap, idDepthOffset),
       )
     }
     else -> emptyList()

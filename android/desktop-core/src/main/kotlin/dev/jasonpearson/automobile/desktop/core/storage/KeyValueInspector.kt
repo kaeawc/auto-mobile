@@ -72,7 +72,7 @@ fun KeyValueInspector(
   loadErrorCode: String? = null,
   onSetValue:
     (suspend (fileName: String, key: String, value: String, type: KeyValueType) -> Result<
-        StorageMutationResult
+        StorageMutationResult,
       >)? =
     null,
   recentlyChangedKeys: Set<String> = emptySet(),
@@ -111,7 +111,7 @@ fun KeyValueInspector(
     // Left panel: File list
     Column(
       modifier =
-        Modifier.width(200.dp).fillMaxSize().background(colors.text.normal.copy(alpha = 0.02f))
+        Modifier.width(200.dp).fillMaxSize().background(colors.text.normal.copy(alpha = 0.02f)),
     ) {
       if (loadError != null) {
         StorageLoadError(loadError, loadErrorCode)
@@ -119,7 +119,7 @@ fun KeyValueInspector(
       // Header
       Box(
         modifier =
-          Modifier.fillMaxWidth().background(colors.text.normal.copy(alpha = 0.03f)).padding(12.dp)
+          Modifier.fillMaxWidth().background(colors.text.normal.copy(alpha = 0.03f)).padding(12.dp),
       ) {
         Text(
           "Storage Files",
@@ -140,7 +140,7 @@ fun KeyValueInspector(
                 .clickable { selectedPath = file.path }
                 .pointerHoverIcon(PointerIcon.Hand)
                 .background(
-                  if (isSelected) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent
+                  if (isSelected) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent,
                 )
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -173,7 +173,7 @@ fun KeyValueInspector(
     // Divider
     Box(
       modifier =
-        Modifier.width(1.dp).fillMaxSize().background(colors.text.normal.copy(alpha = 0.1f))
+        Modifier.width(1.dp).fillMaxSize().background(colors.text.normal.copy(alpha = 0.1f)),
     )
 
     // Right panel: Key-value list
@@ -243,7 +243,7 @@ fun KeyValueInspector(
         modifier =
           Modifier.fillMaxWidth()
             .background(colors.text.normal.copy(alpha = 0.03f))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
       ) {
         Text(
           "Key",
@@ -270,7 +270,7 @@ fun KeyValueInspector(
 
       Box(
         modifier =
-          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f))
+          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f)),
       )
 
       // Entry list
@@ -483,7 +483,7 @@ fun KeyValueInspector(
               modifier =
                 Modifier.fillMaxWidth()
                   .height(1.dp)
-                  .background(colors.text.normal.copy(alpha = 0.05f))
+                  .background(colors.text.normal.copy(alpha = 0.05f)),
             )
           }
         }
@@ -539,7 +539,7 @@ private fun TypeBadge(
       modifier =
         Modifier.clip(RoundedCornerShape(3.dp))
           .background(color.copy(alpha = 0.15f))
-          .padding(horizontal = 6.dp, vertical = 2.dp)
+          .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
       Text(
         label,

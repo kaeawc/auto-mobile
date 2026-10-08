@@ -60,7 +60,7 @@ fun HandledExceptionDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

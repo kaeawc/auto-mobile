@@ -407,7 +407,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): InputActionResult {
     calls.add("inputSwipe")
     inputSwipeCalls.add(
-      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext)
+      InputSwipeCall(startX, startY, endX, endY, platform, deviceId, durationMs, frameContext),
     )
     return inputSwipeResult
   }
@@ -433,7 +433,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ): InputActionResult {
     calls.add("inputTypeText")
     inputTypeTextCalls.add(
-      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext)
+      InputTypeTextCall(text, platform, deviceId, submit, append, frameContext),
     )
     return inputTypeTextResult
   }

@@ -41,7 +41,7 @@ private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
 // The id is matched with `.+` because a device id may itself contain a quote.
 private val HELD_BY_ANOTHER_SESSION_MESSAGE =
   Regex(
-    """Device '.+' is (?:already assigned to (?:session |another session)|locked to another session)"""
+    """Device '.+' is (?:already assigned to (?:session |another session)|locked to another session)""",
   )
 
 // `TerminalSessionError`, which `toActionableError` may wrap into a plain text error.

@@ -48,7 +48,7 @@ fun HorizontalTabBar(
       modifier
         .fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.02f))
-        .padding(horizontal = 8.dp, vertical = 4.dp)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
   ) {
     // Calculate how many tabs can show text based on available width
     // Each tab with text needs ~100dp, icon-only needs ~40dp
@@ -83,7 +83,7 @@ fun HorizontalTabBar(
                 onTabSelected(if (isSelected) null else tab.id)
               }
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp)
+              .padding(horizontal = if (showText) 12.dp else 8.dp, vertical = 6.dp),
         ) {
           Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),

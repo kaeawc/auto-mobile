@@ -1215,7 +1215,7 @@ class EventPersistenceTest {
       delivered.add(kind)
       complete(
         if (kind == "invalid") BatchDeliveryOutcome.INVALID_PAYLOAD
-        else BatchDeliveryOutcome.DELIVERED
+        else BatchDeliveryOutcome.DELIVERED,
       )
     }
     assertEquals(listOf("invalid", "later"), delivered)

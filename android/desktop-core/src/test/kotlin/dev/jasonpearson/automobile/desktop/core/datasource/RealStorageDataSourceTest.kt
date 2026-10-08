@@ -50,7 +50,7 @@ class RealStorageDataSourceTest {
     val client = FakeAutoMobileClient()
     client.callToolResult =
       Json.parseToJsonElement(
-        """{"content":[{"type":"text","text":"{\"type\":\"query\",\"columns\":[],\"rows\":[],\"total\":0}"}]}"""
+        """{"content":[{"type":"text","text":"{\"type\":\"query\",\"columns\":[],\"rows\":[],\"total\":0}"}]}""",
       )
     val dataSource =
       RealStorageDataSource(
@@ -451,7 +451,7 @@ class RealStorageDataSourceTest {
   }
 
   private fun assertMutationCancellation(
-    mutation: suspend RealStorageDataSource.() -> Result<StorageMutationResult>
+    mutation: suspend RealStorageDataSource.() -> Result<StorageMutationResult>,
   ) = runBlocking {
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)

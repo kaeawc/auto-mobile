@@ -62,7 +62,7 @@ class OverlayComponentSemanticsTest {
                 variant = "outlined",
                 children = listOf(OverlayButtonNode(testTag = "inner", label = "Inner")),
               ),
-            )
+            ),
         ),
       )
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
@@ -86,7 +86,7 @@ class OverlayComponentSemanticsTest {
       find {
         it.config.contains(SemanticsProperties.TestTag) &&
           it.config[SemanticsProperties.TestTag] == tag
-      }
+      },
     ) {
       "no node tagged $tag"
     }

@@ -42,7 +42,7 @@ class WaitForToolRedactionTest {
     override fun callTool(toolName: String, parameters: Map<String, Any>): String =
       throw AssertionError(
         "WaitForTool must query the raw client for its internal condition check, not the " +
-          "redacting one"
+          "redacting one",
       )
 
     override fun listAvailableTools(): List<AutoMobileAgent.MCPToolDefinition> = emptyList()

@@ -75,7 +75,7 @@ class OverlaySelectionSemanticsTest {
                 onTap = go,
               ),
               OverlayButtonNode(testTag = "share", label = "Share", variant = "elevated"),
-            )
+            ),
         ),
       )
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
@@ -99,7 +99,7 @@ class OverlaySelectionSemanticsTest {
       find {
         it.config.contains(SemanticsProperties.TestTag) &&
           it.config[SemanticsProperties.TestTag] == tag
-      }
+      },
     ) {
       "no node tagged $tag"
     }

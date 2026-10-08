@@ -42,7 +42,7 @@ data class TableDataResult(
 /** Result of querying table structure. */
 data class TableStructureResult(
   /** Column definitions. */
-  val columns: List<ColumnInfo>
+  val columns: List<ColumnInfo>,
 )
 
 /** Column metadata from PRAGMA table_info. */

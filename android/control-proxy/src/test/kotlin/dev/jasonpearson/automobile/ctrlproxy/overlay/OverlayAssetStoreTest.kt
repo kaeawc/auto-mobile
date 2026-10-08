@@ -57,10 +57,10 @@ class OverlayAssetStoreTest {
     assertEquals(OverlayAssetInfo("a", "image/png", 30), store.lookup("a"))
     assertArrayEquals(png, store.read("a"))
     assertTrue(
-      store.put("b", "image/jpeg", OverlayAssetBytes.jpeg()) is OverlayAssetPutResult.Stored
+      store.put("b", "image/jpeg", OverlayAssetBytes.jpeg()) is OverlayAssetPutResult.Stored,
     )
     assertTrue(
-      store.put("c", "image/webp", OverlayAssetBytes.webp()) is OverlayAssetPutResult.Stored
+      store.put("c", "image/webp", OverlayAssetBytes.webp()) is OverlayAssetPutResult.Stored,
     )
     assertEquals(3, store.count)
     assertEquals(listOf("a", "b", "c"), store.ids())

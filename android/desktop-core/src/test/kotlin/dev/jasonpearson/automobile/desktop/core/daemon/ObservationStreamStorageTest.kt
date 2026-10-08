@@ -85,7 +85,7 @@ class ObservationStreamStorageTest {
           "fileName": "prefs.xml"
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
       assertEquals(StorageSubscriptionKey("com.example", "prefs.xml"), awaitItem())
@@ -354,7 +354,7 @@ class ObservationStreamStorageTest {
       val subscribe =
         factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
       client.handleMessage(
-        """{"id":"${subscribe.id}","type":"subscription_response","success":true}"""
+        """{"id":"${subscribe.id}","type":"subscription_response","success":true}""",
       )
       client.unsubscribeStorage("com.example", "prefs.xml")
 
@@ -383,7 +383,7 @@ class ObservationStreamStorageTest {
           factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
 
         client.handleMessage(
-          """{"id":"${request.id}","type":"subscription_response","success":true}"""
+          """{"id":"${request.id}","type":"subscription_response","success":true}""",
         )
 
         assertEquals(
@@ -411,12 +411,12 @@ class ObservationStreamStorageTest {
       assertEquals(1, transport.sentRequests().count { it.command.endsWith("storage") })
 
       client.handleMessage(
-        """{"id":"${subscribe.id}","type":"subscription_response","success":true}"""
+        """{"id":"${subscribe.id}","type":"subscription_response","success":true}""",
       )
 
       val unsubscribe = transport.sentRequests().single { it.command == "unsubscribe_storage" }
       client.handleMessage(
-        """{"id":"${unsubscribe.id}","type":"subscription_response","success":true}"""
+        """{"id":"${unsubscribe.id}","type":"subscription_response","success":true}""",
       )
       assertEquals(2, transport.sentRequests().count { it.command.endsWith("storage") })
     }
@@ -431,7 +431,7 @@ class ObservationStreamStorageTest {
           factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
 
         client.handleMessage(
-          """{"id":"${request.id}","type":"error","success":false,"error":"runner unavailable"}"""
+          """{"id":"${request.id}","type":"error","success":false,"error":"runner unavailable"}""",
         )
 
         val response = awaitItem()
@@ -454,7 +454,7 @@ class ObservationStreamStorageTest {
       val transport = factory.opened.single()
       val initialSubscribe = transport.sentRequests().single { it.command == "subscribe_storage" }
       client.handleMessage(
-        """{"id":"${initialSubscribe.id}","type":"subscription_response","success":true}"""
+        """{"id":"${initialSubscribe.id}","type":"subscription_response","success":true}""",
       )
 
       client.unsubscribeStorage("com.example", "prefs.xml")
@@ -464,7 +464,7 @@ class ObservationStreamStorageTest {
       // runner even when its reply is lost, so a response error must reconcile the latest intent.
       client.subscribeStorage("com.example", "prefs.xml")
       client.handleMessage(
-        """{"id":"${pendingUnsubscribe.id}","type":"error","success":false,"error":"connection lost"}"""
+        """{"id":"${pendingUnsubscribe.id}","type":"error","success":false,"error":"connection lost"}""",
       )
 
       assertEquals(
@@ -486,10 +486,10 @@ class ObservationStreamStorageTest {
       // DisposableEffect can issue both commands before a later LaunchedEffect starts collecting.
       // The acknowledgements must remain correlated one-for-one, not collapse to replay=1.
       client.handleMessage(
-        """{"id":"${requests[0].id}","type":"subscription_response","success":true}"""
+        """{"id":"${requests[0].id}","type":"subscription_response","success":true}""",
       )
       client.handleMessage(
-        """{"id":"${requests[1].id}","type":"subscription_response","success":true}"""
+        """{"id":"${requests[1].id}","type":"subscription_response","success":true}""",
       )
 
       client.storageSubscriptionResponses.test {
@@ -509,7 +509,7 @@ class ObservationStreamStorageTest {
 
       client.storageSubscriptionResponses.test {
         client.handleMessage(
-          """{"id":"${request.id}","type":"subscription_response","success":true}"""
+          """{"id":"${request.id}","type":"subscription_response","success":true}""",
         )
         expectNoEvents()
       }
@@ -523,7 +523,7 @@ class ObservationStreamStorageTest {
    * called.
    */
   private fun withConnectedClient(
-    block: suspend (ObservationStreamClient, CapturingTransportFactory) -> Unit
+    block: suspend (ObservationStreamClient, CapturingTransportFactory) -> Unit,
   ) = runBlocking {
     // connect() gates on Files.exists(socketPath); a real temp file passes it while the fake
     // factory

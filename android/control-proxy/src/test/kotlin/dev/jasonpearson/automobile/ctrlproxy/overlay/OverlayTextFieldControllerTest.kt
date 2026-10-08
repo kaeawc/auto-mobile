@@ -49,7 +49,7 @@ class OverlayTextFieldControllerTest {
               openWhen = OverlaySheetCondition("open", true),
               detents = listOf(OverlayDetent.Full),
             ),
-          )
+          ),
       ),
       mapOf(
         "open" to OverlayScalar.BooleanValue(open),
@@ -94,7 +94,7 @@ class OverlayTextFieldControllerTest {
       controller.interact(
         runtime,
         OverlayInteraction.Tap(
-          listOf(OverlaySetStateAction("open", OverlayScalar.BooleanValue(true)))
+          listOf(OverlaySetStateAction("open", OverlayScalar.BooleanValue(true))),
         ),
       )
       assertTrue(focusable())

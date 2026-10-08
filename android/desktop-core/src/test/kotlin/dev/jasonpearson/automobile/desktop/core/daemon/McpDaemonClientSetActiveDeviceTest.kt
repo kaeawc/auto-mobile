@@ -108,12 +108,12 @@ class McpDaemonClientSetActiveDeviceTest {
                 buildJsonObject {
                   put("type", "text")
                   put("text", """{"message":"Active device set to 'emulator-5554'"}""")
-                }
+                },
               )
             },
           )
         }
-          .toString()
+          .toString(),
       )
     assertTrue(result.success)
     assertEquals(null, result.refusal)
@@ -128,7 +128,7 @@ class McpDaemonClientSetActiveDeviceTest {
           buildJsonObject {
             put("type", "text")
             put("text", text)
-          }
+          },
         )
       },
     )

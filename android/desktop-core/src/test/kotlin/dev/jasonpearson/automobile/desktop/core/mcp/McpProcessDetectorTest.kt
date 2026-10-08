@@ -164,8 +164,8 @@ class McpProcessDetectorTest {
         responses =
           mapOf(
             listOf("ps", "-eo", "pid,lstart,command") to
-              listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile --stdio")
-          )
+              listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile --stdio"),
+          ),
       )
     val detector =
       RealMcpProcessDetector(
@@ -195,7 +195,7 @@ class McpProcessDetectorTest {
               listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile"),
             listOf("lsof", "-p", "97956", "-a", "-U") to
               listOf("bun  97956 jason  17u  unix 0x1234 0t0  /tmp/auto-mobile-daemon-501.sock"),
-          )
+          ),
       )
     val detector =
       RealMcpProcessDetector(
@@ -226,7 +226,7 @@ class McpProcessDetectorTest {
               listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile"),
             listOf("lsof", "-p", "97956", "-a", "-U") to
               listOf("bun  97956 jason  17u  unix 0x1234 0t0  $overridePath"),
-          )
+          ),
       )
     val detector =
       RealMcpProcessDetector(
@@ -258,7 +258,7 @@ class McpProcessDetectorTest {
               listOf("97956 Wed Jan 22 11:00:00 2025 bun /path/to/auto-mobile"),
             listOf("lsof", "-p", "97956", "-a", "-U") to
               listOf("bun  97956 jason  17u  unix 0x1234 0t0  $overridePath"),
-          )
+          ),
       )
     val detector =
       RealMcpProcessDetector(
@@ -333,7 +333,7 @@ class McpProcessDetectorTest {
 }
 
 private class FakeProcessRunner(
-  private val responses: Map<List<String>, List<String>> = emptyMap()
+  private val responses: Map<List<String>, List<String>> = emptyMap(),
 ) : ProcessRunner {
   val commandsExecuted = mutableListOf<List<String>>()
 

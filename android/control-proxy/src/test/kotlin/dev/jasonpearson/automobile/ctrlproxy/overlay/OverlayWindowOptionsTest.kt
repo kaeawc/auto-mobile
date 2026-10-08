@@ -83,7 +83,7 @@ class OverlayWindowOptionsTest {
     controller.onClientCountChanged(0)
     interact(OverlayInteraction.Tap(listOf(OverlaySetPageAction("pager", OverlayPageTarget.Next))))
     interact(
-      OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("typed"))))
+      OverlayInteraction.Tap(listOf(OverlaySetStateAction("label", OverlayScalar.Text("typed")))),
     )
     val current = checkNotNull(controller.activeRuntime).current
     assertEquals(1, current.pages["pager"])
@@ -221,7 +221,11 @@ class OverlayWindowOptionsTest {
       runTest {}
       OverlaySpecValidator.validate("{}")
       mapOverlaySpec(
-        OverlaySpec("warm", OverlayWindow(OverlayFullscreenPlacement()), root = OverlaySpacerNode())
+        OverlaySpec(
+          "warm",
+          OverlayWindow(OverlayFullscreenPlacement()),
+          root = OverlaySpacerNode(),
+        ),
       )
     }
   }

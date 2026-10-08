@@ -65,7 +65,7 @@ internal class SdkEventBatchBroadcastHandler(
       acknowledge(result, SdkEventBatchBroadcastContract.RESULT_BATCH_ACCEPTED)
     } else {
       log.warn(
-        "Dropping SDK event batch with ${batch.events.size} events because the queue is full"
+        "Dropping SDK event batch with ${batch.events.size} events because the queue is full",
       )
       acknowledge(result, SdkEventBatchBroadcastContract.RESULT_BATCH_REJECTED_QUEUE_FULL)
     }

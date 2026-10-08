@@ -46,7 +46,7 @@ class DeviceDragGesturePolicyTest {
           width,
           height,
           gestureDurationMs = 80,
-        )
+        ),
       )
     // A fast flick (80ms over a long distance) replays as a short, high-velocity swipe → strong
     // fling, not the fixed fallback.
@@ -63,7 +63,7 @@ class DeviceDragGesturePolicyTest {
             width,
             height,
             gestureDurationMs = gesture,
-          )
+          ),
         )
         .durationMs
 
@@ -199,7 +199,7 @@ class DeviceDragGesturePolicyTest {
         height,
         CoordinateSpace.Pixels,
         3.0,
-      )
+      ),
     )
   }
 
@@ -227,7 +227,7 @@ class DeviceDragGesturePolicyTest {
         height,
         CoordinateSpace.Pixels,
         scale,
-      )
+      ),
     )
 
     // The legacy point space is unchanged.

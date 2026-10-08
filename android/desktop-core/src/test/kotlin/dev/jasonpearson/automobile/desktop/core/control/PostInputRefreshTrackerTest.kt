@@ -82,7 +82,7 @@ class PostInputRefreshTrackerTest {
 
     // Only a genuinely newer capture settles it.
     assertTrue(
-      tracker.onSnapshot(snapshot(sourceSequence = 13L, captureSequence = 8L), nowMs = 300L)
+      tracker.onSnapshot(snapshot(sourceSequence = 13L, captureSequence = 8L), nowMs = 300L),
     )
     assertEquals(PostInputRefreshState.Settled, tracker.state)
   }
@@ -115,7 +115,7 @@ class PostInputRefreshTrackerTest {
     val tracker = PostInputRefreshTracker()
     tracker.onInputSucceeded(snapshot(10L), nowMs = 0L)
     assertTrue(
-      tracker.onSnapshot(snapshot(10L), nowMs = PostInputRefreshTracker.REFRESH_TIMEOUT_MS)
+      tracker.onSnapshot(snapshot(10L), nowMs = PostInputRefreshTracker.REFRESH_TIMEOUT_MS),
     )
     assertEquals(PostInputRefreshState.Settled, tracker.state)
   }

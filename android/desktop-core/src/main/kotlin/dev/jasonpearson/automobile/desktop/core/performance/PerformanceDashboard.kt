@@ -106,7 +106,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 45f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialFps, null)),
-                  )
+                  ),
                 )
               }
               if (initialFrameTimeMs != null) {
@@ -121,7 +121,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 33f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialFrameTimeMs, null)),
-                  )
+                  ),
                 )
               }
               if (initialJankFrames != null) {
@@ -136,7 +136,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 10f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialJankFrames.toFloat(), null)),
-                  )
+                  ),
                 )
               }
               if (initialMemoryMb != null) {
@@ -151,7 +151,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 512f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialMemoryMb, null)),
-                  )
+                  ),
                 )
               }
               if (initialTouchLatencyMs != null) {
@@ -166,7 +166,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 200f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialTouchLatencyMs, null)),
-                  )
+                  ),
                 )
               }
               if (initialRecompositionRate != null) {
@@ -181,7 +181,7 @@ fun PerformanceDashboard(
                     thresholdCritical = 50f,
                     trend = MetricTrend.Stable,
                     history = listOf(MetricDataPoint(timestamp, initialRecompositionRate, null)),
-                  )
+                  ),
                 )
               }
             },
@@ -222,7 +222,7 @@ fun PerformanceDashboard(
       // unnecessary and can drop updates when the daemon stamps a raw serial instead of the pane
       // ID.
       LOG.info(
-        "Received performance update - fps=${update.fps}, jankFrames=${update.jankFrames}, touchLatencyMs=${update.touchLatencyMs}, ttiMs=${update.timeToInteractiveMs}, screenName=${update.screenName}"
+        "Received performance update - fps=${update.fps}, jankFrames=${update.jankFrames}, touchLatencyMs=${update.touchLatencyMs}, ttiMs=${update.timeToInteractiveMs}, screenName=${update.screenName}",
       )
 
       // Add to real-time history (keep last 120 data points for sparklines)
@@ -265,7 +265,7 @@ fun PerformanceDashboard(
                 thresholdCritical = 45f,
                 trend = MetricTrend.Stable,
                 history = listOf(newPoint),
-              )
+              ),
             )
             add(
               PerformanceMetric(
@@ -283,9 +283,9 @@ fun PerformanceDashboard(
                       update.timestamp,
                       update.frameTimeMs,
                       update.screenName,
-                    )
+                    ),
                   ),
-              )
+              ),
             )
             add(
               PerformanceMetric(
@@ -303,9 +303,9 @@ fun PerformanceDashboard(
                       update.timestamp,
                       update.jankFrames.toFloat(),
                       update.screenName,
-                    )
+                    ),
                   ),
-              )
+              ),
             )
             add(
               PerformanceMetric(
@@ -323,9 +323,9 @@ fun PerformanceDashboard(
                       update.timestamp,
                       update.memoryUsageMb,
                       update.screenName,
-                    )
+                    ),
                   ),
-              )
+              ),
             )
             // Add touch latency if available
             update.touchLatencyMs?.let { latency ->
@@ -340,7 +340,7 @@ fun PerformanceDashboard(
                   thresholdCritical = 200f,
                   trend = MetricTrend.Stable,
                   history = listOf(MetricDataPoint(update.timestamp, latency, update.screenName)),
-                )
+                ),
               )
             }
             // Add time to interactive if available
@@ -356,7 +356,7 @@ fun PerformanceDashboard(
                   thresholdCritical = 1500f,
                   trend = MetricTrend.Stable,
                   history = listOf(MetricDataPoint(update.timestamp, tti, update.screenName)),
-                )
+                ),
               )
             }
             // Add recomposition rate if available
@@ -372,7 +372,7 @@ fun PerformanceDashboard(
                   thresholdCritical = 50f,
                   trend = MetricTrend.Stable,
                   history = listOf(MetricDataPoint(update.timestamp, rate, update.screenName)),
-                )
+                ),
               )
             }
           }
@@ -499,9 +499,9 @@ fun PerformanceDashboard(
                         update.timestamp,
                         update.touchLatencyMs!!,
                         update.screenName,
-                      )
+                      ),
                     ),
-                )
+                ),
               )
             }
             // Add TTI if it becomes available and doesn't exist
@@ -525,9 +525,9 @@ fun PerformanceDashboard(
                         update.timestamp,
                         update.timeToInteractiveMs!!,
                         update.screenName,
-                      )
+                      ),
                     ),
-                )
+                ),
               )
             }
             // Add recomposition rate if it becomes available and doesn't exist
@@ -551,9 +551,9 @@ fun PerformanceDashboard(
                         update.timestamp,
                         update.recompositionRate!!,
                         update.screenName,
-                      )
+                      ),
                     ),
-                )
+                ),
               )
             }
           }
@@ -798,7 +798,7 @@ private fun MetricCard(
         .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     Column {
       Row(
@@ -913,7 +913,7 @@ private fun MiniSparkline(
           color = color.copy(alpha = 0.6f),
           style = Stroke(width = 2f),
         )
-      }
+      },
   )
 }
 
@@ -999,7 +999,7 @@ private fun MetricTimelineGraph(metric: PerformanceMetric) {
           color = statusColor.copy(alpha = 0.6f),
           style = Stroke(width = 2f),
         )
-      }
+      },
   )
 }
 

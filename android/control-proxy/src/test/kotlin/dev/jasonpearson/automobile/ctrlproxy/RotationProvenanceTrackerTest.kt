@@ -125,7 +125,7 @@ class RotationProvenanceTrackerTest {
         capture,
         rotationAtCaptureStart = 0,
         rotationAtCaptureEnd = changes.rotation,
-      )
+      ),
     )
     assertEquals(0, changes.pendingChangeCount)
   }
@@ -170,7 +170,7 @@ class RotationProvenanceTrackerTest {
         capture,
         rotationAtCaptureStart = 0,
         rotationAtCaptureEnd = 1,
-      )
+      ),
     )
   }
 
@@ -185,7 +185,7 @@ class RotationProvenanceTrackerTest {
         capture,
         rotationAtCaptureStart = 0,
         rotationAtCaptureEnd = 0,
-      )
+      ),
     )
   }
 

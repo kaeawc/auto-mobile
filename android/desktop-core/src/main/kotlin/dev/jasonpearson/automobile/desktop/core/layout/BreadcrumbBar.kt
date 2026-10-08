@@ -100,7 +100,7 @@ private fun BreadcrumbSegment(
         )
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 4.dp, vertical = 2.dp)
+        .padding(horizontal = 4.dp, vertical = 2.dp),
   ) {
     Text(
       text = label,

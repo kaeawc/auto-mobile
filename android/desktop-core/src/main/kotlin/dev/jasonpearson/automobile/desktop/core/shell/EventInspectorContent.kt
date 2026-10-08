@@ -78,7 +78,7 @@ fun InspectorTabBar(
           Modifier.onFocusChanged { isFocused = it.isFocused }
             .then(
               if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
-              else Modifier
+              else Modifier,
             )
             .background(
               if (isSelected) textColor.copy(alpha = 0.12f) else Color.Transparent,
@@ -86,7 +86,7 @@ fun InspectorTabBar(
             )
             .clickable { onSelect(index) }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
       ) {
         Text(
           label,

@@ -16,7 +16,7 @@ class FrameMetricsStoreTest {
   fun `getLatest returns the most recent snapshot`() {
     val store = FrameMetricsStore()
     store.updateSnapshot(
-      FrameMetricsSnapshot(timestamp = 1L, applicationId = "com.a", fps = 60.0, totalFrames = 60)
+      FrameMetricsSnapshot(timestamp = 1L, applicationId = "com.a", fps = 60.0, totalFrames = 60),
     )
     store.updateSnapshot(
       FrameMetricsSnapshot(
@@ -26,7 +26,7 @@ class FrameMetricsStoreTest {
         frameTimeMs = 22.2,
         jankFrames = 4,
         totalFrames = 45,
-      )
+      ),
     )
 
     val latest = store.getLatest()

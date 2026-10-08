@@ -53,7 +53,7 @@ class DesktopDaemonLifecycleTest {
     assertTrue(result.restarted)
     assertEquals(
       listOf(
-        listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start", "--network-mockable")
+        listOf("bunx", "@kaeawc/auto-mobile@0.0.40", "--daemon", "start", "--network-mockable"),
       ),
       commands.commands,
     )
@@ -157,7 +157,7 @@ class DesktopDaemonLifecycleTest {
           "--network-mockable",
           "--video-fps",
           "30",
-        )
+        ),
       ),
       commands.commands,
     )
@@ -291,7 +291,7 @@ class DesktopDaemonLifecycleTest {
           "@kaeawc/auto-mobile@0.0.40",
           "--daemon",
           "start",
-        )
+        ),
       ),
       commands.commands,
     )
@@ -553,7 +553,7 @@ class DesktopDaemonLifecycleTest {
               listOf(
                 DaemonPidReadResult.Unreadable,
                 DaemonPidReadResult.Present(DaemonPidState("0.0.40")),
-              )
+              ),
           ),
         commandExecutor = commands,
         timer = timer,
@@ -593,7 +593,7 @@ class DesktopDaemonLifecycleTest {
       """
       {"version":"0.0.39","options":{"networkMockable":true,"videoFps":30,"eventAllMarkers":["login","save"],"actionsCompactMetadata":true}}
       """
-        .trimIndent()
+        .trimIndent(),
     )
 
     try {

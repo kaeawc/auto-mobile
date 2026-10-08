@@ -177,7 +177,7 @@ class VideoSessionLease(
             startedAtMs = startedAtMs,
             heartbeatAtMs = nowMs(),
             heartbeatElapsedRealtimeMs = elapsedRealtimeMs(),
-          )
+          ),
         )
       val temporary = File(leaseFile.parentFile, "${leaseFile.name}.tmp")
       temporary.writeText(payload)
@@ -193,7 +193,7 @@ class VideoSessionLease(
     } catch (error: Exception) {
       // The socket name (not the secret token) identifies the failing session in logs.
       System.err.println(
-        "VIDEO_SESSION_HEARTBEAT_FAILED socket=${options.socketName} error=${error.message}"
+        "VIDEO_SESSION_HEARTBEAT_FAILED socket=${options.socketName} error=${error.message}",
       )
     }
   }
@@ -210,7 +210,7 @@ class VideoSessionLease(
     } catch (error: Exception) {
       System.err.println(
         "VIDEO_SESSION_CHMOD_FAILED socket=${options.socketName} path=${file.absolutePath} " +
-          "mode=$mode error=${error.message}"
+          "mode=$mode error=${error.message}",
       )
     }
   }

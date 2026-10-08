@@ -61,7 +61,7 @@ internal object AutoMobileBroadcastInterceptor {
               action = action,
               categories = categories,
               extraKeys = extraKeys,
-            )
+            ),
           )
         }
       }

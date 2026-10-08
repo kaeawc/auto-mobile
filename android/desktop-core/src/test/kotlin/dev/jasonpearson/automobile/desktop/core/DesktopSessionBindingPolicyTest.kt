@@ -34,7 +34,7 @@ class DesktopSessionBindingPolicyTest {
           userSelectedDeviceId = null,
           activeDeviceId = "emulator-5554",
           isIos = false,
-        )
+        ),
       )
     }
   }
@@ -86,7 +86,7 @@ class DesktopSessionBindingPolicyTest {
         userSelectedDeviceId = "emulator-5554",
         activeDeviceId = "emulator-5554",
         isIos = false,
-      )
+      ),
     )
   }
 }

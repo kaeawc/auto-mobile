@@ -103,7 +103,7 @@ internal object MemoryMonitor {
             append("; ")
           }
           append(
-            "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}"
+            "heap growth ${formatBytes(deltaBytes.absoluteValue)} exceeded limit ${formatBytes(maxGrowthBytes)}",
           )
         }
       }

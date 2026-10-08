@@ -107,7 +107,7 @@ internal constructor(
         // `config` must be present for config/set even when empty -- the daemon rejects a request
         // whose params omit the key.
         params = DeviceSnapshotSocketParams(config = input),
-      )
+      ),
     )
 
   private fun send(request: DeviceSnapshotSocketRequest): DeviceSnapshotConfigResult {

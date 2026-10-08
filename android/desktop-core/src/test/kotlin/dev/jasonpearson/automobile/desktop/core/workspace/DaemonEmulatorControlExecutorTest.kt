@@ -41,7 +41,7 @@ class DaemonEmulatorControlExecutorTest {
             buildJsonObject {
               put("type", "text")
               put("text", payload.toString())
-            }
+            },
           )
         },
       )
@@ -57,7 +57,7 @@ class DaemonEmulatorControlExecutorTest {
           buildJsonObject {
             put("type", "text")
             put("text", """{"code":"device_lost","reason":"confirmed-unavailable"}""")
-          }
+          },
         )
       },
     )
@@ -72,7 +72,7 @@ class DaemonEmulatorControlExecutorTest {
           buildJsonObject {
             put("type", "text")
             put("text", text)
-          }
+          },
         )
       },
     )
@@ -116,7 +116,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -135,7 +135,7 @@ class DaemonEmulatorControlExecutorTest {
               put("toolName", "deviceSnapshot")
               put("enabled", true)
             }
-      }
+      },
     )
     assertTrue(
       client.toolCalls.any {
@@ -146,7 +146,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -164,7 +164,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "ios")
               put("deviceId", "booted-ipad")
             }
-      }
+      },
     )
   }
 
@@ -204,7 +204,7 @@ class DaemonEmulatorControlExecutorTest {
               put("platform", "android")
               put("deviceId", "emulator-5554")
             }
-      }
+      },
     )
   }
 
@@ -334,7 +334,7 @@ class DaemonEmulatorControlExecutorTest {
               put("toolName", "changeLocalization")
               put("enabled", true)
             }
-      }
+      },
     )
     assertTrue(
       "iOS locale is device-wide — no appId",
@@ -390,7 +390,7 @@ class DaemonEmulatorControlExecutorTest {
               put("deviceId", "emulator-5554")
               put("appId", "com.example.app")
             }
-      }
+      },
     )
   }
 

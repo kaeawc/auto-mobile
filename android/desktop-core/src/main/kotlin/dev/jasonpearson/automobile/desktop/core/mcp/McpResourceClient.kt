@@ -235,7 +235,7 @@ class DaemonMcpResourceClient(
       val content = contents.firstOrNull()
       if (content?.text != null) {
         logger.debug(
-          "[DaemonMcpResourceClient] Success: length=${content.text.length}, mimeType=${content.mimeType}"
+          "[DaemonMcpResourceClient] Success: length=${content.text.length}, mimeType=${content.mimeType}",
         )
         ResourceReadResult.Success(content.text, content.mimeType ?: "application/json")
       } else {
@@ -246,7 +246,7 @@ class DaemonMcpResourceClient(
       val errorMsg = "${e.javaClass.simpleName}: ${e.message}"
       logger.warn("[DaemonMcpResourceClient] Exception: $errorMsg", e)
       ResourceReadResult.Error(
-        "Connection error: $errorMsg\n\nCause: ${e.cause?.message ?: "none"}\n\nStack: ${e.stackTrace.take(3).joinToString("\n") { "  at $it" }}"
+        "Connection error: $errorMsg\n\nCause: ${e.cause?.message ?: "none"}\n\nStack: ${e.stackTrace.take(3).joinToString("\n") { "  at $it" }}",
       )
     }
   }
@@ -380,7 +380,7 @@ object McpResourceClientFactory {
     } catch (e: Exception) {
       // Safe to swallow because the user name is the fallback identifier.
       logger.debug(
-        "[McpResourceClientFactory] Could not read user ID; using user name: ${e.message}"
+        "[McpResourceClientFactory] Could not read user ID; using user name: ${e.message}",
       )
       userName
     }

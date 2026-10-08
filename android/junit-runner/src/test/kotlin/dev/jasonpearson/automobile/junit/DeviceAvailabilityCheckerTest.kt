@@ -130,7 +130,7 @@ class DeviceAvailabilityCheckerTest {
           override fun testStarted(description: Description) {
             started.add(description)
           }
-        }
+        },
       )
       val runner = AutoMobileRunner(RunnerTestTarget::class.java)
       val children = runner.description.children
@@ -199,7 +199,7 @@ class DeviceAvailabilityCheckerTest {
           override fun testFailure(failure: Failure) {
             failures.add(failure)
           }
-        }
+        },
       )
       AutoMobileRunner(RunnerTestTarget::class.java).run(notifier)
       assertEquals(1, failures.size)

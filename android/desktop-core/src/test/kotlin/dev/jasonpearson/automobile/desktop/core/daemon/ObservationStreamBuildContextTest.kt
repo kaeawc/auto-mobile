@@ -62,8 +62,8 @@ class ObservationStreamBuildContextTest {
       client.handleMessage(
         frame(
           buildKey =
-            """{"packageId":"com.example.app","versionCode":0,"versionKey":"1.2.3.4","contentHash":"hashB","futureKey":true}"""
-        )
+            """{"packageId":"com.example.app","versionCode":0,"versionKey":"1.2.3.4","contentHash":"hashB","futureKey":true}""",
+        ),
       )
       assertEquals(
         StreamBuildKey("com.example.app", 0L, "1.2.3.4", "hashB"),

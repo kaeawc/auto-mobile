@@ -45,7 +45,7 @@ data class Keymap(val bindings: List<KeyBinding>) {
             KeyBinding("toggle_bottom_pane", "Toggle Bottom Pane", "Cmd+3"),
             KeyBinding("open_settings", "Open Settings", "Cmd+,"),
             KeyBinding("take_screenshot", "Take Screenshot", "Cmd+Shift+S"),
-          )
+          ),
       )
   }
 }

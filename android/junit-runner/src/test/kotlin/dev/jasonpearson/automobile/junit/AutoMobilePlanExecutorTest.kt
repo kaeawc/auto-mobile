@@ -69,7 +69,7 @@ class AutoMobilePlanExecutorTest {
       payload(
         """{"error":{"code":"daemon_restart_pending",
           "message":"Daemon restart is pending; retry provisionDevice after the replacement becomes ready.",
-          "retryable":true}}"""
+          "retryable":true}}""",
       ),
       "daemon_restart_pending",
       "Daemon restart is pending; retry provisionDevice after the replacement becomes ready.",
@@ -84,7 +84,7 @@ class AutoMobilePlanExecutorTest {
           "code":"session_recovery_pending","sessionUuid":"test-session","platform":"android",
           "deviceId":"emulator-5554","stableDeviceId":"emulator-5554","retryable":true,
           "recoveryWindowRemainingMs":5000,
-          "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}"""
+          "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}""",
       ),
       "session_recovery_pending",
       "Cannot safely recover session test-session",
@@ -96,7 +96,7 @@ class AutoMobilePlanExecutorTest {
     assertEnvelopeFailure(
       payload(
         """{"success":false,"message":"Invalid arguments",
-          "error":{"code":"invalid_arguments","message":"Invalid arguments"}}"""
+          "error":{"code":"invalid_arguments","message":"Invalid arguments"}}""",
       ),
       "invalid_arguments",
       "Invalid arguments",
@@ -227,7 +227,7 @@ class AutoMobilePlanExecutorTest {
         success = true,
         result =
           JsonObject(
-            mapOf("structuredContent" to shutdownPayload(), "isError" to JsonPrimitive(true))
+            mapOf("structuredContent" to shutdownPayload(), "isError" to JsonPrimitive(true)),
           ),
       ),
     )
@@ -248,8 +248,8 @@ class AutoMobilePlanExecutorTest {
         payload(
           """{"success":false,"executedSteps":1,"totalSteps":2,
             "failedStep":{"stepIndex":1,"tool":"tapOn","error":"Element not found"},
-            "error":"Element not found","platform":"android","deviceId":"emulator-5554"}"""
-        )
+            "error":"Element not found","platform":"android","deviceId":"emulator-5554"}""",
+        ),
       ),
     )
 
@@ -408,7 +408,7 @@ class AutoMobilePlanExecutorTest {
         type = "mcp_response",
         success = false,
         error = "daemon request timeout",
-      )
+      ),
     )
     fakeDaemonClient.setResponse(
       "executePlan",
@@ -430,7 +430,7 @@ class AutoMobilePlanExecutorTest {
         type = "mcp_response",
         success = false,
         error = "Unknown tool: setToolEnabled",
-      )
+      ),
     )
     fakeDaemonClient.setResponse(
       "executePlan",
@@ -454,8 +454,8 @@ class AutoMobilePlanExecutorTest {
           mapOf(
             "success" to JsonPrimitive(true),
             "toolResults" to JsonArray(listOf(step)),
-          )
-        )
+          ),
+        ),
       ),
     )
 
@@ -501,7 +501,7 @@ class AutoMobilePlanExecutorTest {
   }
 
   private fun executePlan(
-    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions()
+    options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions(),
   ): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
       "test-plans/launch-clock-app.yaml",
@@ -518,23 +518,23 @@ class AutoMobilePlanExecutorTest {
     payload(
       """{"error":{"code":"session_ownership_lost","message":"Session released",
       "sessionUuid":"test-session","reason":"explicit","retryable":true,
-      "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}"""
+      "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}""",
     )
 
   private fun deviceLostPayload(): JsonObject =
     payload(
       """{"code":"device_lost","deviceId":"emulator-5554","sessionUuid":"test-session",
-      "reason":"confirmed-unavailable"}"""
+      "reason":"confirmed-unavailable"}""",
     )
 
   private fun shutdownPayload(): JsonObject =
     payload(
-      """{"error":{"code":"daemon_shutting_down","message":"Daemon is shutting down","retryable":true}}"""
+      """{"error":{"code":"daemon_shutting_down","message":"Daemon is shutting down","retryable":true}}""",
     )
 
   private fun successPayload(): JsonObject =
     payload(
-      """{"success":true,"executedSteps":1,"totalSteps":1,"platform":"android","deviceId":"emulator-5554"}"""
+      """{"success":true,"executedSteps":1,"totalSteps":1,"platform":"android","deviceId":"emulator-5554"}""",
     )
 
   private fun assertEnvelopeFailure(
@@ -563,11 +563,11 @@ class AutoMobilePlanExecutorTest {
           "content" to
             JsonArray(
               listOf(
-                JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))
-              )
+                JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text))),
+              ),
             ),
           "isError" to JsonPrimitive(isError),
-        )
+        ),
       )
     return DaemonResponse(id = "test", type = "mcp_response", success = true, result = result)
   }

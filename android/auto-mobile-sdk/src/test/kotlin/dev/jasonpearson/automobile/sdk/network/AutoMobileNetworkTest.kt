@@ -62,7 +62,7 @@ class AutoMobileNetworkTest {
         responseBodySize = 1024,
         host = "api.example.com",
         path = "/users",
-      )
+      ),
     )
     drainDelivery()
 
@@ -89,7 +89,7 @@ class AutoMobileNetworkTest {
       NetworkRequestRecord(
         url = "https://api.example.com/v2/items",
         method = "POST",
-      )
+      ),
     )
     drainDelivery()
 
@@ -105,7 +105,7 @@ class AutoMobileNetworkTest {
       NetworkRequestRecord(
         url = "https://example.com",
         method = "GET",
-      )
+      ),
     )
   }
 
@@ -193,7 +193,7 @@ class AutoMobileNetworkTest {
       NetworkRequestRecord(
         url = "https://api.example.com/users",
         method = "GET",
-      )
+      ),
     )
 
     assertEquals(emptyList(), flushed)
@@ -229,14 +229,14 @@ class AutoMobileNetworkTest {
     AutoMobileNetwork.setNetworkControlProvider { true }
 
     assertTrue(
-      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("one")
+      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("one"),
     )
     assertEquals(1, sends)
 
     AutoMobileNetwork.setCapturePolicyProvider { SdkCapturePolicy(allowMutations = true) }
 
     assertFalse(
-      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("two")
+      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("two"),
     )
     assertEquals(1, sends)
 

@@ -248,10 +248,10 @@ compose.desktop {
         // the ScreenCaptureKit helper release. Local/unsigned builds leave sign off.
         signing {
           sign.set(
-            project.providers.environmentVariable("MACOS_SIGN").map { it == "true" }.orElse(false)
+            project.providers.environmentVariable("MACOS_SIGN").map { it == "true" }.orElse(false),
           )
           identity.set(
-            project.providers.environmentVariable("MACOS_DEVELOPER_ID_SIGNING_IDENTITY").orElse("")
+            project.providers.environmentVariable("MACOS_DEVELOPER_ID_SIGNING_IDENTITY").orElse(""),
           )
         }
       }

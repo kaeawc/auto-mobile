@@ -113,7 +113,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       LazyColumn(
         modifier = Modifier.fillMaxSize().padding(paddingValues).padding(horizontal = 16.dp),

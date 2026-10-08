@@ -61,7 +61,7 @@ class OverlayRenderModelTest {
   fun `closed contract icon names all map and unknown names remain placeholders`() {
     val input =
       checkNotNull(
-          OverlaySpecValidator.javaClass.getResourceAsStream("/overlay-spec-contract.json")
+          OverlaySpecValidator.javaClass.getResourceAsStream("/overlay-spec-contract.json"),
         )
         .bufferedReader()
         .use { it.readText() }
@@ -111,7 +111,7 @@ class OverlayRenderModelTest {
             OverlayStyleWhen(
               OverlayCondition("selected", equals = OverlayScalar.BooleanValue(true)),
               OverlayStyle(background = "#2255CC"),
-            )
+            ),
           ),
       )
     fun rendered(selected: Boolean) =
@@ -121,7 +121,7 @@ class OverlayRenderModelTest {
             OverlayWindow(OverlayFullscreenPlacement()),
             root = node,
             state = mapOf("selected" to OverlayScalar.BooleanValue(selected)),
-          )
+          ),
         )
         .root
         .style
@@ -143,10 +143,10 @@ class OverlayRenderModelTest {
                   OverlayStyleWhen(
                     OverlayCondition("k", equals = OverlayScalar.Numeric(1.0)),
                     OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
-                  )
+                  ),
                 ),
-            )
-          )
+            ),
+          ),
         )
       }
     assertTrue(error.message.orEmpty().contains("root.styleWhen[0].style.width.dp"))
@@ -161,8 +161,8 @@ class OverlayRenderModelTest {
             OverlayTextNode(
               text = "text",
               style = OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
-            )
-          )
+            ),
+          ),
         )
       }
     assertTrue(error.message.orEmpty().contains("root.style.width.dp"))
@@ -183,7 +183,7 @@ class OverlayRenderModelTest {
               OverlayLinearGradient(
                 Double.MAX_VALUE,
                 listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
-              )
+              ),
           ),
       )
     for ((key, style) in styles) {
@@ -212,18 +212,18 @@ class OverlayRenderModelTest {
   fun `gradient stop positions apply only when every stop authors one`() {
     val even =
       overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff"))
+        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff")),
       )
     assertEquals(listOf(Color(0xff000000), Color(0xffffffff)), even.first)
     assertNull(even.second)
     val explicit =
       overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff", 1.0))
+        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff", 1.0)),
       )
     assertEquals(listOf(0.2f, 1f), explicit.second)
     val descending =
       overlayGradientStops(
-        listOf(OverlayGradientStop("#000000", 0.8), OverlayGradientStop("#ffffff", 0.2))
+        listOf(OverlayGradientStop("#000000", 0.8), OverlayGradientStop("#ffffff", 0.2)),
       )
     assertEquals(listOf(0.8f, 0.8f), descending.second)
   }
@@ -236,7 +236,7 @@ class OverlayRenderModelTest {
         aspectRatio = 1.5,
         gradient =
           OverlayRadialGradient(
-            listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff"))
+            listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
           ),
       )
     val node = mapOverlaySpec(spec(OverlayTextNode(text = "t", style = style))).root
@@ -273,7 +273,7 @@ class OverlayRenderModelTest {
       OverlaySafeAreaPadding(listOf("top", "start"), listOf("systemBars", "cutout", "ime"))
     val node =
       mapOverlaySpec(
-          spec(OverlayTextNode(style = style, safeAreaPadding = safeArea, text = "text"))
+          spec(OverlayTextNode(style = style, safeAreaPadding = safeArea, text = "text")),
         )
         .root
     assertEquals(style, node.style.source)
@@ -325,7 +325,7 @@ class OverlayRenderModelTest {
     assertFalse(
       mapOverlaySpec(spec(root).copy(state = state + ("enabled" to OverlayScalar.Text("true"))))
         .root
-        .visible
+        .visible,
     )
   }
 

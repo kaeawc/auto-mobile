@@ -43,13 +43,13 @@ class RecordingSharedPreferences(initial: Map<String, Any?> = emptyMap()) : Shar
   override fun edit(): SharedPreferences.Editor = RecordingEditor()
 
   override fun registerOnSharedPreferenceChangeListener(
-    listener: SharedPreferences.OnSharedPreferenceChangeListener
+    listener: SharedPreferences.OnSharedPreferenceChangeListener,
   ) {
     listeners.add(listener)
   }
 
   override fun unregisterOnSharedPreferenceChangeListener(
-    listener: SharedPreferences.OnSharedPreferenceChangeListener
+    listener: SharedPreferences.OnSharedPreferenceChangeListener,
   ) {
     listeners.remove(listener)
   }

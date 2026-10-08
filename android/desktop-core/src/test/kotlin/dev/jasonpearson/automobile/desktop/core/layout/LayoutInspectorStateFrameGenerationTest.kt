@@ -29,7 +29,7 @@ class LayoutInspectorStateFrameGenerationTest {
     val state = LayoutInspectorState()
     val error =
       Json.parseToJsonElement(
-        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: simulator_not_booted"}}"""
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: simulator_not_booted"}}""",
       )
     assertNull(parseHierarchyFromJson(error))
     assertTrue(state.recordHierarchyUnavailable(error))
@@ -37,7 +37,7 @@ class LayoutInspectorStateFrameGenerationTest {
 
     val success =
       Json.parseToJsonElement(
-        """{"hierarchy":{"node":{"className":"XCUIApplication","bounds":{"left":0,"top":0,"right":100,"bottom":100}}}}"""
+        """{"hierarchy":{"node":{"className":"XCUIApplication","bounds":{"left":0,"top":0,"right":100,"bottom":100}}}}""",
       )
     val parsed = requireNotNull(parseHierarchyFromJson(success))
     state.applyHierarchyUpdateImmediate(parsed, emptySet())
@@ -49,7 +49,7 @@ class LayoutInspectorStateFrameGenerationTest {
     val state = LayoutInspectorState()
     val iosError =
       Json.parseToJsonElement(
-        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}"""
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}""",
       )
     assertTrue(state.recordHierarchyUnavailable(iosError))
 
@@ -67,7 +67,7 @@ class LayoutInspectorStateFrameGenerationTest {
 
     val error =
       Json.parseToJsonElement(
-        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}"""
+        """{"hierarchy":{"error":"Failed to retrieve iOS view hierarchy from CtrlProxy iOS: runner unavailable"}}""",
       )
     assertTrue(state.recordHierarchyUnavailable(error))
     advanceUntilIdle()

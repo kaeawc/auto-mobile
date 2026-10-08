@@ -39,7 +39,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
     val json = Json { ignoreUnknownKeys = true }
     val request =
       json.decodeFromString<WebSocketRequest>(
-        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":100,"duration":50,"doubleTap":true}"""
+        """{"type":"request_tap_coordinates","requestId":"double","x":100,"y":100,"duration":50,"doubleTap":true}""",
       )
     CtrlProxyMessageHandler(fixture.actions).handleMessage(request)
     val dispatch = fixture.shadow.gesturesDispatched.single().description()
@@ -169,7 +169,7 @@ class CtrlProxyDisplayRoutingDispatchTest {
         it.msg == "Error performing swipe" &&
           it.throwable is IllegalArgumentException &&
           it.throwable.message == "Gesture display routing requires Android 11 (API 30)"
-      }
+      },
     )
     for (displayId in listOf(Display.DEFAULT_DISPLAY, null)) {
       val before = fixture.shadow.gesturesDispatched.size

@@ -396,7 +396,7 @@ class DesktopDaemonSessionCompositionTest {
 
   /** Binds [pixel] under session-1, then has the daemon idle-release session-1 (C4). */
   private fun ComposeUiTest.idleReleaseBoundSession(
-    transport: RecordingDaemonTransport
+    transport: RecordingDaemonTransport,
   ): () -> DesktopDaemonSessionState {
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
     var state: DesktopDaemonSessionState? = null
@@ -640,7 +640,7 @@ class DesktopDaemonSessionCompositionTest {
       binding = binding,
       sessionFactory = {
         DesktopDaemonSession(
-          McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}")
+          McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}"),
         )
       },
       ioDispatcher = Dispatchers.Unconfined,

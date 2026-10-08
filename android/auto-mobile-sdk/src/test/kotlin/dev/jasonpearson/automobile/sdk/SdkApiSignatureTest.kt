@@ -123,7 +123,7 @@ class SdkApiSignatureTest {
           // of visibility, like Kotlin's public compiler-generated Runnable classes.
           mapOf(
             "Outer\$Generated\$1" to
-              "public final class Outer\$Generated\$1 { public void generatedOnly() {} }"
+              "public final class Outer\$Generated\$1 { public void generatedOnly() {} }",
           ),
         )
       nestedSignature = generator.generate(listOf(nestedClasses))

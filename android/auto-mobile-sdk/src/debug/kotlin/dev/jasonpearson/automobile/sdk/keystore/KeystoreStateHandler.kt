@@ -80,7 +80,7 @@ internal class KeystoreStateHandler(
             present,
             if (present) backend.entryCategory(name) else EntryCategory.UNKNOWN,
           )
-        }
+        },
       )
     } catch (error: Exception) {
       Log.w("KeystoreTestState", "Keystore metadata read failed", error)
@@ -114,7 +114,7 @@ internal class KeystoreStateHandler(
         "scopes",
         JSONArray(
           if (KeystoreTestState.isEnabled()) KeystoreTestState.declaredScopes().sorted()
-          else emptyList<String>()
+          else emptyList<String>(),
         ),
       )
       if (response is KeystoreResponse.Ok) {
@@ -126,7 +126,7 @@ internal class KeystoreStateHandler(
                 .put("alias", entry.alias)
                 .put("present", entry.present)
                 .put("category", entry.category.name)
-            }
+            },
           ),
         )
       }

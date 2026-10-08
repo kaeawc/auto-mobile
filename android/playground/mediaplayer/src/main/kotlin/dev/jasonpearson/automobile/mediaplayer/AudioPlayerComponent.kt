@@ -210,7 +210,7 @@ fun AudioWaveform(isPlaying: Boolean) {
         Modifier.size(120.dp)
           .clip(CircleShape)
           .background(
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isPlaying) 1f else 0.5f)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (isPlaying) 1f else 0.5f),
           ),
       contentAlignment = Alignment.Center,
     ) {
@@ -228,7 +228,7 @@ fun AudioWaveform(isPlaying: Boolean) {
           modifier =
             Modifier.size(width = 4.dp, height = height.dp)
               .clip(RoundedCornerShape(2.dp))
-              .background(waveformColor)
+              .background(waveformColor),
         )
       }
     }
@@ -360,8 +360,8 @@ fun AudioPlayerComponentPreview() {
     AudioPlayerComponent(
       audioResource =
         VideoResource.UriVideo(
-          android.net.Uri.parse("https://www.soundjay.com/misc/sounds/bell-ringing-05.wav")
-        )
+          android.net.Uri.parse("https://www.soundjay.com/misc/sounds/bell-ringing-05.wav"),
+        ),
     )
   }
 }

@@ -169,7 +169,7 @@ fun CommandPalette(
               }
               else -> false
             }
-          }
+          },
     ) {
       TextField(
         value = query,

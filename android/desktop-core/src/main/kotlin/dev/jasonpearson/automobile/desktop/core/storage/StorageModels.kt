@@ -222,7 +222,7 @@ object StorageMockData {
                     defaultValue = null,
                   ),
                 ),
-            )
+            ),
           ),
       ),
     )

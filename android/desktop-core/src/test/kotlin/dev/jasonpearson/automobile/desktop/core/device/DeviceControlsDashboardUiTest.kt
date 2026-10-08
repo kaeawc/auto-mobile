@@ -97,7 +97,7 @@ class DeviceControlsDashboardUiTest {
           recordingActions = FakeVideoRecordingActions(),
           recordingConfigClient =
             FakeVideoRecordingConfigClient(
-              VideoRecordingConfig(qualityPreset = "high", fps = 60, maxArchiveSizeMb = 2048)
+              VideoRecordingConfig(qualityPreset = "high", fps = 60, maxArchiveSizeMb = 2048),
             ),
           streamClient = FakeWebRtcStreamClient(),
           activeDeviceId = "emulator-5554",
@@ -278,7 +278,7 @@ class DeviceControlsDashboardUiTest {
           recordingConfigClient = FakeVideoRecordingConfigClient(),
           streamClient =
             FakeWebRtcStreamClient(
-              startFailure = "WebRTC streaming is not configured (AUTOMOBILE_WEBRTC_WHIP_ENDPOINT)"
+              startFailure = "WebRTC streaming is not configured (AUTOMOBILE_WEBRTC_WHIP_ENDPOINT)",
             ),
           activeDeviceId = "emulator-5554",
         )

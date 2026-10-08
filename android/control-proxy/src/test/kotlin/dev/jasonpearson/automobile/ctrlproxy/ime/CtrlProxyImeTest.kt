@@ -52,7 +52,7 @@ class CtrlProxyImeTest {
           null
         },
         nowMs = { clockMs },
-      )
+      ),
     )
   }
 
@@ -64,7 +64,7 @@ class CtrlProxyImeTest {
     val connection = requireNotNull(editor.onCreateInputConnection(EditorInfo()))
 
     assertTrue(
-      CtrlProxyIme.editorSyncSucceeded(InputConnectionAdapter(connection, InputMethodService()))
+      CtrlProxyIme.editorSyncSucceeded(InputConnectionAdapter(connection, InputMethodService())),
     )
   }
 

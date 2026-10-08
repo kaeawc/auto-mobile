@@ -67,7 +67,7 @@ class NavigationProvenanceTest {
   fun `build key mismatch fades even on the active device`() {
     val ctxWithBuild =
       activeContext.copy(
-        buildKey = ProvenanceBuildKey("com.example.app", versionCode = 2, contentHash = "hashB")
+        buildKey = ProvenanceBuildKey("com.example.app", versionCode = 2, contentHash = "hashB"),
       )
     // Same device, but an older build → historical.
     val provenance = listOf(record(versionCode = 1, contentHash = "hashA"))
@@ -90,20 +90,20 @@ class NavigationProvenanceTest {
       ProvenanceOpacity.isFaded(
         listOf(record(versionCode = 20260102123L, contentHash = "other")),
         context,
-      )
+      ),
     )
     assertFalse(
       ProvenanceOpacity.isActiveRecord(
         matching,
         context.copy(buildKey = matching.buildKey.copy(packageId = "other")),
-      )
+      ),
     )
     assertTrue(ProvenanceOpacity.isActiveRecord(matching, activeContext))
     assertTrue(
       ProvenanceOpacity.isActiveRecord(
         record(versionCode = 20260102124L, contentHash = "other"),
         activeContext,
-      )
+      ),
     )
   }
 
@@ -133,7 +133,7 @@ class NavigationProvenanceTest {
   fun `faded description surfaces build device session and lastSeen`() {
     val provenance =
       listOf(
-        record(versionCode = 2, contentHash = "hashB", deviceId = "emulator-9999", lastSeen = 250L)
+        record(versionCode = 2, contentHash = "hashB", deviceId = "emulator-9999", lastSeen = 250L),
       )
     assertEquals(
       "Home — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250",
@@ -165,7 +165,7 @@ class NavigationProvenanceTest {
           contentHash = "",
           deviceId = ProvenanceOpacity.LEGACY_DEVICE_SENTINEL,
           sessionUuid = "legacy",
-        )
+        ),
       )
     assertEquals(
       ProvenanceOpacity.ACTIVE_ALPHA,

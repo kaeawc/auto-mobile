@@ -138,7 +138,7 @@ fun NavigationDashboard(
       return@LaunchedEffect
     }
     LOG.info(
-      "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}"
+      "Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}",
     )
     isLoading = true
     error = null
@@ -153,7 +153,7 @@ fun NavigationDashboard(
         when (val result = dataSource.getNavigationGraph()) {
           is Result.Success -> {
             LOG.info(
-              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions"
+              "Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions",
             )
             navigationGraph = result.data
             isLoading = false
@@ -195,7 +195,7 @@ fun NavigationDashboard(
       // Only update if it's for the selected app (or if no app filter is set)
       if (selectedAppId == null || update.appId == selectedAppId) {
         LOG.info(
-          "Received navigation update - appId=${update.appId}, nodes=${update.nodes.size}, edges=${update.edges.size}, currentScreen=${update.currentScreen}"
+          "Received navigation update - appId=${update.appId}, nodes=${update.nodes.size}, edges=${update.edges.size}, currentScreen=${update.currentScreen}",
         )
         // Check for foreground app change before switching to Main
         val newAppId = update.appId
@@ -322,7 +322,7 @@ private fun ReadOnlyOfflineBadge(modifier: Modifier = Modifier) {
           RoundedCornerShape(6.dp),
         )
         .padding(horizontal = 8.dp, vertical = 4.dp)
-        .semantics { contentDescription = "Navigate actions disabled (offline)" }
+        .semantics { contentDescription = "Navigate actions disabled (offline)" },
   ) {
     Text(
       "Read-only · offline",

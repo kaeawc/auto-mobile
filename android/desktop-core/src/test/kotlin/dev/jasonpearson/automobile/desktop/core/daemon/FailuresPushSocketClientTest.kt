@@ -66,7 +66,7 @@ class FailuresPushSocketClientTest {
           FakeSocket(),
           FakeSocket(),
           FakeSocket(listOf("""{"type":"subscription_response","success":true}""")),
-        )
+        ),
       )
     val client =
       FailuresPushSocketClient(
@@ -197,7 +197,7 @@ class FailuresPushSocketClientTest {
         onRead = {
           assertTrue(client.isConnected())
           client.disconnect()
-        }
+        },
       )
     client =
       FailuresPushSocketClient(
@@ -405,7 +405,7 @@ class FailuresPushSocketClientTest {
           assertEquals("subscribe", request.command)
           assertEquals(ConnectionState.Connected(subscribed = false), client.connectionState.value)
           client.disconnect()
-        }
+        },
       )
     client =
       FailuresPushSocketClient(

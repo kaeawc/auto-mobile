@@ -196,7 +196,7 @@ class AutoMobileSDKNavigationInitializationTest {
       NavigationEvent(
         destination = "Profile",
         source = NavigationSource.CIRCUIT,
-      )
+      ),
     )
     AutoMobileSDK.shutdown()
 

@@ -105,7 +105,7 @@ fun TestDashboard(
       currentForegroundPackage != null && currentNavigationUpdate?.appId != currentForegroundPackage
     ) {
       LOG.info(
-        "Foreground app changed to $currentForegroundPackage, clearing stale navigation data"
+        "Foreground app changed to $currentForegroundPackage, clearing stale navigation data",
       )
       currentNavigationUpdate = null
     }
@@ -118,7 +118,7 @@ fun TestDashboard(
     LOG.info("Starting hierarchy updates collection in TestDashboard")
     observationStreamClient.hierarchyUpdates.collect { update ->
       LOG.info(
-        "Received hierarchy update in TestDashboard - deviceId=${update.deviceId}, hasData=${update.data != null}"
+        "Received hierarchy update in TestDashboard - deviceId=${update.deviceId}, hasData=${update.data != null}",
       )
       currentHierarchyUpdate = update
     }
@@ -131,7 +131,7 @@ fun TestDashboard(
     LOG.info("Starting screenshot updates collection in TestDashboard")
     observationStreamClient.screenshotUpdates.collect { update ->
       LOG.info(
-        "Received screenshot update in TestDashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}"
+        "Received screenshot update in TestDashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}",
       )
       currentScreenshotUpdate = update
     }
@@ -150,12 +150,12 @@ fun TestDashboard(
       // Only accept navigation updates that match the foreground app (or if no hierarchy yet)
       if (foregroundPackage == null || update.appId == foregroundPackage) {
         LOG.info(
-          "Received navigation update in TestDashboard - appId=${update.appId}, nodes=${update.nodes.size}"
+          "Received navigation update in TestDashboard - appId=${update.appId}, nodes=${update.nodes.size}",
         )
         currentNavigationUpdate = update
       } else {
         LOG.info(
-          "Ignoring navigation update for ${update.appId} (foreground is $foregroundPackage)"
+          "Ignoring navigation update for ${update.appId} (foreground is $foregroundPackage)",
         )
       }
     }
@@ -355,7 +355,7 @@ internal fun TestDashboardHome(
         modifier =
           Modifier.fillMaxWidth()
             .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-            .padding(16.dp)
+            .padding(16.dp),
       ) {
         Text(error, fontSize = 12.sp, color = Color(0xFFFF5722))
       }
@@ -416,7 +416,7 @@ private fun FilterChip(
         .background(bgColor, RoundedCornerShape(12.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 10.dp, vertical = 4.dp)
+        .padding(horizontal = 10.dp, vertical = 4.dp),
   ) {
     Text(label, fontSize = 11.sp, color = textColor)
   }
@@ -619,7 +619,7 @@ private fun RecordingTestScreen(
               Modifier.weight(1f)
                 .height(80.dp)
                 .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-                .padding(8.dp)
+                .padding(8.dp),
           ) {
             // Placeholder text when empty
             if (isEmpty) {
@@ -687,7 +687,7 @@ private fun RecordingTestScreen(
           modifier =
             Modifier.fillMaxWidth()
               .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-              .padding(16.dp)
+              .padding(16.dp),
         ) {
           if (isLoadingAnalysis) {
             Row(
@@ -837,7 +837,7 @@ private fun RecordingTestScreen(
               Modifier.fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                .padding(12.dp)
+                .padding(12.dp),
           ) {
             Text(
               promptText,
@@ -854,7 +854,7 @@ private fun RecordingTestScreen(
             Modifier.fillMaxWidth()
               .padding(horizontal = 16.dp)
               .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-              .padding(12.dp)
+              .padding(12.dp),
         ) {
           Text(
             "Use your AI agent (Claude Code, Codex, etc.) to interact with the app. " +
@@ -882,7 +882,7 @@ private fun RecordingTestScreen(
                       colors.text.normal.copy(alpha = 0.05f),
                       RoundedCornerShape(6.dp),
                     )
-                    .padding(8.dp)
+                    .padding(8.dp),
               ) {
                 currentPackageName?.let { pkg ->
                   Text(
@@ -991,7 +991,7 @@ private fun RecordingTestScreen(
               Modifier.weight(1f)
                 .fillMaxHeight()
                 .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
-                .padding(12.dp)
+                .padding(12.dp),
           ) {
             if (recordedActions.isEmpty()) {
               Column {
@@ -1075,7 +1075,7 @@ private fun RecordingTestScreen(
               Modifier.fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-                .padding(12.dp)
+                .padding(12.dp),
           ) {
             Text(error, fontSize = 12.sp, color = Color(0xFFFF5722))
           }
@@ -1154,7 +1154,7 @@ private fun PlanReviewPanel(
           .fillMaxWidth()
           .background(Color(0xFF1E1E1E), RoundedCornerShape(8.dp))
           .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-          .padding(12.dp)
+          .padding(12.dp),
     ) {
       Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
         val highlightedYaml = highlightYaml(plan.planContent)
@@ -1554,21 +1554,21 @@ private fun TestRunDetailScreen(
                   playbackTimeMs = 0
                 }
                 isPlaying = !isPlaying
-              }
+              },
             ) {
               Text(
                 if (showFullLabels) {
                   if (isPlaying) "|| Pause" else "> Play"
                 } else {
                   if (isPlaying) "||" else ">"
-                }
+                },
               )
             }
             OutlinedButton(
               onClick = {
                 isPlaying = false
                 playbackTimeMs = 0
-              }
+              },
             ) {
               Text(if (showFullLabels) "[] Reset" else "[]")
             }
@@ -1613,7 +1613,7 @@ private fun TestRunDetailScreen(
           modifier =
             Modifier.fillMaxWidth()
               .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
-              .padding(12.dp)
+              .padding(12.dp),
         ) {
           Text(
             errorMsg,
@@ -1730,9 +1730,9 @@ private fun TestRunDetailScreen(
                 .then(
                   if (isCurrentScreen)
                     Modifier.border(1.dp, Color(0xFF2196F3), RoundedCornerShape(4.dp))
-                  else Modifier
+                  else Modifier,
                 )
-                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
           ) {
             Text(screen, fontSize = 11.sp)
           }
@@ -1830,7 +1830,7 @@ private fun RunHistoryChart(
       modifier =
         Modifier.fillMaxWidth()
           .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-          .padding(8.dp)
+          .padding(8.dp),
     ) {
       Row(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -1859,13 +1859,13 @@ private fun RunHistoryChart(
                       Color.White.copy(alpha = 0.5f),
                       RoundedCornerShape(2.dp),
                     )
-                  else Modifier
+                  else Modifier,
                 )
                 .then(
                   if (isClickable)
                     Modifier.clickable { onRunClick(run.runId) }.pointerHoverIcon(PointerIcon.Hand)
-                  else Modifier
-                )
+                  else Modifier,
+                ),
           )
         }
 
@@ -1971,13 +1971,13 @@ private fun VideoPlayerWithTimeline(
       modifier =
         Modifier.fillMaxWidth()
           .height(6.dp)
-          .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(3.dp))
+          .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(3.dp)),
     ) {
       Box(
         modifier =
           Modifier.fillMaxWidth(progress)
             .height(6.dp)
-            .background(Color(0xFF2196F3), RoundedCornerShape(3.dp))
+            .background(Color(0xFF2196F3), RoundedCornerShape(3.dp)),
       )
       // Step markers
       stepTimestamps.forEachIndexed { index, (start, _) ->
@@ -1989,8 +1989,8 @@ private fun VideoPlayerWithTimeline(
                 .size(width = 2.dp, height = 6.dp)
                 .background(
                   if (index == currentStepIndex) Color(0xFF4CAF50)
-                  else colors.text.normal.copy(alpha = 0.3f)
-                )
+                  else colors.text.normal.copy(alpha = 0.3f),
+                ),
           )
         }
       }
@@ -2129,12 +2129,12 @@ private fun ActionCard(
         .then(
           if (borderColor != Color.Transparent)
             Modifier.border(1.dp, borderColor, RoundedCornerShape(8.dp))
-          else Modifier
+          else Modifier,
         )
         .background(bgColor, RoundedCornerShape(8.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     Row(
       horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2189,7 +2189,7 @@ private fun DevicePickerOverlay(
       Modifier.fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
         .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     Column {
       Row(
@@ -2349,7 +2349,7 @@ private fun TestStepRowWithScreenshot(
         // Status indicator
         Box(
           modifier =
-            Modifier.size(if (isCompact) 6.dp else 8.dp).background(statusColor, CircleShape)
+            Modifier.size(if (isCompact) 6.dp else 8.dp).background(statusColor, CircleShape),
         )
 
         // Action - truncate in compact mode
@@ -2413,7 +2413,7 @@ private fun ArtifactButton(label: String) {
       Modifier.background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
         .clickable { /* TODO: Open artifact */ }
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 12.dp, vertical = 8.dp)
+        .padding(horizontal = 12.dp, vertical = 8.dp),
   ) {
     Text(label, fontSize = 12.sp)
   }

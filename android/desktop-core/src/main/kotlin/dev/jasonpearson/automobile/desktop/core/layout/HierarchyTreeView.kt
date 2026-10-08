@@ -278,7 +278,7 @@ private fun TreeNodeRow(
           .then(
             if (node.hasChildren)
               Modifier.clickable(onClick = onToggleExpand).pointerHoverIcon(PointerIcon.Hand)
-            else Modifier
+            else Modifier,
           ),
       contentAlignment = Alignment.Center,
     ) {
@@ -462,7 +462,7 @@ private fun flattenTree(
           depth = depth,
           isExpanded = isExpanded,
           hasChildren = element.children.isNotEmpty(),
-        )
+        ),
       )
 
       if (isExpanded) {

@@ -103,7 +103,7 @@ internal class GestureStreamCoordinator(
         willContinue = true,
         isInitial = true,
         isHold = true,
-      )
+      ),
     )
   }
 
@@ -158,7 +158,7 @@ internal class GestureStreamCoordinator(
           willContinue = true,
           isInitial = false,
           isHold = from == target,
-        )
+        ),
       )
     }
 
@@ -184,7 +184,7 @@ internal class GestureStreamCoordinator(
         willContinue = false,
         isInitial = false,
         isHold = from == to,
-      )
+      ),
     )
   }
 

@@ -763,7 +763,7 @@ fun NavigationCanvasView(
                 )
               }
             }
-          }
+          },
     ) {
       // Render screen nodes as Composables
       nodePositions.forEach { pos ->
@@ -783,7 +783,7 @@ fun NavigationCanvasView(
                 scaleX = scale
                 scaleY = scale
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-              }
+              },
         ) {
           ScreenNodeCard(
             screen = screen,
@@ -997,7 +997,7 @@ private fun ScreenNodeCard(
           )
         }
       }
-    }
+    },
   ) {
     Box(
       modifier =
@@ -1008,7 +1008,7 @@ private fun ScreenNodeCard(
           // Provenance-weighted opacity: 100% active, 50% historical / other build or device
           // (#4985).
           .graphicsLayer { alpha = provenanceAlpha }
-          .semantics { contentDescription = provenanceDescription }
+          .semantics { contentDescription = provenanceDescription },
     ) {
       // Screen name positioned 8dp above the card (plus ~12dp for text height)
       Text(
@@ -1026,7 +1026,7 @@ private fun ScreenNodeCard(
             .background(colors.text.normal.copy(alpha = 0.08f))
             .then(
               if (isHighlighted) Modifier.border(borderWidth, borderColor, RoundedCornerShape(8.dp))
-              else Modifier
+              else Modifier,
             ),
         contentAlignment = Alignment.Center,
       ) {
@@ -1042,7 +1042,7 @@ private fun ScreenNodeCard(
           isLoadingScreenshot -> {
             // Show subtle loading indicator (dimmed placeholder)
             Box(
-              modifier = Modifier.fillMaxSize().background(colors.text.normal.copy(alpha = 0.04f))
+              modifier = Modifier.fillMaxSize().background(colors.text.normal.copy(alpha = 0.04f)),
             )
           }
         // else: empty placeholder (no screenshot available)
@@ -1117,14 +1117,14 @@ private fun ToggleSwitch(
         .background(trackColor)
         .clickable { onCheckedChange(!checked) }
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(2.dp)
+        .padding(2.dp),
   ) {
     Box(
       modifier =
         Modifier.size(14.dp)
           .offset(x = if (checked) 14.dp else 0.dp)
           .clip(CircleShape)
-          .background(thumbColor)
+          .background(thumbColor),
     )
   }
 }

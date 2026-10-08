@@ -76,7 +76,7 @@ class OverlayImageSelectionTest {
           listOf(
             OverlayImageNode(asset = "hero"),
             OverlayRowNode(
-              children = listOf(OverlayImageNode(asset = "hero", contentScale = "crop"))
+              children = listOf(OverlayImageNode(asset = "hero", contentScale = "crop")),
             ),
             OverlayPagerNode(
               id = "pages",
@@ -99,7 +99,7 @@ class OverlayImageSelectionTest {
               items = listOf(OverlayItem("C", image = "hero"), OverlayItem("D", image = "nav-d")),
               stateKey = "tab",
             ),
-          )
+          ),
       )
     assertEquals(
       listOf("hero", "second-page", "sheet", "tab-a", "nav-d"),

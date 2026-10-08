@@ -34,7 +34,7 @@ class SharedPreferencesInspectorProviderWriteTest {
     val base = RuntimeEnvironment.getApplication()
     AutoMobileSDK.initialize(base)
     AutoMobileSDK.registerCapability(
-      SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED)
+      SdkCapabilityDescriptor("storage.mutation", SdkCapabilityState.SUPPORTED),
     )
     AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
     SharedPreferencesInspector.setEnabled(true)

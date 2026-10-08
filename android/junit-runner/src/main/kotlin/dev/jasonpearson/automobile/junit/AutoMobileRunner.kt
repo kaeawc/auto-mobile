@@ -22,7 +22,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
     val requestedStrategy =
       parseTimingOrderingStrategy(
-        SystemPropertyCache.get("automobile.junit.timing.ordering", "auto").trim().lowercase()
+        SystemPropertyCache.get("automobile.junit.timing.ordering", "auto").trim().lowercase(),
       )
     val parallelForks =
       if (requestedStrategy == TimingOrderingStrategy.AUTO) {
@@ -46,7 +46,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     if (!shuffleEnabled || timingOrderedChildren.size <= 1 || timingOrderingActive) {
       if (shuffleEnabled && timingOrderingActive) {
         println(
-          "AutoMobileRunner: Shuffle enabled but timing ordering is active; preserving timing order."
+          "AutoMobileRunner: Shuffle enabled but timing ordering is active; preserving timing order.",
         )
       }
       timingOrderedChildren
@@ -66,7 +66,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         // A failed adb probe is an infrastructure problem, not "no devices": fail, never skip.
         val detail = checker.getLastError() ?: "unknown adb failure"
         notifier.fireTestFailure(
-          Failure(description, IllegalStateException("Android device check failed: $detail"))
+          Failure(description, IllegalStateException("Android device check failed: $detail")),
         )
         return
       }
@@ -208,7 +208,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       when (strategy) {
         TimingOrderingStrategy.DURATION_DESC ->
           withTiming.sortedWith(
-            compareByDescending<TimingCandidate> { it.durationMs }.thenBy { it.index }
+            compareByDescending<TimingCandidate> { it.durationMs }.thenBy { it.index },
           )
         TimingOrderingStrategy.DURATION_ASC ->
           withTiming.sortedWith(compareBy<TimingCandidate> { it.durationMs }.thenBy { it.index })
@@ -237,7 +237,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         val effectiveForks = configuredForks.coerceAtMost(deviceCount)
         if (effectiveForks < configuredForks) {
           println(
-            "AutoMobileRunner: Limiting parallelism from $configuredForks to $effectiveForks (only $deviceCount device(s) available)"
+            "AutoMobileRunner: Limiting parallelism from $configuredForks to $effectiveForks (only $deviceCount device(s) available)",
           )
         }
         effectiveForks
@@ -248,12 +248,12 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     val children = getChildren()
 
     println(
-      "AutoMobileRunner: childrenInvoker called with ${children.size} children, maxParallelForks=$maxParallelForks, deviceCount=$deviceCount"
+      "AutoMobileRunner: childrenInvoker called with ${children.size} children, maxParallelForks=$maxParallelForks, deviceCount=$deviceCount",
     )
 
     if (children.size <= 1 || maxParallelForks <= 1) {
       println(
-        "AutoMobileRunner: Using SEQUENTIAL execution (children=${children.size}, forks=$maxParallelForks)"
+        "AutoMobileRunner: Using SEQUENTIAL execution (children=${children.size}, forks=$maxParallelForks)",
       )
       return super.childrenInvoker(notifier)
     }
@@ -268,11 +268,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           val futures = children.map { child ->
             executor.submit {
               println(
-                "[${Thread.currentThread().name}] Starting test: ${describeChild(child).methodName}"
+                "[${Thread.currentThread().name}] Starting test: ${describeChild(child).methodName}",
               )
               runChild(child, SynchronizedRunNotifier(notifier))
               println(
-                "[${Thread.currentThread().name}] Finished test: ${describeChild(child).methodName}"
+                "[${Thread.currentThread().name}] Finished test: ${describeChild(child).methodName}",
               )
             }
           }

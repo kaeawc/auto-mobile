@@ -20,7 +20,7 @@ class InsertTextSettleTest {
         },
         { 0L },
         { pauses++ },
-      )
+      ),
     )
     assertEquals(1, polls)
     assertEquals(0, pauses)
@@ -41,7 +41,7 @@ class InsertTextSettleTest {
           pauses.add(it)
           now += it
         },
-      )
+      ),
     )
     assertEquals(3, polls)
     assertEquals(listOf(25L, 25L), pauses)
@@ -60,7 +60,7 @@ class InsertTextSettleTest {
           now += it
           totalPause += it
         },
-      )
+      ),
     )
     assertTrue(now >= 300L)
     assertTrue(totalPause <= 300L)
@@ -95,7 +95,7 @@ class InsertTextSettleTest {
         { now },
         { now += it },
         matches = { it.text == "éx👍🏽" },
-      )
+      ),
     )
     assertEquals(50L, now)
     assertEquals(3, reads)
@@ -111,7 +111,7 @@ class InsertTextSettleTest {
         { now },
         { now += it },
         matches = { it.text == "éx👍🏽" },
-      )
+      ),
     )
     assertEquals(300L, now)
   }
@@ -129,7 +129,7 @@ class InsertTextSettleTest {
         { now },
         { now += it },
         baseline = baseline,
-      )
+      ),
     )
     assertEquals(50L, now)
     assertEquals(3, reads)
@@ -173,7 +173,7 @@ class InsertTextSettleTest {
         { now },
         { now += it },
         baseline = snapshot("é", 1),
-      )
+      ),
     )
     assertEquals(300L, now)
     assertEquals(13, reads)

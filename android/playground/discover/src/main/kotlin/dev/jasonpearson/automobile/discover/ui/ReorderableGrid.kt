@@ -203,7 +203,7 @@ fun GridImageItem(
             isDragged -> MaterialTheme.colorScheme.primaryContainer
             isDropTarget -> MaterialTheme.colorScheme.secondaryContainer
             else -> MaterialTheme.colorScheme.surface
-          }
+          },
       ),
   ) {
     Box(modifier = Modifier.fillMaxSize()) {
@@ -217,7 +217,7 @@ fun GridImageItem(
       if (isDragged) {
         Box(
           modifier =
-            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
         )
       }
 
@@ -225,7 +225,7 @@ fun GridImageItem(
         Box(
           modifier =
             Modifier.fillMaxSize()
-              .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f))
+              .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f)),
         )
       }
 

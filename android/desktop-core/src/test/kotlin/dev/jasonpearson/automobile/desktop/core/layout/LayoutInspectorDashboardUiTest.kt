@@ -55,7 +55,7 @@ class LayoutInspectorDashboardUiTest {
           "device",
           0L,
           Json.parseToJsonElement("""{"hierarchy":{"error":"$prefix$reason"}}"""),
-        )
+        ),
       )
     }
     emit("old-first")

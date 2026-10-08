@@ -190,7 +190,7 @@ class CtrlProxyOnDestroyTest {
     assertTrue(
       ShadowLog.getLogs().any {
         it.msg == "Failed to close streamed gestures" && it.throwable === failure
-      }
+      },
     )
   }
 

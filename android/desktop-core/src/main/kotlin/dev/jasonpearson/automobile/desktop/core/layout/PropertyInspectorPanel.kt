@@ -54,7 +54,7 @@ fun PropertyInspectorPanel(
 
   Box(modifier = modifier.fillMaxSize().horizontalScroll(horizontalScrollState)) {
     Column(
-      modifier = Modifier.widthIn(min = 180.dp).verticalScroll(verticalScrollState).padding(12.dp)
+      modifier = Modifier.widthIn(min = 180.dp).verticalScroll(verticalScrollState).padding(12.dp),
     ) {
       if (element == null) {
         Box(
@@ -148,7 +148,7 @@ fun PropertyInspectorPanel(
                       colors.text.normal.copy(alpha = 0.05f),
                       RoundedCornerShape(4.dp),
                     )
-                    .padding(8.dp)
+                    .padding(8.dp),
               ) {
                 Text(
                   element.text!!,
@@ -191,7 +191,7 @@ private fun PropertySection(
         Modifier.fillMaxWidth()
           .padding(top = 2.dp, bottom = 4.dp)
           .height(1.dp)
-          .background(colors.text.normal.copy(alpha = 0.1f))
+          .background(colors.text.normal.copy(alpha = 0.1f)),
     )
     Column(
       verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -238,7 +238,7 @@ private fun PropertyRow(
           Modifier.padding(start = 4.dp)
             .clickable { clipboard.writeText(value) }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(2.dp)
+            .padding(2.dp),
       ) {
         Text("📋", fontSize = 9.sp) // clipboard icon
       }
@@ -301,7 +301,7 @@ private fun StateCheckbox(
           .clip(RoundedCornerShape(3.dp))
           .background(
             if (isChecked) Color(0xFF4CAF50).copy(alpha = 0.2f)
-            else colors.text.normal.copy(alpha = 0.05f)
+            else colors.text.normal.copy(alpha = 0.05f),
           ),
       contentAlignment = Alignment.Center,
     ) {

@@ -102,7 +102,7 @@ class OverlayRuntime(
     mutableSnapshot.value =
       next.copy(
         textEpochs =
-          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 }
+          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 },
       )
   }
 
@@ -303,7 +303,7 @@ class OverlayRuntime(
         payload,
         current.state.toMap(),
         current.pages.toMap(),
-      )
+      ),
     )
   }
 

@@ -76,7 +76,7 @@ class FakeObservationStreamTest {
         screenshotBase64 = "abc",
         screenWidth = 1080,
         screenHeight = 2340,
-      )
+      ),
     )
     stream.emitHierarchy(HierarchyStreamUpdate(deviceId = "dev-1", timestamp = 1L, data = null))
 

@@ -77,7 +77,7 @@ class McpHttpClientStreamableIntegrationTest {
               buildJsonObject {
                 put("type", "text")
                 put("text", text)
-              }
+              },
             )
           },
         )

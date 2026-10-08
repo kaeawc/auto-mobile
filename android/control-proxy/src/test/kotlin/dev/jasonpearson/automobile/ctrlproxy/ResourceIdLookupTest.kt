@@ -179,7 +179,7 @@ class ResourceIdLookupTest {
     assertNull(
       findNodeByResourceIdOnRootDisplay(null, "row") {
         throw AssertionError("null root must not invoke provider")
-      }
+      },
     )
   }
 

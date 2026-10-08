@@ -706,7 +706,7 @@ fun DeviceScreenView(
     // Screenshot viewport
     BoxWithConstraints(
       modifier =
-        Modifier.weight(1f).fillMaxWidth().background(colors.text.normal.copy(alpha = 0.03f))
+        Modifier.weight(1f).fillMaxWidth().background(colors.text.normal.copy(alpha = 0.03f)),
     ) {
       val viewportWidth = constraints.maxWidth.toFloat()
       val viewportHeight = constraints.maxHeight.toFloat()
@@ -832,7 +832,7 @@ fun DeviceScreenView(
             offsetY = offsetY,
             deviceWidth = rotatedRootWidth,
             deviceHeight = rootBoundsHeight,
-          )
+          ),
         )
 
       // Convert a viewport point to device (== hierarchy bounds) coordinates for hit testing and
@@ -859,7 +859,7 @@ fun DeviceScreenView(
                 deviceWidth = snapshot.deviceWidth,
                 deviceHeight = snapshot.deviceHeight,
               )
-          }
+          },
         )
 
       // Focus requester for keyboard events
@@ -1006,7 +1006,7 @@ fun DeviceScreenView(
                 val newScale = (scale * zoomFactor).coerceIn(0.1f, 5f)
                 zoomAroundPoint(newScale, change.position.x, change.position.y)
               }
-            }
+            },
       ) {
         // Device frame - sized to fit viewport with proper aspect ratio
         val localDensity = LocalDensity.current
@@ -1022,7 +1022,7 @@ fun DeviceScreenView(
                 translationY = offsetY
                 transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
               }
-              .size(width = frameWidthDp, height = frameHeightDp)
+              .size(width = frameWidthDp, height = frameHeightDp),
         ) {
           // Screenshot or placeholder
           if (imageBitmap != null) {
@@ -1197,7 +1197,7 @@ fun DeviceScreenView(
                             )
                             .clickable(onClick = onRestartDaemon)
                             .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                       ) {
                         Text(
                           "Restart MCP Daemon",

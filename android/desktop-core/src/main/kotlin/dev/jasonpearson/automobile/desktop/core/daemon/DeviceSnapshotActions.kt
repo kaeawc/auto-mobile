@@ -90,7 +90,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
           put("action", JsonPrimitive("capture"))
           put("deviceId", JsonPrimitive(deviceId))
           if (snapshotName != null) put("snapshotName", JsonPrimitive(snapshotName))
-        }
+        },
       )
     return DeviceSnapshotCaptureResult(
       snapshotName =
@@ -107,7 +107,7 @@ class McpDeviceSnapshotActions(private val clientProvider: () -> AutoMobileClien
         put("deviceId", JsonPrimitive(deviceId))
         // Required by the tool schema for restore; capture treats it as optional.
         put("snapshotName", JsonPrimitive(snapshotName))
-      }
+      },
     )
   }
 
@@ -150,7 +150,7 @@ class FakeDeviceSnapshotActions(
   ): DeviceSnapshotCaptureResult {
     val name = snapshotName ?: "snapshot-${snapshots.size + 1}"
     snapshots.add(
-      DeviceSnapshotMetadata(snapshotName = name, deviceId = deviceId, snapshotType = "full")
+      DeviceSnapshotMetadata(snapshotName = name, deviceId = deviceId, snapshotType = "full"),
     )
     snapshots.removeAll { it.snapshotName in evictOnCapture }
     return DeviceSnapshotCaptureResult(name, "full", evictOnCapture)

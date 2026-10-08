@@ -87,12 +87,12 @@ class SetTextAcknowledgementOrderTest {
     val refresh = functionBody(body, "fun readFreshSnapshot()")
     val guard =
       refresh.indexOf(
-        "if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword)"
+        "if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword)",
       )
     assertTrue(guard >= 0 && refresh.indexOf("targetNode.text?.toString()") > guard)
     assertTrue(
       body.contains("it == remembered &&") &&
-        body.contains("android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS")
+        body.contains("android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS"),
     )
     for (signature in
       listOf(

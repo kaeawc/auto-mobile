@@ -312,7 +312,7 @@ class OverlayDrawer(
           baseAlpha = baseAlpha,
           alpha = 1f,
           drawProgress = 0f,
-        )
+        ),
     )
   }
 
@@ -359,7 +359,7 @@ class OverlayDrawer(
           startAngle = startAngle,
           sweepAngle = sweep,
           strokeWidth = baseStrokeWidth * widthFactor,
-        )
+        ),
       )
     }
 

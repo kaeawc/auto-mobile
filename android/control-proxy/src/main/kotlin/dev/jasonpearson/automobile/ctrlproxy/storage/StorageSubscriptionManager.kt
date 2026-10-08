@@ -69,7 +69,7 @@ class StorageSubscriptionManager(
   @Volatile private var destroyed = false
   private val fetchScope =
     CoroutineScope(
-      scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + ioDispatcher
+      scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]) + ioDispatcher,
     )
   // Cleanup must survive both fetch cancellation and cancellation of the owning service scope.
   private val cleanupContext = scope.coroutineContext.minusKey(Job) + ioDispatcher
@@ -104,7 +104,7 @@ class StorageSubscriptionManager(
   )
 
   private data class SubscriptionEventBuffer(
-    val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque()
+    val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque(),
   )
 
   // Mutated from request and fetch workers and the main looper (destroy).
@@ -165,7 +165,7 @@ class StorageSubscriptionManager(
               SdkAvailabilityInfo(
                 available = response.available,
                 version = response.version,
-              )
+              ),
             )
           else -> Result.failure(StorageError.SdkError("Unexpected response type"))
         }
@@ -514,7 +514,7 @@ class StorageSubscriptionManager(
       } else {
         val response = result.getString("result")?.let(StorageProtocolSerializer::responseFromJson)
         SubscribeCall(
-          Result.success((response as? StorageResponse.SubscriptionResult)?.processToken)
+          Result.success((response as? StorageResponse.SubscriptionResult)?.processToken),
         )
       }
     } catch (e: SecurityException) {
@@ -1149,7 +1149,7 @@ sealed class StorageError(message: String) : Exception(message) {
   class AppStartedByRequest(packageName: String) :
     StorageError(
       "app $packageName was not running; this request started it but its storage inspection did " +
-        "not become available. Launch the app normally and subscribe again"
+        "not become available. Launch the app normally and subscribe again",
     )
 
   class FileNotFound(fileName: String) : StorageError("Preferences file not found: $fileName")

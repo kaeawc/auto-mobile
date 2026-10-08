@@ -424,13 +424,13 @@ class VideoStreamWriterTest {
       subject.offerEncoded(
         VideoStreamProtocol.ptsAndFlags(0L, isConfig = true, isKeyFrame = false, rotation = 0),
         byteArrayOf(1, 2),
-      )
+      ),
     )
     assertTrue(
       subject.offerEncoded(
         VideoStreamProtocol.ptsAndFlags(1L, isConfig = false, isKeyFrame = true, rotation = 0),
         byteArrayOf(3, 4),
-      )
+      ),
     )
 
     try {
@@ -511,7 +511,7 @@ class VideoStreamWriterTest {
     val connection =
       FakeClientConnection(
         input =
-          ByteArrayInputStream(byteArrayOf(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME.toByte()))
+          ByteArrayInputStream(byteArrayOf(VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME.toByte())),
       )
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 
@@ -544,8 +544,8 @@ class VideoStreamWriterTest {
             byteArrayOf(
               unknownCommand.toByte(),
               VideoStreamProtocol.COMMAND_REQUEST_KEY_FRAME.toByte(),
-            )
-          )
+            ),
+          ),
       )
     val subject = writer({ now }, FakeServerSocket(listOf({ connection })))
 

@@ -47,7 +47,7 @@ internal object MemoryDiagnostics {
     val baseDir = resolveHeapDumpDir()
     if (!baseDir.exists() && !baseDir.mkdirs()) {
       System.err.println(
-        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}",
       )
       return null
     }
@@ -88,7 +88,7 @@ internal object MemoryDiagnostics {
     val baseDir = resolveHeapDumpDir()
     if (!baseDir.exists() && !baseDir.mkdirs()) {
       System.err.println(
-        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create heap dump directory: ${baseDir.absolutePath}",
       )
       return null
     }
@@ -98,7 +98,7 @@ internal object MemoryDiagnostics {
     val diagnosticsDir = File(baseDir, "diagnostics/${timestamp}_${sanitizedLabel}")
     if (!diagnosticsDir.exists() && !diagnosticsDir.mkdirs()) {
       System.err.println(
-        "MemoryDiagnostics: Failed to create diagnostics directory: ${diagnosticsDir.absolutePath}"
+        "MemoryDiagnostics: Failed to create diagnostics directory: ${diagnosticsDir.absolutePath}",
       )
       return null
     }

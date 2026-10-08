@@ -552,7 +552,7 @@ class McpDaemonClient(
         BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
       val writer =
         BufferedWriter(
-          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+          OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
         )
       return PersistentChannel(channel, reader, writer)
     } catch (e: Exception) {
@@ -563,7 +563,7 @@ class McpDaemonClient(
       }
       if (expired.get()) {
         throw DaemonUnavailableException(
-          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms"
+          "Gesture stream connect timed out after ${inputRequestTimeoutMs}ms",
         )
       }
       throw e
@@ -966,7 +966,7 @@ class McpDaemonClient(
           .capabilities
       } catch (_: Exception) {
         return DaemonCapabilitiesProbe.Failure(
-          "Daemon capability probe returned an invalid result."
+          "Daemon capability probe returned an invalid result.",
         )
       }
     val resolved = capabilities.toSet()
@@ -1023,7 +1023,7 @@ class McpDaemonClient(
           params = params,
           clientVersion = clientVersion,
           timeoutMs = timeoutMs,
-        )
+        ),
       )
     }
     // Status is a passive health probe. Its purpose is to report a wedged daemon, so running the
@@ -1063,11 +1063,11 @@ class McpDaemonClient(
         channel.connect(address)
         val reader =
           BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
           )
         val writer =
           BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
           )
 
         val request =
@@ -1089,7 +1089,7 @@ class McpDaemonClient(
       } catch (e: Exception) {
         if (expired.get()) {
           throw DaemonUnavailableException(
-            "Daemon request '$method' timed out after ${timeoutMs}ms"
+            "Daemon request '$method' timed out after ${timeoutMs}ms",
           )
         }
         throw e
@@ -1123,7 +1123,7 @@ class McpDaemonClient(
     }
     return response.result
       ?: throw DaemonUnavailableException(
-        "JSON-RPC $method response contained no result; check the daemon response."
+        "JSON-RPC $method response contained no result; check the daemon response.",
       )
   }
 

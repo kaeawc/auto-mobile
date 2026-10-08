@@ -74,7 +74,7 @@ class TelemetryPushSocketClientTest {
         { true },
         options =
           TelemetryPushSocketOptions(
-            sessionUuidProvider = { "desktop-session".takeIf { registered } }
+            sessionUuidProvider = { "desktop-session".takeIf { registered } },
           ),
       )
     client.connect()
@@ -485,7 +485,7 @@ class TelemetryPushSocketClientTest {
                 testScheduler.runCurrent()
                 assertEquals(1, replacement.writes)
               }
-            }
+            },
           ),
       )
 

@@ -183,11 +183,11 @@ class DaemonEmulatorControlExecutor(
     // Perf span for the command-bar path (previously unmeasured): click → daemon ack, including the
     // dispatcher hop. Lets us compare button latency against the video-pane tap tracer.
     LOG.info(
-      "button ${button.toolValue} $deviceId: dispatch=${MONOTONIC_NOW_MS() - startMs}ms success=${result.success}"
+      "button ${button.toolValue} $deviceId: dispatch=${MONOTONIC_NOW_MS() - startMs}ms success=${result.success}",
     )
     if (!result.success) {
       throw McpConnectionException(
-        result.error ?: "input/pressButton failed for ${button.toolValue} on $deviceId"
+        result.error ?: "input/pressButton failed for ${button.toolValue} on $deviceId",
       )
     }
   }

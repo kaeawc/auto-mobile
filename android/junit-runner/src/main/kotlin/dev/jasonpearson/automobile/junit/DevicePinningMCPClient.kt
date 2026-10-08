@@ -54,7 +54,7 @@ internal class DevicePinningMCPClient(
       if (id == null) {
         println(
           "Warning: the failed step's device id is unknown; AI recovery tool calls are not " +
-            "pinned to a device and will fail if more than one device is attached"
+            "pinned to a device and will fail if more than one device is attached",
         )
         return delegate
       }

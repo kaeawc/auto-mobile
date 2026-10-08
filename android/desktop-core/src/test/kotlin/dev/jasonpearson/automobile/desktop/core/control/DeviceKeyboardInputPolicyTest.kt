@@ -60,7 +60,7 @@ class DeviceKeyboardInputPolicyTest {
     assertEquals(
       DeviceKeyboardDecision.SendKey("enter"),
       DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(key = DeviceKeyboardKey.Enter, character = '\n')
+        DeviceKeyStroke(key = DeviceKeyboardKey.Enter, character = '\n'),
       ),
     )
     // And the precedence is the KEY's, not an accident of those characters happening to be
@@ -70,7 +70,7 @@ class DeviceKeyboardInputPolicyTest {
     assertEquals(
       DeviceKeyboardDecision.SendKey("arrow_left"),
       DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(key = DeviceKeyboardKey.ArrowLeft, character = 'q')
+        DeviceKeyStroke(key = DeviceKeyboardKey.ArrowLeft, character = 'q'),
       ),
     )
   }
@@ -90,7 +90,7 @@ class DeviceKeyboardInputPolicyTest {
     assertEquals(
       DeviceKeyboardDecision.TypeText("A"),
       DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(character = 'A', modifiers = DeviceKeyModifiers(shift = true))
+        DeviceKeyStroke(character = 'A', modifiers = DeviceKeyModifiers(shift = true)),
       ),
     )
   }
@@ -113,7 +113,7 @@ class DeviceKeyboardInputPolicyTest {
     assertEquals(
       DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.HostChord),
       DeviceKeyboardInputPolicy.evaluate(
-        DeviceKeyStroke(character = null, modifiers = DeviceKeyModifiers(alt = true))
+        DeviceKeyStroke(character = null, modifiers = DeviceKeyModifiers(alt = true)),
       ),
     )
   }
@@ -128,7 +128,7 @@ class DeviceKeyboardInputPolicyTest {
         DeviceKeyStroke(
           key = DeviceKeyboardKey.Escape,
           modifiers = DeviceKeyModifiers(meta = true),
-        )
+        ),
       ),
     )
   }
@@ -285,7 +285,7 @@ class DeviceKeyboardInputPolicyTest {
           character = '@',
           modifiers = DeviceKeyModifiers(alt = true),
           altComposesText = true,
-        )
+        ),
       ),
     )
   }
@@ -302,7 +302,7 @@ class DeviceKeyboardInputPolicyTest {
           character = 'f',
           modifiers = DeviceKeyModifiers(alt = true),
           altComposesText = false,
-        )
+        ),
       ),
     )
   }
@@ -319,7 +319,7 @@ class DeviceKeyboardInputPolicyTest {
           character = '€',
           modifiers = DeviceKeyModifiers(alt = true),
           altComposesText = true,
-        )
+        ),
       ),
     )
     // And a resolved composition that produced NO character (a dead key, an accelerator) has
@@ -331,7 +331,7 @@ class DeviceKeyboardInputPolicyTest {
           key = DeviceKeyboardKey.ArrowLeft,
           modifiers = DeviceKeyModifiers(alt = true),
           altComposesText = true,
-        )
+        ),
       ),
     )
   }
@@ -346,7 +346,7 @@ class DeviceKeyboardInputPolicyTest {
         DeviceKeyStroke(
           key = DeviceKeyboardKey.ArrowLeft,
           modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
-        )
+        ),
       ),
     )
     // Nor may adding Meta turn a window-manager chord into typing.
@@ -356,7 +356,7 @@ class DeviceKeyboardInputPolicyTest {
         DeviceKeyStroke(
           character = '@',
           modifiers = DeviceKeyModifiers(ctrl = true, alt = true, meta = true),
-        )
+        ),
       ),
     )
   }
@@ -400,7 +400,7 @@ class DeviceKeyboardInputPolicyTest {
         assertEquals(
           DeviceKeyboardDecision.Ignored(DeviceKeyboardRejection.ShiftedKeyUnsupported),
           DeviceKeyboardInputPolicy.evaluate(
-            DeviceKeyStroke(key = key, modifiers = DeviceKeyModifiers(shift = true))
+            DeviceKeyStroke(key = key, modifiers = DeviceKeyModifiers(shift = true)),
           ),
           "$key",
         )
@@ -466,7 +466,7 @@ class DeviceKeyboardInputPolicyTest {
         DeviceKeyStroke(
           character = '€',
           modifiers = DeviceKeyModifiers(ctrl = true, alt = true),
-        )
+        ),
       ),
     )
   }

@@ -81,7 +81,7 @@ class DataStoreInspectorProviderTest {
           "getDataStore",
           null,
           bundleOf("adapterName" to "prefs", "storeName" to "settings"),
-        )
+        ),
       )
 
     val prefs = response as StorageResponse.Preferences
@@ -111,7 +111,7 @@ class DataStoreInspectorProviderTest {
           "getDataStore",
           null,
           bundleOf("adapterName" to "prefs", "storeName" to "typed"),
-        )
+        ),
       )
 
     val byKey = (response as StorageResponse.Preferences).entries.associateBy { it.key }
@@ -138,7 +138,7 @@ class DataStoreInspectorProviderTest {
           "getDataStore",
           null,
           bundleOf("adapterName" to "prefs", "storeName" to "auth"),
-        )
+        ),
       )
 
     val byKey = (response as StorageResponse.Preferences).entries.associateBy { it.key }

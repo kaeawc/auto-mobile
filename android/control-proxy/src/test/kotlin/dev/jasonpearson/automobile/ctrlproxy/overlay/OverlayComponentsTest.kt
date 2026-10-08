@@ -38,10 +38,10 @@ class OverlayComponentsTest {
                   OverlaySwitchNode(stateKey = "on", label = "Alarm"),
                   OverlayCheckboxNode(stateKey = "off"),
                   OverlayButtonNode(label = "Save", variant = "outlined"),
-                )
+                ),
             ),
             state + ("off" to OverlayScalar.BooleanValue(false)),
-          )
+          ),
         )
         .root
     val (switch, checkbox, button) = root.children
@@ -60,7 +60,7 @@ class OverlayComponentsTest {
         spec(
           OverlaySwitchNode(stateKey = "on"),
           mapOf("on" to OverlayScalar.BooleanValue(false)),
-        )
+        ),
       )
     runtime.handle(OverlayInteraction.Toggle("on", listOf(OverlayEmitAction("tapped"))))
     assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["on"])
@@ -91,11 +91,11 @@ class OverlayComponentsTest {
   fun `setState cannot retype a toggle binding`() = runTest {
     val runtime =
       runtime(
-        spec(OverlaySwitchNode(stateKey = "on"), mapOf("on" to OverlayScalar.BooleanValue(true)))
+        spec(OverlaySwitchNode(stateKey = "on"), mapOf("on" to OverlayScalar.BooleanValue(true))),
       )
     val error = runCatching {
       runtime.handle(
-        OverlayInteraction.Tap(listOf(OverlaySetStateAction("on", OverlayScalar.Text("yes"))))
+        OverlayInteraction.Tap(listOf(OverlaySetStateAction("on", OverlayScalar.Text("yes")))),
       )
     }
       .exceptionOrNull()
@@ -123,10 +123,10 @@ class OverlayComponentsTest {
                     variant = "elevated",
                     children = listOf(OverlayButtonNode(label = "Save")),
                   ),
-                )
+                ),
             ),
             state,
-          )
+          ),
         )
         .root
     val (slider, filter, assist, card) = root.children
@@ -144,7 +144,7 @@ class OverlayComponentsTest {
   fun `a card counts toward the node limit through its children`() {
     val deep =
       OverlayCardNode(
-        children = List(OverlaySpecValidator.MAX_OVERLAY_NODES) { OverlaySpacerNode() }
+        children = List(OverlaySpecValidator.MAX_OVERLAY_NODES) { OverlaySpacerNode() },
       )
     val error = runCatching { mapOverlaySpec(spec(deep, emptyMap())) }.exceptionOrNull()
     assertTrue("$error", error is IllegalArgumentException)
@@ -157,7 +157,7 @@ class OverlayComponentsTest {
         spec(
           OverlaySliderNode(stateKey = "v", min = 0.0, max = 10.0),
           mapOf("v" to OverlayScalar.Numeric(2.0)),
-        )
+        ),
       )
     runtime.handle(OverlayInteraction.Slide("v", 5.0, listOf(OverlayEmitAction("moved"))))
     assertEquals(OverlayScalar.Numeric(5.0), runtime.current.state["v"])
@@ -181,7 +181,7 @@ class OverlayComponentsTest {
           spec(
             OverlaySliderNode(stateKey = "v", min = 0.0, max = 10.0),
             mapOf("v" to OverlayScalar.Numeric(2.0), "flag" to OverlayScalar.BooleanValue(true)),
-          )
+          ),
         )
       runtime.handle(OverlayInteraction.Slide("flag", 3.0))
       runtime.handle(OverlayInteraction.Slide("missing", 3.0))
@@ -201,7 +201,7 @@ class OverlayComponentsTest {
         spec(
           OverlayChipNode(label = "Mon", stateKey = "mon"),
           mapOf("mon" to OverlayScalar.BooleanValue(false)),
-        )
+        ),
       )
     runtime.handle(OverlayInteraction.Toggle("mon"))
     assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["mon"])

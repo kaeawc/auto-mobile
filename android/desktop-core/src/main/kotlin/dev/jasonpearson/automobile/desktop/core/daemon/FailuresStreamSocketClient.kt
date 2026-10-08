@@ -368,13 +368,13 @@ internal constructor(
   )
 
   override fun pollNotifications(
-    request: FailuresNotificationsRequest
+    request: FailuresNotificationsRequest,
   ): FailuresNotificationsResponse {
     val response =
       sendRequest<FailuresNotificationsResponse>(
         json.encodeToString(
-          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
-        )
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid),
+        ),
       )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures notifications poll failed")
@@ -386,8 +386,8 @@ internal constructor(
     val response =
       sendRequest<FailuresGroupsResponse>(
         json.encodeToString(
-          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
-        )
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid),
+        ),
       )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures groups poll failed")
@@ -399,8 +399,8 @@ internal constructor(
     val response =
       sendRequest<FailuresTimelineResponse>(
         json.encodeToString(
-          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid)
-        )
+          request.copy(sessionUuid = sessionUuidProvider() ?: request.sessionUuid),
+        ),
       )
     if (!response.success) {
       throw McpConnectionException(response.error ?: "Failures timeline poll failed")

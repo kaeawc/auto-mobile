@@ -89,7 +89,7 @@ internal constructor(
   private val options: TelemetryPushSocketOptions = TelemetryPushSocketOptions(),
 ) : TelemetryPushClient {
   constructor(
-    sessionUuidProvider: (() -> String?)? = null
+    sessionUuidProvider: (() -> String?)? = null,
   ) : this(
     ::ChannelTelemetrySocket,
     TelemetryRetryDelay { delay(it) },
@@ -225,7 +225,7 @@ internal constructor(
       if (attempt >= MAX_RECONNECT_ATTEMPTS) {
         _state.value =
           ConnectionState.Error(
-            if (deviceNotLive) DEVICE_NOT_LIVE_MESSAGE else "Telemetry unavailable on this daemon"
+            if (deviceNotLive) DEVICE_NOT_LIVE_MESSAGE else "Telemetry unavailable on this daemon",
           )
         return
       }

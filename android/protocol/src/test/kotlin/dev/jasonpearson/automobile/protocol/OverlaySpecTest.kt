@@ -53,7 +53,7 @@ class OverlaySpecTest {
       Json.parseToJsonElement(
           checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
             .readBytes()
-            .decodeToString()
+            .decodeToString(),
         )
         .jsonObject
     val variants =
@@ -99,7 +99,7 @@ class OverlaySpecTest {
     val padding =
       OverlaySpecValidator.MAX_OVERLAY_SPEC_BYTES - input.toByteArray(Charsets.UTF_8).size
     assertTrue(
-      OverlaySpecValidator.validate(input + " ".repeat(padding)) is OverlaySpecValidation.Success
+      OverlaySpecValidator.validate(input + " ".repeat(padding)) is OverlaySpecValidation.Success,
     )
     val rejected =
       OverlaySpecValidator.validate(input + " ".repeat(padding + 1))

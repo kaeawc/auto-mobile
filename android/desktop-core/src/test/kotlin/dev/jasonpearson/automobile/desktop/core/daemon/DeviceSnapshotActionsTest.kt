@@ -31,7 +31,7 @@ class DeviceSnapshotActionsTest {
           buildJsonObject {
             put("type", "text")
             put("text", bodyJson)
-          }
+          },
         )
       },
     )
@@ -138,7 +138,7 @@ class DeviceSnapshotActionsTest {
         {"message":"captured","snapshotName":"snap-1","snapshotType":"full",
          "evictedSnapshotNames":["old-1"]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val result = actionsWith(client).captureSnapshot("emulator-5554")
@@ -205,7 +205,7 @@ class DeviceSnapshotActionsTest {
   fun `the fake config client applies partial updates without clobbering other fields`() {
     val client =
       FakeDeviceSnapshotConfigClient(
-        DeviceSnapshotConfig(includeAppData = true, maxArchiveSizeMb = 1024)
+        DeviceSnapshotConfig(includeAppData = true, maxArchiveSizeMb = 1024),
       )
 
     val result = client.setConfig(DeviceSnapshotConfigInput(maxArchiveSizeMb = 256))

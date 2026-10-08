@@ -38,7 +38,9 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     languageVersion.set(
-      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
+      KotlinVersion.valueOf(
+        "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}",
+      ),
     )
   }
 }
@@ -84,7 +86,7 @@ abstract class D8DexTask @Inject constructor(private val execOperations: ExecOpe
           // (kotlin-stdlib, etc.). android.jar stays compileOnly, so it is not
           // here and is not dexed — the framework provides it at runtime.
           addAll(inputFiles.files.map { it.absolutePath })
-        }
+        },
       )
     }
   }

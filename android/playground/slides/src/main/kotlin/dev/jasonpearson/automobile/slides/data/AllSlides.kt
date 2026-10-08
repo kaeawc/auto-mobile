@@ -15,6 +15,6 @@ fun getAllSlides(): List<SlideContent> =
       SlideContent.Emoji(
         emoji = PresentationEmoji.PLAYGROUND,
         caption = "Demo: AutoMobile Playground",
-      )
+      ),
     ) +
     getVisionSlides()

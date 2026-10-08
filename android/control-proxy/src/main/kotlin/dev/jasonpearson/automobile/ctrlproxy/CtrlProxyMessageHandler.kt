@@ -417,7 +417,7 @@ class CtrlProxyMessageHandler(
         // Ahead-of-need: no TS client sends this and no device action is wired. Log loudly so a
         // future hit-test implementation notices the gap rather than silently dropping it.
         log(
-          "request_hit_test received (requestId=${request.requestId}) but no device handler is wired; ignoring"
+          "request_hit_test received (requestId=${request.requestId}) but no device handler is wired; ignoring",
         )
       is RequestClipboard ->
         actions.requestClipboard(request.requestId, request.action, request.text)
@@ -541,7 +541,7 @@ class CtrlProxyMessageHandler(
           }
           else ->
             log(
-              "unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring"
+              "unsubscribe_storage received without subscriptionId or packageName/fileName; ignoring",
             )
         }
       }

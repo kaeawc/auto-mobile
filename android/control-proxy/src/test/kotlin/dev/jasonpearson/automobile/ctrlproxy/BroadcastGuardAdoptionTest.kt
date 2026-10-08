@@ -971,7 +971,7 @@ object BroadcastGuardScanner {
               Kind.MISSING_GUARD,
               name,
               KotlinSourceScan.lineOf(source, bodyOpen + broadcastCalls.first()),
-            )
+            ),
           )
         else ->
           // Guard/launch present: every result broadcast must sit *inside* one of those spans. A
@@ -983,7 +983,7 @@ object BroadcastGuardScanner {
                   Kind.MISSING_GUARD,
                   name,
                   KotlinSourceScan.lineOf(source, bodyOpen + offset),
-                )
+                ),
               )
             }
           }
@@ -994,7 +994,7 @@ object BroadcastGuardScanner {
             Kind.SWALLOW_IN_BROADCAST,
             name,
             KotlinSourceScan.lineOf(source, bodyOpen + offset),
-          )
+          ),
         )
       }
     }
@@ -1012,7 +1012,7 @@ object BroadcastGuardScanner {
             Kind.SWALLOW_IN_LAUNCH,
             "asyncActionRunner.launch",
             KotlinSourceScan.lineOf(source, blockOpen + offset),
-          )
+          ),
         )
       }
     }
@@ -1034,7 +1034,7 @@ object BroadcastGuardScanner {
             Kind.RAW_REQUEST_ID_LAUNCH,
             "serviceScope.launch",
             KotlinSourceScan.lineOf(source, call.blockOpen),
-          )
+          ),
         )
       }
     }

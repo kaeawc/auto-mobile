@@ -54,12 +54,12 @@ fun VerticalCollapsibleTab(
         Modifier.width(28.dp) // 24dp + 4dp padding
           .fillMaxHeight()
           .clickable(onClick = onToggle)
-          .pointerHoverIcon(PointerIcon.Hand)
+          .pointerHoverIcon(PointerIcon.Hand),
     ) {
       // Left edge indicator (2dp lighter color)
       Box(
         modifier =
-          Modifier.width(2.dp).fillMaxHeight().background(colors.text.normal.copy(alpha = 0.08f))
+          Modifier.width(2.dp).fillMaxHeight().background(colors.text.normal.copy(alpha = 0.08f)),
       )
       // Main collapsed bar content with left padding
       Box(
@@ -67,7 +67,7 @@ fun VerticalCollapsibleTab(
           Modifier.weight(1f)
             .fillMaxHeight()
             .background(colors.text.normal.copy(alpha = 0.03f))
-            .padding(start = 4.dp)
+            .padding(start = 4.dp),
       ) {
         Column(
           modifier = Modifier.fillMaxHeight(),
@@ -90,7 +90,7 @@ fun VerticalCollapsibleTab(
                         maxWidth = constraints.maxHeight,
                         minHeight = 0,
                         maxHeight = constraints.maxWidth,
-                      )
+                      ),
                     )
                   // Layout with swapped dimensions
                   layout(placeable.height, placeable.width) {
@@ -145,7 +145,7 @@ fun ResizeHandle(onDrag: (Float) -> Unit) {
         .fillMaxHeight()
         .background(
           if (isDragging) colors.text.normal.copy(alpha = 0.3f)
-          else colors.text.normal.copy(alpha = 0.1f)
+          else colors.text.normal.copy(alpha = 0.1f),
         )
         .pointerHoverIcon(PointerIcon.Crosshair)
         .pointerInput(Unit) {
@@ -158,7 +158,7 @@ fun ResizeHandle(onDrag: (Float) -> Unit) {
               onDrag(dragAmount.x)
             },
           )
-        }
+        },
   )
 }
 

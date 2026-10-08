@@ -17,7 +17,7 @@ class CtrlProxyOwnOverlayEventTest {
   @Test
   fun `own package accessibility overlay window is skipped`() {
     assertTrue(
-      shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+      shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY),
     )
   }
 
@@ -54,17 +54,17 @@ class CtrlProxyOwnOverlayEventTest {
         "com.example.app",
         own,
         AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
-      )
+      ),
     )
     assertFalse(
-      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_APPLICATION)
+      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_APPLICATION),
     )
   }
 
   @Test
   fun `a missing package such as a windows-changed event is processed`() {
     assertFalse(
-      shouldSkipOwnOverlayEvent(null, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+      shouldSkipOwnOverlayEvent(null, own, AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY),
     )
     assertFalse(shouldSkipOwnOverlayEvent(null, own, null))
   }
@@ -86,7 +86,7 @@ class CtrlProxyOwnOverlayEventTest {
       assertFalse("type $type", shouldSkipOwnOverlayEvent(own, own, type, true))
     }
     assertFalse(
-      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_SYSTEM, true)
+      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_SYSTEM, true),
     )
   }
 }

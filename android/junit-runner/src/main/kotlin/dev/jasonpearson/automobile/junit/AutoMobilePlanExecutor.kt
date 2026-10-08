@@ -209,7 +209,7 @@ internal object AutoMobilePlanExecutor {
         // otherwise
         // debugMode leaks them to logcat even though the LLM path is masked.
         println(
-          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}"
+          "Processed plan content:\n${SecretRedactor.redact(processedPlanContent, secretValues)}",
         )
       }
 
@@ -275,7 +275,7 @@ internal object AutoMobilePlanExecutor {
       throw IllegalArgumentException(
         "Plan YAML validation failed:\n$errorMessages\n\n" +
           "The plan does not conform to the AutoMobile test plan schema. " +
-          "Check schemas/test-plan.schema.json for details."
+          "Check schemas/test-plan.schema.json for details.",
       )
     }
 
@@ -369,7 +369,7 @@ internal object AutoMobilePlanExecutor {
         mutableMapOf<String, JsonElement>(
           "planContent" to
             JsonPrimitive(
-              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
+              "base64:" + java.util.Base64.getEncoder().encodeToString(planContent.toByteArray()),
             ),
           "platform" to JsonPrimitive("android"),
           "startStep" to JsonPrimitive(startStep),
@@ -399,7 +399,7 @@ internal object AutoMobilePlanExecutor {
             mapOf(
               "toolName" to JsonPrimitive("executePlan"),
               "sessionUuid" to JsonPrimitive(sessionUuid),
-            )
+            ),
           ),
           options.effectiveExecutePlanTimeoutMs(),
         )
@@ -418,7 +418,7 @@ internal object AutoMobilePlanExecutor {
       } else {
         if (options.debugMode) {
           println(
-            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
+            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)",
           )
         }
 
@@ -523,7 +523,7 @@ internal object AutoMobilePlanExecutor {
 
     // Attempt Koog-powered recovery
     println(
-      "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
+      "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})",
     )
 
     // Pass the resolved secret VALUES into the recovery agent so its loop can scrub the DYNAMIC
@@ -632,7 +632,7 @@ internal object AutoMobilePlanExecutor {
             SucceededStepSummary(
               stepIndex = index,
               tool = SecretRedactor.redact(tool, secretValues),
-            )
+            ),
           )
         }
       }
@@ -790,7 +790,7 @@ internal object AutoMobilePlanExecutor {
           stepIndex = -1,
           toolName = null,
           errorMessage = e.message ?: "Failed to parse tool results",
-        )
+        ),
       )
     }
   }

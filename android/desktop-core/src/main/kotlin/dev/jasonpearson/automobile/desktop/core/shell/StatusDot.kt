@@ -21,6 +21,6 @@ fun StatusDot(connected: Boolean, modifier: Modifier = Modifier) {
       modifier
         .size(8.dp)
         .clip(CircleShape)
-        .background(if (connected) connectedColor else disconnectedColor)
+        .background(if (connected) connectedColor else disconnectedColor),
   )
 }

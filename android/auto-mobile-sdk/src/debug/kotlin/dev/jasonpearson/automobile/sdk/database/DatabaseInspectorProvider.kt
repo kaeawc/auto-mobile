@@ -128,7 +128,7 @@ class DatabaseInspectorProvider : ContentProvider() {
         JSONObject().apply {
           put("name", db.name)
           put("path", db.path)
-        }
+        },
       )
     }
 
@@ -188,7 +188,7 @@ class DatabaseInspectorProvider : ContentProvider() {
           put("nullable", col.nullable)
           put("primaryKey", col.primaryKey)
           put("defaultValue", col.defaultValue ?: JSONObject.NULL)
-        }
+        },
       )
     }
 

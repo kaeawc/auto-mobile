@@ -99,10 +99,12 @@ dependencies {
 tasks.withType<KotlinCompile>().configureEach {
   compilerOptions {
     jvmTarget.set(
-      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get())
+      org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget(libs.versions.build.java.target.get()),
     )
     languageVersion.set(
-      KotlinVersion.valueOf("KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}")
+      KotlinVersion.valueOf(
+        "KOTLIN_${libs.versions.build.kotlin.language.get().replace(".", "_")}",
+      ),
     )
   }
 }
@@ -154,14 +156,14 @@ abstract class SdkApiCheckTask : SdkApiSignatureTask() {
     if (!expected.exists()) {
       throw GradleException(
         "API file ${expected.name} does not exist. " +
-          "Run cd android && ./gradlew :auto-mobile-sdk:apiDump first."
+          "Run cd android && ./gradlew :auto-mobile-sdk:apiDump first.",
       )
     }
     val current = generateApiSignature()
     if (current != expected.readText()) {
       throw GradleException(
         "Public API has changed! Run cd android && ./gradlew :auto-mobile-sdk:apiDump " +
-          "to update the API file.\nExpected file: ${expected.name}"
+          "to update the API file.\nExpected file: ${expected.name}",
       )
     }
     logger.lifecycle("API check passed: public API matches ${expected.name}")

@@ -93,7 +93,7 @@ internal constructor(
         id = UUID.randomUUID().toString(),
         method = "config/set",
         params = VideoRecordingSocketParams(config = input),
-      )
+      ),
     )
 
   private fun send(request: VideoRecordingSocketRequest): VideoRecordingConfigResult {

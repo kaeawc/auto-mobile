@@ -19,6 +19,6 @@ sealed class DataStoreAdapterError(message: String) : Exception(message) {
   /** A value could not be represented by the contract's supported types. */
   class UnsupportedValue(storeName: String, key: String, valueType: String) :
     DataStoreAdapterError(
-      "Unsupported DataStore value for $storeName/$key: $valueType is not representable"
+      "Unsupported DataStore value for $storeName/$key: $valueType is not representable",
     )
 }

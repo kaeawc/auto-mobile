@@ -95,7 +95,7 @@ class IcTraceRecorderTest {
         keyboardVersion = "2.4",
         inputType = 1,
         imeOptions = 6,
-      )
+      ),
     )
     repeat(501) { index ->
       recorder.record("setSelection", "start=$index", 0, 0, -1, -1, result = index % 2 == 0)

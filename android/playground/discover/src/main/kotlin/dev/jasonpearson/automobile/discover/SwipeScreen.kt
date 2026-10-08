@@ -54,7 +54,7 @@ class SwipeScreenViewModel : ViewModel() {
           imageUrl = "https://picsum.photos/300/200?random=3",
           color = Color(0xFFFF5722),
         ),
-      )
+      ),
     )
   val swipeCards: StateFlow<List<SwipeCard>> = _swipeCards.asStateFlow()
 
@@ -67,7 +67,7 @@ class SwipeScreenViewModel : ViewModel() {
         GridImage("grid4", "https://picsum.photos/200/200?random=24", "Image 4"),
         GridImage("grid5", "https://picsum.photos/200/200?random=25", "Image 5"),
         GridImage("grid6", "https://picsum.photos/200/200?random=26", "Image 6"),
-      )
+      ),
     )
   val gridImages: StateFlow<List<GridImage>> = _gridImages.asStateFlow()
 

@@ -81,7 +81,7 @@ class InteractionLatencyTracer(private val nowMs: () -> Long = MONOTONIC_NOW_MS)
           visualMs = rendered - acked,
           totalMs = rendered - interaction.tapInitiatedMs,
         )
-        .format()
+        .format(),
     )
   }
 }

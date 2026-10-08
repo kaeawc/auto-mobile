@@ -67,7 +67,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -189,7 +189,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
           onClick = {
             try {
               throw IllegalStateException(
-                "Intentional non-fatal error from Bug Reproduction screen"
+                "Intentional non-fatal error from Bug Reproduction screen",
               )
             } catch (e: IllegalStateException) {
               AutoMobileFailures.recordHandledException(
@@ -230,7 +230,7 @@ fun BugReproScreen(onNavigateBack: () -> Unit) {
           },
           colors =
             ButtonDefaults.buttonColors(
-              containerColor = Color(0xFFB71C1C) // Dark red for danger
+              containerColor = Color(0xFFB71C1C), // Dark red for danger
             ),
           modifier = Modifier.fillMaxWidth().semantics { testTag = "trigger_crash" },
         ) {

@@ -50,7 +50,7 @@ class SdkCapabilitiesDiscoveryTest {
   @Test
   fun `present bridge forwards the snapshot verbatim including unknown fields`() {
     bridgeReturns(
-      """{"schemaVersion":2,"capabilities":[{"id":"network.control","state":"DISABLED"}],"policy":{"captureHeaders":false,"captureBodies":true,"allowMutations":false},"future":1}"""
+      """{"schemaVersion":2,"capabilities":[{"id":"network.control","state":"DISABLED"}],"policy":{"captureHeaders":false,"captureBodies":true,"allowMutations":false},"future":1}""",
     )
     val state = discoverSdkCapabilities(context, "com.example")
     assertEquals("ok", state.outcome)

@@ -446,7 +446,7 @@ class HierarchyDiffTest {
                 node("android.widget.TextView", "com.app:id/title", text = title),
                 node("androidx.appcompat.widget.AppCompatButton", "com.app:id/cta", text = action),
               ),
-          )
+          ),
         ),
     )
 
@@ -464,7 +464,7 @@ class HierarchyDiffTest {
           node(
             "UITableView",
             children = listOf(node("UILabel", text = title), node("UIButton", text = action)),
-          )
+          ),
         ),
     )
 
@@ -771,7 +771,7 @@ class HierarchyDiffTest {
             node(
               "com.example.ProfileView",
               children = listOf(node("android.widget.TextView", text = "Name")),
-            )
+            ),
           ),
       )
     val ios =
@@ -841,9 +841,9 @@ class HierarchyDiffTest {
                     "android.widget.LinearLayout",
                     "com.app:id/row",
                     children = listOf(node("android.widget.TextView", text = "Inbox")),
-                  )
+                  ),
                 ),
-            )
+            ),
           ),
       )
     val ios =
@@ -855,7 +855,7 @@ class HierarchyDiffTest {
               "UITableView",
               children =
                 listOf(node("UITableViewCell", children = listOf(node("UILabel", text = "Inbox")))),
-            )
+            ),
           ),
       )
 
@@ -970,7 +970,7 @@ class HierarchyDiffTest {
               "android.widget.Button",
               text = "AutoMobile Playground",
               contentDescription = "Predicted app: AutoMobile Playground",
-            )
+            ),
           ),
       )
     val ios =

@@ -80,7 +80,7 @@ class CommandPaletteTest {
         focusedDeviceId = "a",
       )
     assertTrue(
-      buildWorkspaceCommands(two, {}, {}).any { it.label == "Compare Logs across devices" }
+      buildWorkspaceCommands(two, {}, {}).any { it.label == "Compare Logs across devices" },
     )
     val one =
       WorkspaceUiState.Content(

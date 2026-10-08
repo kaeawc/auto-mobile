@@ -111,13 +111,13 @@ class KeyValueLiveUpdatesTest {
 
     val asBool =
       files.applyStorageUpdate(
-        update(key = "count", value = "true", valueType = KeyValueType.Boolean)
+        update(key = "count", value = "true", valueType = KeyValueType.Boolean),
       )
     assertEquals(true, asBool.single().entries.single().value)
 
     val asSet =
       files.applyStorageUpdate(
-        update(key = "count", value = """["a","b"]""", valueType = KeyValueType.StringSet)
+        update(key = "count", value = """["a","b"]""", valueType = KeyValueType.StringSet),
       )
     assertEquals(setOf("a", "b"), asSet.single().entries.single().value)
   }
@@ -128,7 +128,7 @@ class KeyValueLiveUpdatesTest {
 
     val result =
       files.applyStorageUpdate(
-        update(key = "count", value = "not-a-number", valueType = KeyValueType.Int)
+        update(key = "count", value = "not-a-number", valueType = KeyValueType.Int),
       )
 
     assertEquals("not-a-number", result.single().entries.single().value)
@@ -140,7 +140,7 @@ class KeyValueLiveUpdatesTest {
 
     val result =
       files.applyStorageUpdate(
-        update(key = "tags", value = "{not json", valueType = KeyValueType.StringSet)
+        update(key = "tags", value = "{not json", valueType = KeyValueType.StringSet),
       )
 
     assertEquals("{not json", result.single().entries.single().value)
@@ -219,7 +219,7 @@ class KeyValueLiveUpdatesTest {
           key = "when",
           value = "2026-07-19",
           valueType = KeyValueType.fromProtocolName("DATE"),
-        )
+        ),
       )
 
     val entry = result.single().entries.single()

@@ -68,7 +68,7 @@ class WebSocketServerTest {
       line,
     )
     assertNull(
-      WebSocketServer.textInputParseFailureLogLine(frame, "request_tap_coordinates", error)
+      WebSocketServer.textInputParseFailureLogLine(frame, "request_tap_coordinates", error),
     )
   }
 
@@ -575,9 +575,9 @@ class WebSocketServerTest {
             WebSocketServer.OutgoingFrame(
               "after-disconnect",
               WebSocketServer.OutgoingTier.MUST_DELIVER,
-            )
+            ),
           )
-          .isFailure
+          .isFailure,
       )
       assertEquals(CloseReason.Codes.TRY_AGAIN_LATER.code, stalled.closeReason?.code)
       assertTrue(stalled.closeReason?.message?.contains("Outgoing buffer full") == true)
@@ -628,7 +628,7 @@ class WebSocketServerTest {
   }
 
   private fun serverWithHandler(
-    handle: suspend (WebSocketRequest) -> WebSocketResponse?
+    handle: suspend (WebSocketRequest) -> WebSocketResponse?,
   ): WebSocketServer =
     WebSocketServer(
       port = 0,
@@ -743,7 +743,7 @@ class WebSocketServerTest {
         ThreadtimeLogLineParser(
           object : TimeProvider {
             override fun currentTimeMillis(): Long = 42L
-          }
+          },
         )
       var parses = 0
       val reader =
@@ -857,8 +857,8 @@ class WebSocketServerTest {
     assertTrue(server.recordsRequestOwner(RequestHierarchy(requestId = "req_owner")))
     assertTrue(
       server.recordsRequestOwner(
-        RequestHierarchyIfStale(sinceTimestamp = 0L, requestId = "stale_owner")
-      )
+        RequestHierarchyIfStale(sinceTimestamp = 0L, requestId = "stale_owner"),
+      ),
     )
   }
 
@@ -867,7 +867,7 @@ class WebSocketServerTest {
   @Test
   fun `set_network_mock_rules records an owner only when it carries a requestId`() {
     assertTrue(
-      server.recordsRequestOwner(SetNetworkMockRules(requestId = "r1", rules = emptyList()))
+      server.recordsRequestOwner(SetNetworkMockRules(requestId = "r1", rules = emptyList())),
     )
     assertFalse(server.recordsRequestOwner(SetNetworkMockRules(rules = emptyList())))
   }
@@ -877,7 +877,7 @@ class WebSocketServerTest {
     assertEquals(
       "r1",
       WebSocketServer.correlationRequestId(
-        SetNetworkMockRulesResult(timestamp = 1L, requestId = "r1")
+        SetNetworkMockRulesResult(timestamp = 1L, requestId = "r1"),
       ),
     )
   }
@@ -933,7 +933,7 @@ class WebSocketServerTest {
       server.registerRequestOwner("req-failed", owner)
 
       server.broadcast(
-        SwipeResult(timestamp = 0L, requestId = "req-failed", success = true, totalTimeMs = 5L)
+        SwipeResult(timestamp = 0L, requestId = "req-failed", success = true, totalTimeMs = 5L),
       )
       runCurrent()
 
@@ -1046,7 +1046,9 @@ class WebSocketServerTest {
   @Test
   fun `mightCarryRequestId detects the requestId token`() {
     assertTrue(
-      WebSocketServer.mightCarryRequestId("""{"type":"request_screenshot","requestId":"abc-123"}""")
+      WebSocketServer.mightCarryRequestId(
+        """{"type":"request_screenshot","requestId":"abc-123"}""",
+      ),
     )
   }
 
@@ -1065,7 +1067,7 @@ class WebSocketServerTest {
       WebSocketServer.describeDecodeFailure(
         """{"type":"totally_unknown_command","requestId":"r1"}""",
         kotlinx.serialization.SerializationException(
-          "Serializer for subclass 'totally_unknown_command' is not found in the polymorphic scope of 'WebSocketRequest'."
+          "Serializer for subclass 'totally_unknown_command' is not found in the polymorphic scope of 'WebSocketRequest'.",
         ),
       )
     assertTrue(
@@ -1345,7 +1347,7 @@ class WebSocketServerTest {
     assertEquals(
       "overlay-r",
       WebSocketServer.correlationRequestId(
-        OverlayResult(timestamp = 0L, requestId = "overlay-r", success = false)
+        OverlayResult(timestamp = 0L, requestId = "overlay-r", success = false),
       ),
     )
     assertNull(
@@ -1358,8 +1360,8 @@ class WebSocketServerTest {
           name = null,
           payload = null,
           state = emptyMap(),
-        )
-      )
+        ),
+      ),
     )
   }
 }

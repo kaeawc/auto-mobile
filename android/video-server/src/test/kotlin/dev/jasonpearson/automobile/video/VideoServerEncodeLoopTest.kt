@@ -143,14 +143,14 @@ class VideoServerEncodeLoopTest {
   @Test
   fun releasedCodecStateErrorDuringShutdownIsCleanExit() {
     assertTrue(
-      VideoServer.isShutdownRace(running = false, error = IllegalStateException("released"))
+      VideoServer.isShutdownRace(running = false, error = IllegalStateException("released")),
     )
   }
 
   @Test
   fun codecStateErrorWhileRunningMustPropagate() {
     assertFalse(
-      VideoServer.isShutdownRace(running = true, error = IllegalStateException("released"))
+      VideoServer.isShutdownRace(running = true, error = IllegalStateException("released")),
     )
   }
 
@@ -180,7 +180,7 @@ class VideoServerEncodeLoopTest {
 
     assertTrue(VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat))
     assertFalse(
-      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat)
+      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat),
     )
     assertEquals(1, requests)
 
@@ -200,7 +200,7 @@ class VideoServerEncodeLoopTest {
     var requests = 0
 
     assertFalse(
-      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat)
+      VideoServer.recoverFromFrameDrop(handoff::consumeDropGap, { requests++ }, heartbeat),
     )
     assertEquals(0, requests)
   }

@@ -12,7 +12,7 @@ class DeviceSessionSupersededForwarder(
     val column = columns().firstOrNull { it.deviceId == event.deviceId } ?: return
     if (column.deviceSessionUuid != event.retiredUuid) return
     dispatch(
-      WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid))
+      WorkspaceAction.RefreshDeviceSessionUuids(mapOf(event.deviceId to event.successorUuid)),
     )
   }
 }

@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
     if (BuildConfig.DEBUG) {
       // The playground installs the SDK network-control receiver, so opt in to its debug mocks.
       AutoMobileSDK.registerCapability(
-        SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED)
+        SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED),
       )
       AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
     }

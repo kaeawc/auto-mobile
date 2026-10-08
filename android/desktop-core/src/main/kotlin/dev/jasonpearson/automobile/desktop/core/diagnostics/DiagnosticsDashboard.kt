@@ -190,7 +190,7 @@ private fun DiagnosticSection(
     modifier =
       Modifier.fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     Text(
       title,

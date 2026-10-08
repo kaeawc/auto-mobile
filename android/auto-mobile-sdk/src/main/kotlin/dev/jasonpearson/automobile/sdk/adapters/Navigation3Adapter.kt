@@ -83,7 +83,7 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
           source = NavigationSource.COMPOSE_NAVIGATION,
           arguments = arguments,
           metadata = metadata,
-        )
+        ),
       )
     }
   }
@@ -119,7 +119,7 @@ object Navigation3Adapter : NavigationFrameworkAdapter {
         source = NavigationSource.COMPOSE_NAVIGATION,
         arguments = arguments,
         metadata = metadata,
-      )
+      ),
     )
   }
 }

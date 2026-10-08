@@ -17,13 +17,13 @@ internal fun interface LogLineParser {
 }
 
 internal class ThreadtimeLogLineParser(
-  private val timeProvider: TimeProvider = SystemTimeProvider()
+  private val timeProvider: TimeProvider = SystemTimeProvider(),
 ) : LogLineParser {
   companion object {
     /** Threadtime format: `MM-DD HH:MM:SS.mmm PID TID level tag: message`. */
     private val THREADTIME_REGEX =
       Regex(
-        """^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?)\s*:\s(.*)$"""
+        """^(\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2}\.\d{3})\s+(\d+)\s+(\d+)\s+([VDIWEFA])\s+(.+?)\s*:\s(.*)$""",
       )
 
     private fun parseLevel(letter: String): Int =

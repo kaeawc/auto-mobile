@@ -90,12 +90,12 @@ fun buildWorkspaceCommands(
     add(
       PaletteCommand("focus-${column.deviceId}", "Focus $name") {
         onAction(WorkspaceAction.FocusDevice(column.deviceId))
-      }
+      },
     )
     add(
       PaletteCommand("close-${column.deviceId}", "Close $name") {
         onAction(WorkspaceAction.CloseDevice(column.deviceId))
-      }
+      },
     )
   }
   val focused = content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
@@ -105,7 +105,7 @@ fun buildWorkspaceCommands(
       add(
         PaletteCommand("tool-${tool.name}", "Open ${tool.label} on $focusedName") {
           onAction(WorkspaceAction.SelectTool(focused.deviceId, tool))
-        }
+        },
       )
     }
     if (content.columns.size > 1) {
@@ -113,7 +113,7 @@ fun buildWorkspaceCommands(
         add(
           PaletteCommand("diff-${active.name}", "Compare ${active.label} across devices") {
             onAction(WorkspaceAction.DiffTool(active))
-          }
+          },
         )
       }
     }
@@ -202,7 +202,7 @@ fun CommandPalette(
           indication = null,
           onClick = {},
         )
-        .padding(12.dp)
+        .padding(12.dp),
     ) {
       OutlinedTextField(
         value = query,

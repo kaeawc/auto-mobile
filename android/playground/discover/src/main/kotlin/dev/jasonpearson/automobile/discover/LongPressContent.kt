@@ -284,13 +284,13 @@ private fun LongPressDurationButton(requiredDurationMs: Int, label: String, test
                 } else {
                   "Too short (${elapsed}ms)"
                 }
-            }
+            },
           )
         }
         .semantics { this.testTag = testTag },
     colors =
       CardDefaults.cardColors(
-        containerColor = if (statusText.startsWith("Success")) highlightColor else defaultColor
+        containerColor = if (statusText.startsWith("Success")) highlightColor else defaultColor,
       ),
     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
   ) {
@@ -386,7 +386,7 @@ private fun LongPressDragList() {
             CardDefaults.cardColors(
               containerColor =
                 if (isDragging) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant
+                else MaterialTheme.colorScheme.surfaceVariant,
             ),
         ) {
           Row(
@@ -441,7 +441,7 @@ private fun CancelableLongPress() {
                 progress.snapTo(0f)
                 statusText = "Cancelled"
               }
-            }
+            },
           )
         }
         .semantics { testTag = "cancelable_long_press" },

@@ -295,7 +295,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     if (SystemClock.uptimeMillis() >= deadlineMs) {
       driver.restoreIfNeeded(priorImeId)
       onResult(
-        ImeCommitResult(success = false, error = "No active input connection within timeout")
+        ImeCommitResult(success = false, error = "No active input connection within timeout"),
       )
       scheduleIdleRestore(driver, priorImeId)
       return

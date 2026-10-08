@@ -275,7 +275,7 @@ internal fun AvailableDeviceImagesSection(
                   compareBy(
                     { it.substringBefore('.').toIntOrNull() ?: 0 },
                     { it.substringAfter('.', "0").toIntOrNull() ?: 0 },
-                  )
+                  ),
                 )
             }
           // Version slider — only shown when 2+ distinct versions exist
@@ -288,7 +288,7 @@ internal fun AvailableDeviceImagesSection(
               mutableFloatStateOf(
                 (allVersions.indexOf(maxIosVersion).takeIf { it >= 0 } ?: (allVersions.size - 1))
                   .coerceAtLeast(minIdx.toInt())
-                  .toFloat()
+                  .toFloat(),
               )
             }
           if (allVersions.size >= 2) {

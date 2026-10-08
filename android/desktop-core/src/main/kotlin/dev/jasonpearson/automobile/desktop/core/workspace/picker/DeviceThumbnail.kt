@@ -181,7 +181,7 @@ fun DeviceThumbnail(
         .background(
           if (device.state == DeviceState.Shutdown && !booting)
             MaterialTheme.colorScheme.surfaceVariant
-          else Color.Black
+          else Color.Black,
         )
         .semantics {
           contentDescription = "Thumbnail ${device.name}"

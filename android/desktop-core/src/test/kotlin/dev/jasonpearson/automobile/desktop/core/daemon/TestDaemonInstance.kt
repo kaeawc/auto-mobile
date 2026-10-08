@@ -194,7 +194,7 @@ class TestDaemonInstance(private val port: Int = 0) {
           "tools/call:$toolName"
         }
         else -> method
-      }
+      },
     )
 
     return when (method) {

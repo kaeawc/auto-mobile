@@ -11,7 +11,7 @@ class CachedAppListDataSourceTest {
 
   /** Counts how many times the delegate is called. */
   private class CountingAppListDataSource(
-    private val results: Iterator<Result<List<InstalledApp>>>
+    private val results: Iterator<Result<List<InstalledApp>>>,
   ) : AppListDataSource {
     var callCount = 0
 

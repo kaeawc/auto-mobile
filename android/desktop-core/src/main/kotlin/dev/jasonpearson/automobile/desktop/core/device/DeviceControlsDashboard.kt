@@ -347,7 +347,7 @@ private fun Chip(label: String, accent: Color, enabled: Boolean = true, onClick:
         .let {
           if (enabled) it.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand) else it
         }
-        .padding(horizontal = 8.dp, vertical = 3.dp)
+        .padding(horizontal = 8.dp, vertical = 3.dp),
   ) {
     Text(label, fontSize = 9.sp, softWrap = false, color = accent.copy(alpha = alpha))
   }

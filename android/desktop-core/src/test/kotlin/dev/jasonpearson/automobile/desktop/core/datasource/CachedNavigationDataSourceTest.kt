@@ -11,7 +11,7 @@ class CachedNavigationDataSourceTest {
 
   /** Counts how many times the delegate is called. */
   private class CountingNavigationDataSource(
-    private val results: Iterator<Result<NavigationGraph>>
+    private val results: Iterator<Result<NavigationGraph>>,
   ) : NavigationDataSource {
     var callCount = 0
 
@@ -71,7 +71,7 @@ class CachedNavigationDataSourceTest {
             Result.Error(RuntimeException("fail")),
             Result.Success(graph),
           )
-          .iterator()
+          .iterator(),
       )
     val cached = CachedNavigationDataSource(delegate, ttlMs = 10_000L)
 

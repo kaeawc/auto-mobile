@@ -11,8 +11,8 @@ class UncaughtUiErrorTest {
     val message =
       uncaughtUiErrorMessage(
         NoClassDefFoundError(
-          "dev/jasonpearson/automobile/desktop/core/daemon/DaemonPidReadResult\$Absent"
-        )
+          "dev/jasonpearson/automobile/desktop/core/daemon/DaemonPidReadResult\$Absent",
+        ),
       )
 
     assertContains(message, "NoClassDefFoundError")

@@ -73,7 +73,7 @@ class OverlayFontAssetTest {
     assertEquals(OverlayAssetRejection.TOO_LARGE, over.reason)
     assertTrue(over.message, over.message.contains("limit is 64"))
     assertTrue(
-      store.put("i", "image/png", OverlayAssetBytes.png(100)) is OverlayAssetPutResult.Stored
+      store.put("i", "image/png", OverlayAssetBytes.png(100)) is OverlayAssetPutResult.Stored,
     )
   }
 
@@ -115,7 +115,7 @@ class OverlayFontAssetTest {
     assertEquals("brand", style.fontAsset)
     assertEquals(FontFamily.Default, style.fontFamily)
     assertNull(
-      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontAsset
+      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontAsset,
     )
   }
 
@@ -133,7 +133,7 @@ class OverlayFontAssetTest {
                   OverlayStyleWhen(
                     OverlayCondition(key = "k"),
                     OverlayStyle(fontFamily = OverlayFontFamily.Asset("font-b")),
-                  )
+                  ),
                 ),
             ),
             OverlayImageNode(asset = "pic"),
@@ -141,7 +141,7 @@ class OverlayFontAssetTest {
               text = "b",
               style = OverlayStyle(fontFamily = OverlayFontFamily.Named("serif")),
             ),
-          )
+          ),
       )
     assertEquals(listOf("font-a", "font-b", "pic"), overlayAssetReferences(root))
   }

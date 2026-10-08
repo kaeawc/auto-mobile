@@ -3867,6 +3867,15 @@
                 "name": "dialogButton"
               },
               "optional": true
+            },
+            "durationMs": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1,
+                "max": 600000
+              },
+              "optional": true
             }
           }
         },

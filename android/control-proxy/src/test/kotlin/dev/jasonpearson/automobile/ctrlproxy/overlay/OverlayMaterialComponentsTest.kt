@@ -1,6 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.*
 import org.junit.Assert.*
@@ -282,5 +286,42 @@ class OverlayMaterialComponentsTest {
     val mapped = mapOverlaySpec(spec(root, mapOf("open" to OverlayScalar.BooleanValue(true)))).root
     assertEquals("one", mapped.children.single().children.single().text)
     assertEquals(mapOf<String, Int>(), pagerCounts(root))
+  }
+
+  @Test
+  fun `a snackbar closes after its duration through the injected pause`() = runTest {
+    val pauses = mutableListOf<Long>()
+    var closed = 0
+    awaitSnackbarTimeout(2500, { pauses += it }) { closed++ }
+    assertEquals(listOf(2500L), pauses)
+    assertEquals(1, closed)
+  }
+
+  @Test
+  fun `a snackbar without a duration stays and never pauses`() = runTest {
+    var paused = false
+    var closed = false
+    awaitSnackbarTimeout(null, { paused = true }) { closed = true }
+    assertFalse(paused)
+    assertFalse(closed)
+  }
+
+  @Test
+  fun `a snackbar closed early never fires its timeout`() = runTest {
+    var closed = false
+    val job = launch { awaitSnackbarTimeout(1000, { delay(it) }) { closed = true } }
+    advanceTimeBy(999)
+    job.cancel()
+    advanceUntilIdle()
+    assertFalse(closed)
+  }
+
+  @Test
+  fun `the timeout close writes the opposite boolean without running any action`() = runTest {
+    val snackbar = OverlaySnackbarNode(openWhen = open, text = "Saved", durationMs = 1000)
+    val runtime = runtime(spec(snackbar, mapOf("open" to OverlayScalar.BooleanValue(true))))
+    runtime.handle(OverlayInteraction.CloseModal(snackbar.openWhen))
+    assertEquals(OverlayScalar.BooleanValue(false), runtime.current.state["open"])
+    assertEquals(listOf("change"), events.map { it.name })
   }
 }

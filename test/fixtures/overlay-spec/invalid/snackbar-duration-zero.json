@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "open": false
+    },
+    "root": {
+      "type": "snackbar",
+      "openWhen": {
+        "key": "open",
+        "equals": true
+      },
+      "text": "Saved",
+      "durationMs": 0
+    }
+  },
+  "expectedPath": "root.durationMs"
+}

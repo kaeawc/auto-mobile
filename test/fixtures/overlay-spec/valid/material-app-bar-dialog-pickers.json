@@ -80,7 +80,8 @@
         "type": "snackbar",
         "openWhen": { "key": "saved", "equals": true },
         "text": "Alarm set for {hour}:{minute}",
-        "action": { "label": "Undo", "onTap": [{ "type": "emit", "name": "undo" }] }
+        "action": { "label": "Undo", "onTap": [{ "type": "emit", "name": "undo" }] },
+        "durationMs": 4000
       }
     ]
   }

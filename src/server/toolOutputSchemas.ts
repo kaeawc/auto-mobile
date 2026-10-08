@@ -1188,6 +1188,14 @@ export const skeletonElementSchema = z
         "Fully covered by the Android IME window or the visible iOS keyboard; this row has no actionable affordance.",
       ),
     checked: z.boolean().optional(),
+    selected: z
+      .literal(true)
+      .optional()
+      .describe("AutoMobile overlay rows only: the selected tab or option."),
+    state: z
+      .string()
+      .optional()
+      .describe("AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3."),
     enabled: z
       .literal(false)
       .optional()

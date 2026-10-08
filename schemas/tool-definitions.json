@@ -4262,6 +4262,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -4358,6 +4367,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -10166,6 +10184,15 @@
                     "checked": {
                       "type": "boolean"
                     },
+                    "selected": {
+                      "description": "AutoMobile overlay rows only: the selected tab or option.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "state": {
+                      "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                      "type": "string"
+                    },
                     "enabled": {
                       "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                       "type": "boolean",
@@ -10261,6 +10288,15 @@
                     },
                     "checked": {
                       "type": "boolean"
+                    },
+                    "selected": {
+                      "description": "AutoMobile overlay rows only: the selected tab or option.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "state": {
+                      "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                      "type": "string"
                     },
                     "enabled": {
                       "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -11953,6 +11989,15 @@
               "checked": {
                 "type": "boolean"
               },
+              "selected": {
+                "description": "AutoMobile overlay rows only: the selected tab or option.",
+                "type": "boolean",
+                "const": true
+              },
+              "state": {
+                "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                "type": "string"
+              },
               "enabled": {
                 "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                 "type": "boolean",
@@ -12049,6 +12094,15 @@
               },
               "checked": {
                 "type": "boolean"
+              },
+              "selected": {
+                "description": "AutoMobile overlay rows only: the selected tab or option.",
+                "type": "boolean",
+                "const": true
+              },
+              "state": {
+                "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                "type": "string"
               },
               "enabled": {
                 "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -15394,6 +15448,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -15490,6 +15553,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -22764,6 +22836,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -22860,6 +22941,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -30151,6 +30241,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -30247,6 +30346,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
@@ -33834,6 +33942,15 @@
                       "checked": {
                         "type": "boolean"
                       },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
+                      },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",
                         "type": "boolean",
@@ -33930,6 +34047,15 @@
                       },
                       "checked": {
                         "type": "boolean"
+                      },
+                      "selected": {
+                        "description": "AutoMobile overlay rows only: the selected tab or option.",
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "state": {
+                        "description": "AutoMobile overlay rows only: the node's state description, e.g. Page 1 of 3.",
+                        "type": "string"
                       },
                       "enabled": {
                         "description": "Explicit disabled state on Android and iOS; omitted means enabled.",

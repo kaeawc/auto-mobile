@@ -28,6 +28,12 @@ class OverlayRenderModelTest {
     OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
 
   @Test
+  fun `an unstyled node has no fixed colour so the theme content colour applies`() {
+    val node = mapOverlaySpec(spec(OverlayTextNode(text = "plain"))).root
+    assertEquals(Color.Unspecified, node.style.color)
+  }
+
+  @Test
   fun `all static primitives expose roles text and tags`() {
     val nodes =
       listOf(
@@ -64,21 +70,86 @@ class OverlayRenderModelTest {
         .jsonObject
         .getValue("definitions")
         .jsonObject
-        .getValue("item")
-        .jsonObject
-        .getValue("fields")
-        .jsonObject
-        .getValue("icon")
-        .jsonObject
-        .getValue("rule")
+        .getValue("iconName")
         .jsonObject
         .getValue("values")
         .jsonArray
-    for (name in names) assertNotNull(
-      name.jsonPrimitive.content,
-      overlayIcon(name.jsonPrimitive.content),
-    )
+    assertTrue(names.size > 2000)
+    for ((index, name) in names.withIndex()) {
+      val content = name.jsonPrimitive.content
+      assertNotNull(content, overlayIcon(content))
+      // Every name loads filled; styles share the class layout, so a sample of names covers them.
+      if (index % 40 != 0) continue
+      for (variant in listOf("outlined", "rounded", "sharp", "twoTone")) {
+        assertNotNull("$content/$variant", overlayIcon(content, variant))
+      }
+    }
     assertNull(overlayIcon("unknown"))
+    assertNull(overlayIcon("Home"))
+    assertNull(overlayIcon("home; drop"))
+  }
+
+  @Test
+  fun `icon variants resolve distinct artwork and unknown variants fall back to filled`() {
+    val filled = checkNotNull(overlayIcon("timer"))
+    assertSame(filled, overlayIcon("timer", "filled"))
+    assertSame(filled, overlayIcon("timer", "unheard-of"))
+    assertNotSame(filled, overlayIcon("timer", "outlined"))
+    assertNotSame(overlayIcon("timer", "rounded"), overlayIcon("timer", "sharp"))
+    assertNotNull(overlayIcon("bedtime"))
+    assertNotNull(overlayIcon("alarm_add", "twoTone"))
+  }
+
+  @Test
+  fun `styleWhen resolves against state into the render style`() {
+    val node =
+      OverlayTextNode(
+        text = "text",
+        style = OverlayStyle(background = "#111111", color = "#222222"),
+        styleWhen =
+          listOf(
+            OverlayStyleWhen(
+              OverlayCondition("selected", equals = OverlayScalar.BooleanValue(true)),
+              OverlayStyle(background = "#2255CC"),
+            )
+          ),
+      )
+    fun rendered(selected: Boolean) =
+      mapOverlaySpec(
+          OverlaySpec(
+            "panel",
+            OverlayWindow(OverlayFullscreenPlacement()),
+            root = node,
+            state = mapOf("selected" to OverlayScalar.BooleanValue(selected)),
+          )
+        )
+        .root
+        .style
+    assertEquals(overlayColor("#2255CC"), rendered(true).background)
+    assertEquals(overlayColor("#222222"), rendered(true).color)
+    assertEquals(overlayColor("#111111"), rendered(false).background)
+  }
+
+  @Test
+  fun `unrepresentable styleWhen size is rejected with its path`() {
+    val error =
+      assertThrows(IllegalArgumentException::class.java) {
+        mapOverlaySpec(
+          spec(
+            OverlayTextNode(
+              text = "text",
+              styleWhen =
+                listOf(
+                  OverlayStyleWhen(
+                    OverlayCondition("k", equals = OverlayScalar.Numeric(1.0)),
+                    OverlayStyle(width = OverlayDimension.Dp(Double.MAX_VALUE)),
+                  )
+                ),
+            )
+          )
+        )
+      }
+    assertTrue(error.message.orEmpty().contains("root.styleWhen[0].style.width.dp"))
   }
 
   @Test
@@ -98,11 +169,33 @@ class OverlayRenderModelTest {
   }
 
   @Test
+  fun `unrepresentable weight and size bounds are rejected before content installation`() {
+    val styles =
+      mapOf(
+        "weight" to OverlayStyle(weight = Double.MAX_VALUE),
+        "maxWidth" to OverlayStyle(maxWidth = Double.MAX_VALUE),
+        "minHeight" to OverlayStyle(minHeight = Double.MAX_VALUE),
+      )
+    for ((key, style) in styles) {
+      val error =
+        assertThrows(IllegalArgumentException::class.java) {
+          mapOverlaySpec(spec(OverlayTextNode(text = "text", style = style)))
+        }
+      assertTrue(error.message.orEmpty().contains("root.style.$key"))
+    }
+  }
+
+  @Test
   fun `every style property and safe area selection survive pure mapping`() {
     val style =
       OverlayStyle(
         width = OverlayDimension.Fill,
         height = OverlayDimension.Dp(40.5),
+        weight = 2.5,
+        minWidth = 10.0,
+        maxWidth = 200.5,
+        minHeight = 20.0,
+        maxHeight = 90.0,
         padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
         background = "#112233",
         cornerRadius = 6.0,

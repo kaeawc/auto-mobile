@@ -29,6 +29,32 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceSession } from "../../src/db/types";
+import type { ProxySetupResult } from "../../src/utils/interfaces/ProxyManager";
+import { logger } from "../../src/utils/logger";
+
+/** Drain pending microtasks without yielding to timers or I/O. */
+const drainMicrotasks = async (): Promise<void> => {
+  for (let index = 0; index < 50; index += 1) {
+    await Promise.resolve();
+  }
+};
+
+/**
+ * Yield event-loop turns until `done` holds (or a fixed number of turns when
+ * omitted). It never sleeps on a wall clock; it only lets already-queued
+ * promise work and the fake timer's auto-advance tasks run.
+ */
+const drainTurns = async (done?: () => boolean): Promise<void> => {
+  for (let turn = 0; turn < 20; turn += 1) {
+    if (done?.()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  if (done && !done()) {
+    throw new Error("drainTurns: condition not reached");
+  }
+};
 
 describe("ToolExecutionContext", () => {
   let sessionManager: SessionManager;
@@ -462,8 +488,9 @@ describe("ToolExecutionContext", () => {
   );
 
   // Issue #7541: an abort during the retry delay must reject promptly with
-  // the caller's own reason instead of waiting out the 3s sleep. Shared
-  // preparation continues its own bounded retry after that caller detaches.
+  // the caller's own reason instead of waiting out the 3s sleep. That caller
+  // was the flight's only waiter, so the flight ends abandoned instead of
+  // retrying, and the follow-up call starts a fresh flight with its own setup.
   test("rejects promptly with the caller's reason when aborted during the retry sleep (#7541)", async () => {
     let setupCalls = 0;
     let resolveFirstSetup!: () => void;
@@ -507,7 +534,11 @@ describe("ToolExecutionContext", () => {
     await firstSetupDone;
     controller.abort(new Error("caller cancelled during retry sleep"));
     await expect(context).rejects.toThrow("caller cancelled during retry sleep");
+    // Give auto-advance the turns it would need to fire the 3s retry sleep:
+    // a flight that kept retrying would call setup() a second time here.
+    await drainTurns();
     expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBeUndefined();
     await createToolExecutionContext(
       "session-abort-retry-sleep",
       sessionManager,
@@ -515,6 +546,193 @@ describe("ToolExecutionContext", () => {
       sessionOptions,
     );
     expect(setupCalls).toBe(2);
+    expect(sessionManager.getDeviceReadiness("session-abort-retry-sleep")).toBe("automationReady");
+  });
+
+  describe("readiness flight with no waiters left (#7541 follow-up)", () => {
+    const RETRY_DELAY_MS = 3000;
+    const transientFailure: ProxySetupResult = {
+      success: false,
+      message: "Failed to setup Accessibility Service due to device connection issue",
+      error: "error: device offline",
+      category: "deviceConnection",
+    };
+    let manualTimer: FakeTimer;
+    let manualSessionManager: SessionManager;
+    let manualPool: DevicePool;
+
+    /** Each setup() call parks until the test settles it. */
+    const gatedSetup = () => {
+      const started = Array.from({ length: 4 }, () => Promise.withResolvers<void>());
+      const results = Array.from({ length: 4 }, () => Promise.withResolvers<ProxySetupResult>());
+      let calls = 0;
+      setDeviceReadinessProxyDriverProviderForTesting(() => ({
+        resetSetupState: () => {},
+        setup: async () => {
+          const index = calls++;
+          started[index].resolve();
+          return results[index].promise;
+        },
+        waitForConnection: async () => true,
+        isInstalled: async () => true,
+        isVersionCompatible: async () => true,
+      }));
+      return { started, results, calls: () => calls };
+    };
+
+    const startContext = (sessionId: string, signal?: AbortSignal) =>
+      createToolExecutionContext(
+        sessionId,
+        manualSessionManager,
+        manualPool,
+        sessionOptions,
+        undefined,
+        undefined,
+        false,
+        signal,
+      );
+
+    const abandonedLogs = (debugSpy: { mock: { calls: unknown[][] } }) =>
+      debugSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("Readiness flight abandoned: no waiters"),
+      );
+
+    const setupManual = async () => {
+      // Manual stepping only: time moves when a test calls advanceTimeAsync.
+      manualTimer = new FakeTimer();
+      manualSessionManager = new SessionManager(manualTimer, new FakeDeviceSessionPersistence());
+      const manualDeviceManager = new FakeDeviceManager();
+      manualDeviceManager.bootedDevices = [createBootedDevice("device-1")];
+      manualPool = new DevicePool(
+        createDevicePoolDependencies(manualSessionManager, "test-daemon-session-id", {
+          timer: manualTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: manualDeviceManager,
+        }),
+      );
+      await manualPool.initializeWithDevices([createBootedDevice("device-1")]);
+    };
+
+    afterEach(() => {
+      manualSessionManager?.stopCleanupTimer();
+    });
+
+    test("the last waiter leaving during the retry sleep ends the flight without a second setup()", async () => {
+      await setupManual();
+      const debugSpy = spyOn(logger, "debug");
+      try {
+        const gate = gatedSetup();
+        await manualSessionManager.createSession("no-waiters-sleep", "device-1", "android");
+        const controller = new AbortController();
+        const context = startContext("no-waiters-sleep", controller.signal);
+        await gate.started[0].promise;
+        gate.results[0].resolve(transientFailure);
+        await drainTurns(() => manualTimer.getPendingTimeouts().includes(RETRY_DELAY_MS));
+
+        controller.abort(new Error("last waiter left"));
+        await expect(context).rejects.toThrow("last waiter left");
+        await drainTurns(() => abandonedLogs(debugSpy).length > 0);
+
+        // The retry sleep ended early and released its timer.
+        expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
+        await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
+        expect(gate.calls()).toBe(1);
+        expect(abandonedLogs(debugSpy)).toHaveLength(1);
+        expect(String(abandonedLogs(debugSpy)[0][0])).toContain(
+          "deviceId=device-1, attemptsCompleted=1",
+        );
+        expect(manualSessionManager.getDeviceReadiness("no-waiters-sleep")).toBeUndefined();
+      } finally {
+        debugSpy.mockRestore();
+      }
+    });
+
+    test("one of two waiters leaving keeps the flight retrying for the other", async () => {
+      await setupManual();
+      const gate = gatedSetup();
+      await manualSessionManager.createSession("one-waiter-left", "device-1", "android");
+      const leaving = new AbortController();
+      const staying = new AbortController();
+      const leavingContext = startContext("one-waiter-left", leaving.signal);
+      await gate.started[0].promise;
+      gate.results[0].resolve(transientFailure);
+      await drainTurns(() => manualTimer.getPendingTimeouts().includes(RETRY_DELAY_MS));
+      const stayingContext = startContext("one-waiter-left", staying.signal);
+      await drainTurns();
+
+      leaving.abort(new Error("first waiter left"));
+      await expect(leavingContext).rejects.toThrow("first waiter left");
+      await drainTurns();
+      // The remaining waiter keeps the flight's retry sleep alive.
+      expect(manualTimer.getPendingTimeouts()).toContain(RETRY_DELAY_MS);
+      expect(gate.calls()).toBe(1);
+
+      await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
+      await gate.started[1].promise;
+      gate.results[1].resolve({ success: true, message: "ok" });
+      await stayingContext;
+      expect(gate.calls()).toBe(2);
+      expect(manualSessionManager.getDeviceReadiness("one-waiter-left")).toBe("automationReady");
+    });
+
+    test("an abort during setup() lets that setup finish, then starts no further attempt", async () => {
+      await setupManual();
+      const debugSpy = spyOn(logger, "debug");
+      try {
+        const gate = gatedSetup();
+        await manualSessionManager.createSession("no-waiters-mid-setup", "device-1", "android");
+        const controller = new AbortController();
+        const context = startContext("no-waiters-mid-setup", controller.signal);
+        await gate.started[0].promise;
+
+        controller.abort(new Error("left mid-setup"));
+        await expect(context).rejects.toThrow("left mid-setup");
+        expect(abandonedLogs(debugSpy)).toHaveLength(0);
+
+        // The in-progress setup() still runs to completion.
+        gate.results[0].resolve(transientFailure);
+        await drainTurns(() => abandonedLogs(debugSpy).length > 0);
+        expect(manualTimer.getPendingTimeouts()).not.toContain(RETRY_DELAY_MS);
+        await manualTimer.advanceTimeAsync(RETRY_DELAY_MS, drainMicrotasks);
+        expect(gate.calls()).toBe(1);
+        expect(abandonedLogs(debugSpy)).toHaveLength(1);
+        expect(manualSessionManager.getDeviceReadiness("no-waiters-mid-setup")).toBeUndefined();
+      } finally {
+        debugSpy.mockRestore();
+      }
+    });
+
+    test("a caller arriving after an abandoned flight starts a fresh flight", async () => {
+      await setupManual();
+      const debugSpy = spyOn(logger, "debug");
+      try {
+        const gate = gatedSetup();
+        await manualSessionManager.createSession("fresh-after-abandon", "device-1", "android");
+        const controller = new AbortController();
+        const context = startContext("fresh-after-abandon", controller.signal);
+        await gate.started[0].promise;
+        gate.results[0].resolve(transientFailure);
+        await drainTurns(() => manualTimer.getPendingTimeouts().includes(RETRY_DELAY_MS));
+        controller.abort(new Error("left during sleep"));
+        await expect(context).rejects.toThrow("left during sleep");
+        await drainTurns(() => abandonedLogs(debugSpy).length > 0);
+        expect(gate.calls()).toBe(1);
+
+        // No time advance: the fresh flight's setup() runs immediately rather
+        // than after the abandoned flight's retry delay.
+        const fresh = startContext("fresh-after-abandon");
+        await gate.started[1].promise;
+        expect(gate.calls()).toBe(2);
+        gate.results[1].resolve({ success: true, message: "ok" });
+        await fresh;
+        expect(gate.calls()).toBe(2);
+        expect(manualSessionManager.getDeviceReadiness("fresh-after-abandon")).toBe(
+          "automationReady",
+        );
+      } finally {
+        debugSpy.mockRestore();
+      }
+    });
   });
 
   test("preserves the caller's abort reason while shared setup completes", async () => {

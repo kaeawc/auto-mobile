@@ -118,6 +118,11 @@ const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
     height: dimensionSchema.optional(),
+    weight: z.number().finite().min(1e-6).optional(),
+    minWidth: z.number().finite().min(0).optional(),
+    maxWidth: z.number().finite().min(0).optional(),
+    minHeight: z.number().finite().min(0).optional(),
+    maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
     background: z
       .string()

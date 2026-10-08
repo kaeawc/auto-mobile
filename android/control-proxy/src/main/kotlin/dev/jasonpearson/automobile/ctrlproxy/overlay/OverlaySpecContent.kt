@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
@@ -100,18 +101,24 @@ fun OverlaySpecContent(
 }
 
 @Composable
-private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
+private fun RenderOverlayNode(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+) {
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
+      modifier = parentModifier,
       enter = fadeIn() + expandIn(),
       exit = fadeOut() + shrinkOut(),
     ) {
       RenderOverlayNodeContent(node, interact)
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact)
+    RenderOverlayNodeContent(node, interact, parentModifier)
   }
 }
 
@@ -119,8 +126,9 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
 private fun RenderOverlayNodeContent(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
 ) {
-  val modifier = overlayNodeModifier(node, interact)
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact))
   when (node.role) {
     "box" ->
       Box(modifier, contentAlignment = node.style.alignment) {
@@ -132,7 +140,7 @@ private fun RenderOverlayNodeContent(
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, rowWeight(it)) }
       }
     "column" ->
       Column(
@@ -140,7 +148,7 @@ private fun RenderOverlayNodeContent(
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
       }
     "text" ->
       Text(
@@ -385,7 +393,7 @@ private fun RenderOverlaySheet(
             .size(32.dp, 4.dp)
             .background(Color.Gray, RoundedCornerShape(2.dp))
         )
-      node.children.forEach { RenderOverlayNode(it, interact) }
+      node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
     }
   }
 }
@@ -409,6 +417,7 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.width, horizontal = true)
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
+  modifier = sizeConstraintModifier(modifier, style)
   val shape = RoundedCornerShape((style.cornerRadius ?: 0.0).toFloat().dp)
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   node.style.background?.let { modifier = modifier.background(it, shape) }
@@ -509,3 +518,28 @@ private fun dimensionModifier(
     OverlayDimension.Wrap,
     null -> if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
   }
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
+private fun RowScope.rowWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Column. */
+private fun ColumnScope.columnWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Applied after width/height so `fill` and `dp` are clamped by the authored min/max. */
+private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Modifier =
+  if (
+    style.minWidth == null &&
+      style.maxWidth == null &&
+      style.minHeight == null &&
+      style.maxHeight == null
+  )
+    modifier
+  else
+    modifier.sizeIn(
+      minWidth = style.minWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      minHeight = style.minHeight?.toFloat()?.dp ?: Dp.Unspecified,
+      maxWidth = style.maxWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      maxHeight = style.maxHeight?.toFloat()?.dp ?: Dp.Unspecified,
+    )

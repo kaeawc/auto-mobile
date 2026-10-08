@@ -1009,7 +1009,7 @@ describe("overlay MCP tool", () => {
   test.each([
     [{ ...spec, root: { type: "unknown" } }, "root.type", "text"],
     [{ ...spec, window: { ...spec.window, opacity: 101 } }, "window.opacity", "100"],
-    [{ ...spec, root: { type: "icon", name: "unknown" } }, "root", "home"],
+    [{ ...spec, root: { type: "icon", name: "unknown" } }, "root", "Unknown overlay icon name"],
     [{ ...spec, root: { ...spec.root, unknown: true } }, "root.unknown", "Unknown property"],
   ])("invalid spec rejected before client call", async (invalid, path, allowed) => {
     const input = { action: "show", spec: invalid };
@@ -1158,5 +1158,12 @@ describe("overlay CLI and advertised schema registration", () => {
     expect(ToolRegistry.getTool("highlight")!.defaultEnabled).toBe(false);
     expect(definition.name).toBe("prototype");
     expect(definition.outputSchema).toBeDefined();
+  });
+  test("the advertised theme objects reject empty objects like the validator does", () => {
+    type Node = { minProperties?: number; properties: Record<string, Node> };
+    const root = definition.inputSchema as unknown as Node;
+    const theme = root.properties.spec.properties.theme;
+    expect(theme.minProperties).toBe(1);
+    expect(theme.properties.colors.minProperties).toBe(1);
   });
 });

@@ -16,6 +16,7 @@ import type { Window as WindowInterface } from "../../../src/features/observe/in
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { clearResolvedHomePackageCache } from "../../../src/features/observe/androidLauncherPackages";
+import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -320,6 +321,24 @@ describe("HomeScreen", () => {
 
           expect(result.success).toBe(hierarchyChanges);
           expect(result.error).toBe(hierarchyChanges ? undefined : "No visual change observed");
+          expect(result).not.toHaveProperty("message");
+          expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
+        },
+      );
+
+      test.each([5600, 5602])(
+        "does not report already-home when the captured workspace on emulator-%s is hidden",
+        async (deviceId) => {
+          const home = launcherObservation("home", deviceId);
+          fakeObserveScreen.setObserveResult({
+            ...home,
+            viewHierarchy: hideCapturedNode(home.viewHierarchy, `${launcherPackage}:id/workspace`),
+          });
+
+          const result = await homeScreen.execute();
+
+          expect(result.success).toBe(false);
+          expect(result.error).toBe("No visual change observed");
           expect(result).not.toHaveProperty("message");
           expect(fakeAdb.getExecutedCommands()).toContain("shell input keyevent 3");
         },

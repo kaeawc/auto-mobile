@@ -101,6 +101,21 @@ const convertSpec = toJsonSchemaCompat as unknown as (
   schema: ZodTypeAny,
 ) => Record<string, unknown>;
 const advertisedSpec = convertSpec(overlaySpecSchema);
+/**
+ * The contract and validator reject `theme: {}` and `theme.colors: {}`, but a Zod refinement has no
+ * JSON Schema form, so state it on the advertised schema for schema-driven clients.
+ */
+function requireNonEmptyThemeObjects(spec: Record<string, unknown>): void {
+  const theme = (spec.properties as Record<string, Record<string, unknown>> | undefined)?.theme;
+  if (!theme) {
+    return;
+  }
+  theme.minProperties = 1;
+  const colors = (theme.properties as Record<string, Record<string, unknown>> | undefined)?.colors;
+  if (colors) {
+    colors.minProperties = 1;
+  }
+}
 function rehomeSpecReferences(value: unknown, property = "spec"): void {
   if (!value || typeof value !== "object") {
     return;
@@ -115,6 +130,7 @@ function rehomeSpecReferences(value: unknown, property = "spec"): void {
 }
 rehomeSpecReferences(advertisedSpec);
 delete advertisedSpec.$schema;
+requireNonEmptyThemeObjects(advertisedSpec);
 const advertisedVariants = convertSpec(variantListSchema);
 rehomeSpecReferences(advertisedVariants, "variants");
 delete advertisedVariants.$schema;
@@ -203,7 +219,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          'Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge), optional state, root. window.opacity is 0-100, default 100.',
         ),
       display: z
         .string()

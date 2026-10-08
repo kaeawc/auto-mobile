@@ -56,3 +56,24 @@ export function ownOverlayWindows(
       (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE,
   );
 }
+
+/**
+ * Whether one of CtrlProxy's own overlay windows hides the app behind it, from the metadata the
+ * APK reports for it (`overlay_window_metadata_v1`): true only for a fullscreen overlay whose
+ * rendered surface is fully opaque. A sheet, a floating panel or a translucent fullscreen overlay
+ * leaves app pixels visible. When the APK did not report both fields (older APK, or opacity
+ * unknown) the window says nothing about opacity, so the caller's bounds-based answer
+ * (`coversByBounds`: the window spans the target) decides.
+ *
+ * `isFullyCoveredByOwnOverlay` (PR for #10446, branch work/orch-v10-10446-host) should call this in
+ * place of its bare bounds test.
+ */
+export function ownOverlayHidesApp(
+  window: Pick<ViewHierarchyWindowInfo, "overlayPlacement" | "overlayOpaque">,
+  coversByBounds: boolean,
+): boolean {
+  if (window.overlayPlacement === undefined || window.overlayOpaque === undefined) {
+    return coversByBounds;
+  }
+  return window.overlayPlacement === "fullscreen" && window.overlayOpaque;
+}

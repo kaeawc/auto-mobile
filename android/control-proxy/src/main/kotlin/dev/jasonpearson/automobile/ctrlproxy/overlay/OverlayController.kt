@@ -58,7 +58,25 @@ class OverlayController(
   val isShowing: Boolean
     get() = host.isShowing
 
+  /**
+   * Placement and opacity of the overlay currently drawn, for the hierarchy capture
+   * (`overlay_window_metadata_v1`). Null when nothing is showing or the render model cannot be
+   * derived, so the host falls back to bounds. A snapshot read off the controller mutex.
+   */
+  fun windowMetadata(): OverlayWindowMetadata? {
+    val runtime = activeRuntime ?: return null
+    if (!host.isShowing) return null
+    return try {
+      val current = runtime.current
+      overlayWindowMetadata(mapOverlaySpec(current.spec, current.pages))
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay window metadata unavailable", error)
+      null
+    }
+  }
+
   private val mutex = Mutex()
+  @Volatile
   internal var activeRuntime: OverlayRuntime? = null
     private set
 

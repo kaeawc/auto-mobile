@@ -70,6 +70,7 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
+import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "./SessionHeartbeatMonitor";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionIdleTimeoutMs,
@@ -6368,9 +6369,27 @@ export class SessionManager {
     // A session whose owner has been heartbeating is held a further suspect
     // window past its deadline (#10051), so an owner that missed a beat can
     // still restore it.
+    const idleDeadline = session.expiresAt + suspectGraceMsFor(session);
+    if (this.timer.now() <= idleDeadline) {
+      return false;
+    }
     return (
-      !this.activeSessionExecutionChecker(session.sessionId) &&
-      this.timer.now() > session.expiresAt + suspectGraceMsFor(session)
+      !this.activeSessionExecutionChecker(session.sessionId) ||
+      this.hasUnsettledExecutionOutlivedVetoCeiling(session)
+    );
+  }
+
+  /**
+   * Whether an in-flight execution has vetoed this session's idle release for longer than
+   * {@link UNSETTLED_EXECUTION_VETO_CEILING_MS} (#10713). Every call start refreshes `expiresAt`,
+   * so the veto has held since the idle deadline passed; past the ceiling the call has outlived
+   * any request deadline it could have had, and the idle sweep releases the session the same way
+   * the heartbeat and owner-disconnect paths already do (#10663).
+   */
+  private hasUnsettledExecutionOutlivedVetoCeiling(session: Session): boolean {
+    return (
+      this.timer.now() - (session.expiresAt + suspectGraceMsFor(session)) >=
+      UNSETTLED_EXECUTION_VETO_CEILING_MS
     );
   }
 
@@ -6484,6 +6503,13 @@ export class SessionManager {
       const session = this.sessions.get(sessionId);
       if (!session) {
         continue;
+      }
+      if (this.activeSessionExecutionChecker(sessionId)) {
+        logger.warn(
+          `Session ${sessionId} was kept past its idle deadline by executions that never ` +
+            `settled; releasing it anyway past the ${UNSETTLED_EXECUTION_VETO_CEILING_MS}ms ` +
+            `unsettled-execution ceiling`,
+        );
       }
       const release = this.releaseSession(
         sessionId,

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
-import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import {
+  SessionHeartbeatMonitor,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
@@ -127,6 +130,21 @@ describe("the idle window counts from the end of the last tool call", () => {
     expect(manager.hasSession(SESSION)).toBe(true);
 
     timer.setCurrentTime(endedAt + DEFAULT_SESSION_IDLE_TIMEOUT_MS + 1);
+    await sweep();
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
+  });
+
+  it("releases a session whose call never settles once the veto outlives the ceiling (#10713)", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+
+    timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS - 1);
+    await sweep();
+    expect(manager.hasSession(SESSION)).toBe(true);
+    expect(releases).toEqual([]);
+
+    timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS);
     await sweep();
     expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
   });

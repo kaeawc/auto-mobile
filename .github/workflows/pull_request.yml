@@ -2690,7 +2690,8 @@ jobs:
   # Re-enabled in #110
   junit-runner-emulator-tests:
     name: "Run JUnit Runner Emulator Tests"
-    runs-on: ubuntu-latest
+    # Trusted same-repo PRs run on Namespace (KVM-backed); forks stay on GitHub-hosted.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     timeout-minutes: 15
     needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'
@@ -2821,7 +2822,8 @@ jobs:
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
-    runs-on: ubuntu-latest
+    # Trusted same-repo PRs run on Namespace (KVM-backed); forks stay on GitHub-hosted.
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     timeout-minutes: 15
     needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'

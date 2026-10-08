@@ -32,8 +32,6 @@ import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
-import type { ElementFinder } from "../utils/interfaces/ElementFinder";
-import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
@@ -1258,46 +1256,37 @@ const findFirstTextMatch = (
   return null;
 };
 
-const findElementMatch = (
-  finder: ElementFinder,
-  viewHierarchy: ViewHierarchyResult,
-  text: string,
-): SystemTrayElementMatch | null => {
-  const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
-  if (exactMatch) {
-    return { text, matchType: "exact", element: exactMatch };
-  }
-
-  const partialMatch = finder.findElementByText(viewHierarchy, text, undefined, true, false);
-  if (partialMatch) {
-    return { text, matchType: "partial", element: partialMatch };
-  }
-
-  return null;
-};
-
+// Tap and swipe targets both resolve with `inspect`, which returns the matched label
+// itself. The tap intent would find nothing in the shade: CtrlProxy captures carry no
+// click affordance on notification rows or their labels, while a tap on the label
+// still reaches the row's content intent on the device (#10269).
 const findFirstElementMatch = (
-  finder: ElementFinder,
+  selector: ResolverElementSelector,
   viewHierarchy: ViewHierarchyResult,
   texts: string[],
 ): SystemTrayElementMatch | null => {
   const candidates = texts.map((text) => text.trim()).filter(Boolean);
-  for (const text of candidates) {
-    const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
-    if (exactMatch) {
-      return { text, matchType: "exact", element: exactMatch };
-    }
-  }
-
-  for (const text of candidates) {
-    const partialMatch = finder.findElementByText(viewHierarchy, text, undefined, true, false);
-    if (partialMatch) {
-      return { text, matchType: "partial", element: partialMatch };
+  for (const matchType of ["exact", "partial"] as const) {
+    for (const text of candidates) {
+      const { element } = selector.selectByText(viewHierarchy, text, {
+        partialMatch: matchType === "partial",
+        caseSensitive: false,
+        intentAction: "inspect",
+      });
+      if (element) {
+        return { text, matchType, element };
+      }
     }
   }
 
   return null;
 };
+
+const findElementMatch = (
+  selector: ResolverElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  text: string,
+): SystemTrayElementMatch | null => findFirstElementMatch(selector, viewHierarchy, [text]);
 
 const buildNotificationMatch = (
   viewHierarchy: ViewHierarchyResult,
@@ -2035,25 +2024,25 @@ export const resolveNotificationTapElement = (
   match: SystemTrayNotificationMatch,
   criteria: SystemTrayNotificationArgs,
 ): SystemTrayElementMatch | null => {
-  const finder = new DefaultElementFinder();
+  const selector = new ResolverElementSelector();
   const subHierarchy = match.subHierarchy;
 
   if (criteria.tapActionLabel) {
-    const actionMatch = findElementMatch(finder, subHierarchy, criteria.tapActionLabel);
+    const actionMatch = findElementMatch(selector, subHierarchy, criteria.tapActionLabel);
     if (actionMatch) {
       return actionMatch;
     }
   }
 
   if (criteria.title) {
-    const titleMatch = findElementMatch(finder, subHierarchy, criteria.title);
+    const titleMatch = findElementMatch(selector, subHierarchy, criteria.title);
     if (titleMatch) {
       return titleMatch;
     }
   }
 
   if (criteria.body) {
-    const bodyMatch = findElementMatch(finder, subHierarchy, criteria.body);
+    const bodyMatch = findElementMatch(selector, subHierarchy, criteria.body);
     if (bodyMatch) {
       return bodyMatch;
     }
@@ -2071,25 +2060,25 @@ export const resolveNotificationSwipeElement = (
     return match.candidate.element;
   }
 
-  const finder = new DefaultElementFinder();
+  const selector = new ResolverElementSelector();
   const subHierarchy = match.subHierarchy;
 
   if (criteria.title) {
-    const titleMatch = findElementMatch(finder, subHierarchy, criteria.title);
+    const titleMatch = findElementMatch(selector, subHierarchy, criteria.title);
     if (titleMatch) {
       return titleMatch.element;
     }
   }
 
   if (criteria.body) {
-    const bodyMatch = findElementMatch(finder, subHierarchy, criteria.body);
+    const bodyMatch = findElementMatch(selector, subHierarchy, criteria.body);
     if (bodyMatch) {
       return bodyMatch.element;
     }
   }
 
   if (criteria.appId) {
-    const appMatch = findFirstElementMatch(finder, subHierarchy, appMatchTexts);
+    const appMatch = findFirstElementMatch(selector, subHierarchy, appMatchTexts);
     if (appMatch) {
       return appMatch.element;
     }

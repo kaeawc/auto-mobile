@@ -151,9 +151,9 @@ layout room.
 
 | `type`        | Node-specific properties                                                                                                                         |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box`         | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                       |
-| `row`         | Required `children` array, possibly empty; horizontal layout. Optional `repeat`.                                                                                    |
-| `column`      | Required `children` array, possibly empty; vertical layout. Optional `repeat`.                                                                                      |
+| `box`         | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                         |
+| `row`         | Required `children` array, possibly empty; horizontal layout. Optional `repeat`.                                                                 |
+| `column`      | Required `children` array, possibly empty; vertical layout. Optional `repeat`.                                                                   |
 | `text`        | Required `text` string, possibly empty.                                                                                                          |
 | `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                        |
 | `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                              |

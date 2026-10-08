@@ -33,6 +33,13 @@ import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { createExecResult } from "../../src/utils/execResult";
+import type { SettingsNamespace } from "../../src/features/observe/android/types";
+
+// Every system rotation setting reads "1"; the device has no secure device_state_rotation_lock.
+const systemSettingsOne = async (namespace: SettingsNamespace) =>
+  namespace === "secure"
+    ? { success: true, found: false }
+    : { success: true, found: true, value: "1" };
 
 const printStates = readFileSync(
   new URL("../fixtures/android-display/foldpf-print-states.txt", import.meta.url),
@@ -189,7 +196,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsGet",
-    ).mockResolvedValue({ success: true, found: true, value: "1" });
+    ).mockImplementation(systemSettingsOne);
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
@@ -280,7 +287,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsGet",
-    ).mockResolvedValue({ success: true, found: true, value: "1" });
+    ).mockImplementation(systemSettingsOne);
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",
@@ -418,7 +425,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
-      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      ).mockImplementation(systemSettingsOne);
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
@@ -482,7 +489,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
-      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      ).mockImplementation(systemSettingsOne);
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
@@ -568,7 +575,7 @@ describe("registered interaction handlers honor cancellation", () => {
       const settingsGet = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsGet",
-      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      ).mockImplementation(systemSettingsOne);
       const settingsPut = spyOn(
         AndroidCtrlProxyClient.prototype,
         "requestSettingsPut",
@@ -611,7 +618,7 @@ describe("registered interaction handlers honor cancellation", () => {
     const settingsGet = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsGet",
-    ).mockResolvedValue({ success: true, found: true, value: "1" });
+    ).mockImplementation(systemSettingsOne);
     const settingsPut = spyOn(
       AndroidCtrlProxyClient.prototype,
       "requestSettingsPut",

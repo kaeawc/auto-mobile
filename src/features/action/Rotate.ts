@@ -4,7 +4,10 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
-import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import {
+  parseAndroidCommittedStateIdentifier,
+  parseAndroidDeviceStates,
+} from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { RotationSettingManagedError } from "../../models/RotationSettingManagedError";
 import type { SettingsNamespace, SettingsValueType } from "../observe/android/types";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -41,6 +44,27 @@ export interface RotationRestoreState {
 }
 
 const DEVICE_STATE_ROTATION_LOCK = "device_state_rotation_lock";
+// Values of a `device_state_rotation_lock` entry (Settings.Secure.DEVICE_STATE_ROTATION_LOCK_*).
+const DEVICE_STATE_ROTATION_LOCKED = "1";
+const DEVICE_STATE_ROTATION_UNLOCKED = "2";
+
+/**
+ * Unlock `deviceState`'s entry in a `device_state_rotation_lock` map
+ * (`state:setting:state:setting...`). Returns null when the map is malformed or the entry is
+ * not locked, so there is nothing to write.
+ */
+export function unlockDeviceStateRotationEntry(map: string, deviceState: number): string | null {
+  const parts = map.split(":");
+  if (parts.length < 2 || parts.length % 2 !== 0) {
+    return null;
+  }
+  const index = parts.findIndex((part, i) => i % 2 === 0 && part === String(deviceState));
+  if (index < 0 || parts[index + 1] !== DEVICE_STATE_ROTATION_LOCKED) {
+    return null;
+  }
+  parts[index + 1] = DEVICE_STATE_ROTATION_UNLOCKED;
+  return parts.join(":");
+}
 
 export interface RotationRestoreSlot {
   get(): RotationRestoreState | undefined;
@@ -70,6 +94,14 @@ interface RotationSettingCleanup {
   assertCurrentDevice?: () => void;
   pendingWrite?: Promise<unknown>;
   needed: boolean;
+  /**
+   * How turning auto-rotate back on handles `secure device_state_rotation_lock` (mt-0083 D1):
+   * while that per-state map records a lock for the current device state, the window manager
+   * reverts an `accelerometer_rotation=1` write to 0. "restore" writes back the map captured
+   * before this call forced auto-rotate off; "clear" unlocks the committed device state's entry
+   * (auto-rotate was not on before the call). Unset leaves the map alone.
+   */
+  deviceStateLock?: { kind: "restore"; value: string } | { kind: "clear" };
 }
 
 const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
@@ -931,6 +963,8 @@ export class Rotate extends BaseVisualChange {
     }
 
     await beforeWrite({ accelerometerRotation: true });
+    // Auto-rotate was not on, so any lock the device-state map records for this state is cleared.
+    cleanup.deviceStateLock = { kind: "clear" };
     const { achievedOrientation, warning } = await this.restoreAutoRotateAndConfirmOrientation(
       orientation,
       signal,
@@ -1134,7 +1168,18 @@ export class Rotate extends BaseVisualChange {
               );
             }
           }
+          const hasDeviceStateLock = await this.prepareDeviceStateLockForAutoRotate(cleanup);
           await this.writeSystemSetting("accelerometer_rotation", "1", undefined, cleanup);
+          if (hasDeviceStateLock) {
+            // A device-state lock that still records a lock reverts this write; only the
+            // read-back shows whether auto-rotate actually came back on.
+            const actual = await this.readSystemSetting("accelerometer_rotation");
+            if (actual !== "1") {
+              throw new ActionableError(
+                `accelerometer_rotation=1 read back ${actual ?? "unset"} after restoring device_state_rotation_lock.`,
+              );
+            }
+          }
           cleanup.needed = false;
         }),
       {
@@ -1143,6 +1188,67 @@ export class Rotate extends BaseVisualChange {
         label: "Restore accelerometer_rotation=1",
       },
     );
+  }
+
+  /**
+   * Put `device_state_rotation_lock` back before auto-rotate is turned on (see
+   * {@link RotationSettingCleanup.deviceStateLock}). Returns whether the device has the setting,
+   * so the caller reads `accelerometer_rotation` back only there; other devices are unchanged.
+   */
+  private async prepareDeviceStateLockForAutoRotate(
+    cleanup: RotationSettingCleanup,
+  ): Promise<boolean> {
+    const plan = cleanup.deviceStateLock;
+    if (plan === undefined) {
+      return false;
+    }
+    let value: string | null;
+    if (plan.kind === "restore") {
+      value = plan.value;
+    } else {
+      const current = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK);
+      if (current === null) {
+        return false;
+      }
+      value = unlockDeviceStateRotationEntry(current, await this.readCommittedDeviceState());
+    }
+    if (value !== null) {
+      try {
+        await this.writeSetting(
+          { namespace: "secure", key: DEVICE_STATE_ROTATION_LOCK, value, valueType: "string" },
+          undefined,
+          cleanup,
+        );
+      } catch (error) {
+        // Still turn auto-rotate on; the accelerometer_rotation read-back decides the outcome.
+        logger.warn(
+          `[Rotate] Failed to write device_state_rotation_lock before restoring auto-rotate: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return true;
+  }
+
+  private async readCommittedDeviceState(): Promise<number> {
+    try {
+      const { stdout } = await this.adb.executeCommand(
+        "shell cmd device_state state",
+        ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+      );
+      const identifier = parseAndroidCommittedStateIdentifier(stdout);
+      if (identifier !== undefined) {
+        return identifier;
+      }
+      logger.warn(`[Rotate] Could not parse the committed device state from: ${stdout.trim()}`);
+    } catch (error) {
+      logger.warn(
+        `[Rotate] Could not read the committed device state: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    // No entry matches -1, so the lock map is left unchanged.
+    return -1;
   }
 
   private async writeSystemSetting(
@@ -1665,6 +1771,11 @@ export class Rotate extends BaseVisualChange {
           // the lock on devices where the settings provider completes slowly.
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
+          await this.planDeviceStateLock(cleanup, {
+            shouldRestoreAutoRotate,
+            autoRotateState,
+            signal,
+          });
           await this.writeSystemSetting("accelerometer_rotation", "0", signal, cleanup);
         } else {
           logger.debug(
@@ -1721,6 +1832,34 @@ export class Rotate extends BaseVisualChange {
         slot,
         signal,
       });
+    }
+  }
+
+  /**
+   * Decide, before this call forces auto-rotate off, how turning it back on treats
+   * `device_state_rotation_lock`: auto-rotate that was on gets the map captured now (before the
+   * `accelerometer_rotation=0` write records a lock in it); an explicit unlock of auto-rotate
+   * that was not on clears the committed state's lock when it turns auto-rotate on.
+   */
+  private async planDeviceStateLock(
+    cleanup: RotationSettingCleanup,
+    options: {
+      shouldRestoreAutoRotate: boolean;
+      autoRotateState: "locked" | "enabled" | "unknown";
+      signal?: AbortSignal;
+    },
+  ): Promise<void> {
+    const { shouldRestoreAutoRotate, autoRotateState, signal } = options;
+    if (!shouldRestoreAutoRotate) {
+      return;
+    }
+    if (autoRotateState !== "enabled") {
+      cleanup.deviceStateLock = { kind: "clear" };
+      return;
+    }
+    const value = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (value !== null) {
+      cleanup.deviceStateLock = { kind: "restore", value };
     }
   }
 

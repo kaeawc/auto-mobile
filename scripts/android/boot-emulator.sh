@@ -147,6 +147,45 @@ dismiss_system_error_dialogs() {
   fi
 }
 
+# Post-boot package optimisation (artd/dexopt) runs for minutes after a cold emulator boot and
+# stalls system_server up to ~2.7 s, so the first taps of a test time out at 5 s (nightly Foldable
+# Posture lane, #10806). Run the background dexopt job once, synchronously and bounded, so the stall
+# is spent here instead of inside a test. `cmd package bg-dexopt-job` blocks until the job finishes
+# on API 34+; the host-side deadline covers images where it does not. Timeout only warns.
+# AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=0 disables the step.
+settle_post_boot_optimization() {
+  local budget="${AUTOMOBILE_POST_BOOT_SETTLE_SECONDS:-120}"
+  local step="${AUTOMOBILE_POST_BOOT_SETTLE_POLL_SECONDS:-1}"
+  local deadline job_pid booted
+  if [[ "${budget}" -le 0 ]]; then
+    return 0
+  fi
+  deadline=$((SECONDS + budget))
+  while ((SECONDS < deadline)); do
+    booted="$(adb -s "${device_id}" shell getprop sys.boot_completed 2>/dev/null | tr -d '[:space:]' || true)"
+    [[ "${booted}" == 1 ]] && break
+    sleep "${step}"
+  done
+  if [[ "${booted:-}" != 1 ]]; then
+    printf 'warning: sys.boot_completed was not set within %ss; skipping post-boot settle\n' "${budget}" >&2
+    return 0
+  fi
+  progress "Waiting up to ${budget}s for background dexopt to finish."
+  adb -s "${device_id}" shell cmd package bg-dexopt-job >/dev/null 2>&1 &
+  job_pid="$!"
+  while kill -0 "${job_pid}" 2>/dev/null; do
+    if ((SECONDS >= deadline)); then
+      kill "${job_pid}" 2>/dev/null || true
+      wait "${job_pid}" 2>/dev/null || true
+      printf 'warning: background dexopt did not finish within %ss; continuing\n' "${budget}" >&2
+      return 0
+    fi
+    sleep "${step}"
+  done
+  wait "${job_pid}" 2>/dev/null || true
+  progress "Background dexopt settled."
+}
+
 mkdir -p "${diagnostics_dir}"
 progress "Starting AutoMobile Android boot for AVD '${avd_name}' (deadline ${timeout_ms}ms)."
 set +e
@@ -179,6 +218,7 @@ if ! device_id="$(jq -er '.deviceId | strings | select(length > 0)' "${boot_stdo
   progress "Boot returned no device id; diagnostics are in ${diagnostics_dir}."
   exit 1
 fi
+settle_post_boot_optimization
 unlock_keyguard
 dismiss_system_error_dialogs
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then

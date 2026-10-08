@@ -7,6 +7,8 @@ setup() {
   ORIG_PATH="$PATH"
   export PATH="${MOCK_BIN}:${PATH}"
   export ADB_LOG_FILE="${MOCK_BIN}/adb.log"
+  # The post-boot settle has its own tests below; other tests skip it.
+  export AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=0
   cat > "${MOCK_BIN}/adb" <<'MOCK'
 #!/usr/bin/env bash
 if [[ "$*" == *"dumpsys window policy" ]]; then
@@ -339,4 +341,54 @@ run_boot_with_fast_retries() {
   [[ "$output" == *"warning: system error dialogs are still showing after boot: Application Not Responding: com.google.android.apps.nexuslauncher"* ]]
   [[ "$output" == *"emulator-5554" ]]
   [ "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$ADB_LOG_FILE")" -eq 2 ]
+}
+
+write_settle_adb_mock() {
+  local booted="$1" job_sleep="$2"
+  cat > "${MOCK_BIN}/adb" <<MOCK
+#!/usr/bin/env bash
+printf '%s\\n' "\$*" >> "\$ADB_LOG_FILE"
+case "\$*" in
+  *"getprop sys.boot_completed") printf '${booted}\\n' ;;
+  *"cmd package bg-dexopt-job") sleep ${job_sleep}; printf 'Success\\n' ;;
+  *"dumpsys window policy") printf 'isKeyguardShowing=false\\n' ;;
+esac
+MOCK
+  chmod +x "${MOCK_BIN}/adb"
+  cat > "${MOCK_BIN}/bun" <<'MOCK'
+#!/usr/bin/env bash
+printf '%s\n' '{"deviceId":"emulator-5554"}'
+MOCK
+  chmod +x "${MOCK_BIN}/bun"
+}
+
+@test "settle runs the background dexopt job once before the keyguard check" {
+  write_settle_adb_mock 1 0
+  run env AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=30 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'cmd package bg-dexopt-job' "$ADB_LOG_FILE")" -eq 1 ]
+  [ "$(grep -n 'bg-dexopt-job' "$ADB_LOG_FILE" | head -1 | cut -d: -f1)" -lt "$(grep -n 'dumpsys window policy' "$ADB_LOG_FILE" | head -1 | cut -d: -f1)" ]
+}
+
+@test "settle is disabled by AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=0" {
+  write_settle_adb_mock 1 0
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  if grep -Fq 'bg-dexopt-job' "$ADB_LOG_FILE"; then return 1; fi
+}
+
+@test "settle warns and continues when dexopt exceeds the budget" {
+  write_settle_adb_mock 1 30
+  run env AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=1 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: background dexopt did not finish within 1s; continuing"* ]]
+  [[ "$output" == *"emulator-5554" ]]
+}
+
+@test "settle warns and skips dexopt when boot_completed never appears" {
+  write_settle_adb_mock 0 0
+  run env AUTOMOBILE_POST_BOOT_SETTLE_SECONDS=1 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: sys.boot_completed was not set within 1s"* ]]
+  if grep -Fq 'bg-dexopt-job' "$ADB_LOG_FILE"; then return 1; fi
 }

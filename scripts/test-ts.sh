@@ -88,8 +88,8 @@ if [[ "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES+x}" == x ]]; then
 fi
 # 0 keeps one isolated process per shard; see scripts/lib/bun-unit-groups.sh.
 isolated_chunk_size="$(unit_isolated_chunk_size)"
-if ! [[ "$isolated_chunk_size" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer, got: ${isolated_chunk_size}" >&2
+if ! [[ "$isolated_chunk_size" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer below 1000000000, got: ${isolated_chunk_size}" >&2
   exit 2
 fi
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"

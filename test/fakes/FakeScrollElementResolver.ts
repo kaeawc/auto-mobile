@@ -6,11 +6,25 @@ import type {
   ResolverSnapshot,
 } from "../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
-import type { FakeElementFinder } from "./FakeElementFinder";
+import type { Element } from "../../src/models/Element";
+import { FakeElementFinder } from "./FakeElementFinder";
 
 /** Retains scripted finder fixture data in scroll orchestration tests; matcher tests use the real resolver. */
 export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve"> {
-  constructor(private readonly finder: FakeElementFinder) {}
+  private scrollableContainer: () => Element | null = () => null;
+
+  constructor(private readonly finder: FakeElementFinder = new FakeElementFinder()) {}
+
+  /** Scripts the container returned for every scroll-intent resolution. */
+  setNextScrollableContainer(container: Element | null): void {
+    this.scrollableContainer = () => container;
+  }
+
+  /** Scripts the scroll container per lookup, e.g. to shift bounds between calls. */
+  setScrollableContainerResolver(resolver: () => Element | null): void {
+    this.scrollableContainer = resolver;
+  }
+
   resolve(
     snapshot: ResolverSnapshot,
     selector: ResolverSelector,
@@ -31,7 +45,7 @@ export class FakeScrollElementResolver implements Pick<ElementResolver, "resolve
               false,
             )
           : intent.action === "scroll"
-            ? this.finder.findScrollableContainer(hierarchy)
+            ? this.scrollableContainer()
             : null;
     const entry = element
       ? new SearchableHierarchy().project({ hierarchy: { node: element } })[0]

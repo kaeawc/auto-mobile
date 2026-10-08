@@ -5,7 +5,9 @@ import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomSheetNode
 import dev.jasonpearson.automobile.protocol.OverlayBoxNode
 import dev.jasonpearson.automobile.protocol.OverlayButtonNode
+import dev.jasonpearson.automobile.protocol.OverlayCardNode
 import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
+import dev.jasonpearson.automobile.protocol.OverlayChipNode
 import dev.jasonpearson.automobile.protocol.OverlayColumnNode
 import dev.jasonpearson.automobile.protocol.OverlayCondition
 import dev.jasonpearson.automobile.protocol.OverlayEmitAction
@@ -20,6 +22,7 @@ import dev.jasonpearson.automobile.protocol.OverlayRowNode
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlayScrollNode
 import dev.jasonpearson.automobile.protocol.OverlaySetStateAction
+import dev.jasonpearson.automobile.protocol.OverlaySliderNode
 import dev.jasonpearson.automobile.protocol.OverlaySpacerNode
 import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
 import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
@@ -110,6 +113,13 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
         visibleWhen = visibleWhen,
         children = children.bound(),
       )
+    is OverlayCardNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
     is OverlayTextNode ->
       copy(
         onTap = onTap,
@@ -140,6 +150,8 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
     is OverlaySwitchNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayCheckboxNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayButtonNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlaySliderNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayChipNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
   }
 }
 

@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "card",
+      "variant": "tonal",
+      "children": []
+    }
+  },
+  "expectedPath": "root.variant"
+}

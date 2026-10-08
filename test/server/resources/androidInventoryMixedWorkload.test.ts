@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, expect, test } from "bun:test";
 import { MultiPlatformDeviceManager } from "../../../src/devices/deviceUtils";
 import { createListingHandlers } from "../../../src/server/deviceToolsListing";
 import {
@@ -73,7 +73,7 @@ function fixture(slow = false) {
   };
   return { timer, load, avds, sequence };
 }
-afterEach(() => {
+function resetInventoryState(): void {
   setDeviceManager(null);
   setDeviceLockProbe(null);
   setServiceStatusProbe(null);
@@ -82,7 +82,18 @@ afterEach(() => {
   resetAndroidDeviceImageResourceCache();
   AndroidAvdProvenanceCache.resetForTests();
   resetAdbClientCaches();
+}
+// One idle inventory sequence pays the process's first-use module and JIT warm-up for the
+// listing, booted-device and image handlers, which is not what these tests measure.
+beforeAll(async () => {
+  try {
+    const { timer, sequence } = fixture();
+    await timer.resolvePromise(sequence(), 1);
+  } finally {
+    resetInventoryState();
+  }
 });
+afterEach(resetInventoryState);
 
 test("five busy emulators retain inventory with retryable responses within the 25000ms sequence bound", async () => {
   const { timer, load, sequence } = fixture(true);

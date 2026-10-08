@@ -127,6 +127,15 @@ struct OverlaySession {
         }
     }
 
+    /// Test-hook tap (see `OverlayTestHooks`): runs the identified node's `onTap` in-process, as a
+    /// real tap on a plain tappable node would.
+    mutating func simulateTap(identifier: String) -> Result<[OverlayEvent], OverlayTapFailure> {
+        guard isShown, let spec else { return .failure(.notShown) }
+        guard let node = spec.root.find(identifier: identifier) else { return .failure(.notFound) }
+        guard let actions = node.onTap, !actions.isEmpty else { return .failure(.notTappable) }
+        return .success(run(actions))
+    }
+
     /// Settled pager position; clamped, and silent when the page does not change.
     mutating func setPage(_ pager: String, _ target: Int) -> [OverlayEvent] {
         guard isShown, let pageCount = pageCounts[pager], pageCount >= 1 else { return [] }
@@ -197,5 +206,29 @@ extension OverlayNode {
         var counts: [String: Int] = [:]
         collectPagers(into: &counts)
         return counts
+    }
+}
+
+/// Why `simulate_tap` did nothing.
+enum OverlayTapFailure: Error, Equatable {
+    case notShown
+    case notFound
+    case notTappable
+}
+
+/// Debug-only protocol surface for headless tests, where there is no input path into the
+/// simulator. Enabled only when the host sets the flag at launch; production `launchApp` never does.
+enum OverlayTestHooks {
+    static let environmentKey = "AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS"
+    static let gatedRequestTypes: Set<String> = ["simulate_tap"]
+
+    static func isEnabled(environment: [String: String]) -> Bool {
+        environment[environmentKey] == "1"
+    }
+
+    /// The error to reply with when `requestType` is a test hook and hooks are off; nil otherwise.
+    static func rejection(requestType: String, enabled: Bool) -> String? {
+        guard gatedRequestTypes.contains(requestType), !enabled else { return nil }
+        return "\(requestType) is a test hook; launch the app with \(environmentKey)=1 to enable it"
     }
 }

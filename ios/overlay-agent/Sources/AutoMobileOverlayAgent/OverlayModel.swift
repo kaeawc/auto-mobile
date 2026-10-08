@@ -60,6 +60,17 @@ final class OverlayModel: ObservableObject {
         apply { $0.run(actions) }
     }
 
+    /// Runs a test-hook tap; its events are pushed like a real tap's.
+    func simulateTap(identifier: String) -> Result<Void, OverlayTapFailure> {
+        var outcome: Result<Void, OverlayTapFailure> = .failure(.notShown)
+        apply { session in
+            let result = session.simulateTap(identifier: identifier)
+            outcome = result.map { _ in () }
+            return (try? result.get()) ?? []
+        }
+        return outcome
+    }
+
     func setPage(_ pager: String, _ target: Int) {
         apply { $0.setPage(pager, target) }
     }

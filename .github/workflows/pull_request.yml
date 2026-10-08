@@ -1355,8 +1355,9 @@ jobs:
 
   node-unit-tests:
     # 1560s unit lane cap (720s shard budget, one infra retry: see
-    # scripts/test-ts.sh) + setup, cold-import probe and upload < 1920s.
-    timeout-minutes: 32
+    # scripts/test-ts.sh) + 360s timing rechecks + setup, cold-import probe
+    # and upload < 2220s.
+    timeout-minutes: 37
     name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: [detect-changes, fast-validation]
@@ -1396,6 +1397,29 @@ jobs:
           fi
           bash scripts/test-ts.sh unit
 
+      # The 100 ms budget used to run in a separate "Node Unit Timing Budget"
+      # job that downloaded these JUnit reports onto a fresh hosted runner: a
+      # runner slot, a queue wait, a checkout and a bun install per PR. It now
+      # runs on the leg that produced the reports, as merge.yml already does.
+      # Same validator, same isolated median recheck, same base ref.
+      - name: "Enforce 100ms budget for changed unit tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
+        run: bash scripts/validate-bun-test-timings.sh
+
+      - name: "Upload Node Unit Timing Budget Summary"
+        if: always() && !cancelled() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: node-unit-timing-budget-summary
+          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: "Measure cold module imports (advisory, #10429)"
         if: runner.os == 'Linux'
         continue-on-error: true
@@ -1408,60 +1432,6 @@ jobs:
             echo "### Cold module import (Linux)"
             cat scratch/cold-imports.md
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: "Upload Node Unit Timing Reports"
-        if: success() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v6
-        with:
-          name: node-unit-timing-reports
-          path: scratch/timing-unit-reports
-          retention-days: 7
-
-  node-unit-timing-budget:
-    timeout-minutes: 10
-    name: "Node Unit Timing Budget"
-    runs-on: ubuntu-latest
-    needs: [detect-changes, node-unit-tests]
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' && needs.node-unit-tests.result == 'success'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-          fetch-depth: 0
-
-      - name: "Setup Bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: "Install Bun dependencies"
-        shell: bash
-        run: bash scripts/ci/install-bun-deps.sh
-
-      - name: "Download Node Unit Timing Reports"
-        uses: actions/download-artifact@v7
-        with:
-          name: node-unit-timing-reports
-          path: scratch/timing-unit-reports
-
-      - name: "Enforce 100ms budget for changed unit tests"
-        shell: bash
-        env:
-          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
-          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
-          # 360s rechecks + 180s setup/verdict reserve < 600s job timeout.
-          BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS: "360"
-        run: bash scripts/validate-bun-test-timings.sh
-
-      - name: "Upload Node Unit Timing Budget Summary"
-        if: always() && !cancelled()
-        uses: actions/upload-artifact@v6
-        with:
-          name: node-unit-timing-budget-summary
-          path: scratch/timing-unit-reports/unit-timing-budget-summary.md
-          if-no-files-found: ignore
-          retention-days: 7
 
   node-host-integration-tests:
     timeout-minutes: 20

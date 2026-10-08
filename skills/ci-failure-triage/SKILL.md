@@ -13,8 +13,9 @@ read-only unless the user also asks to fix a confirmed cause.
    `scripts/ci/known-flakes.txt` verdict.
 2. `pull_request.yml` keeps roll-up gates only for required checks (`IDE Plugin`,
    `iOS Build`, `Shell Tests`); every other job reports directly, so read the
-   failing job itself. Advisory lanes (simulator, emulator, device-capture,
-   Node Unit Timing Budget) are non-required and never block a merge. Runs from
+   failing job itself. Advisory lanes (simulator, emulator, device-capture, and
+   the Node Unit Tests 100 ms budget step, formerly the Node Unit Timing Budget
+   job) are non-required and never block a merge. Runs from
    before the non-required `iOS`, `Android`, `Node Tests`, and `WebRTC` roll-ups
    were removed still classify those contexts as `CHECK-UPSTREAM-FIRST` when
    only an advisory lane failed.

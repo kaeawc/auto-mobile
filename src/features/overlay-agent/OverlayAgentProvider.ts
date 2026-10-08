@@ -13,6 +13,7 @@ import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDown
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 const CACHE_SUBDIR = "overlay-agent";
 const SECURE_DIR_MODE = 0o700;
@@ -108,7 +109,8 @@ export class OverlayAgentProvider {
     if (envPath) {
       return this.requireOverride(envPath, "env", IOS_OVERLAY_AGENT_ENV);
     }
-    for (const candidate of this.localBuildPaths) {
+    for (const configured of this.localBuildPaths) {
+      const candidate = resolvePathFromDaemonLaunchWorkingDirectory(configured, this.env);
       if (await isFile(candidate)) {
         return { path: candidate, source: "local-build" };
       }
@@ -125,6 +127,9 @@ export class OverlayAgentProvider {
     source: OverlayAgentSource,
     label: string,
   ): Promise<ResolvedOverlayAgent> {
+    // A detached daemon has chdir'd; anchor relative overrides at the launch directory so the
+    // returned DYLD_INSERT_LIBRARIES entry is absolute and stable.
+    candidate = resolvePathFromDaemonLaunchWorkingDirectory(candidate, this.env);
     if (!(await isFile(candidate))) {
       throw new ActionableError(
         `The overlay agent dylib configured by ${label} does not exist: ${candidate}. ` +
@@ -190,7 +195,13 @@ export class OverlayAgentProvider {
     }
     try {
       const stats = await fs.stat(this.dylibPath);
-      return stats.isFile() && stats.size === metadata.size;
+      if (!stats.isFile() || stats.size !== metadata.size) {
+        return false;
+      }
+      // The sidecar only records what was once verified; re-hash so same-size corruption or a
+      // stale sidecar left by an interrupted publish never passes as a verified dylib.
+      const { checksum } = await this.checksumCalculator.computeFileSha256(this.dylibPath);
+      return checksum.toLowerCase() === expected.toLowerCase();
     } catch (error) {
       // The dylib vanished while the sidecar survived; download restores both.
       logger.debug("[OVERLAY_AGENT] No usable cached overlay agent dylib", {
@@ -213,6 +224,9 @@ export class OverlayAgentProvider {
     const partialPath = path.join(dir, `${OVERLAY_AGENT_CACHE_FILENAME}.download`);
     const controller = new AbortController();
     const timeout = this.timer.setTimeout(() => controller.abort(), this.downloadTimeoutMs);
+    // Only artifacts this attempt published may be removed on failure; another provider or daemon
+    // sharing the cache may already have published a verified entry.
+    let published = false;
 
     try {
       await this.downloader.download(
@@ -229,6 +243,7 @@ export class OverlayAgentProvider {
         );
       }
       const { size } = await fs.stat(partialPath);
+      published = true;
       await fs.rename(partialPath, this.dylibPath);
       await fs.writeFile(
         this.metadataPath,
@@ -253,8 +268,9 @@ export class OverlayAgentProvider {
       // Never leave unverified bytes where a later run could mistake them for a cache entry.
       await Promise.all([
         fs.rm(partialPath, { force: true }),
-        fs.rm(this.dylibPath, { force: true }),
-        fs.rm(this.metadataPath, { force: true }),
+        ...(published
+          ? [fs.rm(this.dylibPath, { force: true }), fs.rm(this.metadataPath, { force: true })]
+          : []),
       ]);
       if (controller.signal.aborted) {
         throw new ActionableError(

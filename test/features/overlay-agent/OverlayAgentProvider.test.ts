@@ -87,7 +87,7 @@ describe("OverlayAgentProvider", () => {
     expect(downloader.downloadedUrls).toHaveLength(1);
   });
 
-  test("cache hit with matching metadata does not download or rehash", async () => {
+  test("cache hit with matching metadata re-hashes the dylib and does not download", async () => {
     await fs.writeFile(dylibPath(), DYLIB);
     await fs.writeFile(
       metadataPath(),
@@ -95,7 +95,18 @@ describe("OverlayAgentProvider", () => {
     );
     expect(await makeProvider().ensure()).toEqual({ path: dylibPath(), source: "cache" });
     expect(downloader.downloadedUrls).toEqual([]);
-    expect(checksumCalculator.computedFiles).toEqual([]);
+    expect(checksumCalculator.computedFiles).toEqual([dylibPath()]);
+  });
+
+  test("same-size corruption behind a matching sidecar is not a cache hit", async () => {
+    await fs.writeFile(dylibPath(), DYLIB);
+    await fs.writeFile(
+      metadataPath(),
+      JSON.stringify({ sha256: EXPECTED_SHA, size: DYLIB.length }),
+    );
+    checksumCalculator.checksum = "c".repeat(64);
+    const env = { AUTOMOBILE_VERSION: "0.0.82", [SKIP_IOS_OVERLAY_AGENT_DOWNLOAD_ENV]: "1" };
+    await expect(makeProvider({ env }).ensure()).rejects.toThrow(/download is disabled/);
   });
 
   test("checksum mismatch refuses and deletes everything it wrote", async () => {
@@ -104,13 +115,14 @@ describe("OverlayAgentProvider", () => {
     expect(await fs.readdir(cacheDir)).toEqual([]);
   });
 
-  test("checksum mismatch also evicts a previously cached entry", async () => {
+  test("a failed attempt leaves a published cache entry it did not install", async () => {
     await fs.writeFile(dylibPath(), DYLIB);
     await fs.writeFile(metadataPath(), JSON.stringify({ sha256: "stale", size: 1 }));
     checksumCalculator.checksum = "c".repeat(64);
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
-    expect(await exists(dylibPath())).toBe(false);
-    expect(await exists(metadataPath())).toBe(false);
+    expect(await exists(dylibPath())).toBe(true);
+    expect(await exists(metadataPath())).toBe(true);
+    expect(await exists(`${dylibPath()}.download`)).toBe(false);
   });
 
   test("missing checksum degrades with an actionable error and never downloads", async () => {
@@ -148,6 +160,19 @@ describe("OverlayAgentProvider", () => {
     });
     expect(downloader.downloadedUrls).toEqual([]);
     expect(checksumCalculator.computedFiles).toEqual([]);
+  });
+
+  test("relative env and local-build paths resolve against the daemon launch directory", async () => {
+    await fs.writeFile(path.join(cacheDir, "env.dylib"), DYLIB);
+    await fs.writeFile(path.join(cacheDir, "local.dylib"), DYLIB);
+    const env = { AUTOMOBILE_DAEMON_LAUNCH_CWD: cacheDir };
+    expect(
+      await makeProvider({ env: { ...env, [IOS_OVERLAY_AGENT_ENV]: "env.dylib" } }).ensure(),
+    ).toEqual({ path: path.join(cacheDir, "env.dylib"), source: "env" });
+    expect(await makeProvider({ env, localBuildPaths: ["local.dylib"] }).ensure()).toEqual({
+      path: path.join(cacheDir, "local.dylib"),
+      source: "local-build",
+    });
   });
 
   test("a configured env override that is missing fails instead of falling back to download", async () => {

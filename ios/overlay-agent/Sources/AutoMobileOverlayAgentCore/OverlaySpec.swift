@@ -286,6 +286,15 @@ final class OverlayNode: Decodable {
         child?.collectPagers(into: &counts)
     }
 
+    /// The first node whose accessibility identifier (`testTag`, else `id`) is `identifier`.
+    func find(identifier: String) -> OverlayNode? {
+        if (testTag ?? id) == identifier { return self }
+        for node in (children ?? []) + [child].compactMap({ $0 }) {
+            if let match = node.find(identifier: identifier) { return match }
+        }
+        return nil
+    }
+
     /// Asset ids the spec references, for the `missingAssets` warning.
     func collectAssets(into ids: inout Set<String>) {
         if let asset { ids.insert(asset) }

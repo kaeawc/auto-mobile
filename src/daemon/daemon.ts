@@ -1,6 +1,7 @@
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { isSessionReleasing } from "./sessionReleaseState";
+import { isTokenOwnedOrClaimPending } from "./daemonRequestHandlers";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   releaseSessionAndDevice,
@@ -1319,7 +1320,11 @@ export class Daemon {
       res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
       return;
     }
-    this.sessionManager.recordHeartbeat(sessionId);
+    // HTTP heartbeats carry no liveness owner token, so apply the socket route's
+    // tokenless rule: a no-op (200) on a proxy-owned or claim-pending session.
+    if (!(session && isTokenOwnedOrClaimPending(session))) {
+      this.sessionManager.recordHeartbeat(sessionId);
+    }
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
     return;

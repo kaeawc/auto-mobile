@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>PayloadContent</key>
+	<array>
+		<dict>
+			<key>AllowedSystemExtensionTypes</key>
+			<dict>
+				<key>CEZH89E7MT</key>
+				<array>
+					<string>NetworkExtension</string>
+				</array>
+			</dict>
+			<key>AllowedSystemExtensions</key>
+			<dict>
+				<key>CEZH89E7MT</key>
+				<array>
+					<string>dev.jasonpearson.automobile.networkfilter.provider</string>
+				</array>
+			</dict>
+			<key>PayloadDisplayName</key>
+			<string>AutoMobile Network Filter System Extension</string>
+			<key>PayloadIdentifier</key>
+			<string>dev.jasonpearson.automobile.mdm.network-filter.system-extension-policy</string>
+			<key>PayloadType</key>
+			<string>com.apple.system-extension-policy</string>
+			<key>PayloadUUID</key>
+			<string>9FBEE3E7-90FF-43FA-94C0-570AFBCB1A08</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+		</dict>
+		<dict>
+			<key>FilterDataProviderBundleIdentifier</key>
+			<string>dev.jasonpearson.automobile.networkfilter.provider</string>
+			<key>FilterDataProviderDesignatedRequirement</key>
+			<string>anchor apple generic and identifier "dev.jasonpearson.automobile.networkfilter.provider" and certificate leaf[subject.OU] = "CEZH89E7MT"</string>
+			<key>FilterPackets</key>
+			<false/>
+			<key>FilterSockets</key>
+			<true/>
+			<key>FilterType</key>
+			<string>Plugin</string>
+			<key>PayloadDisplayName</key>
+			<string>AutoMobile Network Filter Content Filter</string>
+			<key>PayloadIdentifier</key>
+			<string>dev.jasonpearson.automobile.mdm.network-filter.webcontent-filter</string>
+			<key>PayloadType</key>
+			<string>com.apple.webcontent-filter</string>
+			<key>PayloadUUID</key>
+			<string>BD5FE8D4-4B12-49ED-B255-998F34F39EA3</string>
+			<key>PayloadVersion</key>
+			<integer>1</integer>
+			<key>PluginBundleID</key>
+			<string>dev.jasonpearson.automobile.networkfilter</string>
+			<key>UserDefinedName</key>
+			<string>AutoMobile Network Filter</string>
+		</dict>
+	</array>
+	<key>PayloadDescription</key>
+	<string>Pre-approves the AutoMobile network-filter system extension and its content filter. Deliver through MDM: a user-installed profile does not pre-approve system extensions.</string>
+	<key>PayloadDisplayName</key>
+	<string>AutoMobile Network Filter</string>
+	<key>PayloadIdentifier</key>
+	<string>dev.jasonpearson.automobile.mdm.network-filter</string>
+	<key>PayloadOrganization</key>
+	<string>AutoMobile</string>
+	<key>PayloadScope</key>
+	<string>System</string>
+	<key>PayloadType</key>
+	<string>Configuration</string>
+	<key>PayloadUUID</key>
+	<string>D681C242-3D68-40E7-8057-4B23FC963CB4</string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+</dict>
+</plist>

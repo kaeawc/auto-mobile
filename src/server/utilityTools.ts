@@ -1,4 +1,5 @@
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import type { NetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
 import { createSetActiveDeviceHandler } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
@@ -12,6 +13,7 @@ import {
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
+import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
@@ -22,6 +24,7 @@ import {
   MAX_NETWORK_CONDITION_TTL_SECONDS,
   networkConditionInputDegrades,
   networkConditionInputError,
+  classifyNetworkConditionRequest,
   type BiometricEnrollment,
   type DeviceStateResult,
   type SetDeviceStateInput,
@@ -53,7 +56,8 @@ import {
   applyStateAfterBiometricCaptureFailure,
   runSessionBiometricMutation,
 } from "./sessionBiometricEnrollment";
-import { runSessionNetworkMutation } from "./sessionNetworkCondition";
+import { runSessionNetworkMutation, type IosAppNetworkRulePlan } from "./sessionNetworkCondition";
+import type { IosAppNetworkRuleCommandContext } from "../features/network-filter/IosAppNetworkRuleClient";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 
 async function resumeCtrlProxyIfCurrentlyBooted(
@@ -224,17 +228,49 @@ const NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR =
   "Omit expiresInSeconds (and reset the condition yourself when done), or run within a session.";
 
 /**
- * A networkCondition mutation needs a session restore slot only when it degrades
- * the link on an Android emulator (issue #6012) — the single decision shared by
- * the restore-slot registration and the TTL-enforceability check.
+ * How a networkCondition mutation is owned by the session — the single decision
+ * shared by the restore-slot registration and the TTL-enforceability check:
+ * - `true`: a degrade on an Android emulator registers a device-wide restore
+ *   slot (issue #6012).
+ * - an iOS plan: `offline` or a reset for an explicitly named app on an iOS
+ *   Simulator (#10264). The plan carries the immutable target (simulator UDID
+ *   and bundle id); the session adds owner generation and rule revision.
+ * - `false`: nothing to own (Android resets, unsupported targets and profiles,
+ *   which the setter refuses).
  */
-function shouldRegisterNetworkRestore(device: BootedDevice, args: SetDeviceStateArgs): boolean {
+function shouldRegisterNetworkRestore(
+  device: BootedDevice,
+  args: SetDeviceStateArgs,
+): boolean | IosAppNetworkRulePlan {
+  const input = args.networkCondition;
+  if (input === undefined) {
+    return false;
+  }
+  if (device.platform === "ios") {
+    return iosAppNetworkRulePlan(device, input);
+  }
   return (
-    args.networkCondition !== undefined &&
-    networkConditionInputDegrades(args.networkCondition) &&
+    networkConditionInputDegrades(input) &&
     device.platform === "android" &&
     device.deviceId.startsWith("emulator-")
   );
+}
+
+function iosAppNetworkRulePlan(
+  device: BootedDevice,
+  input: NonNullable<SetDeviceStateArgs["networkCondition"]>,
+): IosAppNetworkRulePlan | false {
+  if (!input.appId || !isIosSimulatorDevice(device)) {
+    return false;
+  }
+  const kind = classifyNetworkConditionRequest(input);
+  const target = { udid: device.deviceId, bundleId: input.appId };
+  if (kind === "reset") {
+    return { platform: "ios", action: "reset", target };
+  }
+  return kind === "degrade" && input.profile === "offline"
+    ? { platform: "ios", action: "apply", target }
+    : false;
 }
 
 /**
@@ -244,15 +280,14 @@ function shouldRegisterNetworkRestore(device: BootedDevice, args: SetDeviceState
  */
 function networkConditionTtlIsUnenforceable(
   expiresInSeconds: number | undefined,
-  registerNetworkRestore: boolean,
+  registerNetworkRestore: boolean | IosAppNetworkRulePlan,
   hasLifecycleOwner: boolean,
 ): boolean {
-  return (
-    registerNetworkRestore &&
-    expiresInSeconds !== undefined &&
-    expiresInSeconds > 0 &&
-    !hasLifecycleOwner
-  );
+  const registers =
+    typeof registerNetworkRestore === "object"
+      ? registerNetworkRestore.action === "apply"
+      : registerNetworkRestore;
+  return registers && expiresInSeconds !== undefined && expiresInSeconds > 0 && !hasLifecycleOwner;
 }
 
 const networkConditionInputSchema = z
@@ -262,8 +297,19 @@ const networkConditionInputSchema = z
       .describe(
         "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
           "veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), " +
-          "4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`. " +
-          "Android emulator only.",
+          "4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`, on " +
+          "Android emulators. iOS Simulator accepts only offline and none, for one app named by appId.",
+      ),
+    appId: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[A-Za-z0-9._-]+$/)
+      .optional()
+      .describe(
+        "iOS Simulator only, and required there: bundle id of the one app to take offline " +
+          "(profile=offline) or restore (profile=none). Its new connections are refused through " +
+          "AutoMobile's network filter; open connections continue. Needs a session.",
       ),
     cancel: z.boolean().optional().describe("Reset to normal connectivity (same as profile=none)."),
     reset: z.boolean().optional().describe("Alias of cancel."),
@@ -416,7 +462,10 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
           .describe("Android connectivity toggles to apply."),
         networkCondition: networkConditionInputSchema
           .optional()
-          .describe("Device-wide network condition to apply (Android emulator only)."),
+          .describe(
+            "Network condition to apply: device-wide on an Android emulator, or offline/none for " +
+              "one app (appId) on an iOS Simulator.",
+          ),
         clock: deviceClockInputSchema
           .optional()
           .describe(
@@ -773,19 +822,65 @@ const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArg
   return result.success ? response : { ...response, isError: true as const };
 };
 
-const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
-  const deviceState = new DeviceState(device);
-  const result = await deviceState.getState(args.include);
-
-  return createStructuredToolResponse({
-    message: deviceStateMessage(result),
-    ...result,
+/**
+ * The setter `setDeviceState` drives, wired to the session for clock, location
+ * and iOS per-app network rules. `useIosAppNetworkRule` hands it the ownership
+ * of the iOS rule command in flight, which `runSessionNetworkMutation` supplies
+ * just before it calls the setter.
+ */
+function createSessionDeviceState(
+  device: BootedDevice,
+  sessionUuid: string | undefined,
+  sessionManager: SessionManager | undefined,
+  networkFilterBridge: NetworkFilterBridge | undefined,
+): {
+  deviceState: DeviceState;
+  useIosAppNetworkRule: (rule: IosAppNetworkRuleCommandContext | undefined) => void;
+} {
+  let iosAppNetworkRule: IosAppNetworkRuleCommandContext | undefined;
+  const deviceState = new DeviceState(device, {
+    networkFilterBridge,
+    iosAppNetworkRule: () => iosAppNetworkRule,
+    clockMutation: (mutation) =>
+      runSessionClockMutation(sessionManager, sessionUuid, device.deviceId, mutation),
+    canWriteLocation: createSessionLocationWriteAdmission({
+      sessionManager,
+      sessionUuid,
+      deviceId: device.deviceId,
+    }),
+    onLocationApplied: createSessionLocationAppliedCallback({
+      sessionManager,
+      sessionUuid,
+      device,
+    }),
   });
-};
+  return {
+    deviceState,
+    useIosAppNetworkRule: (rule) => {
+      iosAppNetworkRule = rule;
+    },
+  };
+}
+
+const createGetDeviceStateHandler =
+  (networkFilterBridge?: NetworkFilterBridge) =>
+  async (device: BootedDevice, args: GetDeviceStateArgs) => {
+    const deviceState = new DeviceState(device, { networkFilterBridge });
+    const result = await deviceState.getState(args.include);
+
+    return createStructuredToolResponse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+  };
 
 // Register tools
 export function registerUtilityTools(
-  options: { displayInventory?: DisplayInventoryProvider } = {},
+  options: {
+    displayInventory?: DisplayInventoryProvider;
+    /** iOS Simulator network-extension controller; defaults to the installed one. */
+    networkFilterBridge?: NetworkFilterBridge;
+  } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
@@ -800,20 +895,12 @@ export function registerUtilityTools(
       args.sessionUuid && DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
-    const deviceState = new DeviceState(device, {
-      clockMutation: (mutation) =>
-        runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, mutation),
-      canWriteLocation: createSessionLocationWriteAdmission({
-        sessionManager,
-        sessionUuid: args.sessionUuid,
-        deviceId: device.deviceId,
-      }),
-      onLocationApplied: createSessionLocationAppliedCallback({
-        sessionManager,
-        sessionUuid: args.sessionUuid,
-        device,
-      }),
-    });
+    const { deviceState, useIosAppNetworkRule } = createSessionDeviceState(
+      device,
+      args.sessionUuid,
+      sessionManager,
+      options.networkFilterBridge,
+    );
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).
     const registerNetworkRestore = shouldRegisterNetworkRestore(device, args);
@@ -851,7 +938,10 @@ export function registerUtilityTools(
             args.sessionUuid,
             device.deviceId,
             registerNetworkRestore,
-            () => deviceState.setState(input),
+            (rule) => {
+              useIosAppNetworkRule(rule);
+              return deviceState.setState(input);
+            },
             input.networkCondition.expiresInSeconds,
           )
         : deviceState.setState(input);
@@ -938,16 +1028,16 @@ export function registerUtilityTools(
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack." +
+    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
-    getDeviceStateHandler,
+    createGetDeviceStateHandler(options.networkFilterBridge),
     { defaultEnabled: false, outputSchema: getDeviceStateResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind." +
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,

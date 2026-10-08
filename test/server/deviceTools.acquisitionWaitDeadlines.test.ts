@@ -965,6 +965,40 @@ describe("device acquisition wait deadlines", () => {
     }
   }
 
+  // #10649: a readiness step that honors cancellation surfaces the live-deadline
+  // error itself, which must name the acquisition stage that was running.
+  test("getApple live deadline error names the running acquisition stage", async () => {
+    await pool.addDevice(ios);
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async (request) =>
+        await new Promise<void>((_resolve, reject) => {
+          request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+            once: true,
+          });
+        }),
+    });
+    const key = "cancellable-readiness-ios-live";
+    registerLiveDeadline(key, new ProgressExtendableDeadline(0, 500));
+    const outcome = observe(
+      acquire(ios, undefined, { __mcpRequestDeadlineMs: 500, __mcpLiveDeadlineKey: key }),
+    );
+    try {
+      await flushMicrotasks();
+      timer.advanceTime(500);
+      await flushMicrotasks();
+      expect(outcome.settled).toBe(true);
+      expect(outcome.error).toBeInstanceOf(ActionableError);
+      expect((outcome.error as Error).message).toBe(
+        "getApple timed out at the live MCP request deadline while preparing the automation " +
+          "runner. Retry device acquisition.",
+      );
+      expect(sessionManager.getAllSessionIds()).toEqual([]);
+    } finally {
+      unregisterLiveDeadline(key);
+      await flushMicrotasks();
+    }
+  });
+
   // #6034 review: System UI ANR recovery reuses the preserved session without
   // `runOperationWithinDeadline`, so binding must check cancellation itself.
   test("a late System UI ANR recovery after the backstop binds nothing and retires the replacement", async () => {

@@ -275,11 +275,15 @@ describe("WakeAndUnlock", () => {
         return reads === 1 ? LOCKED_SWIPE : new Promise(() => {});
       });
       try {
-        await expect(action.execute(undefined, 14_000)).rejects.toThrow(
-          /runner recovery.*timed out/,
+        // Sample the clock as the action rejects: auto-advance then keeps firing the
+        // abandoned 21 s recovery sleep.
+        const failure = await action.execute(undefined, 14_000).then(
+          () => ({ error: undefined as unknown, at: timer.now() }),
+          (error: unknown) => ({ error, at: timer.now() }),
         );
+        expect((failure.error as Error).message).toMatch(/runner recovery.*timed out/);
         expect(reads).toBe(2);
-        expect(timer.now()).toBe((recovery.budgets[0] ?? 0) + 250);
+        expect(failure.at).toBe((recovery.budgets[0] ?? 0) + 250);
         expect(warn).toHaveBeenCalledWith(
           expect.stringContaining("probe"),
           expect.any(ActionableError),
@@ -1064,9 +1068,15 @@ describe("WakeAndUnlock", () => {
       iosLockStateProbe: lock,
       iosRunnerRecovery: recovery,
     });
-    await expect(action.execute()).rejects.toThrow(/could not read.*after the swipe/);
+    // Sample the clock as the action rejects: auto-advance then keeps firing the
+    // abandoned unlock sleeps.
+    const failure = await action.execute().then(
+      () => ({ error: undefined as unknown, at: timer.now() }),
+      (error: unknown) => ({ error, at: timer.now() }),
+    );
+    expect((failure.error as Error).message).toMatch(/could not read.*after the swipe/);
     expect(calls).toEqual([2_000, 2_250, 2_250]);
-    expect(timer.now()).toBe(25_000);
+    expect(failure.at).toBe(25_000);
     expect(lock.reads).toBeGreaterThan(1);
   });
 

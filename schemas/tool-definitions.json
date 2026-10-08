@@ -2482,7 +2482,7 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2786,6 +2786,110 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
+            },
+            "scope": {
+              "type": "string",
+              "enum": ["device", "app"]
+            },
+            "appId": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "object",
+              "properties": {
+                "appId": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string",
+                  "const": "offline"
+                },
+                "revision": {
+                  "type": "number"
+                },
+                "ownerGeneration": {
+                  "type": "number"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "leaseExpiresInMs": {
+                  "type": "number"
+                },
+                "droppedFlows": {
+                  "type": "number"
+                }
+              },
+              "required": ["appId", "profile", "revision", "ownerGeneration"],
+              "additionalProperties": {}
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string"
+                  },
+                  "profile": {
+                    "type": "string",
+                    "const": "offline"
+                  },
+                  "revision": {
+                    "type": "number"
+                  },
+                  "ownerGeneration": {
+                    "type": "number"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "leaseExpiresInMs": {
+                    "type": "number"
+                  },
+                  "droppedFlows": {
+                    "type": "number"
+                  }
+                },
+                "required": ["appId", "profile", "revision", "ownerGeneration"],
+                "additionalProperties": {}
+              }
+            },
+            "acknowledged": {
+              "type": "boolean"
+            },
+            "coverage": {
+              "type": "string",
+              "const": "partial"
+            },
+            "limitations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": ["supported"],
@@ -3690,7 +3794,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. overlay:true (iOS simulators only) relaunches the app with the overlay agent injected, so its current state is lost.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3715,6 +3819,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "overlay": {
+          "description": "iOS simulator only: inject the overlay agent so the overlay tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (overlays need no injection) and for com.apple.* apps.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -6824,6 +6932,32 @@
         },
         "observedAppId": {
           "type": "string"
+        },
+        "overlayAgent": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "agentVersion": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["port", "agentVersion", "protocolVersion", "capabilities"],
+          "additionalProperties": false
         },
         "observationOmitted": {
           "type": "object",
@@ -17993,7 +18127,7 @@
   },
   {
     "name": "prototype",
-    "description": "Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
+    "description": "Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; a same-id show replaces the overlay; no update, showVariants or display; sizes are points). awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -18499,8 +18633,23 @@
                           "maximum": 2147483647
                         },
                         "fontFamily": {
-                          "type": "string",
-                          "enum": ["default", "sansSerif", "serif", "monospace"]
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["default", "sansSerif", "serif", "monospace"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "asset": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": ["asset"],
+                              "additionalProperties": false
+                            }
+                          ]
                         },
                         "textStyle": {
                           "type": "string",
@@ -19228,10 +19377,172 @@
                     },
                     "variant": {
                       "type": "string",
-                      "enum": ["filled", "outlined", "text"]
+                      "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                    },
+                    "icon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                     }
                   },
                   "required": ["type", "label"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["radioGroup"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 16
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["listItem"]
+                    },
+                    "headline": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "supporting": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "leadingIcon": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                    },
+                    "trailing": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["switch"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["checkbox"]
+                            },
+                            "stateKey": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "required": ["type", "stateKey"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["icon"]
+                            },
+                            "name": {
+                              "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
+                            }
+                          },
+                          "required": ["type", "name"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["type", "headline"],
                   "additionalProperties": false
                 },
                 {
@@ -19589,7 +19900,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/16/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/18/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -20079,8 +20390,23 @@
                             "maximum": 2147483647
                           },
                           "fontFamily": {
-                            "type": "string",
-                            "enum": ["default", "sansSerif", "serif", "monospace"]
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": ["default", "sansSerif", "serif", "monospace"]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "asset": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["asset"],
+                                "additionalProperties": false
+                              }
+                            ]
                           },
                           "textStyle": {
                             "type": "string",
@@ -20818,10 +21144,172 @@
                       },
                       "variant": {
                         "type": "string",
-                        "enum": ["filled", "outlined", "text"]
+                        "enum": ["filled", "tonal", "elevated", "outlined", "text"]
+                      },
+                      "icon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                       }
                     },
                     "required": ["type", "label"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["radioGroup"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "options": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "value": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["value", "label"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 2,
+                        "maxItems": 16
+                      }
+                    },
+                    "required": ["type", "stateKey", "options"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["listItem"]
+                      },
+                      "headline": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "supporting": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "leadingIcon": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                      },
+                      "trailing": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["switch"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["checkbox"]
+                              },
+                              "stateKey": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "required": ["type", "stateKey"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["icon"]
+                              },
+                              "name": {
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
+                              }
+                            },
+                            "required": ["type", "name"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["type", "headline"],
                     "additionalProperties": false
                   },
                   {
@@ -21179,7 +21667,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/16/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/18/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5
@@ -21358,7 +21846,7 @@
           }
         },
         "assets": {
-          "description": "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "description": "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
           "minItems": 1,
           "maxItems": 32,
           "type": "array",
@@ -21366,13 +21854,13 @@
             "type": "object",
             "properties": {
               "id": {
-                "description": "Opaque asset id that spec image nodes reference (image.asset)",
+                "description": "Opaque asset id that spec image nodes reference (image.asset, or style.fontFamily {asset})",
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 256
               },
               "path": {
-                "description": "Absolute path of a PNG, JPEG or WebP file the daemon can read",
+                "description": "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
                 "type": "string",
                 "minLength": 1
               },
@@ -27763,7 +28251,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS Simulator clears it with `simctl location clear`; failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -27821,13 +28309,20 @@
           "additionalProperties": false
         },
         "networkCondition": {
-          "description": "Device-wide network condition to apply (Android emulator only).",
+          "description": "Network condition to apply: device-wide on an Android emulator, or offline/none for one app (appId) on an iOS Simulator.",
           "type": "object",
           "properties": {
             "profile": {
-              "description": "Device-wide network profile. Documented values: none=unshaped, offline=no data, veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), 4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`. Android emulator only.",
+              "description": "Device-wide network profile. Documented values: none=unshaped, offline=no data, veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), 4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`, on Android emulators. iOS Simulator accepts only offline and none, for one app named by appId.",
               "type": "string",
               "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"]
+            },
+            "appId": {
+              "description": "iOS Simulator only, and required there: bundle id of the one app to take offline (profile=offline) or restore (profile=none). Its new connections are refused through AutoMobile's network filter; open connections continue. Needs a session.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9._-]+$"
             },
             "cancel": {
               "description": "Reset to normal connectivity (same as profile=none).",
@@ -28382,6 +28877,110 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
+            },
+            "scope": {
+              "type": "string",
+              "enum": ["device", "app"]
+            },
+            "appId": {
+              "type": "string"
+            },
+            "rule": {
+              "type": "object",
+              "properties": {
+                "appId": {
+                  "type": "string"
+                },
+                "profile": {
+                  "type": "string",
+                  "const": "offline"
+                },
+                "revision": {
+                  "type": "number"
+                },
+                "ownerGeneration": {
+                  "type": "number"
+                },
+                "owner": {
+                  "type": "string"
+                },
+                "leaseExpiresInMs": {
+                  "type": "number"
+                },
+                "droppedFlows": {
+                  "type": "number"
+                }
+              },
+              "required": ["appId", "profile", "revision", "ownerGeneration"],
+              "additionalProperties": {}
+            },
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "appId": {
+                    "type": "string"
+                  },
+                  "profile": {
+                    "type": "string",
+                    "const": "offline"
+                  },
+                  "revision": {
+                    "type": "number"
+                  },
+                  "ownerGeneration": {
+                    "type": "number"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "leaseExpiresInMs": {
+                    "type": "number"
+                  },
+                  "droppedFlows": {
+                    "type": "number"
+                  }
+                },
+                "required": ["appId", "profile", "revision", "ownerGeneration"],
+                "additionalProperties": {}
+              }
+            },
+            "acknowledged": {
+              "type": "boolean"
+            },
+            "coverage": {
+              "type": "string",
+              "const": "partial"
+            },
+            "limitations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": ["supported"],

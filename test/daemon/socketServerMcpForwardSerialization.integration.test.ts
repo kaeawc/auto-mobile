@@ -421,6 +421,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test.skipIf(process.platform === "win32")(
     "serves eight clients' three Android inventory reads from one bounded snapshot",
     async () => {
+      // Real sockets answer on real event-loop turns, so the server's own timer must not
+      // auto-advance: its microtask pump would fire the 30s MCP timeout before they do.
+      await restartWithFakeTimer("mcp-inventory-snapshot");
       resetAdbDeviceListCache();
       const inventoryTimer = new FakeTimer();
       let adbDeviceListCalls = 0;
@@ -2395,6 +2398,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test("concurrent tools/call for different devices can overlap inside callTool", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
+    // The second request arrives over a real socket turn, so hold the first call open until
+    // both are in flight instead of racing a fake deadline against that turn.
+    const bothInFlight = Promise.withResolvers<void>();
 
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
@@ -2402,9 +2408,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
         callTool: async () => {
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>((resolve) => {
-            fakeTimer.setTimeout(resolve, 40);
-          });
+          if (inFlight === 2) {
+            bothInFlight.resolve();
+          }
+          await bothInFlight.promise;
           inFlight -= 1;
           return { content: [] };
         },
@@ -2431,6 +2438,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const forwardedSessionIds: string[] = [];
+    // See the different-devices overlap test: wait for both calls instead of a fake deadline.
+    const bothInFlight = Promise.withResolvers<void>();
 
     server.mcpClientFactory = async () => {
       const fake: FakeMcpClient = {
@@ -2440,9 +2449,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
           forwardedSessionIds.push(String(args.__mcpSessionId));
           inFlight += 1;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>((resolve) => {
-            fakeTimer.setTimeout(resolve, 40);
-          });
+          if (inFlight === 2) {
+            bothInFlight.resolve();
+          }
+          await bothInFlight.promise;
           inFlight -= 1;
           return { content: [] };
         },
@@ -2743,6 +2753,8 @@ describe("UnixSocketServer MCP forward serialization", () => {
   test.skipIf(process.platform === "win32")(
     "closing one client cancels only its resource read and lets the next client finish",
     async () => {
+      // Real sockets answer on real event-loop turns; see the inventory snapshot test.
+      await restartWithFakeTimer("mcp-cancel-resource-read");
       const firstStarted = Promise.withResolvers<void>();
       const secondStarted = Promise.withResolvers<void>();
       const forwardedSignals: AbortSignal[] = [];

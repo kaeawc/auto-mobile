@@ -5,8 +5,14 @@ import NetworkFilterCore
 @objc(IdentityFilterProvider)
 final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate {
     private let probe = IdentityProbe(resolver: SecurityProbeIdentityResolver(), processTable: DarwinProcessTable())
+    private let rules = NetworkRuleStore(clock: SystemMonotonicClock())
+    private lazy var policy = AppFlowPolicy(
+        store: rules,
+        processTable: DarwinProcessTable(),
+        identityResolver: SecurityProbeIdentityResolver()
+    )
     private var listener: NSXPCListener?
-    private lazy var service = ProbeService(probe: probe)
+    private lazy var service = ProbeService(probe: probe, rules: rules)
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         let generation = service.stopOrBeginStartup()
@@ -23,8 +29,9 @@ final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate 
         listener.delegate = self
         self.listener = listener
         listener.resume()
-        // No data callbacks: every new flow receives allow(), so no socket data
-        // is paused, inspected, or blocked by this initial attribution probe.
+        // No data callbacks: each new flow gets one verdict in handleNewFlow and
+        // no socket data is paused or inspected. Established flows are never
+        // revisited, so an offline rule leaves open connections running.
         apply(NEFilterSettings(rules: [], defaultAction: .filterData)) { [weak self] error in
             guard self?.service.finishStartup(generation: generation, succeeded: error == nil) == true else {
                 listener.invalidate()
@@ -52,7 +59,17 @@ final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate 
             sourceAppAuditToken: flow.sourceAppAuditToken,
             sourceProcessAuditToken: flow.sourceProcessAuditToken
         )
-        return .allow()
+        // Allows without any lookup unless a leased offline rule is active; a
+        // flow it cannot attribute to the rule's simulator and app is allowed.
+        switch policy.verdict(
+            sourceAppAuditToken: flow.sourceAppAuditToken,
+            sourceProcessAuditToken: flow.sourceProcessAuditToken
+        ) {
+        case .allow:
+            return .allow()
+        case .drop:
+            return .drop()
+        }
     }
 
     func listener(_: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {

@@ -518,7 +518,8 @@ class CtrlProxyMessageHandler(
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)
       is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
-      is GetSdkCapabilities -> actions.getSdkCapabilities(request.requestId, request.packageName)
+      is GetSdkCapabilities ->
+        actions.getSdkCapabilities(request.requestId, request.packageName, request.userId)
       is ListDataStores ->
         actions.listDataStores(request.requestId, request.packageName, request.adapterName)
       is GetDataStore ->

@@ -18,6 +18,7 @@ public enum CommandError: LocalizedError, Sendable {
     case invalidParameter(String, String)
     case executionFailed(String)
     case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
+    case queryBoundExceeded(command: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
 
     /// Machine-readable code for the wire's additive `errorCode` field; `nil` for errors the host
@@ -29,7 +30,7 @@ public enum CommandError: LocalizedError, Sendable {
         case let .deadlineExceeded(_, _, gestureCompleted):
             return gestureCompleted ? "deadline_completed_late" : "deadline_not_started"
         case .unknownCommand, .missingParameter, .invalidParameter, .executionFailed,
-             .gestureBoundExceeded:
+             .gestureBoundExceeded, .queryBoundExceeded:
             return nil
         }
     }
@@ -48,6 +49,10 @@ public enum CommandError: LocalizedError, Sendable {
             return "Command execution failed: \(reason)"
         case let .gestureBoundExceeded(command, phase, boundMs, elapsedMs):
             return "Command \(command) exceeded execution bound \(boundMs)ms in phase \(phase) after \(elapsedMs)ms; XCUITest call is still executing and the runner stays busy until it returns"
+        case let .queryBoundExceeded(command, boundMs, elapsedMs):
+            // Keep the "exceeded execution bound ... XCUITest call is still executing" wording the
+            // host already matches for the gesture bound.
+            return "Command \(command) exceeded execution bound \(boundMs)ms after \(elapsedMs)ms waiting on a live XCUITest query; the observed app is likely suspended or backgrounded (XCUIApplication.state can report foreground for several seconds after Home). Re-observe before acting. XCUITest call is still executing and the runner stays busy until it returns"
         case let .deadlineExceeded(command, deadlineMs, gestureCompleted):
             let outcome = gestureCompleted
                 ? "gesture completed after its deadline; outcome is indeterminate"

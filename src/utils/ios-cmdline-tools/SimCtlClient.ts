@@ -163,6 +163,33 @@ const defaultSimCtlFileSystem: SimCtlFileSystem = {
  * Interface for iOS simulator control using simctl
  * Provides methods to manage and interact with iOS simulators
  */
+export interface SimctlLaunchOptions {
+  foregroundIfRunning?: boolean;
+  launchArguments?: string[];
+  /**
+   * Environment for the launched app. Every key must carry the `SIMCTL_CHILD_` prefix: simctl
+   * strips it and hands the rest to the app process. Merged over the host environment for this
+   * one `simctl launch`, so a host-level `SIMCTL_CHILD_*` value is replaced, not combined.
+   */
+  environment?: Record<string, string>;
+}
+
+/** The complete env for an env-carrying `simctl launch`, or undefined to inherit the host env. */
+function launchEnvironment(
+  environment: Record<string, string> | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (environment === undefined || Object.keys(environment).length === 0) {
+    return undefined;
+  }
+  const invalid = Object.keys(environment).filter((key) => !key.startsWith("SIMCTL_CHILD_"));
+  if (invalid.length > 0) {
+    throw new ActionableError(
+      `simctl launch environment keys must start with SIMCTL_CHILD_: ${invalid.join(", ")}`,
+    );
+  }
+  return { ...process.env, ...environment };
+}
+
 export interface SimCtl {
   /**
    * Set the target device ID
@@ -330,7 +357,7 @@ export interface SimCtl {
    */
   launchApp(
     bundleId: string,
-    options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
+    options?: SimctlLaunchOptions,
     deviceId?: string,
   ): Promise<{
     success: boolean;
@@ -438,10 +465,11 @@ const execAsync = async (
   args: string[],
   maxBuffer?: number,
   signal?: AbortSignal,
+  env?: NodeJS.ProcessEnv,
 ): Promise<ExecResult> => {
   return runExecSeam(
     (execOptions) => sharedExecFileAsync(file, args, execOptions),
-    { maxBuffer, signal },
+    { maxBuffer, signal, env },
     { command: file, args },
     { preserveError: true },
   );
@@ -669,6 +697,7 @@ export class SimCtlClient implements SimCtl {
     args: string[],
     maxBuffer?: number,
     signal?: AbortSignal,
+    env?: NodeJS.ProcessEnv,
   ) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
@@ -739,6 +768,7 @@ export class SimCtlClient implements SimCtl {
           args: string[],
           maxBuffer?: number,
           signal?: AbortSignal,
+          env?: NodeJS.ProcessEnv,
         ) => Promise<ExecResult>)
       | null = null,
     timer: Timer = defaultTimer,
@@ -853,6 +883,7 @@ export class SimCtlClient implements SimCtl {
     displayCommand?: string,
     explicitSignal?: AbortSignal,
     waitForTimedOutCommandSettlement = false,
+    env?: NodeJS.ProcessEnv,
   ): Promise<ExecResult> {
     // One span per simctl invocation, named by the leading subcommand so spans
     // aggregate (e.g. `simctl boot`), recorded against the ambient
@@ -864,6 +895,7 @@ export class SimCtlClient implements SimCtl {
         displayCommand,
         explicitSignal,
         waitForTimedOutCommandSettlement,
+        env,
       ),
     );
   }
@@ -874,6 +906,7 @@ export class SimCtlClient implements SimCtl {
     displayCommand?: string,
     explicitSignal?: AbortSignal,
     waitForTimedOutCommandSettlement = false,
+    env?: NodeJS.ProcessEnv,
   ): Promise<ExecResult> {
     if (args.length === 0) {
       throw new Error("Command cannot be empty");
@@ -890,7 +923,10 @@ export class SimCtlClient implements SimCtl {
     const callerSignal = explicitSignal ?? getAbortSignal();
     const runCommand = async (signal?: AbortSignal) => {
       try {
-        return await this.execAsync("xcrun", localArgs, undefined, signal);
+        // Pass env only when set, so existing exec fakes see an unchanged call shape.
+        return env === undefined
+          ? await this.execAsync("xcrun", localArgs, undefined, signal)
+          : await this.execAsync("xcrun", localArgs, undefined, signal, env);
       } catch (error) {
         const tokenIndex = args.indexOf("--automobile-mutation-token");
         const token = tokenIndex >= 0 ? args[tokenIndex + 1] : undefined;
@@ -2710,7 +2746,7 @@ export class SimCtlClient implements SimCtl {
    */
   async launchApp(
     bundleId: string,
-    options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
+    options?: SimctlLaunchOptions,
     deviceId?: string,
   ): Promise<{
     success: boolean;
@@ -2725,6 +2761,9 @@ export class SimCtlClient implements SimCtl {
         launchArgs,
         undefined,
         `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
+        undefined,
+        false,
+        launchEnvironment(options?.environment),
       );
 
       // Parse the output to extract PID if available

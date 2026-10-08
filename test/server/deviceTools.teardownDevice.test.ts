@@ -34,6 +34,7 @@ import {
   setDeviceToolsDependencies,
   teardownDeviceSchema,
   teardownOperationFingerprint,
+  TEARDOWN_OPERATION_RESULT_TTL_MS,
 } from "../../src/server/deviceTools";
 import type { TeardownDeviceArgs } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -1721,7 +1722,10 @@ describe("deleteDevice handler", () => {
 
     expect(body.state).toBe("destroyed");
     expect(avdManager.getListDeviceImagesCalls()).toHaveLength(3);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
+    // No verification poll is left behind; only the terminal result's TTL may be.
+    expect(
+      timer.getPendingTimeouts().filter((ms) => ms !== TEARDOWN_OPERATION_RESULT_TTL_MS),
+    ).toEqual([]);
     expect(await manager.getBootedDevices("android")).toEqual([]);
     expect(await manager.listDeviceImages("android")).toEqual([]);
   });

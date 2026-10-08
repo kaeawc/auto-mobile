@@ -508,7 +508,7 @@ describe("device description projections", () => {
     expect(simulator.capabilityInventory?.capabilities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "ios.simulator.doNotDisturb", state: "unsupported" }),
-        expect.objectContaining({ id: "ios.simulator.networkCondition", state: "unsupported" }),
+        expect.objectContaining({ id: "ios.simulator.networkCondition", state: "supported" }),
         expect.objectContaining({ id: "ios.simulator.connectivity", state: "unsupported" }),
       ]),
     );

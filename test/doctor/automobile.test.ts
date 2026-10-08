@@ -1,3 +1,4 @@
+import { checkForeignLeaseHolders } from "../../src/doctor/checks/foreignLeaseHolders";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   MAX_CTRL_PROXY_DOCTOR_DEVICES,
@@ -1195,6 +1196,11 @@ describe("runAutoMobileChecks", () => {
       status: "pass" as const,
       message: "No orphaned AutoMobile daemons found",
     }),
+    checkForeignLeaseHolders: async () => ({
+      name: "CtrlProxy Forwarding Leases",
+      status: "pass" as const,
+      message: "No CtrlProxy forwarding leases held by other processes",
+    }),
   };
 
   test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {
@@ -1214,6 +1220,27 @@ describe("runAutoMobileChecks", () => {
 
     expect(buildIdentity).toBeDefined();
     expect(buildIdentity?.status).toBe("pass");
+  });
+
+  test("includes the foreign forwarding-lease holders check", async () => {
+    const results = await runAutoMobileChecks(
+      { ios: true },
+      {
+        ...stubChecks,
+        checkForeignLeaseHolders: () =>
+          checkForeignLeaseHolders({
+            lister: {
+              listHolders: () => [{ deviceId: "emulator-5554", pid: 777, alive: true }],
+            },
+            selfPid: 1,
+          }),
+      },
+    );
+
+    const leases = results.find((result) => result.name === "CtrlProxy Forwarding Leases");
+
+    expect(leases?.status).toBe("warn");
+    expect(leases?.detail).toContain("emulator-5554: PID 777");
   });
 
   test("includes the image backend provisioning check", async () => {

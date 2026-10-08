@@ -13,6 +13,7 @@ import {
   DaemonNotification,
   isDaemonNotification,
   PROGRESS_NOTIFICATION_METHOD,
+  boundSessionLossMessage,
   sanitizeBoundSessionLoss,
   sanitizeDaemonRequestFailureCause,
 } from "./types";
@@ -182,10 +183,7 @@ export class DaemonShuttingDownError extends DaemonUnavailableError {
 /** A terminal loss of a session explicitly bound to the forwarded request. */
 export class DaemonBoundSessionLostError extends ActionableError {
   constructor(readonly failure: BoundSessionLoss) {
-    super(
-      `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). ` +
-        "Acquire a new device session before continuing.",
-    );
+    super(boundSessionLossMessage(failure));
     this.name = "DaemonBoundSessionLostError";
   }
 }

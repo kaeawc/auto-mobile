@@ -27,6 +27,28 @@ public struct ProbeFlow: Codable, Equatable {
     public let sourceApp: ProbeProcessIdentity?
     public let sourceProcess: ProbeProcessIdentity?
     public let delegated: Bool?
+    // Version 2 fields. They are optional so a version 1 snapshot still decodes.
+    public let attribution: FlowAttributionStatus?
+    public let method: SimulatorAttributionMethod?
+    public let simulator: FlowSimulator?
+    public let app: FlowApp?
+    public let reason: FlowAttributionReason?
+
+    public init(
+        sourceApp: ProbeProcessIdentity?,
+        sourceProcess: ProbeProcessIdentity?,
+        delegated: Bool?,
+        attribution: FlowAttribution? = nil
+    ) {
+        self.sourceApp = sourceApp
+        self.sourceProcess = sourceProcess
+        self.delegated = delegated
+        self.attribution = attribution?.attribution
+        method = attribution?.method
+        simulator = attribution?.simulator
+        app = attribution?.app
+        reason = attribution?.reason
+    }
 }
 
 public struct ProbeSnapshot: Codable {
@@ -35,22 +57,26 @@ public struct ProbeSnapshot: Codable {
     public let mode: String
     public let observedFlows: UInt64
     public let discardedFlows: UInt64
+    /// Version 2: the simulators the host allowed attribution to for this read-back.
+    public let managedSimulators: [ManagedSimulator]?
     public let flows: [ProbeFlow]
     public let limitations: [String]
 }
 
 /// Diagnostics only. This type has no rule application or blocking operation.
 public final class IdentityProbe {
-    public static let version = 1
+    public static let version = 2
     public static let capacity = 128
     private let resolver: ProbeIdentityResolver
+    private let attributionResolver: SimulatorFlowResolver
     private let lock = NSLock()
     private var tokens: [(Data?, Data?)] = []
     private var observed: UInt64 = 0
     private var discarded: UInt64 = 0
 
-    public init(resolver: ProbeIdentityResolver) {
+    public init(resolver: ProbeIdentityResolver, processTable: ProcessTable) {
         self.resolver = resolver
+        attributionResolver = SimulatorFlowResolver(processTable: processTable)
     }
 
     public func record(sourceAppAuditToken: Data?, sourceProcessAuditToken: Data?) {
@@ -68,17 +94,28 @@ public final class IdentityProbe {
         tokens.append((app, process))
     }
 
-    public func snapshot() -> ProbeSnapshot {
+    /// Resolves identities and simulator attribution at read-back time, off the
+    /// flow callback. Only `managedSimulators` can be attributed; every other flow,
+    /// and every failed lookup, is reported as unattributed.
+    public func snapshot(managedSimulators: [ManagedSimulator] = []) -> ProbeSnapshot {
         lock.lock()
         let retained = tokens
         let observedFlows = observed
         let discardedFlows = discarded
         lock.unlock()
+        let managed = Set(managedSimulators)
         let flows = retained.map { app, process in
-            ProbeFlow(
-                sourceApp: identity(app),
-                sourceProcess: identity(process),
-                delegated: app.flatMap { source in process.map { source != $0 } }
+            let sourceApp = identity(app)
+            let sourceProcess = identity(process)
+            return ProbeFlow(
+                sourceApp: sourceApp,
+                sourceProcess: sourceProcess,
+                delegated: app.flatMap { source in process.map { source != $0 } },
+                attribution: attributionResolver.resolve(
+                    sourceApp: sourceApp,
+                    sourceProcess: sourceProcess,
+                    managed: managed
+                )
             )
         }
         return ProbeSnapshot(
@@ -87,9 +124,11 @@ public final class IdentityProbe {
             mode: "allow_only",
             observedFlows: observedFlows,
             discardedFlows: discardedFlows,
+            managedSimulators: managedSimulators,
             flows: flows,
             limitations: [
-                "Simulator attribution is unverified; no network condition is applied.",
+                "Simulator attribution methods are unverified on a signed run (#10263); no network condition is applied.",
+                "Attribution is resolved at read-back: a process that exited since its flow is reported as unattributed.",
                 "New socket flows only; existing connections and non-socket traffic are not measured.",
                 "Code metadata may be absent if a process exits before snapshot collection.",
                 "The newest 128 flow identities are retained; no payloads or network addresses are collected.",

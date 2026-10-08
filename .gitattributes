@@ -15,6 +15,7 @@ test/fixtures/android-getevent/*.txt text eol=lf
 test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf

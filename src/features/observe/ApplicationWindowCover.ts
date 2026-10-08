@@ -1,6 +1,6 @@
 import type { Element, ElementBounds, ViewHierarchyResult } from "../../models";
 import type { ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
-import { ownOverlayWindows } from "./ownOverlayFocus";
+import { ownOverlayHidesApp, ownOverlayWindows } from "./ownOverlayFocus";
 import { boundsArea } from "../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -196,16 +196,27 @@ function windowContains(window: ViewHierarchyWindowInfo, bounds: ElementBounds):
  * overlay paints an opaque surface, so this reports what a coordinate gesture would hit: the
  * overlay window, not the app row behind it. Overlay rows are never covered by their own window,
  * and `layer: "app"` scoping removes the window first, so the app rows come back untouched.
+ *
+ * When the APK reports `overlay_window_metadata_v1` (`apkReportsMetadata`, inferred from any own
+ * overlay window carrying the fields unless the caller passes it), `ownOverlayHidesApp` lets that
+ * explicit placement/opacity decide; otherwise the node-rendering bounds rule above is the fallback.
  */
 export function isFullyCoveredByOwnOverlay(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
+  apkReportsMetadata = ownOverlayWindows(hierarchy).some(
+    (window) => window.overlayPlacement !== undefined || window.overlayOpaque !== undefined,
+  ),
 ): boolean {
   // The highlight overlay is a full-screen, FLAG_NOT_TOUCHABLE canvas that exposes no nodes, so
   // coordinate gestures pass through it; only an overlay window that renders nodes can intercept.
-  const overlays = ownOverlayWindows(hierarchy).filter(
-    (window) => hostsNodes(window) && windowContains(window, bounds),
+  const overlays = ownOverlayWindows(hierarchy).filter((window) =>
+    ownOverlayHidesApp(
+      window,
+      hostsNodes(window) && windowContains(window, bounds),
+      apkReportsMetadata,
+    ),
   );
   if (overlays.length === 0) {
     return false;

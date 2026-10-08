@@ -878,6 +878,13 @@ export const OVERLAY_DISPLAY_CAPABILITY = "overlay_display_id_v1";
 export const NETWORK_MOCK_RULES_REPORT_CAPABILITY = "network_mock_rules_report_v1";
 
 /**
+ * Advertised by a CtrlProxy whose window entries for its own interactive overlay carry
+ * `overlayPlacement` and `overlayOpaque`. Older APKs never send them, so consumers fall back to
+ * window bounds when the fields are absent.
+ */
+export const OVERLAY_WINDOW_METADATA_CAPABILITY = "overlay_window_metadata_v1";
+
+/**
  * Advertised by a CtrlProxy whose `get_sdk_capabilities` honours `userId` (work or secondary
  * profile). An older service ignores the unknown field and reads its own user's app instance, so the
  * host omits it there.
@@ -894,6 +901,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "tap_double_v1",
   OVERLAY_DISPLAY_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
+  OVERLAY_WINDOW_METADATA_CAPABILITY,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,
 ] as const;
 

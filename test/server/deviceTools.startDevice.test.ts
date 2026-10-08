@@ -1081,12 +1081,19 @@ describe("startDevice handler", () => {
     const start = callStartDevice({ platform: "android" });
     await waitForReadiness;
     expect(pool.getIdleDevices()).toEqual([]);
-    await expect(pool.assignDeviceToSession("competing-session", "android")).rejects.toThrow(
-      /Timed out waiting for device/,
+    // Observe and release as the competitor times out: auto-advance would otherwise
+    // run fake time on to startDevice's own request deadline.
+    const competing = await pool.assignDeviceToSession("competing-session", "android").then(
+      () => ({ error: undefined as unknown, sessionId: undefined as string | null | undefined }),
+      (error: unknown) => {
+        const sessionId = pool.getDevice(androidDevice.deviceId)?.sessionId;
+        releaseReadiness();
+        return { error, sessionId };
+      },
     );
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+    expect((competing.error as Error).message).toMatch(/Timed out waiting for device/);
+    expect(competing.sessionId).toBeNull();
 
-    releaseReadiness();
     const result = await start;
     expect(result.runtime.session.sessionUuid).toBe("session-1");
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");

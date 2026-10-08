@@ -501,13 +501,19 @@ describe("ToolExecutionContext", () => {
       false,
       controller.signal,
     );
-    // The fake timer's auto-advance dispatch runs on a macrotask (setImmediate),
-    // so waiting for the microtask-scheduled `firstSetupDone` here is
-    // guaranteed to land before the retry sleep's fake deadline fires.
+    // The fake timer's auto-advance fires the retry sleep only once the microtask
+    // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
+    // here is guaranteed to land before the retry sleep's fake deadline fires.
     await firstSetupDone;
     controller.abort(new Error("caller cancelled during retry sleep"));
-    await expect(context).rejects.toThrow("caller cancelled during retry sleep");
-    expect(setupCalls).toBe(1);
+    // Sample as the caller's context rejects: auto-advance keeps running the
+    // abandoned retry sleep afterwards.
+    const rejection = await context.then(
+      () => ({ error: undefined as unknown, setupCalls }),
+      (error: unknown) => ({ error, setupCalls }),
+    );
+    expect((rejection.error as Error).message).toContain("caller cancelled during retry sleep");
+    expect(rejection.setupCalls).toBe(1);
     await createToolExecutionContext(
       "session-abort-retry-sleep",
       sessionManager,

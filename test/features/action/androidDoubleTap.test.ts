@@ -29,6 +29,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
 
 /** The target start-to-start interval; Android's own limit is ANDROID_DOUBLE_TAP_TIMEOUT_MS. */
@@ -302,7 +303,8 @@ describe("dispatchAndroidDoubleTap", () => {
       signal: controller.signal,
       tap: () => client.requestTapCoordinates(10, 20),
     });
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Microtasks only: a real turn would let auto-advance finish the gap first.
+    await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
     controller.abort();
     await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
     expect(tapStarts).toHaveLength(1);
@@ -322,7 +324,8 @@ describe("dispatchAndroidDoubleTap", () => {
       },
       tap: () => client.requestTapCoordinates(10, 20),
     });
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Microtasks only: a real turn would let auto-advance finish the gap first.
+    await drainUntil(() => tapStarts.length === 1, { description: "the first tap" });
     current = false;
     await expect(pending).rejects.toThrow("Display changed");
     expect(tapStarts).toHaveLength(1);

@@ -13,6 +13,7 @@ import {
   FakeWebSocket,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
 import {
   RealCtrlProxyWebSocketInTestError,
@@ -271,7 +272,10 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     );
 
     await driveFailures(client, 3);
-    await flushMicrotasks();
+    // Microtasks only: a real turn lets auto-advance run fake time past the cooldown.
+    await drainUntil(() => manager.isAccessibilityServiceHealthyCallCount >= 1, {
+      description: "the recovery health check",
+    });
 
     expect(manager.isAccessibilityServiceHealthyCallCount).toBeGreaterThanOrEqual(1);
     expect(manager.rebindIfUnhealthyCallCount).toBe(0);

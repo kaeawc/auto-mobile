@@ -53,6 +53,82 @@ describe("FakeTimer auto-advance", function () {
 
     expect(calls).toBe(1);
   });
+
+  test("settles a long chain of waits without a real event-loop turn", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let realTurnRan = false;
+    setImmediate(() => {
+      realTurnRan = true;
+    });
+
+    for (let step = 0; step < 50; step++) {
+      await timer.sleep(1_000);
+    }
+
+    expect(timer.now()).toBe(50_000);
+    expect(realTurnRan).toBe(false);
+  });
+
+  test("fires work registered before enableAutoAdvance", async function () {
+    const timer = new FakeTimer();
+    const sleeping = timer.sleep(25);
+
+    timer.enableAutoAdvance();
+    await sleeping;
+
+    expect(timer.now()).toBe(25);
+  });
+
+  test("lets a process.nextTick delivery land before a pending deadline", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const events: string[] = [];
+    timer.setTimeout(() => events.push("deadline"), 1_000);
+
+    // A tick queued from a microtask runs only once the microtask queue empties.
+    queueMicrotask(() => process.nextTick(() => events.push("tick")));
+    await timer.sleep(2_000);
+
+    expect(events).toEqual(["tick", "deadline"]);
+  });
+
+  test("yields a real turn to the host during an endless poll", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let polling = true;
+    let polls = 0;
+    const poller = (async () => {
+      while (polling) {
+        polls++;
+        await timer.sleep(1);
+      }
+    })();
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    polling = false;
+    await poller;
+
+    expect(polls).toBeGreaterThan(1);
+  });
+
+  test("paces a lone never-cleared interval at one tick per real turn", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let ticks = 0;
+    const handle = timer.setInterval(() => {
+      ticks++;
+    }, 1);
+
+    for (let turn = 0; turn < 3; turn++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    timer.clearInterval(handle);
+
+    expect(ticks).toBeGreaterThan(0);
+    expect(ticks).toBeLessThanOrEqual(3);
+    expect(timer.now()).toBe(ticks);
+  });
 });
 
 describe("FakeTimer async manual advancement", function () {

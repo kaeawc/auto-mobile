@@ -365,6 +365,17 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     failure surfaces as an error and must never be read as "not running"
     (#6407, child of #6371).
 
+16. **Liveness proves the owner is alive; only tool usage proves the device is
+    in use.** A heartbeat renews the owner lease and never the idle deadline
+    (#10656). Every change to a liveness path ships a two-sided test: each
+    "kept while X" assertion is paired with "released when Y", driven by the
+    real producers (the proxy's own keeper, tool calls, tokenless desktop
+    heartbeats) on a `FakeTimer`. Add the row to
+    `test/daemon/livenessScenarioMatrix.test.ts` (harness:
+    `test/helpers/livenessScenarioHarness.ts`); a seeded property in
+    `test/daemon/sessionExpiryProperties.test.ts` covers the clock
+    discontinuities (#10667, #10705).
+
 ## 3. Recurring bug classes → where to look first
 
 1. **Release/teardown asymmetry** — acquire is centralized, release is bolted
@@ -397,6 +408,15 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
 8. **Daemon process identity** — clients holding state about a replaced
    daemon: stale tool caches, "Unknown tool", wedged transports, orphaned
    cross-namespace daemons blocking replacement. (#2599, #2732, #2444, #5419)
+
+9. **Liveness clock conflated with activity clock** — a keep-alive signal
+   (heartbeat, ack, replay-lease refresh) also moves the idle deadline, or the
+   idle clock also proves the owner is alive. Smell: one timestamp written by
+   both a heartbeat path and a tool-call path, or a test that stops the keeper
+   (or hand-calls `recordHeartbeat`) to force an expiry no production client
+   can reach. A fix without a "released when idle despite heartbeats" test
+   regresses silently to "never released". (#10655 H1/H3, #10656, #10658, #10657,
+   #10667)
 
 ## 4. Hunting procedure
 

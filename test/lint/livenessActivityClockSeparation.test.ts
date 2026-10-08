@@ -166,12 +166,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
   },
-  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.endSessionCall": {
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.endOneSessionCall": {
     writes: 2,
     reason:
       "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
       "binding's replay lease and a held session's lastUsedAt, so idleness counts from the end " +
-      "of the last call however long it ran.",
+      "of the last call however long it ran. A call routed by a deviceId/platform selector " +
+      "counts against the session the selector reached (#10692).",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
     writes: 1,

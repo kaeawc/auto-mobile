@@ -64,6 +64,7 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
+  getDevicePlatformFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
@@ -1015,6 +1016,11 @@ export class DaemonMcpProxy {
   private readonly livenessAcks = new Map<string, number>();
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
   private readonly sessionDeviceIds = new Map<string, string>();
+  /**
+   * Platform of each session, learned from acquisition results, so a call routed by a `platform`
+   * selector can tell which of this proxy's sessions it reached (#10692).
+   */
+  private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   /**
    * Handovers awaiting delivery, per affected session. The first tool call that names the session
    * (or reaches it implicitly) returns the structured error; naming it again attempts an
@@ -3373,11 +3379,11 @@ export class DaemonMcpProxy {
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
-    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
-      name,
-      callerArgs,
-      isSessionAcquisition,
-    );
+    const {
+      forwardedArgs: routedArgs,
+      allowReleasedSession,
+      usesDeviceSelector,
+    } = this.prepareToolRoutingArgs(name, callerArgs, isSessionAcquisition);
     const forwardedArgs = this.withAcceptanceConfiguration(routedArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -3394,7 +3400,10 @@ export class DaemonMcpProxy {
     this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
     let registeredRequestId: string | undefined;
     let registeredClient: DaemonClientLike | undefined;
-    const trackedSessionUuid = this.beginSessionCall(name, forwardedSessionUuid);
+    const trackedSessionUuids = this.beginSessionCall(
+      name,
+      this.sessionsUsedByCall(forwardedSessionUuid, usesDeviceSelector, callerArgs),
+    );
     let callReachedSession = true;
     try {
       const forwarding = this.withRecoverableReconnect(
@@ -3500,7 +3509,7 @@ export class DaemonMcpProxy {
       }
       throw error;
     } finally {
-      this.endSessionCall(trackedSessionUuid, callReachedSession);
+      this.endSessionCall(trackedSessionUuids, callReachedSession);
       this.releaseReleaseEpochReference(forwardedSessionUuid);
       this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       this.removeProgressListener(registeredClient, registeredRequestId);
@@ -3523,7 +3532,11 @@ export class DaemonMcpProxy {
     name: string,
     callerArgs: Record<string, unknown>,
     isSessionAcquisition: boolean,
-  ): { forwardedArgs: Record<string, unknown>; allowReleasedSession: boolean } {
+  ): {
+    forwardedArgs: Record<string, unknown>;
+    allowReleasedSession: boolean;
+    usesDeviceSelector: boolean;
+  } {
     const isTerminalSessionlessDiscovery =
       this.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
@@ -3545,6 +3558,7 @@ export class DaemonMcpProxy {
       forwardedArgs,
       allowReleasedSession:
         isSessionAcquisition || isTerminalSessionlessDiscovery || canUseSurvivingSession,
+      usesDeviceSelector,
     };
   }
 
@@ -3590,6 +3604,7 @@ export class DaemonMcpProxy {
     const sessionUuid = getDeviceSessionIdFromResult(result);
     if (sessionUuid) {
       this.throwIfSessionReleasedSince(sessionUuid, releaseEpoch);
+      this.rememberSessionPlatform(sessionUuid, result);
       this.rememberSessionUuid(
         name,
         { sessionUuid, deviceId: getDeviceIdFromResult(result) },
@@ -3625,7 +3640,9 @@ export class DaemonMcpProxy {
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
     if (!this.canUseSurvivingSession(args, usesDeviceSelector)) {
-      this.throwIfBoundSessionUnavailable(explicitSessionUuid);
+      this.throwIfBoundSessionUnavailable(explicitSessionUuid, () =>
+        this.canUseSurvivingSession(args, usesDeviceSelector),
+      );
     }
     const normalizedArgs =
       explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
@@ -3669,12 +3686,20 @@ export class DaemonMcpProxy {
     return explicit ? liveOwned.includes(explicit) : liveOwned.length > 0 && usesDeviceSelector;
   }
 
-  private throwIfBoundSessionUnavailable(explicitSessionUuid?: string): void {
+  private throwIfBoundSessionUnavailable(
+    explicitSessionUuid?: string,
+    survivingSessionUsable?: () => boolean,
+  ): void {
     this.throwIfFencedForCaller(explicitSessionUuid);
     if (!this.isBoundSessionReplayExpired()) {
       return;
     }
     this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
+    // The latest binding idled out, but a selector call may still reach another live session
+    // this proxy holds (#10692): only the idle binding is retired, not the caller's device.
+    if (survivingSessionUsable?.()) {
+      return;
+    }
     this.throwIfFencedForCaller(explicitSessionUuid);
   }
 
@@ -3795,19 +3820,61 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Count a forwarded call against the session it uses; returns the UUID to pass to
+   * Count a forwarded call against the sessions it uses; returns the UUIDs to pass to
    * {@link endSessionCall}. Inventory observation never uses the session it names, so it neither
    * holds nor refreshes it.
    */
-  private beginSessionCall(name: string, sessionUuid: string | undefined): string | undefined {
-    if (sessionUuid === undefined || isDeviceInventoryTool(name)) {
-      return undefined;
+  private beginSessionCall(name: string, sessionUuids: readonly string[]): readonly string[] {
+    if (isDeviceInventoryTool(name)) {
+      return [];
     }
-    this.sessionCallsInFlight.set(
-      sessionUuid,
-      (this.sessionCallsInFlight.get(sessionUuid) ?? 0) + 1,
-    );
-    return sessionUuid;
+    for (const sessionUuid of sessionUuids) {
+      this.sessionCallsInFlight.set(
+        sessionUuid,
+        (this.sessionCallsInFlight.get(sessionUuid) ?? 0) + 1,
+      );
+    }
+    return sessionUuids;
+  }
+
+  /** The sessions a forwarded call uses: the one it names, or the ones its device selector reaches. */
+  private sessionsUsedByCall(
+    forwardedSessionUuid: string | undefined,
+    usesDeviceSelector: boolean,
+    callerArgs: Record<string, unknown>,
+  ): string[] {
+    if (forwardedSessionUuid !== undefined) {
+      return [forwardedSessionUuid];
+    }
+    return usesDeviceSelector ? this.sessionsReachedBySelector(callerArgs) : [];
+  }
+
+  /**
+   * The sessions a call routed by a `deviceId`/`platform` selector reaches (#10692). Such a call
+   * carries no session UUID: the daemon resolves the selector among the sessions this proxy owns.
+   * A session matches when its recorded device (or platform) is the one selected; when nothing is
+   * recorded for the only live session, that session is the one the daemon can reach.
+   */
+  private sessionsReachedBySelector(args: Record<string, unknown>): string[] {
+    const live = [
+      ...(this.boundSessionUuid !== undefined && !this.terminalBoundSession
+        ? [this.boundSessionUuid]
+        : []),
+      ...this.otherHeldSessions.keys(),
+    ];
+    const selected = (sessionUuid: string): boolean | undefined => {
+      if (typeof args.deviceId === "string") {
+        const deviceId = this.sessionDeviceIds.get(sessionUuid);
+        return deviceId === undefined ? undefined : deviceId === args.deviceId;
+      }
+      const platform = this.sessionPlatforms.get(sessionUuid);
+      return platform === undefined ? undefined : platform === args.platform;
+    };
+    const matches = live.filter((sessionUuid) => selected(sessionUuid) === true);
+    if (matches.length > 0) {
+      return matches;
+    }
+    return live.length === 1 && selected(live[0]) === undefined ? live : [];
   }
 
   /**
@@ -3816,10 +3883,13 @@ export class DaemonMcpProxy {
    * session 2 min after the END of its last tool call, however long that call ran. A call that never reached a
    * live session (a transport or pre-dispatch failure) used nothing, so it leaves the clock alone.
    */
-  private endSessionCall(sessionUuid: string | undefined, reachedSession: boolean): void {
-    if (sessionUuid === undefined) {
-      return;
+  private endSessionCall(sessionUuids: readonly string[], reachedSession: boolean): void {
+    for (const sessionUuid of sessionUuids) {
+      this.endOneSessionCall(sessionUuid, reachedSession);
     }
+  }
+
+  private endOneSessionCall(sessionUuid: string, reachedSession: boolean): void {
     const remaining = (this.sessionCallsInFlight.get(sessionUuid) ?? 1) - 1;
     if (remaining > 0) {
       this.sessionCallsInFlight.set(sessionUuid, remaining);
@@ -4833,6 +4903,7 @@ export class DaemonMcpProxy {
     this.livenessConflictLogged.delete(sessionUuid);
     if (!keepHandover) {
       this.sessionDeviceIds.delete(sessionUuid);
+      this.sessionPlatforms.delete(sessionUuid);
       this.stallHandovers.delete(sessionUuid);
     }
   }
@@ -5169,6 +5240,7 @@ export class DaemonMcpProxy {
     }
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
+    this.rememberSessionPlatform(mintedSessionUuid, result);
     // A prior binding's keeper must not outlive the rebind to a fresh session.
     // (A terminal fence already stopped it; this covers re-acquiring over a live
     // binding.)
@@ -5210,6 +5282,14 @@ export class DaemonMcpProxy {
     // can arrive while it is in flight, fence and clear the binding, and make
     // this acquisition result stale before it reaches the caller.
     this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+  }
+
+  /** Learn a session's platform so a `platform` selector can be matched to it (#10692). */
+  private rememberSessionPlatform(sessionUuid: string, result: unknown): void {
+    const platform = getDevicePlatformFromResult(result);
+    if (platform) {
+      this.sessionPlatforms.set(sessionUuid, platform);
+    }
   }
 
   /** Learn which device a session runs on so a liveness handover can name it (#10053). */
@@ -5696,6 +5776,7 @@ export class DaemonMcpProxy {
     this.otherHeldSessions.clear();
     this.livenessAcks.clear();
     this.sessionDeviceIds.clear();
+    this.sessionPlatforms.clear();
     this.stallHandovers.clear();
     this.pendingSessionLosses.clear();
     this.livenessHandoverListeners.clear();

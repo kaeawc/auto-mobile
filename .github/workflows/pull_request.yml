@@ -1338,7 +1338,9 @@ jobs:
   # =============================================================================
 
   node-unit-tests:
-    timeout-minutes: 15
+    # 1560s unit lane cap (720s shard budget, one infra retry: see
+    # scripts/test-ts.sh) + setup, cold-import probe and upload < 1920s.
+    timeout-minutes: 32
     name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: [detect-changes, fast-validation]
@@ -1368,6 +1370,9 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          # 2 x (720s budget + 60s attempt overhead): a shard that times out or
+          # is killed by a signal is retried once (#10583).
+          AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
           AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then

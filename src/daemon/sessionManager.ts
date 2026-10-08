@@ -934,6 +934,11 @@ export {
   sanitizeCliSessionIdleTimeoutMs,
 } from "./constants";
 
+/** The idle window default before the 2026-10-08 owner decision; rows persisted with it adopt the current one. */
+const LEGACY_DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+/** The CLI idle default before the 2026-10-08 owner decision; rows persisted with it adopt the current one. */
+const LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
@@ -6631,15 +6636,62 @@ export class SessionManager {
       persisted.heartbeat_timeout_source,
     );
     const livenessPolicy = persistedLivenessPolicy(persisted.liveness_policy);
-    const preCliLiveness = persistedPreCliLiveness(persisted);
+    const persistedPreCli = persistedPreCliLiveness(persisted);
+    const preCliLiveness = persistedPreCli && {
+      ...persistedPreCli,
+      heartbeatTimeoutMs: this.currentDefaultLease(
+        persistedPreCli.heartbeatTimeoutMs,
+        persistedPreCli.heartbeatTimeoutSource,
+      ),
+      sessionTimeoutMs: this.currentDefaultIdleWindow(persistedPreCli.sessionTimeoutMs),
+    };
+    const sessionTimeoutMs = this.currentDefaultIdleWindow(persisted.session_timeout_ms);
+    if (livenessPolicy === "cli-idle") {
+      // A CLI session's heartbeat timeout is its idle timeout, whatever the stored source says.
+      const cliIdleTimeoutMs =
+        persisted.heartbeat_timeout_ms === LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS
+          ? Math.min(resolveCliSessionIdleTimeoutMs(), MAX_CLI_SESSION_IDLE_TIMEOUT_MS)
+          : persisted.heartbeat_timeout_ms;
+      return {
+        sessionTimeoutMs: Math.max(sessionTimeoutMs, cliIdleTimeoutMs),
+        heartbeatTimeoutMs: cliIdleTimeoutMs,
+        heartbeatTimeoutSource,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        livenessPolicy,
+        ...(preCliLiveness ? { preCliLiveness } : {}),
+      };
+    }
     return {
-      sessionTimeoutMs: persisted.session_timeout_ms,
-      heartbeatTimeoutMs: persisted.heartbeat_timeout_ms,
+      sessionTimeoutMs,
+      heartbeatTimeoutMs: this.currentDefaultLease(
+        persisted.heartbeat_timeout_ms,
+        heartbeatTimeoutSource,
+      ),
       heartbeatTimeoutSource,
       hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
       livenessPolicy,
       ...(preCliLiveness ? { preCliLiveness } : {}),
     };
+  }
+
+  /**
+   * A recovered session's lease: one this daemon (or an older one) chose by default follows the
+   * current default, so an upgrade does not leave a pre-upgrade session on the old lease for its
+   * whole life. An explicitly requested lease is kept.
+   */
+  private currentDefaultLease(heartbeatTimeoutMs: number, source: "default" | "custom"): number {
+    return source === "default" ? getDefaultSessionHeartbeatTimeoutMs() : heartbeatTimeoutMs;
+  }
+
+  /**
+   * A recovered session's idle window. The stored value has no source column, so a row holding
+   * exactly the pre-2026-10-08 default (30 min) is treated as defaulted and follows the current
+   * idle window; any other value was requested and is kept.
+   */
+  private currentDefaultIdleWindow(sessionTimeoutMs: number): number {
+    return sessionTimeoutMs === LEGACY_DEFAULT_SESSION_TIMEOUT_MS
+      ? this.SESSION_TIMEOUT_MS
+      : sessionTimeoutMs;
   }
 
   // Intentionally NOT barrier-tracked when reached via the awaited path

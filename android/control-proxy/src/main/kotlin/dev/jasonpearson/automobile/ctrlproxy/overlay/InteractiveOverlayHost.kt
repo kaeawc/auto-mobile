@@ -209,8 +209,15 @@ class DefaultInteractiveOverlayHost(
 
   override suspend fun replace(request: InteractiveOverlayRequest): Boolean = show(request)
 
+  /**
+   * Only the system layer on the default display uses the service's own WindowManager: its default
+   * token is the accessibility-overlay token, so a window added through it is stacked like an
+   * accessibility overlay whatever its type. An app-layer window there would draw above the
+   * notification shade and status bar (#10529), so it gets its own application-overlay window
+   * context like any other display.
+   */
   private fun windowFor(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow =
-    if (displayId == Display.DEFAULT_DISPLAY) {
+    if (displayId == Display.DEFAULT_DISPLAY && layer == OverlayWindowLayer.SYSTEM) {
       OverlayDisplayWindow(
         context,
         windowManager,
@@ -219,7 +226,8 @@ class DefaultInteractiveOverlayHost(
       )
     } else {
       requireNotNull(displayWindows.open(displayId, layer)) {
-        "Unknown or disconnected display: $displayId"
+        if (displayId == Display.DEFAULT_DISPLAY) "Cannot attach an app-layer window"
+        else "Unknown or disconnected display: $displayId"
       }
     }
 

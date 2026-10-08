@@ -545,3 +545,83 @@ describe("tapOn fresh hierarchy transition fence", () => {
     }
   });
 });
+
+// #9847: after a fold the caller's stamp is behind, but a selector is not a coordinate.
+describe("unscoped selector tapOn re-resolves against a new display generation", () => {
+  function staleCallerHarness(platform: "android" | "ios") {
+    const h = harness(cases[0], platform);
+    h.transitions.transition(1);
+    const fresh = {
+      ...h.screen,
+      displayRevision: h.transitions.fullRevision,
+      display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
+    } as ObserveResult;
+    const action = new BaseVisualChange(
+      h.targetDevice,
+      h.adb,
+      h.timer,
+      h.deps.renderedDisplayRevision,
+      h.deps,
+    );
+    action.observeScreen = h.observe;
+    return { h, fresh, action };
+  }
+  const options = (toolName: string) => ({
+    changeExpected: false,
+    skipUiStability: true,
+    predictionContext: { toolName, toolArgs: {} },
+  });
+
+  for (const platform of ["android", "ios"] as const) {
+    test(`${platform}: one fresh read at the new generation, then the block runs`, async () => {
+      const { h, fresh, action } = staleCallerHarness(platform);
+      h.observe.setObserveResult(fresh);
+      const seen: ObserveResult[] = [];
+      const result = await action.observedInteraction(async (observation) => {
+        seen.push(observation);
+        return { success: true };
+      }, options("tapOn"));
+      expect(result.success).toBe(true);
+      expect(seen.map((observation) => observation.display.generation)).toEqual([8]);
+      expect(h.observe.getExecuteOptions()[0]?.freshness).toBe("fresh");
+    });
+  }
+
+  test("a read still at the old revision keeps the refusal", async () => {
+    const { action } = staleCallerHarness("android");
+    let calls = 0;
+    const run = () =>
+      action.observedInteraction(async () => {
+        calls++;
+        return { success: true };
+      }, options("tapOn"));
+    assertStale(await rejection(run), 7, 8);
+    expect(calls).toBe(0);
+  });
+
+  test("a transition after the re-read is fenced at the re-read generation", async () => {
+    const { h, fresh, action } = staleCallerHarness("android");
+    h.observe.setObserveResult(fresh);
+    spyOn(h.adb, "getDeviceTimestampMs").mockImplementation(async () => {
+      h.transitions.transition(1);
+      return h.timer.now();
+    });
+    const run = () => action.observedInteraction(async () => ({ success: true }), options("tapOn"));
+    assertStale(await rejection(run), 8, 9);
+  });
+
+  for (const toolName of ["tapAt", "tapAny", "swipeOn"]) {
+    test(`${toolName} keeps refusing caller coordinates`, async () => {
+      const { h, fresh, action } = staleCallerHarness("android");
+      h.observe.setObserveResult(fresh);
+      assertStale(
+        await rejection(() =>
+          action.observedInteraction(async () => ({ success: true }), options(toolName)),
+        ),
+        7,
+        8,
+      );
+      expect(h.observe.getExecuteCallCount()).toBe(0);
+    });
+  }
+});

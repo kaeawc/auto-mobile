@@ -97,6 +97,13 @@ const COORDINATE_ACTIONS = new Set([
   "pinchOn",
 ]);
 
+/**
+ * Actions that resolve their target from the pre-action read rather than from coordinates the
+ * caller chose. A caller observation from an older display generation costs them one fresh read
+ * resolved against the new generation instead of a refusal (#9847).
+ */
+const SELECTOR_RESOLVED_ACTIONS = new Set(["tapOn"]);
+
 export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
 
 export interface DisplayFence {
@@ -304,7 +311,7 @@ export class BaseVisualChange {
     );
   }
 
-  protected captureDisplayFence(): DisplayFence {
+  protected captureDisplayFence(resolvedGeneration?: number): DisplayFence {
     const deviceId = this.device.deviceId;
     const currentRevision = () =>
       this.device.platform === "ios"
@@ -312,6 +319,7 @@ export class BaseVisualChange {
         : this.displayTransitionReader.revision(deviceId);
     const revision = currentRevision();
     const observedGeneration =
+      resolvedGeneration ??
       this.renderedDisplayGeneration(deviceId) ??
       this.displayTransitionReader.identityRevision(deviceId);
     return {
@@ -359,12 +367,19 @@ export class BaseVisualChange {
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const actionDisplayRevision = (): number =>
       this.displayTransitionReader.identityRevision(this.device.deviceId);
-    const displayRevision = actionDisplayRevision();
-    const fence = this.captureDisplayFence();
+    let displayRevision = actionDisplayRevision();
+    let fence = this.captureDisplayFence();
     // Without a stored caller stamp, in-flight fences use the action-start identity generation.
-    const observedGeneration =
+    let observedGeneration =
       this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
+    // An unscoped selector action re-reads the display instead of trusting a caller stamp.
+    const reresolvesTarget =
+      SELECTOR_RESOLVED_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
+      options.display === undefined &&
+      !options.previousObservation &&
+      !options.skipPreviousObserve;
+    let refreshForDisplayChange = false;
     if (
       !options.skipCallerDisplayFence &&
       COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
@@ -376,7 +391,10 @@ export class BaseVisualChange {
           )
         : callerDisplayRevision !== this.displayTransitionReader.revision(this.device.deviceId))
     ) {
-      throw this.staleDisplay(observedGeneration);
+      if (!reresolvesTarget) {
+        throw this.staleDisplay(observedGeneration);
+      }
+      refreshForDisplayChange = true;
     }
 
     if (progress) {
@@ -394,6 +412,8 @@ export class BaseVisualChange {
         options.usesObservationForResolution !== false
           ? pendingWindowResolutionGeneration(this.device.deviceId)
           : undefined;
+      // A pending window resolution or a caller-stale display needs one fresh read.
+      const requiresFreshRead = refreshForDisplayChange || resolutionGeneration !== undefined;
       let staleCachedRefetch = false;
       let knownWrongWindow = resolutionGeneration !== undefined;
       try {
@@ -411,7 +431,7 @@ export class BaseVisualChange {
             cached?.viewHierarchy && !cached.viewHierarchy.hierarchy.error,
           );
           staleCachedRefetch =
-            resolutionGeneration !== undefined ||
+            requiresFreshRead ||
             (usableCached && BaseVisualChange.shouldRefetchCachedObservation(cached!));
           if (
             !usableCached ||
@@ -477,7 +497,24 @@ export class BaseVisualChange {
     }
 
     const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
-    if (coordinateAction && actionDisplayRevision() !== displayRevision) {
+    if (
+      reresolvesTarget &&
+      (refreshForDisplayChange || actionDisplayRevision() !== displayRevision) &&
+      previousObserveResult?.displayRevision !== undefined &&
+      previousObserveResult.displayRevision ===
+        this.displayTransitionReader.revision(this.device.deviceId)
+    ) {
+      // The pre-action read was recorded at the current display revision, so the selector
+      // resolves against the new generation; later transitions are still fenced from here.
+      displayRevision = actionDisplayRevision();
+      observedGeneration = this.displayTransitionReader.identityRevision(this.device.deviceId);
+      fence = this.captureDisplayFence(observedGeneration);
+      refreshForDisplayChange = false;
+    }
+    if (
+      coordinateAction &&
+      (refreshForDisplayChange || actionDisplayRevision() !== displayRevision)
+    ) {
       throw this.staleDisplay(observedGeneration);
     }
 

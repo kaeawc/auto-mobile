@@ -106,6 +106,8 @@ interface RotationSettingCleanup {
 
 const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
 const ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS = 1000;
+// Reads of a non-default display's rotation after `cmd window user-rotation -d` (150ms apart).
+const DISPLAY_ROTATION_CONFIRM_ATTEMPTS = 5;
 
 type AlreadyAppliedOrientationDecision =
   | { kind: "handled"; result: RotateResult }
@@ -1330,23 +1332,12 @@ export class Rotate extends BaseVisualChange {
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
           if (display !== 0) {
-            await this.assertDisplayExists(display, signal);
-            const rotation = rotationForOrientation(
+            return await this.rotateNonDefaultDisplay(
               orientation,
-              await readNaturalLandscape(this.adb, signal, display),
+              display,
+              lockOrientation,
+              signal,
             );
-            const mode = lockOrientation === false ? "free" : "lock";
-            await this.adb.executeCommand(
-              `shell cmd window user-rotation -d ${display} ${mode} ${rotation}`,
-            );
-            return {
-              success: true,
-              orientation,
-              value: rotation,
-              currentOrientation: orientation,
-              rotationPerformed: true,
-              message: `Rotated display ${display} to ${orientation}`,
-            };
           }
           return await this.executeAndroidRotation(
             orientation,
@@ -1366,6 +1357,94 @@ export class Rotate extends BaseVisualChange {
           : "Failed to rotate device",
       );
     }
+  }
+
+  private async rotateNonDefaultDisplay(
+    orientation: "portrait" | "landscape",
+    display: number,
+    lockOrientation: boolean | undefined,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
+    await this.assertDisplayExists(display, signal);
+    const naturalLandscape = await readNaturalLandscape(this.adb, signal, display);
+    const rotation = rotationForOrientation(orientation, naturalLandscape);
+    const mode = lockOrientation === false ? "free" : "lock";
+    await this.adb.executeCommand(
+      `shell cmd window user-rotation -d ${display} ${mode} ${rotation}`,
+    );
+    // The command returning is not proof the display rotated (#10362): read the target
+    // display's own rotation back before reporting the requested orientation.
+    const actualRotation = await this.readDisplayRotationUntil(
+      display,
+      (value) => orientationFromRotation(value, naturalLandscape) === orientation,
+      signal,
+    );
+    const base = { orientation, value: rotation, rotationPerformed: true };
+    if (actualRotation === null) {
+      const warning = `Display ${display}'s orientation after rotation could not be confirmed (live rotation read failed); the requested ${orientation} orientation may not be held.`;
+      return { ...base, success: true, currentOrientation: "unknown", warning, message: warning };
+    }
+    const actual = orientationFromRotation(actualRotation, naturalLandscape) ?? "unknown";
+    if (actual === orientation) {
+      return {
+        ...base,
+        success: true,
+        currentOrientation: orientation,
+        message: `Rotated display ${display} to ${orientation}`,
+      };
+    }
+    const error = `Requested ${orientation} on display ${display}, but the display is actually in ${actual} (rotation ${actualRotation}) after the rotation settled.`;
+    return {
+      ...base,
+      success: false,
+      currentOrientation: actual,
+      rotationPerformed: false,
+      error,
+      message: error,
+    };
+  }
+
+  /**
+   * Poll one display's live WindowManager rotation until `reached` accepts it, within a bounded
+   * budget: at most {@link DISPLAY_ROTATION_CONFIRM_ATTEMPTS} reads, no new read once
+   * {@link ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS} has elapsed, and each read capped at
+   * {@link ROTATION_READ_FLOOR_MS}. Returns the last rotation read, or null when none was readable.
+   */
+  private async readDisplayRotationUntil(
+    display: number,
+    reached: (rotation: number) => boolean,
+    signal?: AbortSignal,
+  ): Promise<number | null> {
+    const start = this.timer.now();
+    let last: number | null = null;
+    for (let attempt = 1; attempt <= DISPLAY_ROTATION_CONFIRM_ATTEMPTS; attempt++) {
+      throwIfAborted(signal);
+      try {
+        const rotation = await readWindowManagerRotation(this.adb, {
+          displayId: display,
+          signal,
+          timeoutMs: ROTATION_READ_FLOOR_MS,
+        });
+        last = rotation ?? last;
+        if (rotation !== null && reached(rotation)) {
+          return rotation;
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(
+          `[Rotate] Failed to read display ${display} rotation: ${errorMessage(error)}`,
+          error,
+        );
+      }
+      if (
+        attempt === DISPLAY_ROTATION_CONFIRM_ATTEMPTS ||
+        this.timer.now() - start >= ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS
+      ) {
+        break;
+      }
+      await awaitWhileRequestIsLive(this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS), signal);
+    }
+    return last;
   }
 
   private async assertDisplayExists(display: number, signal?: AbortSignal): Promise<void> {

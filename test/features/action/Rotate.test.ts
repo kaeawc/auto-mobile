@@ -128,7 +128,10 @@ describe("Rotate", () => {
     fakeAdb.setCommandResponse("shell wm size -d 2", createExecResult("Physical size: 1080x1920"));
     const result = await rotate.execute("landscape", undefined, true, undefined, 2);
     expect(result.success).toBe(true);
-    expect(fakeAdb.getExecutedCommands()).toEqual([
+    // The display's rotation read-back is covered in Rotate.displayReadBack.test.ts.
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => !command.includes("dumpsys window")),
+    ).toEqual([
       "shell cmd display get-displays",
       "shell wm size -d 2",
       "shell cmd window user-rotation -d 2 lock 1",
@@ -146,7 +149,9 @@ describe("Rotate", () => {
     expect(landscape.value).toBe(0);
     const portrait = await rotate.execute("portrait", undefined, true, undefined, 2);
     expect(portrait.value).toBe(1);
-    expect(fakeAdb.getExecutedCommands()).toEqual([
+    expect(
+      fakeAdb.getExecutedCommands().filter((command) => !command.includes("dumpsys window")),
+    ).toEqual([
       "shell cmd display get-displays",
       "shell wm size -d 2",
       "shell cmd window user-rotation -d 2 lock 0",

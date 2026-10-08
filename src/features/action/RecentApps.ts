@@ -99,10 +99,7 @@ export class RecentApps extends BaseVisualChange {
   ): Promise<ObserveResult> {
     let observation: ObserveResult | undefined;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const minTimestamp = await awaitWhileRequestIsLive(
-        this.adb.getDeviceTimestampMs(),
-        signal,
-      );
+      const minTimestamp = await awaitWhileRequestIsLive(this.adb.getDeviceTimestampMs(), signal);
       observation = await awaitWhileRequestIsLive(
         this.observeScreen.execute({
           freshness: "fresh",

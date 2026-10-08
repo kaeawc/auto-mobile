@@ -12,7 +12,7 @@ import {
   type OverlayAgentConnect,
 } from "../../../../src/features/overlay/ios/overlayAgentInjection";
 import { OVERLAY_AGENT_PROTOCOL_VERSION } from "../../../../src/features/overlay/ios/overlayAgentClient";
-import { noOverlayAgentConnections } from "../../../../src/features/overlay/overlayAgentConnections";
+import { noOverlayAgentConnections } from "../../../../src/features/overlay/ios/iosOverlayTransport";
 import type { BootedDevice } from "../../../../src/models";
 import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
 import {

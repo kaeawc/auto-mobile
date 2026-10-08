@@ -15,7 +15,7 @@ import { logger } from "../../../utils/logger";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { ResolvedOverlayAgent } from "../../overlay-agent/OverlayAgentProvider";
-import type { OverlayAgentConnections } from "../overlayAgentConnections";
+import type { OverlayAgentConnections } from "./iosOverlayTransport";
 import {
   connectOverlayAgent,
   createOverlayAgentLaunchConfig,

@@ -104,6 +104,33 @@ describe("WebpBinaryResolver", () => {
     await expect(resolver.resolveCwebp()).resolves.toBe(pathCwebp);
   });
 
+  test("uses the bundled x64 copy on Windows ARM64 via emulation", async () => {
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    const bundledCwebp = path.join(ROOT, "vendor", "libwebp", "win32-x64", "cwebp.exe");
+    fileSystem.addExecutable(bundledCwebp);
+
+    const resolver = resolverFor(fileSystem, {
+      platform: "win32",
+      arch: "arm64",
+      env: { PATH: "" },
+    });
+
+    await expect(resolver.resolveCwebp()).resolves.toBe(bundledCwebp);
+  });
+
+  test("does not use the bundled Windows copy on unsupported Windows architectures", async () => {
+    const fileSystem = new FakeWebpBinaryFileSystem();
+    fileSystem.addExecutable(path.join(ROOT, "vendor", "libwebp", "win32-x64", "cwebp.exe"));
+
+    const resolver = resolverFor(fileSystem, {
+      platform: "win32",
+      arch: "ia32",
+      env: { PATH: "" },
+    });
+
+    await expect(resolver.resolveCwebp()).rejects.toBeInstanceOf(ActionableError);
+  });
+
   test("skips non-executable PATH candidates", async () => {
     const fileSystem = new FakeWebpBinaryFileSystem();
     const executableCwebp = path.join(ROOT, "second-bin", "cwebp");

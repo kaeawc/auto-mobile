@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.File
@@ -32,6 +33,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
+private val DAEMON_PATHS_LOG = LoggerFactory.getLogger("DaemonSocketPaths")
 private const val DAEMON_REGISTER_SESSION_METHOD = "daemon/registerSession"
 private const val DAEMON_CAPABILITIES_METHOD = "daemon/capabilities"
 private const val INPUT_TYPE_TEXT_APPEND_CAPABILITY = "input/typeText.mode:append"
@@ -81,7 +83,13 @@ class McpDaemonClient(
   internal constructor(
     requestTransport: DaemonRequestTransport,
     json: Json = DaemonJson,
-  ) : this(socketPathValue = "in-memory-daemon", json = json, clientVersion = null) {
+    sessionUuid: String? = null,
+  ) : this(
+    socketPathValue = "in-memory-daemon",
+    json = json,
+    clientVersion = null,
+    sessionUuid = sessionUuid,
+  ) {
     this.daemonLifecycle = null
     this.requestTransport = requestTransport
   }
@@ -1164,32 +1172,51 @@ class McpDaemonClient(
 object DaemonSocketPaths {
   private val ignoredVersions = setOf("latest", "unknown")
 
-  fun socketPath(): String {
-    val userId = getUserId()
-    return resolveDaemonPath(
+  /**
+   * The uid cannot change during a run, so it is resolved once per process (#10238). Before this it
+   * forked `id -u` on every path lookup: four forks ahead of each click-to-tap or keystroke, and
+   * one per root recomposition on the UI thread.
+   */
+  private val processUserId = CachedDaemonUserId()
+
+  fun socketPath(): String = socketPath(processUserId)
+
+  fun pidFilePath(): String = pidFilePath(processUserId)
+
+  internal fun socketPath(
+    userId: CachedDaemonUserId,
+    override: String? =
       System.getenv("AUTOMOBILE_DAEMON_SOCKET_PATH")
         ?: System.getenv("AUTO_MOBILE_DAEMON_SOCKET_PATH"),
-      "/tmp/auto-mobile-daemon-$userId.sock",
-    )
-  }
+  ): String = resolveDaemonPath(override, { "/tmp/auto-mobile-daemon-${userId.value}.sock" })
 
-  fun pidFilePath(): String {
-    val userId = getUserId()
-    return resolveDaemonPath(
+  internal fun pidFilePath(
+    userId: CachedDaemonUserId,
+    override: String? =
       System.getenv("AUTOMOBILE_DAEMON_PID_FILE_PATH")
         ?: System.getenv("AUTO_MOBILE_DAEMON_PID_FILE_PATH"),
-      "/tmp/auto-mobile-daemon-$userId.pid",
+  ): String =
+    resolveDaemonPath(
+      override,
+      { "/tmp/auto-mobile-daemon-${userId.value}.pid" },
       System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
     )
-  }
 
   internal fun resolveDaemonPath(
     override: String?,
     defaultPath: String,
     daemonLaunchCwd: String =
       System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
+  ): String = resolveDaemonPath(override, { defaultPath }, daemonLaunchCwd)
+
+  /** [defaultPath] is lazy so an explicit [override] never pays for the default's uid lookup. */
+  internal fun resolveDaemonPath(
+    override: String?,
+    defaultPath: () -> String,
+    daemonLaunchCwd: String =
+      System.getenv("AUTOMOBILE_DAEMON_LAUNCH_CWD") ?: System.getProperty("user.dir", "."),
   ): String {
-    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath
+    val configuredPath = override?.trim().takeUnless { it.isNullOrEmpty() } ?: return defaultPath()
     val path = Path.of(configuredPath)
     return if (path.isAbsolute) configuredPath
     else Path.of(daemonLaunchCwd, configuredPath).toString()
@@ -1237,27 +1264,49 @@ object DaemonSocketPaths {
   private const val SNAPSHOT_SUFFIX = "-SNAPSHOT"
 
   internal fun releaseVersion(version: String): String = version.substringBefore('+')
+}
 
-  private fun getUserId(): String {
-    val userName = System.getProperty("user.name", "default").ifBlank { "default" }
-    val osName = System.getProperty("os.name", "").lowercase()
-    if (osName.contains("win")) {
-      return userName
-    }
+/**
+ * The daemon's per-user socket/PID file suffix, resolved at most once per instance. Thread-safe:
+ * concurrent first callers share one lookup. [lookup] is injectable so tests count invocations
+ * without forking a process.
+ */
+internal class CachedDaemonUserId(private val lookup: () -> String = ::lookupDaemonUserId) {
+  val value: String by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { lookup() }
+}
 
-    return try {
-      val process = ProcessBuilder("id", "-u").start()
-      val completed = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-      if (!completed) {
-        process.destroy()
-        return userName
-      }
-      val uid = process.inputStream.bufferedReader().readText().trim()
-      if (uid.isNotEmpty()) uid else userName
-    } catch (e: Exception) {
-      userName
-    }
+private fun lookupDaemonUserId(): String =
+  resolveDaemonUserId(
+    userName = System.getProperty("user.name", "default").ifBlank { "default" },
+    osName = System.getProperty("os.name", "").lowercase(),
+    readUid = ::forkUid,
+  )
+
+/**
+ * Windows and any failed or empty `id -u` read fall back to [userName], exactly as the previous
+ * per-call lookup did.
+ */
+internal fun resolveDaemonUserId(userName: String, osName: String, readUid: () -> String): String {
+  if (osName.contains("win")) {
+    return userName
   }
+  return try {
+    readUid().trim().ifEmpty { userName }
+  } catch (e: Exception) {
+    // The user name is the documented fallback identifier when `id -u` is unavailable.
+    DAEMON_PATHS_LOG.debug("Could not read the user id; using the user name: ${e.message}")
+    userName
+  }
+}
+
+/** Runs `id -u`; a timeout yields an empty string so the caller falls back to the user name. */
+private fun forkUid(): String {
+  val process = ProcessBuilder("id", "-u").start()
+  if (!process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+    process.destroy()
+    return ""
+  }
+  return process.inputStream.bufferedReader().readText()
 }
 
 @Serializable data class RegisterSessionRequest(val sessionId: String, val clientName: String)

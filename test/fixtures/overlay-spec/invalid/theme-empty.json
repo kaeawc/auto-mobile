@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "theme": {},
+    "root": {
+      "type": "text",
+      "text": "x"
+    }
+  },
+  "expectedPath": "theme"
+}

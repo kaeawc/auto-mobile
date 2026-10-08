@@ -58,7 +58,6 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
-      finder,
       resolver: new FakeScrollElementResolver(finder),
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;

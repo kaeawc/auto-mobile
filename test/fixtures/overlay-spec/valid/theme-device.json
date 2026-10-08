@@ -1,0 +1,18 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "system",
+    "colors": {
+      "source": "device"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "x"
+  }
+}

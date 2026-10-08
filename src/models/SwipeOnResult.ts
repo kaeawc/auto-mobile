@@ -1,4 +1,5 @@
 import type { TimingData } from "../utils/PerformanceTracker";
+import type { ContainerFailure } from "./ActionableError";
 import { BaseActionResult } from "./BaseActionResult";
 import { Element } from "./Element";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
@@ -8,6 +9,8 @@ import { ToolDebugInfo } from "../utils/DebugContextBuilder";
  */
 export interface SwipeOnResult extends BaseActionResult {
   warning?: string;
+  /** Which container level failed to resolve (not found or ambiguous), as dragAndDrop reports. */
+  containerFailure?: ContainerFailure;
   /** Requested iOS diagnostics retained when failure skips the post-action observation. */
   timing?: TimingData;
 

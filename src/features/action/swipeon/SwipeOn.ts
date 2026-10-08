@@ -188,6 +188,13 @@ function displaySwipeCoordinates(
   }
 }
 
+/** The structured container diagnostic a selector failure carries onto the result (#10325). */
+function containerFailureOf(error: unknown): Pick<SwipeOnResult, "containerFailure"> {
+  return error instanceof ActionableError && error.containerFailure
+    ? { containerFailure: error.containerFailure }
+    : {};
+}
+
 export class SwipeOn extends BaseVisualChange {
   private readonly skipCallerDisplayFence: boolean;
   private readonly stopAfterIosGestureFailure: boolean;
@@ -1082,7 +1089,10 @@ export class SwipeOn extends BaseVisualChange {
           throw error;
         }
         logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
-        return withStaleDisplay(this.createErrorResult(errorMessage(error)), error);
+        return withStaleDisplay(
+          { ...this.createErrorResult(errorMessage(error)), ...containerFailureOf(error) },
+          error,
+        );
       }
     }
     return undefined;
@@ -1363,6 +1373,7 @@ export class SwipeOn extends BaseVisualChange {
       success: false,
       error: errorMsg,
       ...(cause instanceof SwipeOutcomeIndeterminateError ? { outcomeIndeterminate: true } : {}),
+      ...containerFailureOf(cause),
       ...(timing ? { timing } : {}),
       targetType: normalizedOptions.container ? "element" : "screen",
       x1: 0,

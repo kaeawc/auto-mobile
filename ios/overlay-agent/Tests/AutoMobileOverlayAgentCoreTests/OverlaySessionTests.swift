@@ -271,8 +271,8 @@ final class OverlaySessionTests: XCTestCase {
     }
 }
 
-private extension Result {
-    var failureValue: Failure? {
+extension Result {
+    fileprivate var failureValue: Failure? {
         if case let .failure(error) = self { return error }
         return nil
     }

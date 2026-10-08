@@ -607,14 +607,15 @@ function validateValue(value: unknown): OverlayValidationResult {
     selectorDepth: 0,
     conditionDepth: 0,
   };
+  const data = object(value) ?? {};
   const error =
     walk(value, definitions.spec, "", context, 0) ??
     repeatErrors(value) ??
     pagerErrors(context) ??
-    bindingErrors(context, object(value) ?? {}) ??
-    listItemBindingErrors(context, object(value) ?? {}) ??
-    sheetBindingErrors(context, object(value) ?? {}) ??
-    stateActionErrors(context, object(value) ?? {});
+    bindingErrors(context, data) ??
+    listItemBindingErrors(context, data) ??
+    sheetBindingErrors(context, data) ??
+    stateActionErrors(context, data);
   if (error) {
     return { success: false, error };
   }

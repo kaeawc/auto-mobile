@@ -17,6 +17,7 @@ import { join } from "node:path";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
 import { composeVariantCarousel } from "../../src/features/overlay/overlayVariants";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 const PORT = Number(process.env.AUTOMOBILE_OVERLAY_PORT ?? 8771);
 const REPO = join(import.meta.dir, "..", "..");
@@ -28,7 +29,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 interface Waiter {
   resolve: (message: Message) => void;
   reject: (error: Error) => void;
-  timeout: ReturnType<typeof setTimeout>;
+  timeout: NodeJS.Timeout;
 }
 
 class AgentConnection {
@@ -40,7 +41,10 @@ class AgentConnection {
   /** Called once when the agent goes away, so event waits settle too. */
   onClosed: (error: Error) => void = () => {};
 
-  private constructor(private readonly socket: Socket) {
+  private constructor(
+    private readonly socket: Socket,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     socket.setEncoding("utf8");
     // The injected app can exit or crash at any time; settle everything still waiting.
     socket.on("error", (error) =>
@@ -79,7 +83,7 @@ class AgentConnection {
     const waiter = requestId === undefined ? undefined : this.waiters.get(requestId);
     if (waiter !== undefined && requestId !== undefined) {
       this.waiters.delete(requestId);
-      clearTimeout(waiter.timeout);
+      this.timer.clearTimeout(waiter.timeout);
       waiter.resolve(message);
     } else if (message.type === "overlay_event") {
       this.onEvent(message);
@@ -94,7 +98,7 @@ class AgentConnection {
     }
     const requestId = `r${this.nextId++}`;
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      const timeout = this.timer.setTimeout(() => {
         this.waiters.delete(requestId);
         reject(new Error(`Overlay agent did not answer ${type} within ${REQUEST_TIMEOUT_MS} ms`));
       }, REQUEST_TIMEOUT_MS);
@@ -109,7 +113,7 @@ class AgentConnection {
     }
     this.closedError = error;
     for (const waiter of this.waiters.values()) {
-      clearTimeout(waiter.timeout);
+      this.timer.clearTimeout(waiter.timeout);
       waiter.reject(error);
     }
     this.waiters.clear();

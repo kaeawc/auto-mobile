@@ -186,8 +186,10 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     deps?: WebRtcStreamSocketServerDependencies,
+    // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "webrtcStream",
+      { allowObserverSessions: true },
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
   ) {
@@ -395,7 +397,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }
 
   private authorizeRequest(request: WebRtcStreamSocketRequest): void {
-    // Start admits live device sessions as viewers. Attached viewers authenticate and
+    // Start admits live device and observer sessions as viewers. Attached viewers authenticate and
     // use manager facts for lease/stream authority even after the device changes owner.
     const admission = request.action === "start" || !this.authenticator.resolveSubscriptionIdentity;
     this.authenticator.authorize({

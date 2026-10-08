@@ -134,11 +134,16 @@ observer entry synchronously before publishing, including rehydration. Releasing
 that device session does not restore an observer entry. Device-tool admission
 continues to consult SessionManager alone.
 
-Open owner questions:
+Read-only viewer grant (#10698): a registered observer, like any live device
+session, may watch any device through video relay subscribe and WebRTC start, as
+a read-only viewer. The grant does not depend on holding an unrelated device.
+The observation and push sockets keep unowned-device-only scope
+(`observerMaySeeDeviceOwner`). `input/*` follows ownership instead: a held device
+takes input only from a frame whose `sessionUuid` names its holder (typed code
+`device_owned_by_other_session`); an unowned device takes input from anyone.
 
-1. May the desktop watch a device owned by another session while an agent drives
-   it? That requires a read-only observer grant, not designed here.
-2. Is non-persistence acceptable? Clients must register again after daemon restart.
+Open owner question: is non-persistence acceptable? Clients must register again
+after daemon restart.
 
 The follow-up enforcement lane must make stream authentication consult
 `resolveObserverScope`, enforce it on observation-stream/push sockets, rebase on

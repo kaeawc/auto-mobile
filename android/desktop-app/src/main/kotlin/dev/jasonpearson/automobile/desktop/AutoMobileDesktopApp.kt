@@ -174,11 +174,27 @@ fun AutoMobileDesktopApp(
   // Read through rememberUpdatedState so a session rotation does not rebuild the executor (and the
   // view model keyed on it); a button press is the user using the device (#10716).
   val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
+  // The daemon accepts input for a held device only from its holder (#10698), so every input path
+  // names the desktop session, read per frame so a session rotation is picked up.
+  val latestSessionUuidProvider by rememberUpdatedState(desktopSessionState.sessionUuidProvider)
+  val desktopInputSessionUuid: () -> String? = remember { { latestSessionUuidProvider() } }
+  val desktopInputClient =
+    remember(graph) {
+      if (graph.autoMobileClient.transportName == "Unix Socket") {
+        McpDaemonClient(
+          DaemonSocketPaths.socketPath(),
+          inputSessionUuidProvider = desktopInputSessionUuid,
+        )
+      } else {
+        graph.autoMobileClient
+      }
+    }
   val controlExecutor =
     remember(graph, desktopDaemonSession) {
       InteractionNotifyingControlExecutor(
         DaemonEmulatorControlExecutor(
           graph.autoMobileClient,
+          inputClient = desktopInputClient,
           foregroundAppResolver =
             ObservationForegroundAppResolver(
               sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
@@ -311,7 +327,9 @@ fun AutoMobileDesktopApp(
       if (graph.autoMobileClient.transportName == "Unix Socket") {
         // Resolve once: this provider runs per input action on the pane's dispatch thread.
         val socketPath = DaemonSocketPaths.socketPath()
-        val provider: () -> AutoMobileClient? = { McpDaemonClient(socketPath) }
+        val provider: () -> AutoMobileClient? = {
+          McpDaemonClient(socketPath, inputSessionUuidProvider = desktopInputSessionUuid)
+        }
         provider
       } else {
         { null }

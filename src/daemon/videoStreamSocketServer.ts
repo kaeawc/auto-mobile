@@ -371,8 +371,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     private readonly deps: VideoStreamSocketServerDependencies,
     socketPath: string = getSocketPath(VIDEO_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    // Observers may watch read-only (#10698); admission is still viewer-only for non-holders.
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "video-stream subscribe",
+      { allowObserverSessions: true },
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
   ) {
@@ -531,7 +533,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.subscribing.add(socket);
     try {
       // Authenticate before starting or attaching to any capture (issue #4751):
-      // only a live device session may subscribe; non-owners attach read-only.
+      // only a live device or observer session may subscribe; non-owners attach read-only.
       this.authenticator.authorize({
         sessionUuid: request.sessionUuid,
         deviceId: request.deviceId,

@@ -66,6 +66,14 @@ class McpDaemonClient(
    */
   private val inputRequestTimeoutMs: Long = INPUT_REQUEST_TIMEOUT_MS,
   private val statusRequestTimeoutMs: Long = STATUS_REQUEST_TIMEOUT_MS,
+  /**
+   * The daemon session input frames act for (#10698). A device a session holds takes input only
+   * from that session, so a client that drives a device its desktop session holds (but is not
+   * itself bound to that session, like the per-action pane clients) names it here. Read per frame,
+   * so a rotated session is picked up; null sends sessionless input, accepted for unheld devices.
+   * Defaults to this client's own [sessionUuid].
+   */
+  private val inputSessionUuidProvider: () -> String? = { null },
 ) : AutoMobileClient {
   private var daemonLifecycle: DaemonLifecycleEnsurer? =
     if (socketPathValue == DaemonSocketPaths.socketPath()) DesktopDaemonLifecycle() else null
@@ -629,7 +637,7 @@ class McpDaemonClient(
           id = UUID.randomUUID().toString(),
           type = "mcp_request",
           method = method,
-          params = buildJsonObject(params),
+          params = withInputSession(buildJsonObject(params)),
           clientVersion = clientVersion,
           timeoutMs = inputRequestTimeoutMs,
         )
@@ -886,11 +894,18 @@ class McpDaemonClient(
         ?: throw DaemonUnavailableException("Tool-selection response missing profile UUID")
   }
 
+  /** [params] plus the `sessionUuid` input acts for, when there is one (#10698). */
+  private fun withInputSession(params: JsonObject): JsonObject {
+    val session = inputSessionUuidProvider() ?: sessionUuid
+    if (session.isNullOrBlank() || "sessionUuid" in params) return params
+    return JsonObject(params + ("sessionUuid" to JsonPrimitive(session)))
+  }
+
   private fun sendInputRequest(method: String, params: JsonObject): InputActionResult {
     // Input rides the tighter deadline: a hung input/* call froze the pane's whole input path
     // (single dispatch thread + FIFO mutex), and live interaction would rather shed one tap
     // after 5s than sit dead for a minute.
-    val response = sendRequest(method, params, timeoutMs = inputRequestTimeoutMs)
+    val response = sendRequest(method, withInputSession(params), timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
       return InputActionResult(action = method, success = false, error = response.error)
     }

@@ -881,8 +881,15 @@ fun AutoMobileContent(
         realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
     )
   SideEffect { desktopSessionBinding.value = selectedBinding }
+  // Live view and screen sharing need a session the daemon admits on the stream sockets: the one
+  // holding the device, or a registered observer-only session while the pick is only viewed (held
+  // by another session, or released for inactivity), which the daemon admits read-only (#10698).
   val desktopSessionReady =
-    desktopSessionState.boundDeviceId == activeDeviceId && activeDeviceId != null
+    activeDeviceId != null &&
+      (desktopSessionState.boundDeviceId == activeDeviceId ||
+        (desktopSessionState.isRegistered &&
+          (desktopSessionState.viewingDeviceId == activeDeviceId ||
+            desktopSessionState.idleReleasedDeviceId == activeDeviceId)))
 
   // Device snapshots span two transports: the verbs are MCP tool/resource calls, while the
   // retention config is its own Unix socket. Both are null in Fake mode so the dashboard renders

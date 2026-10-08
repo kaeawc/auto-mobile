@@ -331,6 +331,59 @@ describe("observer session admission is opt-in", () => {
       ).toThrow(/not an active daemon session/);
     }
   });
+  test("the read-only viewer grant covers observers and holders alike (#10698)", () => {
+    const registry = new ObserverSessionRegistry(new FakeTimer());
+    registry.register("observer", "desktop");
+    // "agent" holds "owned"; "live" holds "own" and nothing else; "observer" holds nothing.
+    const manager = sessionManager({
+      getSessionForDevice: (id) => (id === "owned" ? "agent" : id === "own" ? "live" : null),
+    });
+    const auth = new ObserverAdmittingStreamAuthenticator({
+      resolveSessionManager: () => manager,
+      resolveObserverRegistry: () => registry,
+      operation: "videoStream",
+      env: {},
+    });
+    const view = (sessionUuid: string, deviceId: string) => () =>
+      auth.authorize({ sessionUuid, deviceId, admitViewer: true });
+
+    // An observer-only session may watch a device another session owns.
+    expect(view("observer", "owned")).not.toThrow();
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: "observer", deviceId: "owned" }),
+    ).toEqual({ authEnabled: true, sessionExists: true, ownsDevice: false, hasDeviceOwner: true });
+    // A session holding an unrelated device gets the same read-only grant, nothing more.
+    expect(view("live", "owned")).not.toThrow();
+    expect(auth.resolveSubscriptionIdentity({ sessionUuid: "live", deviceId: "owned" })).toEqual({
+      authEnabled: true,
+      sessionExists: true,
+      ownsDevice: false,
+      hasDeviceOwner: true,
+    });
+    // The owner views its own device as its owner.
+    expect(view("live", "own")).not.toThrow();
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: "live", deviceId: "own" }),
+    ).toMatchObject({ sessionExists: true, ownsDevice: true });
+    // The grant is read-only: ownership rechecks and unregistered identities stay strict.
+    expect(() =>
+      auth.authorize({
+        sessionUuid: "observer",
+        deviceId: "owned",
+        admitViewer: true,
+        requireOwnership: true,
+      }),
+    ).toThrow(/different daemon session/);
+    expect(view("stranger", "owned")).toThrow(/unknown or expired/);
+
+    // An expired observer no longer counts as a live identity.
+    registry.release("observer");
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: "observer", deviceId: "owned" })
+        .sessionExists,
+    ).toBe(false);
+  });
+
   test("fails closed with an unavailable observer registry", () => {
     const auth = new ObserverAdmittingStreamAuthenticator({
       resolveSessionManager: () => sessionManager(),

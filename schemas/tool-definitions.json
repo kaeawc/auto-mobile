@@ -19469,6 +19469,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19562,6 +19565,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -21230,6 +21236,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -21323,6 +21332,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"

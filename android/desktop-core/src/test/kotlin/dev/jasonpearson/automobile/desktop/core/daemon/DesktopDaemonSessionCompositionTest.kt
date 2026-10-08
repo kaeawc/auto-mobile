@@ -211,6 +211,89 @@ class DesktopDaemonSessionCompositionTest {
 
   private fun DesktopDaemonSessionState?.takeControl() = requireNotNull(this).requestControl()
 
+  @Test
+  fun `closing the last pane releases the held device and stops its heartbeat`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      setContent { sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals(0, transport.count("daemon/releaseSession"))
+
+      binding.value = null
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      val heartbeatsAtClose = transport.sessionsFor("daemon/heartbeat").count { it == "session-1" }
+      repeat(3) { tick() }
+
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      assertEquals(
+        heartbeatsAtClose,
+        transport.sessionsFor("daemon/heartbeat").count { it == "session-1" },
+      )
+    }
+
+  @Test
+  fun `a focus change between devices keeps the session and never releases`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    setContent { sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    // Closing one of two panes moves focus to the survivor; the session stays held.
+    binding.value = pixelFold
+    mainClock.advanceTimeByFrame()
+    repeat(3) { tick() }
+
+    assertEquals(0, transport.count("daemon/releaseSession"))
+    assertEquals(setOf<String?>("session-1"), transport.sessionsFor("daemon/heartbeat").toSet())
+  }
+
+  @Test
+  fun `refocusing after the last pane closed re-acquires under a fresh session`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      setContent { sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      binding.value = null
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+
+      binding.value = pixel
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+
+      assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+      assertEquals(1, transport.count("daemon/releaseSession"))
+    }
+
+  @Test
+  fun `a refused bind is not a device hold so unfocusing releases nothing`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport(rejectBindsUntilAttempt = 99)
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    setContent { sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    binding.value = null
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    assertEquals(0, transport.count("daemon/releaseSession"))
+  }
+
+  private var sessionCounter = 0
+
   private fun ComposeUiTest.tick() {
     mainClock.advanceTimeBy(HEARTBEAT_MS)
     mainClock.advanceTimeByFrame()
@@ -225,9 +308,12 @@ class DesktopDaemonSessionCompositionTest {
       socketPath = "in-memory",
       binding = binding,
       sessionFactory = {
-        DesktopDaemonSession(McpDaemonClient(transport, sessionUuid = "desktop-session"))
+        DesktopDaemonSession(
+          McpDaemonClient(transport, sessionUuid = "session-${++sessionCounter}")
+        )
       },
       ioDispatcher = Dispatchers.Unconfined,
+      cleanupDispatcher = Dispatchers.Unconfined,
     )
   }
 

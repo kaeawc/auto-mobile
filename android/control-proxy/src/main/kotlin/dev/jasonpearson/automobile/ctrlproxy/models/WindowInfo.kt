@@ -22,5 +22,15 @@ data class WindowInfo(
    * older APKs never send it.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val packageName: String? = null,
+  /**
+   * Only on CtrlProxy's own interactive overlay window while one is showing: `fullscreen`, `sheet`
+   * or `floating`. Advertised by `overlay_window_metadata_v1`; omitted otherwise and by older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val overlayPlacement: String? = null,
+  /**
+   * Only alongside [overlayPlacement]: true when the overlay's rendered surface is fully opaque
+   * (window opacity 100 and an opaque root or scrim).
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val overlayOpaque: Boolean? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
 )

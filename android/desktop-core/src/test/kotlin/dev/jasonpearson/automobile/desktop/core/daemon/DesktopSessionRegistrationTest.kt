@@ -43,6 +43,18 @@ class DesktopSessionRegistrationTest {
   }
 
   @Test
+  fun `only an acknowledged bind counts as holding a device until cleared`() {
+    val registration = DesktopSessionRegistration({}, {})
+    registration.deviceBound(held = false)
+    assertTrue(registration.isRegistered.value)
+    assertFalse(registration.holdsDevice)
+    registration.deviceBound(held = true)
+    assertTrue(registration.holdsDevice)
+    registration.clear()
+    assertFalse(registration.holdsDevice)
+  }
+
+  @Test
   fun `failures subscribe frame includes the provider session UUID`() {
     var registered = false
     val client = FailuresPushSocketClient { "desktop-session".takeIf { registered } }

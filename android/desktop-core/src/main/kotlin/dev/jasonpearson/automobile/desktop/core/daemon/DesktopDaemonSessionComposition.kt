@@ -81,10 +81,16 @@ fun rememberDesktopDaemonSession(
   binding: MutableState<DesktopDaemonSessionBinding?>,
   sessionFactory: (String) -> DesktopDaemonSession = { DesktopDaemonSession.create(it) },
   ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  cleanupDispatcher: CoroutineDispatcher = Dispatchers.IO,
   onDaemonRecovered: suspend () -> Boolean = { true },
 ): DesktopDaemonSessionState {
+  // Bumped when the last pane closes while the session holds a device (#10659). Releasing a
+  // session is terminal on the daemon (a reaped or released UUID cannot be reused), so the hold is
+  // dropped by disposing this session and minting a fresh one, which registers deviceless and
+  // re-binds on demand when a pane is focused again.
+  var sessionEpoch by remember(socketPath) { mutableStateOf(0) }
   val session =
-    remember(socketPath) {
+    remember(socketPath, sessionEpoch) {
       socketPath?.let {
         runCatching { sessionFactory(it) }
           .onFailure { error ->
@@ -103,7 +109,7 @@ fun rememberDesktopDaemonSession(
   val bindingGeneration = remember(session) { AtomicLong(0L) }
 
   DisposableEffect(session) {
-    val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val cleanupScope = CoroutineScope(SupervisorJob() + cleanupDispatcher)
     onDispose {
       if (session != null) {
         cleanupScope.launch {
@@ -126,6 +132,13 @@ fun rememberDesktopDaemonSession(
     viewingDeviceId = null
     if (session == null) {
       boundDeviceId = target?.deviceId
+      return@LaunchedEffect
+    }
+
+    if (target == null && session.holdsDevice) {
+      // No pane observes the device any more: stop heartbeating it and release it by rotating
+      // the session (the old one is released by the DisposableEffect above).
+      sessionEpoch++
       return@LaunchedEffect
     }
 
@@ -152,7 +165,7 @@ fun rememberDesktopDaemonSession(
               val result = session.client.setActiveDevice(target.deviceId, target.platform)
               if (result.success) {
                 bindingAcknowledged = true
-                session.deviceBound()
+                session.deviceBound(held = true)
               } else {
                 refused = true
                 viewingDeviceId = target.deviceId

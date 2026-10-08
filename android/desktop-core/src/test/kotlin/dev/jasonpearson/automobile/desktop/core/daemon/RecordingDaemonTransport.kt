@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int = 0) :
   DaemonRequestTransport {
   private val calls = CopyOnWriteArrayList<Pair<String, String?>>()
+  private val sessionCalls = CopyOnWriteArrayList<Pair<String, String?>>()
   private val failures = CopyOnWriteArrayList<String>()
   private var bindAttempts = 0
 
@@ -27,6 +28,10 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
 
   fun count(method: String) = calls.count { it.first == method }
 
+  /** Session ids carried by [method] requests, in order (#10659). */
+  fun sessionsFor(method: String): List<String?> =
+    sessionCalls.filter { it.first == method }.map { it.second }
+
   fun boundDevices(): List<String> =
     calls.filter { it.second != null }.map { requireNotNull(it.second) }
 
@@ -40,6 +45,7 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
         null
       }
     calls.add(request.method to device)
+    sessionCalls.add(request.method to request.params["sessionId"]?.jsonPrimitive?.content)
     if (failures.remove(key)) {
       return DaemonResponse(
         id = request.id,

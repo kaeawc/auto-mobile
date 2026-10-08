@@ -78,6 +78,22 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `button and list item icons accept the full icon set`() {
+    for (root in
+      listOf(
+        """{"type":"button","label":"Connect","icon":"wifi"}""",
+        """{"type":"listItem","headline":"Wi-Fi","leadingIcon":"wifi"}""",
+        """{"type":"listItem","headline":"Wi-Fi","trailing":{"type":"icon","name":"wifi"}}""",
+      )) {
+      val spec = """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":$root}"""
+      val accepted = OverlaySpecValidator.validate(spec)
+      assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
+      val unknown = OverlaySpecValidator.validate(spec.replace("\"wifi\"", "\"not_an_icon\""))
+      assertTrue(unknown is OverlaySpecValidation.Failure, root)
+    }
+  }
+
+  @Test
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())
     val padding =

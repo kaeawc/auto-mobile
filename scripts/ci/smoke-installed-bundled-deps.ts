@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /** Import the bundled closure from the installed tarball without starting AutoMobile. */
-import { readdirSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -25,6 +25,19 @@ export function importSkipReason(
   return metadata.bin
     ? "bin-only package (no importable entry)"
     : "no runtime entry (types-only package)";
+}
+
+/**
+ * True when `resolved` lives under `directory`. Bun.resolveSync returns a real
+ * path while `directory` may sit under a symlink (macOS `/var` -> `/private/var`),
+ * so compare real paths on both sides.
+ */
+export function isInsidePackage(
+  resolved: string,
+  directory: string,
+  realpath: (p: string) => string = realpathSync,
+): boolean {
+  return realpath(resolved).startsWith(`${realpath(directory)}${path.sep}`);
 }
 
 export interface SmokeFailure {
@@ -76,7 +89,7 @@ async function importInstalledPackage(pkg: BundledPackage): Promise<unknown> {
     ? path.dirname(path.dirname(pkg.directory))
     : path.dirname(pkg.directory);
   const resolved = Bun.resolveSync(pkg.metadata.name, owner);
-  if (!resolved.startsWith(`${pkg.directory}${path.sep}`)) {
+  if (!isInsidePackage(resolved, pkg.directory)) {
     throw new Error(`Resolved outside installed package: ${resolved}`);
   }
   return import(pathToFileURL(resolved).href);

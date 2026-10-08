@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseSync } from "oxc-parser";
@@ -66,11 +66,16 @@ function relativeImports(source: AstNode): string[] {
 }
 
 describe("deviceTools.killDevice import casing (issue #6060)", () => {
+  // Reading and parsing the suite (the parser's first use in the process) is setup, not the
+  // casing check: do it once here.
+  let pollutingSuite: AstNode;
+  beforeAll(() => {
+    pollutingSuite = parseSync(POLLUTING_SUITE, readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"))
+      .program as unknown as AstNode;
+  });
+
   test("uses the repository filename's exact casing", () => {
-    const source = parseSync(
-      POLLUTING_SUITE,
-      readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"),
-    ).program;
+    const source = pollutingSuite;
 
     const repositoryImports = relativeImports(source).filter(
       (specifier) => specifier.toLowerCase() === DEVICE_SESSION_REPOSITORY_IMPORT.toLowerCase(),

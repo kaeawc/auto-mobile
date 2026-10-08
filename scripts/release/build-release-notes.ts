@@ -26,6 +26,7 @@ interface ReleaseNotesInput {
     videoJar: string;
     screenCaptureHelper: string;
     overlayAgent: string;
+    networkFilter: string;
   };
 }
 
@@ -58,6 +59,7 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     `\n\n## video-server jar\n\n**SHA256 Checksum:** \`${checksums.videoJar}\`\n\nDownload automobile-video.jar from the release assets below.` +
     `\n\n## macOS screen-capture-helper\n\n**SHA256 Checksum:** \`${checksums.screenCaptureHelper}\`\n\nDownload screen-capture-helper-macos-universal.zip from the release assets below.` +
     `\n\n## iOS simulator overlay agent\n\n**SHA256 Checksum:** \`${checksums.overlayAgent}\`\n\nDownload AutoMobileOverlayAgent.dylib (universal arm64 + x86_64, ad-hoc signed) from the release assets below.` +
+    `\n\n## macOS network-filter\n\n**SHA256 Checksum:** \`${checksums.networkFilter}\`\n\nDownload automobile-network-filter-macos-universal.zip from the release assets below.` +
     "\n\n## Desktop App\n\nNative installers are attached below: macOS `.dmg` (signed & notarized), Windows `.msi`, and Linux `.deb`.";
   if (changelogPart.length + tail.length <= RELEASE_NOTES_BUDGET) {
     return changelogPart + tail;
@@ -109,6 +111,7 @@ if (import.meta.main) {
     videoJar: requiredEnv("VIDEO_JAR_CHECKSUM"),
     screenCaptureHelper: requiredEnv("SCREEN_CAPTURE_HELPER_CHECKSUM"),
     overlayAgent: requiredEnv("OVERLAY_AGENT_CHECKSUM"),
+    networkFilter: requiredEnv("NETWORK_FILTER_CHECKSUM"),
   };
   const changelogPath = process.env.CHANGELOG_PATH || "CHANGELOG.md";
   const body = buildReleaseNotes({

@@ -46,6 +46,7 @@ teardown() {
 write_release_ts() {
   local video_line=""
   local helper_line=""
+  local filter_line=""
   if [ "$#" -ge 2 ]; then
     video_line="
     videoJarSha256: \"$2\","
@@ -59,6 +60,11 @@ write_release_ts() {
     overlay_line="
     overlayAgentSha256: \"$4\","
   fi
+  local filter_line=""
+  if [ "$#" -ge 5 ]; then
+    filter_line="
+    networkFilterSha256: \"$5\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
@@ -68,6 +74,7 @@ export interface ReleaseChecksumEntry {
   videoJarSha256?: string;
   screenCaptureHelperSha256?: string;
   overlayAgentSha256?: string;
+  networkFilterSha256?: string;
 }
 
 export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
@@ -75,7 +82,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$overlay_line
+    runnerSha256: "",$video_line$helper_line$overlay_line$filter_line
   },
 ];
 EOF
@@ -183,6 +190,31 @@ EOF
   write_release_ts "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" overlayagent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "matching networkFilterSha256 verifies successfully (networkfilter platform)" {
+  write_release_ts "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" networkfilter
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent networkFilterSha256 reports 'no checksum', not a mismatch" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" networkfilter
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+  [[ "$output" != *"SHA256 mismatch"* ]]
+}
+
+@test "mismatched networkFilterSha256 reports a mismatch" {
+  write_release_ts "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" networkfilter
   [ "$status" -ne 0 ]
   [[ "$output" == *"SHA256 mismatch"* ]]
 }

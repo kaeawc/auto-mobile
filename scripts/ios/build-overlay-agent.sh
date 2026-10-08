@@ -34,7 +34,7 @@ done
 
 partial_path="${output_path}.partial"
 rm -f "${partial_path}"
-lipo -create "${slice_paths[@]}" -output "${partial_path}"
+lipo -create ${slice_paths[@]+"${slice_paths[@]}"} -output "${partial_path}"
 
 architectures="$(lipo -archs "${partial_path}")"
 for arch in "${slices[@]}"; do

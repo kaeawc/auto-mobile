@@ -37,7 +37,13 @@ class LogsFacetTest {
       setContent {
         MaterialTheme {
           LogsFacet(
-            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            column =
+              DeviceColumn(
+                deviceId = "dev-1",
+                name = "Pixel",
+                platform = Platform.Android,
+                deviceSessionUuid = "uuid-1",
+              ),
             sessionUuidProvider = provider,
             telemetryClientFactory = { FakeTelemetryPushClient().also { clients.add(it) } },
           )
@@ -50,6 +56,7 @@ class LogsFacetTest {
       waitForIdle()
       assertEquals(1, clients.size)
       assertEquals("dev-1", clients.single().getLastDeviceId())
+      assertEquals("uuid-1", clients.single().getLastDeviceSessionUuid())
       assertEquals(1, clients.single().getConnectCallCount())
 
       runOnIdle { sessionUuid.value = null }

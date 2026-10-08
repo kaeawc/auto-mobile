@@ -61,4 +61,24 @@ class OverlayStateLogicTest {
     assertNull(OverlayToggleAction("count").nextValue(state))
     assertNull(OverlayToggleAction("missing").nextValue(state))
   }
+
+  @Test
+  fun `styleWhen merges matching entries over the base in authored order`() {
+    val base = OverlayStyle(background = "#111111", alpha = 1.0, cornerRadius = 4.0)
+    val entries =
+      listOf(
+        OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5)),
+        OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(false)), OverlayStyle(alpha = 0.1)),
+        OverlayStyleWhen(
+          OverlayCondition("count", gt = 2.0),
+          OverlayStyle(alpha = 0.7, background = "#222222"),
+        ),
+      )
+    val resolved = resolveOverlayStyle(base, entries, state)
+    assertEquals(0.7, resolved.alpha!!, 0.0)
+    assertEquals("#222222", resolved.background)
+    assertEquals(4.0, resolved.cornerRadius!!, 0.0)
+    assertEquals(base, resolveOverlayStyle(base, null, state))
+    assertEquals(OverlayStyle(), resolveOverlayStyle(null, entries.subList(1, 2), state))
+  }
 }

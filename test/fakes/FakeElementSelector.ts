@@ -4,7 +4,7 @@ import type { ElementSelectionResult } from "../../src/models/ElementSelectionRe
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
 import type { ElementSelector } from "../../src/utils/interfaces/ElementSelector";
-import type { TextSelectionIntent } from "../../src/utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../src/utils/interfaces/TextSelectionIntent";
 
 /**
  * Deterministic fake for testing code that depends on ElementSelector.

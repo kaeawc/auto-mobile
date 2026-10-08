@@ -270,6 +270,7 @@ jobs:
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
           OVERLAY_AGENT_SHA256: ${{ needs.build-candidate-overlay-agent.outputs.sha256 }}
+          NETWORK_FILTER_SHA256: ${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
 
       - name: Commit release constants to staging ref
@@ -394,6 +395,12 @@ jobs:
           name: overlay-agent
           path: /tmp
 
+      - name: "Download network-filter"
+        uses: actions/download-artifact@v7
+        with:
+          name: network-filter
+          path: /tmp
+
       - name: "Download desktop macOS DMG"
         uses: actions/download-artifact@v7
         with:
@@ -422,7 +429,9 @@ jobs:
           bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-video.jar videojar
           bash scripts/ci/verify-artifact-sha256.sh /tmp/screen-capture-helper-macos-universal.zip screencapturehelper
           bash scripts/ci/verify-artifact-sha256.sh /tmp/AutoMobileOverlayAgent.dylib overlayagent
-          bash scripts/ci/verify-overlay-agent.sh /tmp/AutoMobileOverlayAgent.dylib
+          # Structural overlay-agent checks (lipo/vtool/codesign) run in the macOS builder
+          # (build-overlay-agent.yml); this Linux job only checks the registry checksum.
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/automobile-network-filter-macos-universal.zip networkfilter
           bash scripts/ci/verify-release-integrity.sh "$VERSION" /tmp/control-proxy.ipa
           bash scripts/ci/verify-desktop-installer-assets.sh "$VERSION" /tmp/desktop
 
@@ -473,7 +482,7 @@ jobs:
             --arg tag_sha "$TAG_SHA" \
             --arg prepare_run_id "$PREPARE_RUN_ID" \
             '{tag: $tag, tag_sha: $tag_sha, prepare_run_id: $prepare_run_id,
-              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "overlay-agent", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
+              artifacts: ["control-proxy-apk", "ctrl-proxy-ios-ipa", "video-server-jar", "screen-capture-helper", "overlay-agent", "network-filter", "automobile-desktop-macos", "automobile-desktop-windows", "automobile-desktop-linux"]}' \
             > /tmp/release-artifact-provenance.json
 
       - name: Upload release artifact provenance

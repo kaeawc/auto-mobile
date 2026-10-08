@@ -107,6 +107,16 @@ fail() {
   exit 1
 }
 
+# The host driver prints the agent's asynchronous `event {json}` / `unmatched {json}` lines on
+# stdout next to the one JSON reply, so a captured file is not a single JSON document. Keep only
+# the last overlay_result line (a bounded, line-oriented filter) and rewrite the file with it.
+keep_reply() {
+  local file="$1" reply
+  reply="$(grep '^{' "${file}" | jq -c 'select(.type == "overlay_result")' | tail -n 1 || true)"
+  [[ -n ${reply} ]] || fail "no overlay_result reply from the driver: $(cat "${file}")"
+  printf '%s\n' "${reply}" > "${file}"
+}
+
 echo "== build agent"
 bash "${build_script}"
 
@@ -143,13 +153,16 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   sleep "${settle}"
 done
 [[ ${connected} == true ]] || fail "agent never answered get_overlay_status ($(tail -n 1 "${log_dir}/status-initial.err"))"
+keep_reply "${log_dir}/status-initial.json"
 [[ "$(jq -r '.type' "${log_dir}/status-initial.json")" == overlay_result ]] || fail "unexpected status reply"
 [[ "$(jq -r '.status.shown' "${log_dir}/status-initial.json")" == false ]] || fail "overlay shown before show_overlay"
 
 echo "== show the demo overlay"
 "${driver[@]}" floating > "${log_dir}/show.json"
+keep_reply "${log_dir}/show.json"
 [[ "$(jq -r '.success' "${log_dir}/show.json")" == true ]] || fail "show_overlay failed: $(cat "${log_dir}/show.json")"
 "${driver[@]}" status > "${log_dir}/status-shown.json"
+keep_reply "${log_dir}/status-shown.json"
 [[ "$(jq -r '.status.shown' "${log_dir}/status-shown.json")" == true ]] || fail "status does not report the overlay shown"
 [[ "$(jq -r '.status.id' "${log_dir}/status-shown.json")" == floating-demo ]] || fail "status reports the wrong overlay id"
 
@@ -162,8 +175,10 @@ fi
 
 echo "== dismiss"
 "${driver[@]}" dismiss > "${log_dir}/dismiss.json"
+keep_reply "${log_dir}/dismiss.json"
 [[ "$(jq -r '.success' "${log_dir}/dismiss.json")" == true ]] || fail "dismiss_overlay failed: $(cat "${log_dir}/dismiss.json")"
 "${driver[@]}" status > "${log_dir}/status-dismissed.json"
+keep_reply "${log_dir}/status-dismissed.json"
 [[ "$(jq -r '.status.shown' "${log_dir}/status-dismissed.json")" == false ]] || fail "overlay still shown after dismiss"
 sleep "${settle}"
 dismissed="${log_dir}/dismissed.png"

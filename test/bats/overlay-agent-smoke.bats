@@ -82,7 +82,12 @@ case "$1" in
     ;;
   dismiss)
     rm -f "${shown_file}"
-    echo '{"type":"overlay_result","success":true}'
+    if [[ ${STUB_DRIVER_MODE} == event-before-reply ]]; then
+      echo 'event {"kind":"dismissed","id":"floating-demo","type":"overlay_event","sequence":1}'
+    fi
+    if [[ ${STUB_DRIVER_MODE} != event-only ]]; then
+      echo '{"type":"overlay_result","success":true}'
+    fi
     ;;
 esac
 STUB
@@ -99,6 +104,22 @@ STUB
   grep -q "xcrun simctl shutdown UDID-FRESH" "${STUB_LOG}"
   grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
   [ -f "${OVERLAY_SMOKE_LOG_DIR}/shown.png" ]
+}
+
+@test "skips asynchronous overlay_event lines the driver prints before the dismiss reply" {
+  export STUB_DRIVER_MODE=event-before-reply
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ ${output} == *"PASS on iOS 26.5"* ]]
+  [ "$(jq -r '.type' "${OVERLAY_SMOKE_LOG_DIR}/dismiss.json")" = overlay_result ]
+}
+
+@test "fails clearly when the driver prints no overlay_result reply" {
+  export STUB_DRIVER_MODE=event-only
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"no overlay_result reply"* ]]
+  grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
 }
 
 @test "builds the agent before creating a simulator" {

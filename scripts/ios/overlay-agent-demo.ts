@@ -2,7 +2,8 @@
 /**
  * Prototype host driver for the iOS simulator overlay agent (ios/overlay-agent).
  *
- *   bun scripts/ios/overlay-agent-demo.ts launch <udid> <bundleId>   relaunch the app with the agent injected
+ *   bun scripts/ios/overlay-agent-demo.ts launch <udid> <bundleId> [--test-hooks]   relaunch the app with the agent injected
+ *   bun scripts/ios/overlay-agent-demo.ts tap <nodeId>              simulate_tap (needs --test-hooks); prints the reply and the overlay_events it caused
  *   bun scripts/ios/overlay-agent-demo.ts variants [--screenshot <udid>]   swipeable carousel, waits for a pick
  *   bun scripts/ios/overlay-agent-demo.ts floating                  floating card over a live app
  *   bun scripts/ios/overlay-agent-demo.ts sheet                     bottom sheet with a text field
@@ -288,7 +289,7 @@ const sheetSpec = () =>
     },
   });
 
-function launch(udid: string, bundleId: string): void {
+function launch(udid: string, bundleId: string, testHooks: boolean): void {
   const dylib = join(AGENT_DIR, "AutoMobileOverlayAgent.dylib");
   const config = createOverlayAgentLaunchConfig(PORT, defaultIdGenerator);
   mkdirSync(AGENT_DIR, { recursive: true });
@@ -303,6 +304,8 @@ function launch(udid: string, bundleId: string): void {
         ...process.env,
         SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
         ...config.simctlEnvironment,
+        // Debug-only: lets the agent accept simulate_tap. Never set for ordinary launches.
+        ...(testHooks ? { SIMCTL_CHILD_AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS: "1" } : {}),
       },
       encoding: "utf8",
     },
@@ -320,7 +323,7 @@ async function main(): Promise<void> {
     if (udid === undefined || bundleId === undefined) {
       throw new Error("usage: launch <udid> <bundleId>");
     }
-    launch(udid, bundleId);
+    launch(udid, bundleId, rest.includes("--test-hooks"));
     return;
   }
   const agent = await openAgent();
@@ -337,6 +340,19 @@ async function main(): Promise<void> {
       case "sheet":
         console.log(JSON.stringify(await agent.request("show_overlay", { spec: sheetSpec() })));
         break;
+      case "tap": {
+        const nodeId = rest[0];
+        if (nodeId === undefined) {
+          throw new Error("usage: tap <nodeId>");
+        }
+        // The agent pushes a tap's events before it replies on the same stream, so everything
+        // collected by the time the reply lands belongs to this tap.
+        const events: Message[] = [];
+        agent.onEvent = (event) => events.push(event);
+        const result = await agent.request("simulate_tap", { nodeId });
+        console.log(JSON.stringify({ result, events }));
+        break;
+      }
       case "dismiss":
         console.log(JSON.stringify(await agent.request("dismiss_overlay", { all: true })));
         break;

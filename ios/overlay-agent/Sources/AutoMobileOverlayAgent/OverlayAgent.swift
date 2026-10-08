@@ -39,6 +39,8 @@ final class OverlayAgent {
     /// App windows' own `accessibilityElementsHidden` while a fullscreen overlay covers them.
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
 
+    private var testHooksEnabled = false
+
     func boot() {
         let configuration: OverlayAgentConfiguration
         switch OverlayAgentConfiguration.from(environment: ProcessInfo.processInfo.environment) {
@@ -49,6 +51,7 @@ final class OverlayAgent {
             NSLog("[AutoMobileOverlayAgent] not starting: %@", failure.description)
             return
         }
+        testHooksEnabled = OverlayTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
             "[AutoMobileOverlayAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",
             OverlayAgentProtocol.agentVersion,
@@ -152,8 +155,21 @@ final class OverlayAgent {
             body.merge(extra) { _, new in new }
             reply(body)
         }
+        if let rejection = OverlayTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
+            return result(false, rejection)
+        }
         do {
             switch type {
+            case "simulate_tap":
+                guard let identifier = message["nodeId"] as? String else {
+                    return result(false, "simulate_tap needs a nodeId")
+                }
+                switch model.simulateTap(identifier: identifier) {
+                case .success: result(true)
+                case .failure(.notShown): result(false, "No overlay is shown")
+                case .failure(.notFound): result(false, "No node with id or testTag \(identifier)")
+                case .failure(.notTappable): result(false, "Node \(identifier) has no onTap")
+                }
             case "show_overlay":
                 let spec = try decode(OverlaySpec.self, message["spec"])
                 model.show(spec)

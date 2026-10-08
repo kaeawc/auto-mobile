@@ -170,4 +170,49 @@ final class OverlaySessionTests: XCTestCase {
                 + #""sequence":4,"state":{"k":"v"},"timestamp":9,"type":"overlay_event"}"#
         )
     }
+
+    // MARK: Test hooks
+
+    func testSimulateTapRunsTheTaggedNodesOnTapAndSequencesEvents() throws {
+        var session = OverlaySession()
+        try session.show(spec("""
+        {"id":"t","window":{"placement":{"type":"fullscreen"}},"state":{"liked":false},
+         "root":{"type":"column","children":[
+           {"type":"text","testTag":"like","text":"Like",
+            "onTap":[{"type":"setState","key":"liked","value":true},{"type":"emit","name":"liked"}]}]}}
+        """))
+        let first = try session.simulateTap(identifier: "like").get()
+        let second = try session.simulateTap(identifier: "like").get()
+        XCTAssertEqual(first.map(\.name), ["liked"])
+        XCTAssertEqual(first.map(\.sequence), [1])
+        XCTAssertEqual(second.map(\.sequence), [2])
+        XCTAssertEqual(session.state["liked"], .bool(true))
+    }
+
+    func testSimulateTapFailuresAreTyped() throws {
+        var session = OverlaySession()
+        XCTAssertEqual(session.simulateTap(identifier: "x").failureValue, .notShown)
+        try session.show(spec("""
+        {"id":"t","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","children":[{"type":"text","testTag":"plain","text":"hi"}]}}
+        """))
+        XCTAssertEqual(session.simulateTap(identifier: "missing").failureValue, .notFound)
+        XCTAssertEqual(session.simulateTap(identifier: "plain").failureValue, .notTappable)
+    }
+
+    func testTestHooksAreRejectedUnlessTheLaunchFlagIsSet() {
+        XCTAssertFalse(OverlayTestHooks.isEnabled(environment: [:]))
+        XCTAssertFalse(OverlayTestHooks.isEnabled(environment: [OverlayTestHooks.environmentKey: "0"]))
+        XCTAssertTrue(OverlayTestHooks.isEnabled(environment: [OverlayTestHooks.environmentKey: "1"]))
+        XCTAssertNotNil(OverlayTestHooks.rejection(requestType: "simulate_tap", enabled: false))
+        XCTAssertNil(OverlayTestHooks.rejection(requestType: "simulate_tap", enabled: true))
+        XCTAssertNil(OverlayTestHooks.rejection(requestType: "show_overlay", enabled: false))
+    }
+}
+
+private extension Result {
+    var failureValue: Failure? {
+        if case let .failure(error) = self { return error }
+        return nil
+    }
 }

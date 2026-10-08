@@ -465,6 +465,13 @@ export interface OverlayEventLifecycle {
    * initialised); the host retries on its next registration or call until it subscribes.
    */
   subscribeDeviceUnbound(listener: (deviceId: string) => void): (() => void) | undefined;
+  /**
+   * What an unbound subscription is bound to (the daemon's current session manager), or
+   * `undefined` while unbinding cannot be observed. When it changes (DaemonState reset and
+   * re-initialised), the host drops its subscription to the old source and subscribes again.
+   * Omitted: the source never changes.
+   */
+  deviceUnboundSource?(): object | undefined;
 }
 type OverlayClient = AndroidOverlayClient;
 /** The transport for one call; `android` carries the CtrlProxy-only display gate and inspect. */
@@ -796,6 +803,11 @@ function settleShowEvents(
   if (outcome.inPlace && outcome.success) {
     events.show(scope, outcome.target.id!, source);
   }
+}
+
+function overlayDeviceUnboundSource(): object | undefined {
+  const state = DaemonState.getInstance();
+  return state.isInitialized() ? state.getSessionManager() : undefined;
 }
 
 function subscribeOverlayDeviceUnbound(
@@ -1349,6 +1361,7 @@ function defaultOverlayLifecycle(): OverlayEventLifecycle {
     subscribeDeviceRemoval: (listener) =>
       getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener),
     subscribeDeviceUnbound: subscribeOverlayDeviceUnbound,
+    deviceUnboundSource: overlayDeviceUnboundSource,
   };
 }
 
@@ -1358,7 +1371,9 @@ function defaultOverlayLifecycle(): OverlayEventLifecycle {
  *
  * The unbound hook may not be available when the host is created (the daemon host is built
  * before DaemonState initialises), so `ensureSubscribed` retries it until it takes, keeping
- * exactly one active unbound subscription.
+ * exactly one active unbound subscription. It also follows the hook's source: once DaemonState is
+ * re-initialised with a new session manager, the subscription to the old one is dropped and
+ * replaced (#10715).
  */
 function subscribeOverlayCleanup(
   lifecycle: OverlayEventLifecycle,
@@ -1373,13 +1388,28 @@ function subscribeOverlayCleanup(
     }),
     lifecycle.subscribeDeviceRemoval((deviceId) => events.releaseDevice(deviceId)),
   ];
-  let unsubscribeUnbound: (() => void) | undefined;
+  // A lifecycle without a source never re-initialises; one constant stands for it.
+  const fixedSource = {};
+  let unbound: { source: object; unsubscribe: () => void } | undefined;
   let disposed = false;
   const ensureSubscribed = () => {
-    if (!disposed && unsubscribeUnbound === undefined) {
-      unsubscribeUnbound = lifecycle.subscribeDeviceUnbound((deviceId) =>
-        events.releaseDevice(deviceId),
-      );
+    if (disposed) {
+      return;
+    }
+    const source = lifecycle.deviceUnboundSource ? lifecycle.deviceUnboundSource() : fixedSource;
+    if (unbound !== undefined && unbound.source === source) {
+      return;
+    }
+    unbound?.unsubscribe();
+    unbound = undefined;
+    if (source === undefined) {
+      return;
+    }
+    const unsubscribe = lifecycle.subscribeDeviceUnbound((deviceId) =>
+      events.releaseDevice(deviceId),
+    );
+    if (unsubscribe) {
+      unbound = { source, unsubscribe };
     }
   };
   ensureSubscribed();
@@ -1387,8 +1417,8 @@ function subscribeOverlayCleanup(
     ensureSubscribed,
     unsubscribe: () => {
       disposed = true;
-      unsubscribeUnbound?.();
-      unsubscribeUnbound = undefined;
+      unbound?.unsubscribe();
+      unbound = undefined;
       for (const cleanup of cleanups) {
         cleanup();
       }

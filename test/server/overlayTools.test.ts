@@ -607,6 +607,32 @@ describe("overlay MCP tool", () => {
     expect(lifecycle.getListenerCount()).toBe(0);
   });
 
+  test("re-subscribes device-unbound cleanup when DaemonState is re-initialised (#10715)", async () => {
+    const lifecycle = new FakeOverlayEventLifecycle();
+    unsubscribe();
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer, lifecycle });
+    expect(lifecycle.getDeviceUnboundListenerCount()).toBe(1);
+    lifecycle.reinitialiseDeviceUnboundSource();
+    await call({ action: "show", spec, sessionUuid: "one" });
+    // The stale subscription to the old session manager is dropped, not kept alongside.
+    expect(lifecycle.getDeviceUnboundListenerCount()).toBe(1);
+    lifecycle.unbindDevice(device.deviceId);
+    expect(client.getOverlayListenerCount()).toBe(0);
+    expect((await call({ action: "status", sessionUuid: "one" })).payload.overlays).toEqual([]);
+    unsubscribe();
+    expect(lifecycle.getListenerCount()).toBe(0);
+  });
+
+  test("drops device-unbound cleanup while DaemonState is reset (#10715)", async () => {
+    const lifecycle = new FakeOverlayEventLifecycle();
+    unsubscribe();
+    unsubscribe = registerOverlayTools({ clientFactory: () => client, timer, lifecycle });
+    lifecycle.setDeviceUnboundAvailable(false);
+    await call({ action: "status", sessionUuid: "one" });
+    expect(lifecycle.getDeviceUnboundListenerCount()).toBe(0);
+    unsubscribe();
+  });
+
   test("failed shows do not retain subscriptions and failed dismiss preserves buffered events", async () => {
     client.setOverlayResult({ success: false, error: "Refused" });
     await call({ action: "show", spec });

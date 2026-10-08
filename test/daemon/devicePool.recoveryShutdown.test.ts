@@ -29,6 +29,7 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 
 const original: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -348,6 +349,9 @@ async function flush(): Promise<void> {
     await Promise.resolve();
   }
 }
+
+// These tests exercise the three-minute restart recovery window, which the idle deadline caps.
+useSessionIdleWindowForSuite();
 
 test("recovery waits for checked disappearance after an untracked emulator acknowledges kill", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();

@@ -13,6 +13,11 @@ import {
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+  PROXY_HEARTBEAT_INTERVAL_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
@@ -33,23 +38,22 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 // #10656 (H1 of #10655): a liveness heartbeat must not count as device use.
 //
 // The stdio MCP proxy is the authoritative liveness owner of the sessions it
-// acquires. Its keeper heartbeats every 5 s (the stdio entry point passes a 10 s
-// lease, and the keeper runs at half of it) whether or not the agent calls a
-// tool. Those ticks renew the owner lease and its grace window, but they must not
-// renew the 30 min idle deadline (`lastUsedAt` / `expiresAt`) or the proxy's own
+// acquires. Its keeper heartbeats every 2 s (half the 4 s lease) whether or not
+// the agent calls a tool. Those ticks renew the owner lease and its grace window,
+// but they must not renew the 2 min idle deadline (`lastUsedAt` / `expiresAt`) or
+// the proxy's own
 // replay lease (`boundSessionUuidAt`). Only tool calls do. Before the fix an agent
 // that called getAndroid and then went quiet, with its MCP host still open, held
 // the device for as long as the proxy process lived.
 //
 // Driven for real:
-// - DaemonMcpProxy, configured as src/index.ts configures the stdio proxy: the
-//   keeper at its 5 s cadence against the 10 s lease, the owner-token claim, and
-//   the replay-TTL gate.
+// - DaemonMcpProxy, configured with the default lease: the keeper at its 2 s
+//   cadence against the 4 s lease, the owner-token claim, and the replay-TTL gate.
 // - handleDaemonRequest: daemon/heartbeat, daemon/sessionInfo and
 //   daemon/availableDevices.
 // - SessionManager: recordHeartbeat, getOrCreateSession (the tool-call refresh),
 //   isSessionExpired, and its own 5 min cleanup sweep on the injected timer.
-// - SessionHeartbeatMonitor: the 10 s reaper scan, wired as in daemon.ts.
+// - SessionHeartbeatMonitor: the 2 s reaper scan, wired as in daemon.ts.
 // - DevicePool: bindOrReuseDeviceSession and the release-on-expiry hook.
 // - releaseSessionAndDevice: the daemon's reap path.
 //
@@ -67,12 +71,12 @@ const OWNER_TOKEN = "claude-code-proxy-owner";
 const DEVICE = { deviceId: "emulator-5554", name: "Pixel_8_API_35", platform: "android" as const };
 /** The lease src/index.ts passes to the stdio proxy, which is also the daemon session's lease. */
 const LEASE_MS = getDefaultSessionHeartbeatTimeoutMs();
-/** daemonMcpProxy.ts heartbeatIntervalMs(): half the configured lease, so 5 s in production. */
+/** daemonMcpProxy.ts heartbeatIntervalMs(): half the configured lease. */
 const KEEPER_INTERVAL_MS = Math.floor(LEASE_MS / 2);
-/** SessionManager.SESSION_TIMEOUT_MS. It is private, and it is the only idle bound for a heartbeat session. */
-const SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
+/** The session idle window, the only idle bound for a heartbeat session. */
+const SESSION_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
 /** SessionHeartbeatMonitor's default scan interval; each scan also sweeps expired sessions. */
-const REAPER_SCAN_MS = 10_000;
+const REAPER_SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** The latest the idle release may land after the deadline: suspect grace, one scan, one keeper tick. */
 const RELEASE_SLACK_MS = SUSPECT_GRACE_MS + REAPER_SCAN_MS + KEEPER_INTERVAL_MS;
 /**
@@ -107,7 +111,7 @@ function deviceStartResult(sessionUuid: string) {
   };
 }
 
-describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min idle deadline", () => {
+describe("#10656: an idle proxy's liveness heartbeats do not extend the idle deadline", () => {
   let timer: FakeTimer;
   let persistence: FakeDeviceSessionPersistence;
   let manager: SessionManager;
@@ -204,8 +208,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min i
       },
     });
 
-    // Configured as src/index.ts configures the stdio proxy: a 10 s lease and no
-    // explicit interval, so the keeper runs every 5 s.
+    // The default lease and no explicit interval, so the keeper runs at half the lease.
     proxy = new DaemonMcpProxy({
       clientFactory: () => client,
       daemonManager: matchingDaemonManager(),
@@ -249,15 +252,15 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min i
     return undefined;
   }
 
-  test("an idle owner's heartbeats do not extend the idle deadline: the device is freed at 30 min while the proxy stays open", async () => {
+  test("an idle owner's heartbeats do not extend the idle deadline: the device is freed after the idle window while the proxy stays open", async () => {
     expect(LEASE_MS).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
-    expect(KEEPER_INTERVAL_MS).toBe(5_000);
+    expect(KEEPER_INTERVAL_MS).toBe(PROXY_HEARTBEAT_INTERVAL_MS);
     const acquiredAt = timer.now();
     expect(manager.getSession(SESSION)!.expiresAt).toBe(acquiredAt + SESSION_IDLE_TIMEOUT_MS);
 
-    // Just before the deadline: hundreds of owner ticks, none of them counted as use.
+    // Just before the deadline: a tick every keeper interval, none of them counted as use.
     await idleFor(SESSION_IDLE_TIMEOUT_MS - KEEPER_INTERVAL_MS);
-    expect(heartbeats.length).toBeGreaterThan(300);
+    expect(heartbeats.length).toBeGreaterThan(SESSION_IDLE_TIMEOUT_MS / KEEPER_INTERVAL_MS - 5);
     expect(heartbeats.every((reply) => reply.success && reply.token === OWNER_TOKEN)).toBe(true);
     const held = manager.getSession(SESSION);
     expect(held).not.toBeNull();
@@ -297,9 +300,9 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min i
     expect(["cleanup-expired", "lazy-expiry"]).toContain(releasedRow!.release_reason!);
   });
 
-  test("a tool call at 29 min moves the release to 59 min; heartbeats alone never move it", async () => {
+  test("a tool call a minute before the deadline moves the release a full window later; heartbeats alone never move it", async () => {
     const acquiredAt = timer.now();
-    await idleFor(29 * 60_000);
+    await idleFor(SESSION_IDLE_TIMEOUT_MS - 60_000);
     const usedAt = timer.now();
     await proxy.callTool("observe", {});
     expect(forwarded.at(-1)).toEqual({
@@ -325,7 +328,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min i
     expect(pool.getDevice(DEVICE.deviceId)).toMatchObject({ status: "idle", sessionId: null });
   });
 
-  test("past the 30 min replay TTL the proxy no longer replays the idle binding: heartbeat acks do not refresh it", async () => {
+  test("past the replay TTL the proxy no longer replays the idle binding: heartbeat acks do not refresh it", async () => {
     await idleFor(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + RELEASE_SLACK_MS);
 
     // A sessionless call from the long-idle agent is not rewritten onto the
@@ -340,7 +343,7 @@ describe("#10656: an idle proxy's liveness heartbeats do not extend the 30 min i
 
     // stdin EOF: the proxy closes and stops its keeper. Nothing else changes.
     await proxy.close();
-    // Lease, then suspect grace, then one 10 s reaper scan.
+    // Lease, then suspect grace, then one reaper scan.
     await idleFor(LEASE_MS + SUSPECT_GRACE_MS + REAPER_SCAN_MS + KEEPER_INTERVAL_MS);
 
     // Owner gone is still reported as a heartbeat timeout, distinct from idle expiry.

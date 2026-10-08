@@ -2,7 +2,7 @@ import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -108,7 +108,7 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
     warnSpy.mockRestore();
   });
 
-  const IDLE_WINDOW_MS = 30 * 60 * 1000;
+  const IDLE_WINDOW_MS = DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
 
   test("stops heartbeating a superseded device after the idle window while the new one keeps going", async () => {
     await acquire("getAndroid", "android-session");
@@ -124,11 +124,12 @@ describe("proxy stops heartbeating held sessions the conversation abandoned (iss
   test("keeps both devices heartbeating while each was used within the idle window", async () => {
     await acquire("getAndroid", "android-session");
     await acquire("getApple", "ios-session");
-    await timer.advanceTimeAsync(IDLE_WINDOW_MS - 10 * 60 * 1000);
+    await timer.advanceTimeAsync(IDLE_WINDOW_MS / 2);
     await acquire("getAndroid", "android-session");
     await acquire("getApple", "ios-session");
 
-    await timer.advanceTimeAsync(15 * 60 * 1000);
+    // Past the window measured from the first acquisition, inside it from the second.
+    await timer.advanceTimeAsync((IDLE_WINDOW_MS * 3) / 4);
 
     expect(await tickSessions()).toEqual(["android-session", "ios-session"]);
   });

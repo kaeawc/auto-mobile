@@ -6,6 +6,11 @@ import {
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager, SessionSuspectError } from "../../src/daemon/sessionManager";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+  PROXY_HEARTBEAT_INTERVAL_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import type { Random } from "../../src/utils/Random";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -26,14 +31,14 @@ const OWNER = "expiry-property-owner";
 
 export const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
 export const GRACE_MS = SUSPECT_GRACE_MS;
-/** The stdio proxy keeper's production cadence (half the 10 s heartbeat timeout). */
-export const HEARTBEAT_CADENCE_MS = 5_000;
+/** The stdio proxy keeper's production cadence. */
+export const HEARTBEAT_CADENCE_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 /** SessionHeartbeatMonitor's default scan interval. */
-export const MONITOR_INTERVAL_MS = 10_000;
+export const MONITOR_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** SessionManager's periodic expired-session sweep. */
 export const CLEANUP_INTERVAL_MS = 5 * 60 * 1_000;
-/** Idle windows a schedule may pick: the autolock 60 s window and a longer one. */
-export const IDLE_WINDOWS_MS = [60_000, 90_000] as const;
+/** Idle windows a schedule may pick: the autolock 60 s window and the default idle window. */
+export const IDLE_WINDOWS_MS = [60_000, DEFAULT_SESSION_IDLE_TIMEOUT_MS] as const;
 
 export type ProducerEvent = "heartbeat" | "toolCall" | "monitorTick" | "cleanupSweep";
 

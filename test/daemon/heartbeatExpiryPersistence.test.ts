@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -42,7 +43,8 @@ test.each([
       manager.recordHeartbeat("heartbeat-expired");
       monitor.start();
 
-      await timer.advanceTimeAsync(10_000);
+      // One grace window after the heartbeat: the 1 s lease has lapsed, the grace has 1 s left.
+      await timer.advanceTimeAsync(SUSPECT_GRACE_MS);
 
       expect(await persistence.getSession?.("heartbeat-expired")).toMatchObject({
         status: "active",

@@ -3,9 +3,14 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -87,9 +92,11 @@ describe("SessionHeartbeatMonitor", () => {
       );
       monitor.start();
 
-      // Past the pre-first-heartbeat grace on the first scan: reaped.
-      timer.advanceTime(10_000);
-      await Promise.resolve();
+      // Past the 5 s pre-first-heartbeat grace on the third 2 s scan: reaped once.
+      for (let scan = 0; scan < 3; scan++) {
+        timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+        await drainMicrotasks(10);
+      }
       expect(reaped).toEqual(["s1"]);
 
       monitor.stop();
@@ -216,15 +223,17 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      timer.advanceTime(5_000);
+      // Judged only on the owner timeout (the default lease), never the 5 s pre-first-heartbeat
+      // grace: kept through the lease, reaped one millisecond after it.
+      timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS - 1);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(2_000);
+      timer.advanceTime(1);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(3_001);
+      timer.advanceTime(1);
       await monitor.tick();
       expect(reaped).toEqual([
         { sessionId: "default-timeout-awaiting-owner", reason: "rehydration-owner-timeout" },

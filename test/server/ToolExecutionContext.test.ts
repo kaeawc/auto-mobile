@@ -65,6 +65,9 @@ describe("ToolExecutionContext", () => {
   const originalGetInstance = AndroidCtrlProxyManager.getInstance;
   const originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
   const sessionOptions = { keepScreenAwake: false };
+  // The auto-advancing FakeTimer runs the readiness waits of a setup far past the default 2-minute
+  // idle window; tests that race setups give their session a window those waits fit inside.
+  const AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS = 30 * 60_000;
   const createBootedDevice = (deviceId: string): BootedDevice => ({
     name: deviceId,
     platform: "android",
@@ -1713,7 +1716,12 @@ describe("ToolExecutionContext", () => {
       close: async () => {},
     })) as any;
 
-    await sessionManager.createSession("session-device-lock", "device-1", "android");
+    await sessionManager.createSession(
+      "session-device-lock",
+      "device-1",
+      "android",
+      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+    );
 
     // Stand in for a concurrent device preparation (startDevice/getAndroid/
     // provision via RunnerReadinessService) holding the SAME per-device lock.
@@ -1764,7 +1772,12 @@ describe("ToolExecutionContext", () => {
 
     // A post-restart recovered session: already tracked, readiness never
     // recorded — mirrors a session reused by a concurrent acquisition.
-    await sessionManager.createSession("session-acquisition-race", "device-1", "android");
+    await sessionManager.createSession(
+      "session-acquisition-race",
+      "device-1",
+      "android",
+      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+    );
 
     // Stand in for a device acquisition that has already released the
     // per-device readiness lock (CtrlProxy setup finished) but has not yet
@@ -1887,7 +1900,12 @@ describe("ToolExecutionContext", () => {
       isInstalled: async () => true,
       isVersionCompatible: async () => true,
     }));
-    await sessionManager.createSession("session-shared-flight", "device-1", "android");
+    await sessionManager.createSession(
+      "session-shared-flight",
+      "device-1",
+      "android",
+      AUTO_ADVANCED_SETUP_IDLE_WINDOW_MS,
+    );
     const firstController = new AbortController();
     const first = createToolExecutionContext(
       "session-shared-flight",

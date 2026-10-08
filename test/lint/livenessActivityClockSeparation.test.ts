@@ -133,6 +133,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a tool reading the session cache stamps lastUsedAt.",
   },
+  "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
+    writes: 2,
+    reason:
+      "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
+      "so idleness counts from the end of the last call; the execution tracker fires it.",
+  },
   "src/daemon/sessionManager.ts rollbackSessionActivityIfCurrent": {
     writes: 2,
     reason: "Rollback: restores the pre-write activity clocks after a failed cache activity write.",
@@ -806,6 +812,52 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       .sort()
       .join("\n");
     expect({ actual, located }).toEqual({ actual: expected, located });
+  });
+
+  test("the CLI idle release is judged on the tool-activity clock, never a heartbeat clock", () => {
+    // A `--daemon heartbeat` loop proves the CLI owner is alive, not that it uses the device, so
+    // it must never hold a CLI session past the idle window (owner decision 2026-10-08).
+    const path = "src/daemon/SessionHeartbeatMonitor.ts";
+    const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+    const heartbeatClocks = new Set([
+      "lastHeartbeat",
+      "lastOwnerHeartbeat",
+      "stallForgivenAt",
+      "effectiveLastHeartbeat",
+      "ownerLeaseHeartbeat",
+    ]);
+    const judgements: { line: number; readsActivity: boolean; heartbeatReads: string[] }[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isConditionalExpression(node) &&
+        ts.isStringLiteral(unwrap(node.whenTrue)) &&
+        (unwrap(node.whenTrue) as ts.StringLiteral).text === "cli-idle-timeout"
+      ) {
+        let readsActivity = false;
+        const heartbeatReads: string[] = [];
+        const scan = (inner: ts.Node): void => {
+          if (ts.isPropertyAccessExpression(inner) && inner.name.text === "lastUsedAt") {
+            readsActivity = true;
+          }
+          if (
+            (ts.isIdentifier(inner) || ts.isPrivateIdentifier(inner)) &&
+            heartbeatClocks.has(inner.text)
+          ) {
+            heartbeatReads.push(inner.text);
+          }
+          ts.forEachChild(inner, scan);
+        };
+        scan(node.condition);
+        judgements.push({ line: lineOf(model.source, node), readsActivity, heartbeatReads });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(model.source);
+    // Sanity: the judgement exists, so the check cannot pass vacuously.
+    expect(judgements.length).toBeGreaterThan(0);
+    expect(
+      judgements.filter((judgement) => !judgement.readsActivity || judgement.heartbeatReads.length),
+    ).toEqual([]);
   });
 
   test("the persisted activity mirror copies the session's clocks instead of computing new ones", () => {

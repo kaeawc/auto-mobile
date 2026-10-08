@@ -184,16 +184,19 @@ describe("CLI-owned session liveness (#6870)", () => {
     const reaped: Array<{ sessionId: string; reason: string }> = [];
     const monitor = monitorWith(reaped);
 
-    // The 12.4 s gap from the issue report.
-    timer.advanceTime(12_367);
+    timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS + 1);
     await monitor.tick();
     // The default-policy session is suspect past its lease (#10051), not yet reaped.
     expect(reaped).toEqual([]);
 
     timer.advanceTime(SUSPECT_GRACE_MS);
     await monitor.tick();
-
     expect(reaped).toEqual([{ sessionId: "mcp", reason: "heartbeat-timeout" }]);
+
+    // The CLI session outlives the 12.4 s gap from the issue report.
+    timer.setCurrentTime(12_367);
+    await monitor.tick();
+    expect(reaped.filter((entry) => entry.sessionId === "cli")).toEqual([]);
   });
 
   it("never reaps a CLI session for a missing first heartbeat", async () => {

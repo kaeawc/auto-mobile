@@ -37,6 +37,9 @@ describe("suspect grace window (#10051)", () => {
   const withGrace = (overrides: Partial<LivenessOwnerLeaseSnapshot>) =>
     heartbeatSnapshot({ graceMs: SUSPECT_GRACE_MS, ...overrides });
 
+  // The lease ends at t=11_000 (1_000 + 10_000) and the grace at 11_000 + SUSPECT_GRACE_MS.
+  const graceEnd = 11_000 + SUSPECT_GRACE_MS;
+
   test("reports the time left in the lease, then in the grace window", () => {
     expect(livenessLeaseState(withGrace({ now: 4_000 }))).toEqual({
       phase: "live",
@@ -44,13 +47,13 @@ describe("suspect grace window (#10051)", () => {
     });
     expect(livenessLeaseState(withGrace({ now: 11_001 }))).toEqual({
       phase: "suspect",
-      remainingMs: 9_999,
+      remainingMs: SUSPECT_GRACE_MS - 1,
     });
-    expect(livenessLeaseState(withGrace({ now: 21_000 }))).toEqual({
+    expect(livenessLeaseState(withGrace({ now: graceEnd }))).toEqual({
       phase: "suspect",
       remainingMs: 0,
     });
-    expect(livenessLeaseState(withGrace({ now: 21_001 }))).toEqual({
+    expect(livenessLeaseState(withGrace({ now: graceEnd + 1 }))).toEqual({
       phase: "lapsed",
       remainingMs: 0,
     });
@@ -58,8 +61,8 @@ describe("suspect grace window (#10051)", () => {
 
   test("still holds the owner's claim while suspect and releases it one millisecond after", () => {
     expect(isLivenessOwnerLeaseLive(withGrace({ now: 11_001 }))).toBe(true);
-    expect(isLivenessOwnerLeaseLive(withGrace({ now: 21_000 }))).toBe(true);
-    expect(isLivenessOwnerLeaseLive(withGrace({ now: 21_001 }))).toBe(false);
+    expect(isLivenessOwnerLeaseLive(withGrace({ now: graceEnd }))).toBe(true);
+    expect(isLivenessOwnerLeaseLive(withGrace({ now: graceEnd + 1 }))).toBe(false);
   });
 
   test("a snapshot without a grace window has no suspect phase", () => {

@@ -8,12 +8,14 @@
  */
 
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
+import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 
 /**
  * How long a session whose owner missed its lease is held, device still reserved
- * for the owner token, before it is released (#10051, owner decision 2026-10-05).
+ * for the owner token, before it is released (#10051). Defined with the other
+ * release windows in `./sessionLivenessWindows`.
  */
-export const SUSPECT_GRACE_MS = 10_000;
+export { SUSPECT_GRACE_MS };
 
 /**
  * - `live`: the owner's lease has not expired.

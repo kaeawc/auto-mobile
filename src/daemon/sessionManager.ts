@@ -70,6 +70,10 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
+import {
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  getSessionIdleTimeoutMs,
+} from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
@@ -411,7 +415,7 @@ export interface PreCliLivenessSnapshot {
  *
  * - `heartbeat` (the default): the strict contract a long-lived stdio/HTTP MCP
  *   client can keep — a first heartbeat within the pre-first-heartbeat grace,
- *   then one every `heartbeatTimeoutMs` (10 s by default).
+ *   then one every `heartbeatTimeoutMs` (4 s by default, plus a 4 s suspect grace).
  * - `cli-idle`: the contract a one-shot `--cli` process can keep. Each
  *   invocation connects, runs one tool and exits, so between calls nobody is
  *   heartbeating; the session is instead reaped only after a wall-clock idle
@@ -1244,13 +1248,14 @@ export class SessionManager {
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
-  // Session timeout: 30 minutes
-  private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
+  // tool call, env-overridable (see `./sessionLivenessWindows`).
+  private readonly SESSION_TIMEOUT_MS = getSessionIdleTimeoutMs();
 
   // Cleanup interval: every 5 minutes
   private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-  static readonly DEFAULT_HEARTBEAT_TIMEOUT_MS = 10 * 1000;
+  static readonly DEFAULT_HEARTBEAT_TIMEOUT_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 
   constructor(
     timer: Timer = defaultTimer,
@@ -5763,14 +5768,48 @@ export class SessionManager {
   }
 
   /**
+   * A tool call on the session finished: restart the idle window from now (owner decision
+   * 2026-10-08). The call stamped `lastUsedAt` when it started and held the session while it ran
+   * (`activeSessionExecutionChecker`), so without this a call that outlasted the idle window would
+   * release its session the moment it ended. The end of a call is tool usage, so it also refreshes
+   * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
+   */
+  recordToolCallEnded(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || this.releasingSessions.has(session)) {
+      return;
+    }
+    const now = this.timer.now();
+    const previousActivity = {
+      lastUsedAt: session.lastUsedAt,
+      lastHeartbeat: session.lastHeartbeat,
+      expiresAt: session.expiresAt,
+    };
+    session.lastUsedAt = Math.max(session.lastUsedAt, now);
+    session.lastHeartbeat = Math.max(session.lastHeartbeat, now);
+    session.expiresAt = Math.max(session.expiresAt, now + session.sessionTimeoutMs);
+    session.activityGeneration++;
+    const capturedGeneration = session.activityGeneration;
+    void this.getBarrier()
+      .track(() => this.recordSessionActivity(session))
+      .catch((error) => {
+        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
+        logger.warn(
+          `[SessionManager] Failed to record tool-call end activity: ${errorMessage(error)}`,
+        );
+      });
+  }
+
+  /**
    * Record a liveness heartbeat for a session.
    *
    * A heartbeat proves the owner process is alive; it is not device use (#10656). It renews the
    * owner lease (`lastHeartbeat`, `lastOwnerHeartbeat`), marks the session as heartbeating, and
    * promotes an awaiting-owner session to owned. It must never write the tool-activity clocks
    * (`lastUsedAt`, `expiresAt`): an idle but live owner — a stdio proxy whose keeper ticks every
-   * 5 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
-   * calls (`getOrCreateSession`) move the idle deadline. Guarded by
+   * 2 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
+   * calls (`getOrCreateSession` at the start, `recordToolCallEnded` at the end) move the idle
+   * deadline. Guarded by
    * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {

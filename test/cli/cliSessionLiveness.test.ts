@@ -379,7 +379,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       },
       timer,
     );
-    timer.advanceTime(12_367);
+    timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS + 1);
     await monitor.tick();
     // Past the lease the session is suspect (#10051), reaped once the grace window ends.
     expect(reaped).toEqual([]);

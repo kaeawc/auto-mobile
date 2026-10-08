@@ -5,7 +5,7 @@
  * Without this, a one-shot client that exits without releasing its session holds
  * the device until the heartbeat monitor reaps the session, and every other
  * client's explicit `getAndroid {deviceId}` is refused in the meantime. The grace
- * window is the same suspect window an owner gets after missing its lease
+ * window is the lease plus the suspect window an owner gets after missing it
  * (#10051): a proxy whose socket merely dropped reconnects and heartbeats well
  * inside it, which cancels the release.
  *
@@ -22,12 +22,17 @@ import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
 import type { Session } from "./sessionManager";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
 
 /** The release reason recorded for a session whose owning connection closed. */
 export const OWNER_DISCONNECTED_RELEASE_REASON = "owner-disconnected";
 
-/** How long a session whose owning connection closed is held before it is released. */
-export const OWNER_DISCONNECT_GRACE_MS = SUSPECT_GRACE_MS;
+/**
+ * How long a session whose owning connection closed is held before it is released: the time a
+ * live owner has to deliver its next heartbeat (lease plus suspect grace), so a proxy whose socket
+ * merely dropped can reconnect and heartbeat inside it.
+ */
+export const OWNER_DISCONNECT_GRACE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
 
 /**
  * Longest an active execution may keep a session whose owner disconnected (#10663). No request's

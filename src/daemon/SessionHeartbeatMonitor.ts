@@ -8,6 +8,7 @@ import {
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "./sessionLivenessWindows";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -40,13 +41,13 @@ const STALE_REASON_DESCRIPTION: Record<SessionHeartbeatReleaseReason, string> = 
 };
 
 export interface SessionHeartbeatMonitorConfig {
-  /** How often to scan for stale sessions. Default: 10s. */
+  /** How often to scan for stale sessions. Default: 2s (see `./sessionLivenessWindows`). */
   checkIntervalMs?: number;
   /** Grace period before default-heartbeat sessions that never sent a heartbeat are reaped. Default: 5s. */
   preFirstHeartbeatGraceMs?: number;
   /** Grace period before a custom-heartbeat session that never sent a heartbeat is eligible. Default: 20s. */
   graceMs?: number;
-  /** Default timeout for sessions that do not carry their own heartbeat timeout. Default: 10s. */
+  /** Default timeout for sessions that do not carry their own heartbeat timeout. Default: 4s. */
   heartbeatTimeoutMs?: number;
   /**
    * How much later than scheduled a tick may fire before the daemon is judged to
@@ -70,7 +71,7 @@ export const DEFAULT_STALL_MARGIN_MS = 2_000;
  */
 export const UNSETTLED_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
 
-const DEFAULT_CHECK_INTERVAL_MS = 10_000;
+const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -317,12 +318,15 @@ export class SessionHeartbeatMonitor {
     });
 
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
-    // the 10 s heartbeat contract: the `--cli` process that owns it exits between
-    // calls, so nobody is left to heartbeat and a missing first heartbeat says
-    // nothing about abandonment. Its `heartbeatTimeoutMs` was widened to the CLI
-    // idle timeout when it adopted the policy.
+    // the heartbeat lease: the `--cli` process that owns it exits between calls,
+    // so nobody is left to heartbeat and a missing first heartbeat says nothing
+    // about abandonment. Its `heartbeatTimeoutMs` was widened to the CLI idle
+    // timeout when it adopted the policy. Idleness is measured from the last TOOL
+    // activity (`lastUsedAt`, stamped at a call's start and end), never from a
+    // heartbeat: a `--daemon heartbeat` loop proves liveness, not use, and must
+    // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
-      return now - lastHeartbeat > timeoutMs ? "cli-idle-timeout" : undefined;
+      return now - session.lastUsedAt > timeoutMs ? "cli-idle-timeout" : undefined;
     }
 
     if (!session.hasReceivedHeartbeat) {

@@ -540,6 +540,7 @@ export class Daemon {
     WeakSet<NavigationGraphManager>
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
+  private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private options: DaemonOptions;
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
@@ -742,6 +743,30 @@ export class Daemon {
     });
   }
 
+  /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
+  private stopSessionTimers(): void {
+    this.sessionManager.stopCleanupTimer();
+    this.observerSessionRegistry.dispose();
+    this.unsubscribeSessionExecutionEnded?.();
+    this.unsubscribeSessionExecutionEnded = null;
+  }
+
+  /** Idleness counts from the END of the last tool call (owner decision 2026-10-08). */
+  private subscribeToolCallEndActivity(): void {
+    this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
+      (sessionUuids) => {
+        const sessionIds = new Set(
+          sessionUuids.map(
+            (uuid) => resolveToolSelectionBaseSessionUuid(uuid, this.sessionManager) ?? uuid,
+          ),
+        );
+        for (const sessionId of sessionIds) {
+          this.sessionManager.recordToolCallEnded(sessionId);
+        }
+      },
+    );
+  }
+
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
     registerNetworkStateSessionCleanup(this.sessionManager);
@@ -757,6 +782,7 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
+    this.subscribeToolCallEndActivity();
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
@@ -3951,10 +3977,7 @@ export class Daemon {
           // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
-          run: () => {
-            this.sessionManager.stopCleanupTimer();
-            this.observerSessionRegistry.dispose();
-          },
+          run: () => this.stopSessionTimers(),
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },

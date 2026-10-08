@@ -20,7 +20,6 @@ import {
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
-  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
@@ -37,6 +36,7 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "./constants";
+import { getSessionIdleTimeoutMs, PROXY_HEARTBEAT_INTERVAL_MS } from "./sessionLivenessWindows";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
@@ -138,7 +138,7 @@ export type VersionMismatchReason =
 
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
-const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
@@ -975,8 +975,8 @@ export class DaemonMcpProxy {
       claimSent: boolean;
       /**
        * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
-       * has named for {@link DAEMON_BOUND_SESSION_REPLAY_TTL_MS} is abandoned and evicted, so a
-       * conversation that moved to another device stops pinning the old one.
+       * has named for the session idle window (`boundSessionReplayTtlMs`) is abandoned and
+       * evicted, so a conversation that moved to another device stops pinning the old one.
        */
       lastUsedAt: number;
       /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
@@ -989,6 +989,11 @@ export class DaemonMcpProxy {
   private readonly livenessConflictLogged = new Set<string>();
   /** How long a refused claim keeps retrying: the other owner's lease plus its grace (#10053). */
   private readonly ownershipConflictLeashMs: number;
+  /**
+   * The daemon's idle window, which retires the remembered binding and evicts abandoned held
+   * sessions. Read from the same `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` override the daemon reads.
+   */
+  private readonly boundSessionReplayTtlMs = getSessionIdleTimeoutMs();
   /**
    * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
@@ -3761,7 +3766,7 @@ export class DaemonMcpProxy {
     ) {
       return false;
     }
-    return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+    return this.timer.now() - this.boundSessionUuidAt >= this.boundSessionReplayTtlMs;
   }
 
   private clearBoundSessionUuid(): void {
@@ -4522,9 +4527,9 @@ export class DaemonMcpProxy {
   private evictAbandonedHeldSessions(): void {
     const now = this.timer.now();
     for (const [sessionUuid, held] of [...this.otherHeldSessions]) {
-      if (now - held.lastUsedAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS) {
+      if (now - held.lastUsedAt >= this.boundSessionReplayTtlMs) {
         logger.info(
-          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${DAEMON_BOUND_SESSION_REPLAY_TTL_MS}ms; no longer heartbeating it`,
+          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
         );
         this.dropHeldSession(sessionUuid);
       }

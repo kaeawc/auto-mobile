@@ -13,8 +13,9 @@ import {
 } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 
-// #10051: after lease expiry a session is held as suspect for a 10 s grace window
+// #10051: after lease expiry a session is held as suspect for a short grace window
 // with its device reserved for the owner token, and the daemon never reaps on the
 // strength of its own stall. Everything runs on a fake timer against the real
 // heartbeat handler, session manager and heartbeat monitor.
@@ -24,6 +25,8 @@ const DEVICE = "emulator-5554";
 const OWNER = "harness-a";
 const FOREIGN = "harness-b";
 const LEASE_MS = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+/** The heartbeat monitor's default scan interval. */
+const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
@@ -120,7 +123,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("the owner's heartbeat inside the window restores the same session and device", async () => {
       const original = sessionManager.getSession(SESSION);
-      timer.advanceTime(LEASE_MS + 5_000);
+      timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS / 2);
       await monitor.tick();
       expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
 
@@ -142,12 +145,12 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         liveness: { state: "live", remainingMs: LEASE_MS },
       });
 
-      timer.advanceTime(LEASE_MS + 3_000);
+      timer.advanceTime(LEASE_MS + 1_000);
 
       expect((await sessionInfo()).result).toMatchObject({
         sessionId: SESSION,
         assignedDevice: DEVICE,
-        liveness: { state: "suspect", remainingMs: SUSPECT_GRACE_MS - 3_000 },
+        liveness: { state: "suspect", remainingMs: SUSPECT_GRACE_MS - 1_000 },
       });
     });
   });
@@ -198,8 +201,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     });
 
     test("the rejection names the time left in the window", async () => {
+      const seconds = Math.ceil((SUSPECT_GRACE_MS - 1) / 1000);
       await expect(sessionManager.getOrCreateSession(SESSION)).rejects.toThrow(
-        /being restored; its device stays reserved for 10s\. Retry this call now/,
+        new RegExp(
+          `being restored; its device stays reserved for ${seconds}s\\. Retry this call now`,
+        ),
       );
     });
   });
@@ -231,12 +237,12 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     test("a silent owner is still reaped by on-schedule ticks after lease plus grace", async () => {
       monitor.start();
       // Each scan settles before the clock moves on, as on a daemon that is keeping its schedule.
-      for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += 10_000) {
-        await timer.advanceTimeAsync(10_000);
+      for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += SCAN_MS) {
+        await timer.advanceTimeAsync(SCAN_MS);
       }
       expect(reaped).toEqual([]);
 
-      await timer.advanceTimeAsync(10_000);
+      await timer.advanceTimeAsync(SCAN_MS);
 
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
@@ -252,11 +258,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       expect(reaped).toEqual([]);
       expect(sessionManager.getSession(SESSION)).not.toBeNull();
-      // Exactly the lost interval is forgiven (#10051 review F7): 60s of silence, 10s scheduled,
-      // so the lease is judged as if only the scheduled 10s had passed.
+      // Exactly the lost interval is forgiven (#10051 review F7): 60s of silence, one scan
+      // scheduled, so the lease is judged as if only the scheduled scan interval had passed.
       expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
         phase: "live",
-        remainingMs: 0,
+        remainingMs: LEASE_MS - SCAN_MS,
       });
     });
 
@@ -280,15 +286,16 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       await monitor.tick();
       const resumedAt = timer.now();
 
-      // 60s silent against a 10s schedule: 50s forgiven, so only the scheduled 10s was counted
-      // and 10s of lease plus grace remain.
-      timer.advanceTime(LEASE_MS);
+      // 60s silent against a one-scan schedule: all but the scheduled scan interval is
+      // forgiven, so the lease plus grace minus that interval remain.
+      const remaining = LEASE_MS + SUSPECT_GRACE_MS - SCAN_MS;
+      timer.advanceTime(remaining);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
       timer.advanceTime(1);
       await monitor.tick();
-      expect(timer.now() - resumedAt).toBe(LEASE_MS + 1);
+      expect(timer.now() - resumedAt).toBe(remaining + 1);
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
@@ -315,9 +322,10 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     test("a stall shorter than the idle window is forgiven whichever timer fires first (#10661)", async () => {
       const original = sessionManager.getSession(SESSION);
       monitor.start();
-      // 75s of silence: past expiresAt (60s) plus grace (10s), so an unforgiven lazy lookup
-      // would release the session, but only 65s of it was lost to the stall.
-      timer.setCurrentTime(timer.now() + 75_000);
+      // 63s of silence: past expiresAt (60s) plus grace, so an unforgiven lazy lookup would
+      // release the session, but only 61s of it was lost to the stall, less than the idle
+      // window plus grace, so it is a stall and not sleep.
+      timer.setCurrentTime(timer.now() + 63_000);
 
       expect((await heartbeat(OWNER)).success).toBe(true);
       await monitor.tick();
@@ -328,10 +336,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("stall forgiveness is applied once when a lookup and the tick both notice it (#10661)", async () => {
       monitor.start();
-      timer.setCurrentTime(timer.now() + 75_000);
+      timer.setCurrentTime(timer.now() + 63_000);
       sessionManager.getSession(SESSION);
       const forgivenAt = sessionManager.getSession(SESSION)?.stallForgivenAt;
       const expiresAt = sessionManager.getSession(SESSION)?.expiresAt;
+      expect(forgivenAt).toBeDefined();
 
       await monitor.tick();
 
@@ -342,7 +351,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     test("a tick only slightly late is not a stall and forgives nothing", async () => {
       monitor.start();
       // 1s late against a 2s margin: ordinary timer jitter, heartbeats were being received.
-      timer.setCurrentTime(timer.now() + 10_000 + 1_000);
+      timer.setCurrentTime(timer.now() + SCAN_MS + 1_000);
       await monitor.tick();
       expect(sessionManager.getSession(SESSION)?.stallForgivenAt).toBeUndefined();
     });
@@ -356,26 +365,29 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
-    test("a 16s stall that is only 7s late is forgiven instead of reaping a heartbeating owner (review F7)", async () => {
-      // The review's example: lease 10s, grace 10s, scans every 10s. The owner's last heartbeat
-      // is 4.5s before a 16s stall that starts 1s after a scan, so the scan that wakes first
-      // fires 7s late and sees a session aged 20.5s.
+    test("a 5s stall that is only 3s late is forgiven instead of reaping a heartbeating owner (review F7)", async () => {
+      // The review's shape on the current windows (lease 4s, grace 4s, scans every 2s). The
+      // owner's last heartbeat is at 1s; scans run on schedule at 2s, 4s and 6s; then a 5s stall
+      // makes the next scan fire 3s late, at 11s, when the session has aged 10s, past lease plus
+      // grace.
       const original = sessionManager.getSession(SESSION);
       monitor.start();
-      timer.setCurrentTime(6_500);
+      timer.setCurrentTime(1_000);
       expect((await heartbeat(OWNER)).success).toBe(true);
-      timer.setCurrentTime(10_000);
-      await monitor.tick();
-      timer.setCurrentTime(10_000 + 1_000 + 16_000);
+      for (const at of [2_000, 4_000, 6_000]) {
+        timer.setCurrentTime(at);
+        await monitor.tick();
+      }
+      timer.setCurrentTime(11_000);
 
       await monitor.tick();
 
       expect(reaped).toEqual([]);
       expect(sessionManager.getSession(SESSION)).toBe(original);
-      // The 7s the daemon was late are not counted: the session ages from 6.5s + 7s.
+      // The 3s the daemon was late are not counted: the session ages 7s, inside the grace.
       expect(sessionManager.getSessionLeaseState(SESSION)).toEqual({
         phase: "suspect",
-        remainingMs: 6_500,
+        remainingMs: LEASE_MS + SUSPECT_GRACE_MS - 7_000,
       });
       // Its owner's buffered heartbeat then restores it.
       expect((await heartbeat(OWNER)).success).toBe(true);
@@ -395,11 +407,13 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       );
       try {
         strictMonitor.start();
-        timer.setCurrentTime(6_500);
+        timer.setCurrentTime(1_000);
         await heartbeat(OWNER);
-        timer.setCurrentTime(10_000);
-        await strictMonitor.tick();
-        timer.setCurrentTime(27_000);
+        for (const at of [2_000, 4_000, 6_000]) {
+          timer.setCurrentTime(at);
+          await strictMonitor.tick();
+        }
+        timer.setCurrentTime(11_000);
 
         await strictMonitor.tick();
 
@@ -496,7 +510,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           lastHeartbeat: 40,
           livenessOwnerToken: OWNER,
         });
-        timer.advanceTime(5_000);
+        timer.advanceTime(LEASE_MS - 1_000);
         await restartedMonitor.tick();
         expect(reaped).toEqual([]);
 
@@ -579,8 +593,8 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     test("a non-owner's tool calls do not keep the owner's lease alive, so a restarted proxy wins after lease plus grace (F1a)", async () => {
       // OWNER stops heartbeating at t=0 (a dead proxy). The restarted proxy, with a new token,
       // keeps working: every call names the session and refreshes its activity.
-      for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += 5_000) {
-        timer.advanceTime(5_000);
+      for (let elapsed = 0; elapsed < LEASE_MS + SUSPECT_GRACE_MS; elapsed += SCAN_MS) {
+        timer.advanceTime(SCAN_MS);
         await sessionManager.getOrCreateSession(SESSION);
         await monitor.tick();
         expect((await heartbeat(FOREIGN, true)).code).toBe("liveness_owner_conflict");

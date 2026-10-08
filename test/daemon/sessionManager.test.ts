@@ -1,6 +1,7 @@
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -585,7 +586,7 @@ describe("SessionManager", () => {
     test("should set correct expiration time for session", async () => {
       const beforeCreate = fakeTimer.now();
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
-      const expectedExpiry = beforeCreate + 30 * 60 * 1000; // 30 minutes
+      const expectedExpiry = beforeCreate + DEFAULT_SESSION_IDLE_TIMEOUT_MS; // 2 minutes
       expect(session.expiresAt).toBe(expectedExpiry);
     });
 
@@ -2547,8 +2548,8 @@ describe("SessionManager", () => {
     });
 
     test("setLastHierarchy stores a ViewHierarchyResult in the typed top-level slot and stamps lastObserveTime (#2917)", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android");
       fakeTimer.setCurrentTime(123456);
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
       const hierarchy = makeHierarchy("root");
 
       sessionManager.setLastHierarchy("session-1", hierarchy);
@@ -3072,20 +3073,17 @@ describe("SessionManager", () => {
   });
 
   describe("recordHeartbeat", () => {
-    test("should extend expiry using the session's custom timeout", async () => {
+    test("holds a heartbeating session only through the suspect grace past its custom timeout", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
       fakeTimer.advanceTime(4000);
 
+      // A heartbeat does not extend the idle deadline (#10656), but a heartbeating session
+      // past its deadline is held for the suspect grace window (#10051) before release.
       sessionManager.recordHeartbeat("session-1");
-      fakeTimer.advanceTime(4000);
+      fakeTimer.advanceTime(1000 + SUSPECT_GRACE_MS);
       expect(sessionManager.getSession("session-1")).not.toBeNull();
 
-      // A heartbeating session past its deadline is held for the suspect grace
-      // window (#10051) before the sweep releases it.
-      fakeTimer.advanceTime(1500);
-      expect(sessionManager.getSession("session-1")).not.toBeNull();
-
-      fakeTimer.advanceTime(SUSPECT_GRACE_MS);
+      fakeTimer.advanceTime(1);
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });
@@ -4682,8 +4680,8 @@ describe("SessionManager", () => {
         released.push({ sessionId, deviceId });
       });
 
-      // Advance time past the 30-minute session timeout
-      fakeTimer.advanceTime(31 * 60 * 1000);
+      // Advance time past the idle window, before the first cleanup sweep
+      fakeTimer.advanceTime(DEFAULT_SESSION_IDLE_TIMEOUT_MS + 60_000);
 
       // Accessing the expired session should trigger cleanup + callback
       const result = sessionManager.getSession("session-expiry");
@@ -4702,7 +4700,7 @@ describe("SessionManager", () => {
         released.push({ sessionId, deviceId });
       });
 
-      // Advance past session timeout + cleanup interval (30min + 5min)
+      // Advance well past the idle window and several cleanup intervals
       fakeTimer.advanceTime(36 * 60 * 1000);
       await sessionManager.waitForSessionRelease("session-timer");
 
@@ -4725,7 +4723,8 @@ describe("SessionManager", () => {
       const manager = new SessionManager(fakeTimer, repository);
       try {
         await manager.createSession("lazy-expiry", "emulator-5554", "android");
-        fakeTimer.advanceTime(31 * 60 * 1000);
+        // Past the idle window, before the first 5-minute cleanup sweep.
+        fakeTimer.advanceTime(DEFAULT_SESSION_IDLE_TIMEOUT_MS + 60_000);
         expect(manager.getSession("lazy-expiry")).toBeNull();
         await manager.waitForSessionRelease("lazy-expiry");
 
@@ -4828,7 +4827,7 @@ describe("SessionManager", () => {
       const mgr = new SessionManager(fakeTimer, repo, () => barrier);
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
-        // Past session timeout (30m) + cleanup interval (5m): the timer fires.
+        // Past the idle window and a cleanup interval (5m): the timer fires.
         fakeTimer.advanceTime(36 * 60 * 1000);
         await mgr.waitForSessionRelease("s1");
         expect(released).toContain("s1");

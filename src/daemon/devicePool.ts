@@ -8,6 +8,10 @@ import {
 import { isSessionReleasing } from "./sessionReleaseState";
 import { releaseSessionAndDevice } from "./releaseSessionAndDevice";
 import {
+  ForwardLeaseForeignDeviceOwnership,
+  type ForeignDeviceOwnership,
+} from "./foreignDeviceOwnership";
+import {
   InMemoryDeviceHealthMarkers,
   type DeviceHealthMarkers,
   type DeviceHealthMarker,
@@ -733,6 +737,11 @@ export interface OwnerDisconnectOptions {
 
 export interface DevicePoolDependencies {
   androidAdbFactory?: AdbClientFactory;
+  /**
+   * Who else drives a device. Multi-device allocation skips devices another live daemon owns.
+   * `DevicePool.create` reads CtrlProxy forwarding leases; a directly built pool sees none.
+   */
+  foreignDeviceOwnership?: ForeignDeviceOwnership;
   env?: Environment;
   deviceHealthMarkers?: DeviceHealthMarkers;
   deviceHealthRecoveryBackoff?: BackoffPolicy;
@@ -1028,10 +1037,16 @@ export class DevicePool {
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
   static create(deps: DevicePoolDependencies): DevicePool {
-    return new DevicePool(deps);
+    return new DevicePool({
+      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(),
+      ...deps,
+    });
   }
 
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
+  private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
+  private readonly loggedForeignDeviceOwners = new Map<string, number>();
 
   constructor({
     env,
@@ -1067,8 +1082,10 @@ export class DevicePool {
     deviceShutdownReservationsFactory,
     deviceSessionContinuityEnabled,
     androidAdbFactory,
+    foreignDeviceOwnership,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
+    this.foreignDeviceOwnership = foreignDeviceOwnership;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
     this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
@@ -2344,7 +2361,7 @@ export class DevicePool {
                 continue;
               }
 
-              const assignResult = await this.tryAssignDevice(sessionId, platform);
+              const assignResult = await this.tryAssignUnownedDevice(sessionId, platform);
               if (assignResult.refreshCompleted) {
                 refreshFailure = assignResult.refreshFailure;
               }
@@ -2738,7 +2755,8 @@ export class DevicePool {
     const available = new Set<string>();
     let canClaim = true;
     for (const request of this.criteriaMatcher.sortBySpecificity(claims)) {
-      const candidates = this.getDevicesMatchingCriteria(request.criteria);
+      const matching = this.getDevicesMatchingCriteria(request.criteria);
+      const candidates = matching.filter((candidate) => !this.isDrivenByForeignDaemon(candidate));
       const device = candidates.find(
         (candidate) => this.isIdleDeviceEligible(candidate) && !available.has(candidate.id),
       );
@@ -2750,7 +2768,8 @@ export class DevicePool {
         if (
           !idle &&
           !this.shouldWaitForDevice(
-            this.countBusyDevices(candidates),
+            // Another daemon's device is busy from here: it frees when that daemon lets it go.
+            this.countBusyDevices(candidates) + (matching.length - candidates.length),
             this.hasPendingAndroidRecoveryMatching(request.criteria),
           )
         ) {
@@ -3236,6 +3255,16 @@ export class DevicePool {
       deadlineMs,
       "start",
       async (childProcess, signal, retainLeaseUntil) => {
+        if (childProcess === null && device.platform === "android") {
+          // The launch found this AVD already running in a process this daemon did not start, and
+          // its emulator was not visible to this daemon's adb when the AVD was chosen. It belongs
+          // to someone else (often another daemon on its own adb server): never adopt it for an
+          // allocation, and never spend the allocation deadline waiting for it (mt-0083 D2).
+          logger.warn(
+            `[DevicePool] AVD '${device.name}' is already running in another process; not adopting it for allocation`,
+          );
+          return null;
+        }
         const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
         if (readinessTimeoutMs <= 0) {
           logger.warn(`[DevicePool] Start deadline elapsed; cancelling ${label} before readiness`);
@@ -3410,35 +3439,65 @@ export class DevicePool {
     const reservedDeviceIds = new Set<string>();
     const excludedImageIds = new Set<string>();
     let started = 0;
+    let refreshed = false;
 
-    for (const request of requests) {
-      const existing = this.getDevicesMatchingCriteria(request.criteria).find(
+    // A session that already holds a device (an executePlan base session) uses that device, so
+    // it can never stand in for another label's request.
+    const unheldRequests = requests.filter((request) => {
+      const held = this.deviceHeldByExistingSession(request.sessionId);
+      if (held) {
+        reservedDeviceIds.add(held.id);
+      }
+      return !held;
+    });
+    const findExisting = (request: DeviceAllocationRequest) =>
+      this.getUnownedDevicesMatchingCriteria(request.criteria).find(
         (device) => device.status !== "error" && !reservedDeviceIds.has(device.id),
       );
+
+    for (const request of unheldRequests) {
+      const existing = findExisting(request);
       if (existing) {
         reservedDeviceIds.add(existing.id);
         continue;
       }
 
-      const startedDevice = await this.startAdditionalDeviceMatchingCriteria(
+      const outcome = await this.startAdditionalDeviceMatchingCriteria(
         request.criteria,
         excludedImageIds,
         deadlineMs,
+        async () => {
+          if (refreshed) {
+            return undefined;
+          }
+          // A booted device can be missing from the pool, e.g. dropped after a reboot until
+          // something acquires it. Re-discover once before cold-booting an AVD (mt-0083 D2).
+          refreshed = true;
+          await this.refreshDevicesWithOutcome();
+          return findExisting(request);
+        },
       );
-      if (startedDevice) {
-        reservedDeviceIds.add(startedDevice.id);
-        started++;
+      if (outcome) {
+        reservedDeviceIds.add(outcome.device.id);
+        if (outcome.started) {
+          started++;
+        }
       }
     }
 
     return started;
   }
 
+  /**
+   * Cold-boot a device image matching `criteria`. Just before booting, `rediscover` may find a
+   * pooled device that can serve the request instead; it is returned unstarted.
+   */
   private async startAdditionalDeviceMatchingCriteria(
     criteria: DeviceAllocationCriteria | undefined,
     excludedImageIds: Set<string>,
     deadlineMs: number,
-  ): Promise<PooledDevice | null> {
+    rediscover: () => Promise<PooledDevice | undefined>,
+  ): Promise<{ device: PooledDevice; started: boolean } | null> {
     if (!criteria?.platform) {
       return null;
     }
@@ -3452,6 +3511,10 @@ export class DevicePool {
       const device = candidates[0];
       if (!device) {
         return null;
+      }
+      const rediscovered = await rediscover();
+      if (rediscovered) {
+        return { device: rediscovered, started: false };
       }
 
       const label = device.deviceId ?? device.name;
@@ -3469,7 +3532,8 @@ export class DevicePool {
         deadlineMs,
         criteria.platform,
       );
-      return ready ? (this.devices.get(ready.deviceId) ?? null) : null;
+      const pooled = ready ? this.devices.get(ready.deviceId) : undefined;
+      return pooled ? { device: pooled, started: true } : null;
     } catch (error) {
       logger.warn(
         `[DevicePool] Failed to start device for criteria ${this.criteriaMatcher.formatCriteriaSummary(criteria)}: ${error}`,
@@ -5036,6 +5100,22 @@ export class DevicePool {
     );
   }
 
+  /** Platform multi-device attempt: like tryAssignDevice, minus devices other daemons drive. */
+  private tryAssignUnownedDevice(
+    sessionId: string,
+    platform?: Platform,
+  ): ReturnType<DevicePool["tryAssignDevice"]> {
+    return this.tryAssignFrom(
+      sessionId,
+      () =>
+        this.getDevicesByPlatform(platform).filter(
+          (device) => !this.isDrivenByForeignDaemon(device),
+        ),
+      "platform pool empty",
+      () => this.hasPendingAndroidRecovery(platform),
+    );
+  }
+
   private recordCriteriaAssignment(
     request: DeviceAllocationRequest,
     result: Awaited<ReturnType<DevicePool["tryAssignDeviceWithCriteria"]>>,
@@ -5067,7 +5147,7 @@ export class DevicePool {
   }> {
     return this.tryAssignFrom(
       sessionId,
-      () => this.getDevicesMatchingCriteria(criteria),
+      () => this.getUnownedDevicesMatchingCriteria(criteria),
       "criteria pool empty",
       () => this.hasPendingAndroidRecoveryMatching(criteria),
     );
@@ -7496,6 +7576,36 @@ export class DevicePool {
       device.id.length > 0 &&
       discoverySourceFor(device.platform, device.id) === "ios-simulator"
     );
+  }
+
+  /** Devices matching `criteria` that no other live daemon drives (mt-0083 D2). */
+  private getUnownedDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {
+    return this.getDevicesMatchingCriteria(criteria).filter(
+      (device) => !this.isDrivenByForeignDaemon(device),
+    );
+  }
+
+  /**
+   * An idle Android device whose CtrlProxy forwarding lease another live AutoMobile process holds
+   * is that process's device. On a shared adb server it looks idle here only because this pool
+   * holds no session on it, so multi-device allocation must not hand it to a plan.
+   */
+  private isDrivenByForeignDaemon(device: PooledDevice): boolean {
+    if (device.platform !== "android" || device.sessionId !== null) {
+      return false;
+    }
+    const ownerPid = this.foreignDeviceOwnership?.foreignOwnerPid(device.id);
+    if (ownerPid === undefined) {
+      this.loggedForeignDeviceOwners.delete(device.id);
+      return false;
+    }
+    if (this.loggedForeignDeviceOwners.get(device.id) !== ownerPid) {
+      this.loggedForeignDeviceOwners.set(device.id, ownerPid);
+      logger.info(
+        `[DevicePool] Not allocating ${device.id}: another AutoMobile process (PID ${ownerPid}) drives it`,
+      );
+    }
+    return true;
   }
 
   private getDevicesMatchingCriteria(criteria?: DeviceAllocationCriteria): PooledDevice[] {

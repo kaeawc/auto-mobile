@@ -13,6 +13,8 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   deviceImages: DeviceInfo[] = [];
   bootedDevices: BootedDevice[] = [];
   startedDevices: DeviceInfo[] = [];
+  /** Model a launch that finds its AVD already running in another process (duplicate exit). */
+  startAdoptsForeignEmulator = false;
   startDeviceTimeouts: Array<number | undefined> = [];
   // Platforms whose discovery should report as failed/unavailable (used to
   // exercise partial-discovery handling). Defaults to all platforms succeeding.
@@ -161,9 +163,14 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   async startDevice(
     device: DeviceInfo,
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
-  ): Promise<ChildProcess> {
+  ): Promise<ChildProcess | null> {
     this.startedDevices.push(device);
     this.startDeviceTimeouts.push(timeoutMs);
+    if (this.startAdoptsForeignEmulator) {
+      // The launch exited as a duplicate of an emulator another process runs: no child process,
+      // and nothing new becomes visible to this daemon's adb.
+      return null;
+    }
     const id = device.deviceId ?? device.name;
     const alreadyBooted = this.bootedDevices.some((booted) => booted.deviceId === id);
     if (!alreadyBooted) {

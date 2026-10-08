@@ -15,6 +15,7 @@ import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,
 } from "../../../src/utils/HostCommandExecutor";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { ExecSeamOptions, RawExecOutput } from "../../../src/utils/ExecSeam";
 import { logger } from "../../../src/utils/logger";
 
@@ -93,6 +94,25 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   afterEach(() => {
     warn.mockRestore();
+  });
+
+  test("rethrows a cancelled request instead of reporting unavailable", async () => {
+    const controller = new AbortController();
+    exec.fail(execError(null, "", "aborted"));
+    controller.abort(new Error("client cancelled"));
+
+    await expect(runWithAbortSignal(controller.signal, () => bridge().status())).rejects.toThrow(
+      "client cancelled",
+    );
+  });
+
+  test("forwards the ambient request signal to the controller exec", async () => {
+    const controller = new AbortController();
+    exec.succeed(fixture("ready"));
+
+    await runWithAbortSignal(controller.signal, () => bridge().status());
+
+    expect(exec.calls[0]?.options?.signal).toBe(controller.signal);
   });
 
   test("defaults to the controller inside the /Applications bundle", () => {
@@ -353,6 +373,18 @@ describe("createManagedSimulatorLister (#10590)", () => {
       { deviceSet: DEVICE_SET, udid: SIM_A },
       { deviceSet: DEVICE_SET, udid: SIM_B },
     ]);
+  });
+
+  test("rethrows a cancelled request instead of returning no simulators", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("client cancelled"));
+    const list = createManagedSimulatorLister({
+      listBootedSimulators: async () => {
+        throw new Error("simctl aborted");
+      },
+    });
+
+    await expect(runWithAbortSignal(controller.signal, list)).rejects.toThrow("client cancelled");
   });
 
   test("honours CORESIMULATOR_DEVICE_SET_PATH", async () => {

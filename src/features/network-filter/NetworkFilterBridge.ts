@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { z } from "zod/v4";
+import { combineWithAmbientAbort, throwIfRequestAborted } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   DefaultHostCommandExecutor,
@@ -191,6 +192,8 @@ export function createManagedSimulatorLister(
     try {
       booted = await listBooted();
     } catch (error) {
+      // A cancelled request is not a listing failure: surface the abort.
+      throwIfRequestAborted();
       logger.warn(
         `[NetworkFilterBridge] listing booted simulators failed: ${errorMessage(error)}`,
         error,
@@ -275,10 +278,13 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
         {
           timeoutMs: this.timeoutMs,
           maxBuffer: CONTROLLER_MAX_BUFFER_BYTES,
+          signal: combineWithAmbientAbort(),
         },
       );
       stdout = result.stdout;
     } catch (error) {
+      // A cancelled request is not an `unavailable` controller.
+      throwIfRequestAborted();
       const failure = execFailureDetails(error);
       if (failure.code === "ENOENT") {
         // Removed between the existence check and the exec.

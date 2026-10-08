@@ -481,6 +481,7 @@ internal constructor(
                 isFocused = window.isFocused,
                 hierarchy = processedElement,
                 windowBounds = ElementBounds(windowBounds),
+                isOwnInteractiveOverlay = hasInteractiveOverlayTitle(window.type, window.title),
               )
             )
           }
@@ -1636,6 +1637,8 @@ internal constructor(
     val isFocused: Boolean,
     val hierarchy: UIElementInfo,
     val windowBounds: ElementBounds? = null,
+    /** CtrlProxy's own interactive overlay window (either layer); never an occluder here. */
+    val isOwnInteractiveOverlay: Boolean = false,
   )
 
   private data class OrderCounter(var value: Int = 0)
@@ -1799,6 +1802,16 @@ internal constructor(
         .mapTo(mutableSetOf()) {
           it.windowId
         }
+    // The host decides what CtrlProxy's own interactive overlay covers (isFullyCoveredByOwnOverlay,
+    // layer:"app", covered-tap refusal), so its windows must not prune the app nodes beneath them
+    // here; dropping those nodes left the host nothing to scope or refuse (#10608/#10544).
+    val ownOverlayWindowKeys =
+      windowEntries
+        .asSequence()
+        .filter { it.isOwnInteractiveOverlay }
+        .mapTo(mutableSetOf()) {
+          it.windowId
+        }
     for (windowEntry in windowEntries) {
       val hierarchy = windowEntry.hierarchy
       val windowKey = windowEntry.windowId
@@ -1902,7 +1915,11 @@ internal constructor(
         // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
         // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
         // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
-        if (occluder.windowKey != node.windowKey && occluder.windowKey in imeWindowKeys) {
+        // CtrlProxy's own interactive overlay windows are skipped the same way (see above).
+        if (
+          occluder.windowKey != node.windowKey &&
+            (occluder.windowKey in imeWindowKeys || occluder.windowKey in ownOverlayWindowKeys)
+        ) {
           continue
         }
         val intersection = intersectBounds(node.bounds, occluderBounds) ?: continue

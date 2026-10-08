@@ -1144,6 +1144,53 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `own interactive overlay windows of either layer do not prune covered app rows`() {
+    // The app layer's TYPE_APPLICATION_OVERLAY window reports as TYPE_SYSTEM (#10544).
+    for (type in
+      listOf(
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+        AccessibilityWindowInfo.TYPE_SYSTEM,
+      )) {
+      val result =
+        coveredRowExtraction(
+          type,
+          "dev.jasonpearson.automobile.ctrlproxy",
+          INTERACTIVE_OVERLAY_WINDOW_TITLE,
+        )
+      val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
+      assertTrue("type $type", serialized.contains("Covered row"))
+      assertFalse("type $type", serialized.contains("\"occlusionState\":\"hidden\""))
+      assertTrue("type $type", serialized.contains("Overlay card"))
+    }
+  }
+
+  @Test
+  fun `third-party and highlight overlays still prune covered app rows`() {
+    for ((type, pkg, title) in
+      listOf(
+        Triple(AccessibilityWindowInfo.TYPE_SYSTEM, "com.android.systemui", "NotificationShade"),
+        Triple(AccessibilityWindowInfo.TYPE_SYSTEM, "com.android.systemui", null),
+        // CtrlProxy's highlight overlay keeps today's behaviour: only the interactive title skips.
+        Triple(
+          AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+          "dev.jasonpearson.automobile.ctrlproxy",
+          "AutoMobile Overlay",
+        ),
+        // The interactive title on an application window is not an overlay window.
+        Triple(
+          AccessibilityWindowInfo.TYPE_APPLICATION,
+          "other.app",
+          INTERACTIVE_OVERLAY_WINDOW_TITLE,
+        ),
+      )) {
+      val serialized =
+        json.encodeToString(ViewHierarchy.serializer(), coveredRowExtraction(type, pkg, title))
+      assertFalse("$type $title", serialized.contains("Covered row"))
+      assertTrue("$type $title", serialized.contains("Visible row"))
+    }
+  }
+
+  @Test
   fun `overlay metadata is stamped on both overlay layers but never on SystemUI windows`() {
     val asked = mutableListOf<Pair<String?, String?>>()
     val stamping =
@@ -3622,6 +3669,7 @@ class ViewHierarchyExtractorTest {
     isActive: Boolean = true,
     isFocused: Boolean = true,
     windowBounds: ElementBounds? = null,
+    isOwnInteractiveOverlay: Boolean = false,
   ): Any {
     val windowEntryClass = this.javaClass.declaredClasses.first { it.simpleName == "WindowEntry" }
     val constructor =
@@ -3634,6 +3682,7 @@ class ViewHierarchyExtractorTest {
         Boolean::class.javaPrimitiveType,
         UIElementInfo::class.java,
         ElementBounds::class.java,
+        Boolean::class.javaPrimitiveType,
       )
     constructor.isAccessible = true
     return constructor.newInstance(
@@ -3645,6 +3694,7 @@ class ViewHierarchyExtractorTest {
       isFocused,
       hierarchy,
       windowBounds,
+      isOwnInteractiveOverlay,
     )
   }
 

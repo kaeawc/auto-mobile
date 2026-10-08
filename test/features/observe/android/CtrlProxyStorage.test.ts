@@ -190,6 +190,84 @@ describe("CtrlProxyStorage (Android)", function () {
     }
   });
 
+  const sdkSnapshot = {
+    schemaVersion: 1,
+    capabilities: [
+      { id: "network.control", state: "SUPPORTED" },
+      { id: "storage.keystore", state: "DISABLED", reason: "off" },
+    ],
+    policy: { captureHeaders: false, captureBodies: true, allowMutations: false },
+  };
+
+  const openSdkCapabilitiesClient = async (supportedCommands: string[]) => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    await client.ensureConnected();
+    const socket = await waitForSocket(getSocket);
+    await waitForSocketOpen(socket);
+    socket!.simulateMessage(JSON.stringify({ type: "connected", id: "apk", supportedCommands }));
+    return { client, socket: socket! };
+  };
+
+  const answerSdkCapabilities = async (state: unknown) => {
+    const { client, socket } = await openSdkCapabilitiesClient(["get_sdk_capabilities"]);
+    try {
+      const count = socket.sentMessages.length;
+      const pending = client.getSdkCapabilities("com.example");
+      await waitForSentMessages(socket, count + 1);
+      const request = findSentMessage(socket, "get_sdk_capabilities");
+      expect(request.packageName).toBe("com.example");
+      socket.simulateMessage(
+        JSON.stringify({ type: "sdk_capabilities", requestId: request.requestId, state }),
+      );
+      return await pending;
+    } finally {
+      client.close();
+    }
+  };
+
+  test("SDK capabilities round trip returns the typed snapshot and drops unknown fields", async () => {
+    const result = await answerSdkCapabilities({
+      schemaVersion: 1,
+      outcome: "ok",
+      snapshot: { ...sdkSnapshot, future: 1 },
+    });
+    expect(result).toEqual({ status: "available", snapshot: sdkSnapshot });
+  });
+
+  test("SDK capabilities forward a bridge-unavailable reason from the device", async () => {
+    const result = await answerSdkCapabilities({
+      schemaVersion: 1,
+      outcome: "unavailable",
+      reason: "BRIDGE_NOT_INSTALLED",
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "BRIDGE_NOT_INSTALLED" });
+  });
+
+  test("SDK capabilities report a malformed device snapshot as unavailable", async () => {
+    const result = await answerSdkCapabilities({
+      schemaVersion: 1,
+      outcome: "ok",
+      snapshot: { schemaVersion: 1 },
+    });
+    expect(result).toEqual({ status: "unavailable", reason: "MALFORMED_RESPONSE" });
+  });
+
+  test("an old CtrlProxy APK yields unavailable without sending a request", async () => {
+    const { client, socket } = await openSdkCapabilitiesClient([]);
+    try {
+      expect(await client.getSdkCapabilities("com.example")).toEqual({
+        status: "unavailable",
+        reason: "CTRLPROXY_UNSUPPORTED",
+      });
+      expect(
+        socket.sentMessages.some((message) => JSON.parse(message).type === "get_sdk_capabilities"),
+      ).toBe(false);
+    } finally {
+      client.close();
+    }
+  });
+
   test.each([
     ["list_preference_files", "preference_files"],
     ["get_preferences", "preferences"],

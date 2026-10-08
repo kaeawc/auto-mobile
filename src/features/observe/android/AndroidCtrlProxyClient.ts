@@ -629,6 +629,12 @@ interface WsKeystoreDiscoveryMessage extends WsMessageBase {
   state: unknown;
 }
 
+interface WsSdkCapabilitiesMessage extends WsMessageBase {
+  type: "sdk_capabilities";
+  requestId: string;
+  state: unknown;
+}
+
 interface WsPreferenceFilesMessage extends WsMessageBase {
   type: "preference_files";
   requestId: string;
@@ -1009,6 +1015,7 @@ type WebSocketMessage =
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
   | WsKeystoreDiscoveryMessage
+  | WsSdkCapabilitiesMessage
   | WsPreferenceFilesMessage
   | WsPreferencesMessage
   | WsSubscribeStorageResultMessage
@@ -3469,6 +3476,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.storage.discoverKeystore(packageName);
   }
 
+  async getSdkCapabilities(packageName: string) {
+    return this.storage.getSdkCapabilities(packageName);
+  }
+
   async listDataStores(
     packageName: string,
     adapterName: string,
@@ -5787,6 +5798,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       })),
 
     keystore_discovery: (message) =>
+      this.resolvePendingResponse(message, (message) => ({ state: message.state })),
+
+    sdk_capabilities: (message) =>
       this.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
     preference_files: (message) =>

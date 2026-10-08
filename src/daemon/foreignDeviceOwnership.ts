@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   readExclusiveLockContent,
   takeOverExclusiveLock,
@@ -7,7 +7,11 @@ import {
 } from "../utils/fileLock";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import { isProcessRunning } from "../utils/processLiveness";
-import { ensureSecureSharedAutoMobileDirSync, getSharedAutoMobileDir } from "../utils/tempDir";
+import {
+  ensureSecureDirectorySync,
+  getAdbServerScopedAutoMobileDir,
+  getSharedAutoMobileDir,
+} from "../utils/tempDir";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -66,8 +70,60 @@ export interface DeviceOwnershipFileSource {
   ): boolean;
 }
 
-/** Shared (agent-invariant) directory of multi-device allocation claims, one lock per device. */
+/** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
+
+const DEFAULT_ADB_SERVER_HOST = "localhost";
+const DEFAULT_ADB_SERVER_PORT = "5037";
+const LOOPBACK_ADB_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/** A file-name-safe key for one ADB server endpoint; loopback spellings share one key. */
+function tcpServerScope(host: string, port: string): string {
+  const canonicalHost = LOOPBACK_ADB_HOSTS.has(host.toLowerCase())
+    ? DEFAULT_ADB_SERVER_HOST
+    : host.toLowerCase();
+  return `tcp-${canonicalHost}-${port}`.replace(/[^A-Za-z0-9.-]/g, "_");
+}
+
+/**
+ * Identifies the ADB server this process's `adb` talks to, from the variables adb itself reads:
+ * `ADB_SERVER_SOCKET` (`tcp:<port>`, `tcp:<host>:<port>`, or another socket spec), else
+ * `ANDROID_ADB_SERVER_ADDRESS` and `ANDROID_ADB_SERVER_PORT` (default `localhost:5037`).
+ * Daemons sharing a server see the same devices, so they must share its claims (#10708).
+ */
+export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
+  const socket = env.ADB_SERVER_SOCKET?.trim();
+  if (socket) {
+    if (socket.startsWith("tcp:")) {
+      const endpoint = socket.slice("tcp:".length);
+      const separator = endpoint.lastIndexOf(":");
+      return separator < 0
+        ? tcpServerScope(DEFAULT_ADB_SERVER_HOST, endpoint)
+        : tcpServerScope(endpoint.slice(0, separator), endpoint.slice(separator + 1));
+    }
+    return `socket-${Buffer.from(socket).toString("base64url")}`;
+  }
+  return tcpServerScope(
+    env.ANDROID_ADB_SERVER_ADDRESS?.trim() || DEFAULT_ADB_SERVER_HOST,
+    env.ANDROID_ADB_SERVER_PORT?.trim() || DEFAULT_ADB_SERVER_PORT,
+  );
+}
+
+/**
+ * Where a device's allocation claim lives. It is keyed by the ADB server, not by
+ * `AUTOMOBILE_COORDINATION_DIR`, so two daemons that share an adb server but use different
+ * coordination directories still contend for the same claim on the same device (#10708).
+ */
+export function deviceAllocationClaimPath(
+  deviceId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(adbServerScope(env), DEVICE_ALLOCATION_CLAIM_SUBDIR, homeDir),
+    ctrlProxyForwardLeaseFileName(deviceId),
+  );
+}
 
 const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   // Read-only: resolving a path does not create the shared directory.
@@ -76,25 +132,24 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
       getSharedAutoMobileDir(CTRL_PROXY_FORWARD_LEASE_SUBDIR),
       ctrlProxyForwardLeaseFileName(deviceId),
     ),
-  claimPath: (deviceId) =>
-    join(
-      getSharedAutoMobileDir(DEVICE_ALLOCATION_CLAIM_SUBDIR),
-      ctrlProxyForwardLeaseFileName(deviceId),
-    ),
+  claimPath: (deviceId) => deviceAllocationClaimPath(deviceId),
   read: (path) => readExclusiveLockContent(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
   tryAcquire: (path, owner) => {
-    ensureSecureSharedAutoMobileDirSync(DEVICE_ALLOCATION_CLAIM_SUBDIR);
+    ensureSecureDirectorySync(dirname(path));
     return tryAcquireExclusiveLock(path, owner);
   },
   takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
 };
 
 /**
- * Reads two per-device lock files in the shared coordination directory: the CtrlProxy forwarding
- * lease (#10485) a daemon takes when it first talks to a device's CtrlProxy, and the allocation
- * claim a daemon takes when multi-device allocation assigns it the device. Both use the
- * forwarding lease's lock format, including the owner's control socket.
+ * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
+ * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
+ * daemon takes when multi-device allocation assigns it the device. The claim lives in a directory
+ * scoped to the ADB server rather than to the coordination directory, so daemons with different
+ * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
+ * Both use the forwarding lease's lock format, including the owner's control socket, whose
+ * absolute path any daemon on the host can probe.
  *
  * A live PID alone is not trusted: after a crash or reboot the PID can name an unrelated process.
  * An owner that recorded its control socket is asked over it, the same way the CtrlProxy path
@@ -141,7 +196,18 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       return true;
     }
     const owner = this.claimOwner();
-    if (this.source.tryAcquire(path, owner)) {
+    let acquired: boolean;
+    try {
+      acquired = this.source.tryAcquire(path, owner);
+    } catch (error) {
+      logger.warn(
+        `Cannot publish the allocation claim for ${deviceId} at ${path}: ${errorMessage(error)}`,
+        error,
+      );
+      // Without a writable claim directory, allocation proceeds as it did before claims existed.
+      return true;
+    }
+    if (acquired) {
       return true;
     }
     const observed = this.source.read(path);

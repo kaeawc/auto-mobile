@@ -162,7 +162,30 @@ export function getSharedAutoMobileDir(
   return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
 }
 
-function ensureSecureDirectorySync(dir: string): string {
+/**
+ * Resolve a coordination directory scoped to one ADB server rather than to
+ * `AUTOMOBILE_COORDINATION_DIR` (#10708). Daemons that share an ADB server share
+ * its devices even when they use different coordination directories, so state
+ * that must keep them off each other's devices lives under the OS account's
+ * home, keyed by the server (see `adbServerScope`).
+ */
+export function getAdbServerScopedAutoMobileDir(
+  serverScope: string,
+  subdirectory: string,
+  homeDir: string = os.userInfo().homedir,
+): string {
+  if (homeDir.length === 0) {
+    throw new Error(
+      "Unable to resolve the ADB-server coordination directory without an OS account home directory.",
+    );
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", "adb-servers", serverScope, subdirectory);
+}
+
+/**
+ * Synchronously ensure `dir` exists with restrictive permissions, refusing a symbolic link.
+ */
+export function ensureSecureDirectorySync(dir: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
   if (fs.lstatSync(dir).isSymbolicLink()) {
     throw new Error(`Refusing to use symbolic-link directory: ${dir}`);

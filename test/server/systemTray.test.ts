@@ -21,6 +21,8 @@ import {
   EXPAND_GROUP_SETTLE_MS,
   getNotificationGroupChildRows,
   resolveNotificationGroupExpansionState,
+  resolveNotificationSwipeElement,
+  resolveNotificationTapElement,
 } from "../../src/server/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -1965,6 +1967,44 @@ describe("systemTray headerless two-notification group", () => {
       ).toEqual([`shell input swipe 938 ${y} 141 ${y} 300`]);
     });
   }
+
+  // #10269: the tap and swipe targets come from the resolver's `inspect` intent. The
+  // captured shade carries no click affordance on any node, so the tap intent finds no
+  // target at all; the matched label is tapped, as with the retired ElementFinder.
+  test("resolves the captured expanded row's labels as tap and swipe targets", async () => {
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      adbFactory: () => new SequencedFakeAdbExecutor([1000]),
+      observeScreenFactory: () =>
+        new SequencedObserveScreen([createObservation(headerlessTwoNotificationGroups.expanded)]),
+    });
+    const { match } = await waitForNotificationMatch(
+      device,
+      { title: "Gamma", appId: "com.android.shell" },
+      ["Shell", "com.android.shell"],
+      500,
+    );
+    const title = { left: 179, top: 997, right: 308, bottom: 1048 };
+    const body = { left: 179, top: 1053, right: 891, bottom: 1106 };
+    expect(resolveNotificationTapElement(match!, { title: "Gamma" })).toMatchObject({
+      matchType: "exact",
+      element: { bounds: title },
+    });
+    expect(resolveNotificationTapElement(match!, { title: "gamm" })).toMatchObject({
+      matchType: "partial",
+      element: { bounds: title },
+    });
+    expect(resolveNotificationTapElement(match!, { body: "gamma body" })?.element.bounds).toEqual(
+      body,
+    );
+    const withoutRowBounds = { ...match!, candidate: { ...match!.candidate, element: undefined } };
+    expect(
+      resolveNotificationSwipeElement(withoutRowBounds, { body: "gamma body" }, [])?.bounds,
+    ).toEqual(body);
+    expect(
+      resolveNotificationSwipeElement(withoutRowBounds, { title: "Gamma" }, [])?.bounds,
+    ).toEqual(title);
+  });
 });
 
 describe("systemTray grouped notifications", () => {

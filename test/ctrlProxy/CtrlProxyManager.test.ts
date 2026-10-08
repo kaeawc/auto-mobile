@@ -7,7 +7,7 @@ import {
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
 } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import { AdbClient, AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../../src/models";
 import * as fs from "fs/promises";
@@ -418,6 +418,39 @@ describe("CtrlProxyManager", function () {
         await expect(accessibilityServiceClient[method]()).resolves.toBe(false);
       });
     }
+  });
+
+  describe("install status inspection timeout (#10630)", function () {
+    const listCommand = `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`;
+
+    test("isInstalled surfaces an actionable error instead of reporting absent", async () => {
+      fakeAdb.setCommandError(
+        listCommand,
+        new AdbCommandTimeoutError("pm list packages timed out"),
+      );
+
+      await expect(accessibilityServiceClient.isInstalled()).rejects.toThrow(
+        "install status check timed out",
+      );
+    });
+
+    test("ensureCompatibleVersion does not start an install after an inspection timeout", async () => {
+      fakeAdb.setCommandError(
+        listCommand,
+        new AdbCommandTimeoutError("pm list packages timed out"),
+      );
+
+      await expect(accessibilityServiceClient.ensureCompatibleVersion()).rejects.toThrow(
+        "install status check timed out",
+      );
+      expect(fakeAdb.wasCommandExecuted("install")).toBe(false);
+    });
+
+    test("a genuinely absent package still reports not installed", async () => {
+      fakeAdb.setCommandResponse(listCommand, { stdout: "", stderr: "" });
+
+      expect(await accessibilityServiceClient.isInstalled()).toBe(false);
+    });
   });
 
   describe("evict", function () {

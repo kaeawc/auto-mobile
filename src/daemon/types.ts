@@ -160,6 +160,27 @@ export interface BoundSessionLoss {
   release?: SessionReleaseSnapshot;
 }
 
+/** Release reasons that mean the session ran out its idle window rather than being taken away. */
+const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
+  "lazy-expiry",
+  "cleanup-expired",
+  "heartbeat-timeout",
+  "cli-idle-timeout",
+]);
+
+/**
+ * The owner-facing message for a lost bound session. An idle expiry says so, including that the
+ * wall-clock window keeps running while the host sleeps, so a call after a long sleep gets an
+ * explanation and a next step rather than a bare "no longer active".
+ */
+export function boundSessionLossMessage(failure: BoundSessionLoss): string {
+  const base = `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). `;
+  return IDLE_EXPIRY_LOSS_REASONS.has(failure.reason)
+    ? `${base}The session was released after sitting idle past its window; time the host spent ` +
+        "asleep counts toward that window. Acquire a new device session before continuing."
+    : `${base}Acquire a new device session before continuing.`;
+}
+
 function hasSessionReleaseSnapshotFields(
   record: Record<string, unknown>,
   expectedSessionUuid: string,

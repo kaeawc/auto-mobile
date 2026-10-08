@@ -100,6 +100,24 @@ class DesktopDaemonSessionCompositionTest {
   }
 
   @Test
+  fun `a null binding never binds a device across ticks and a later pick binds once`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(null)
+      setContent { sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+
+      repeat(5) { tick() }
+      assertEquals(emptyList(), transport.boundDevices())
+
+      binding.value = pixel
+      mainClock.advanceTimeByFrame()
+      repeat(3) { tick() }
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    }
+
+  @Test
   fun `closing the last pane releases the held device and stops its heartbeat`() =
     runComposeUiTest {
       val transport = RecordingDaemonTransport()

@@ -13,6 +13,7 @@ import { logger } from "../../../src/utils/logger";
 import { createFileBackedDbHarness, type FileBackedDbHarness } from "../../db/withFileBackedDb";
 import { FakeChecksumCalculator } from "../../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../../fakes/FakeFileDownloader";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const EXPECTED_SHA = "b".repeat(64);
@@ -34,6 +35,7 @@ describe("OverlayAgentProvider", () => {
       downloader,
       checksumCalculator,
       timer,
+      idGenerator: new FakeIdGenerator(),
       expectedChecksum: EXPECTED_SHA,
       releaseUrl: RELEASE_URL,
       env: { AUTOMOBILE_VERSION: "0.0.82" },
@@ -122,7 +124,10 @@ describe("OverlayAgentProvider", () => {
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
     expect(await exists(dylibPath())).toBe(true);
     expect(await exists(metadataPath())).toBe(true);
-    expect(await exists(`${dylibPath()}.download`)).toBe(false);
+    expect(await fs.readdir(cacheDir)).toEqual([
+      OVERLAY_AGENT_CACHE_FILENAME,
+      OVERLAY_AGENT_METADATA_FILENAME,
+    ]);
   });
 
   test("missing checksum degrades with an actionable error and never downloads", async () => {
@@ -222,5 +227,32 @@ describe("OverlayAgentProvider", () => {
     await expect(provider.ensure()).rejects.toThrow("network down");
     downloader.shouldThrow = null;
     expect((await provider.ensure()).source).toBe("download");
+  });
+
+  test("overlapping downloads use distinct partials and both end with one valid dylib", async () => {
+    const a = makeProvider({ idGenerator: new FakeIdGenerator(["a1"]) });
+    const b = makeProvider({ idGenerator: new FakeIdGenerator(["b1"]) });
+    const results = await Promise.all([a.ensure(), b.ensure()]);
+    expect(results.map((r) => r.path)).toEqual([dylibPath(), dylibPath()]);
+    expect([...downloader.downloadedDestinations].sort()).toEqual([
+      `${dylibPath()}.a1.download`,
+      `${dylibPath()}.b1.download`,
+    ]);
+    expect((await fs.readdir(cacheDir)).sort()).toEqual([
+      OVERLAY_AGENT_CACHE_FILENAME,
+      OVERLAY_AGENT_METADATA_FILENAME,
+    ]);
+    expect(await fs.readFile(dylibPath())).toEqual(DYLIB);
+  });
+
+  test("a failed attempt removes only its own partial", async () => {
+    const otherPartial = `${dylibPath()}.other.download`;
+    await fs.writeFile(otherPartial, DYLIB);
+    checksumCalculator.checksum = "c".repeat(64);
+    await expect(
+      makeProvider({ idGenerator: new FakeIdGenerator(["mine"]) }).ensure(),
+    ).rejects.toThrow(/checksum verification failed/);
+    expect(downloader.downloadedDestinations).toEqual([`${dylibPath()}.mine.download`]);
+    expect(await fs.readdir(cacheDir)).toEqual([path.basename(otherPartial)]);
   });
 });

@@ -326,6 +326,18 @@ async function handleReleaseLivenessOwnership(
   };
 }
 
+/**
+ * True once a token-bearing proxy owns, or has a claim pending on, the session.
+ * A tokenless heartbeat (socket or HTTP) must then be a liveness no-op: it
+ * predates liveness ownership and must not renew the owner lease or deadlines.
+ */
+export function isTokenOwnedOrClaimPending(session: {
+  livenessOwnerToken?: string;
+  livenessOwnershipClaims?: { size: number };
+}): boolean {
+  return session.livenessOwnerToken !== undefined || !!session.livenessOwnershipClaims?.size;
+}
+
 async function handleHeartbeat(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -372,10 +384,7 @@ async function handleHeartbeat(
       ? heartbeatParams.livenessOwnerToken
       : undefined;
   const claimsLivenessOwnership = heartbeatParams?.claimLivenessOwnership === true;
-  if (
-    !livenessOwnerToken &&
-    (session.livenessOwnerToken !== undefined || session.livenessOwnershipClaims?.size)
-  ) {
+  if (!livenessOwnerToken && isTokenOwnedOrClaimPending(session)) {
     // Tokenless clients predate liveness ownership. Keep them compatible
     // only until a token-bearing owner has claimed this session; afterward
     // they are stale by definition and must not change policy or deadlines.

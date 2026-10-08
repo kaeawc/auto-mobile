@@ -64,29 +64,18 @@ struct OverlaySession {
         spec != nil
     }
 
-    /// A show brings the spec's own state and resets every pager to its first page.
-    mutating func show(_ spec: OverlaySpec) {
-        pageCounts = spec.root.pagerCounts()
-        pages = pageCounts.mapValues { _ in 0 }
-        state = spec.state ?? [:]
-        self.spec = spec
-    }
-
-    /// Like the Android runtime: a replacement brings its own state, and a pager that survives
-    /// keeps its position clamped to the new page count.
-    mutating func replace(_ spec: OverlaySpec) {
-        let previous = pages
+    /// A show of the overlay already on screen replaces it in place: its spec state is
+    /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
+    /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
+    /// every pager on its first page. Event sequences are per id and never rewound either way.
+    mutating func show(_ spec: OverlaySpec, reset: Bool = false) {
+        let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
             result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
         }
         state = spec.state ?? [:]
         self.spec = spec
-    }
-
-    /// Wire state patches are silent, as on Android.
-    mutating func mergeState(_ values: [String: JSONValue]) {
-        state.merge(values) { _, new in new }
     }
 
     func holds(_ condition: Condition) -> Bool {
@@ -136,6 +125,15 @@ struct OverlaySession {
         default:
             return
         }
+    }
+
+    /// Test-hook tap (see `OverlayTestHooks`): runs the identified node's `onTap` in-process, as a
+    /// real tap on a plain tappable node would.
+    mutating func simulateTap(identifier: String) -> Result<[OverlayEvent], OverlayTapFailure> {
+        guard isShown, let spec else { return .failure(.notShown) }
+        guard let node = spec.root.find(identifier: identifier) else { return .failure(.notFound) }
+        guard let actions = node.onTap, !actions.isEmpty else { return .failure(.notTappable) }
+        return .success(run(actions))
     }
 
     /// Settled pager position; clamped, and silent when the page does not change.
@@ -208,5 +206,29 @@ extension OverlayNode {
         var counts: [String: Int] = [:]
         collectPagers(into: &counts)
         return counts
+    }
+}
+
+/// Why `simulate_tap` did nothing.
+enum OverlayTapFailure: Error, Equatable {
+    case notShown
+    case notFound
+    case notTappable
+}
+
+/// Debug-only protocol surface for headless tests, where there is no input path into the
+/// simulator. Enabled only when the host sets the flag at launch; production `launchApp` never does.
+enum OverlayTestHooks {
+    static let environmentKey = "AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS"
+    static let gatedRequestTypes: Set<String> = ["simulate_tap"]
+
+    static func isEnabled(environment: [String: String]) -> Bool {
+        environment[environmentKey] == "1"
+    }
+
+    /// The error to reply with when `requestType` is a test hook and hooks are off; nil otherwise.
+    static func rejection(requestType: String, enabled: Bool) -> String? {
+        guard gatedRequestTypes.contains(requestType), !enabled else { return nil }
+        return "\(requestType) is a test hook; launch the app with \(environmentKey)=1 to enable it"
     }
 }

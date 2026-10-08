@@ -7,6 +7,7 @@ import {
   MAX_OVERLAY_ASSET_BYTES,
   MAX_OVERLAY_ASSET_COUNT,
   MAX_OVERLAY_ASSET_TOTAL_BYTES,
+  detectFontMimeType,
   overlayAssetUploadProblem,
 } from "./overlayAssets";
 import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
@@ -63,6 +64,16 @@ export interface OverlayAssetUploadOutcome {
 
 type Prepared = { assets: OverlayAssetUpload[] } | { error: string };
 
+/** Font files are checked by signature and size only; they are never decoded as images. */
+function validateFontBytes(id: string, bytes: Buffer): OverlayAssetUpload | string | null {
+  const mimeType = detectFontMimeType(bytes);
+  if (mimeType === null) {
+    return null;
+  }
+  const asset: OverlayAssetUpload = { id, mimeType, bytes };
+  return overlayAssetUploadProblem(asset) ?? asset;
+}
+
 function validateImageBytes(id: string, bytes: Buffer): OverlayAssetUpload | string {
   const mimeType = detectImageMimeType(bytes);
   if (mimeType === null) {
@@ -70,6 +81,11 @@ function validateImageBytes(id: string, bytes: Buffer): OverlayAssetUpload | str
   }
   const asset: OverlayAssetUpload = { id, mimeType, bytes };
   return overlayAssetUploadProblem(asset) ?? asset;
+}
+
+/** A file source may be an image or a font; fonts are told apart by their sfnt signature. */
+function validateFileBytes(id: string, bytes: Buffer): OverlayAssetUpload | string {
+  return validateFontBytes(id, bytes) ?? validateImageBytes(id, bytes);
 }
 
 async function readFileSource(
@@ -87,7 +103,7 @@ async function readFileSource(
     if (stat.size > MAX_OVERLAY_ASSET_BYTES) {
       return `file is ${stat.size} bytes; the limit is ${MAX_OVERLAY_ASSET_BYTES}`;
     }
-    return validateImageBytes(source.id, await reader.readFile(source.path));
+    return validateFileBytes(source.id, await reader.readFile(source.path));
   } catch (error) {
     logger.warn(`[overlay] Cannot read asset file ${source.path}: ${errorMessage(error)}`, error);
     return `cannot read file: ${errorMessage(error)}`;

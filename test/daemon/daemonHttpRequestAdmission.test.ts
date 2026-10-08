@@ -307,6 +307,40 @@ test("HTTP heartbeat accepts an unregistered non-releasing object", async () => 
   }
 });
 
+describe("HTTP heartbeat on a proxy-owned session", () => {
+  for (const kind of ["token-owned", "claim-pending"] as const) {
+    test(`tokenless HTTP heartbeat is a 200 no-op on a ${kind} session`, async () => {
+      const h = releasingSessionHarness();
+      const heartbeat = spyOn(h.manager, "recordHeartbeat");
+      try {
+        const session = await h.createUnregisteredSession();
+        if (kind === "token-owned") {
+          session.livenessOwnerToken = "proxy-token";
+        } else {
+          session.livenessOwnershipClaims = new Set(["proxy-token"]);
+        }
+        const ownerHeartbeat = session.lastOwnerHeartbeat;
+        const lastHeartbeat = session.lastHeartbeat;
+        const { server } = await harness(h.manager);
+        const response = await server.dispatch(
+          { host: `127.0.0.1:${port}` },
+          "POST",
+          "/heartbeat",
+          JSON.stringify({ sessionId: releasingSessionId }),
+        );
+        expect(response.statusCode).toBe(200);
+        expect(response.body).toBe('{"status":"ok"}');
+        expect(heartbeat).not.toHaveBeenCalled();
+        expect(session.lastOwnerHeartbeat).toBe(ownerHeartbeat);
+        expect(session.lastHeartbeat).toBe(lastHeartbeat);
+      } finally {
+        heartbeat.mockRestore();
+        h.dispose();
+      }
+    });
+  }
+});
+
 test("HTTP request callback handles unexpected rejection before transport dispatch", async () => {
   const warnings = spyOn(logger, "warn").mockImplementation(() => {});
   try {

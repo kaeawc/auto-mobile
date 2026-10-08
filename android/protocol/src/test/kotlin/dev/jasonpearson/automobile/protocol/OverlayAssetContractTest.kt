@@ -11,7 +11,11 @@ class OverlayAssetContractTest {
     assertEquals(32, OverlayAssetContract.MAX_OVERLAY_ASSET_COUNT)
     assertEquals(16 * 1024 * 1024, OverlayAssetContract.MAX_OVERLAY_ASSET_TOTAL_BYTES)
     assertEquals(256, OverlayAssetContract.MAX_OVERLAY_ASSET_ID_LENGTH)
-    assertEquals(setOf("image/png", "image/jpeg", "image/webp"), OverlayAssetContract.MIME_TYPES)
+    assertEquals(2 * 1024 * 1024, OverlayAssetContract.MAX_OVERLAY_FONT_ASSET_BYTES)
+    assertEquals(
+      setOf("image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"),
+      OverlayAssetContract.MIME_TYPES,
+    )
   }
 
   @Test

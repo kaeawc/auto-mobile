@@ -23,6 +23,32 @@ nonisolated func hasMultiPanelMismatch(app: GestureSize, screen: GestureSize) ->
     return !same && !transposed
 }
 
+/// Screen offset of an inset app window (#6635), or nil when there is nothing to translate.
+///
+/// In an iPadOS windowed app (iOS 27 "Windowed Apps"), XCTest reports the application
+/// element's frame, and the snapshot hierarchy that observe is built from, relative to the
+/// app window with origin (0,0). The app's window element and synthesized events use screen
+/// space. Observe therefore reports window-relative points, and the runner adds the window's
+/// screen origin before it delivers a point-offset gesture. Full-screen apps and iPhones have
+/// the window at the app frame's origin, so this returns nil and nothing changes.
+///
+/// The window must be the same size as the application frame. A different window (another
+/// scene, or a system window) would otherwise move every gesture.
+nonisolated func windowedAppTranslation(
+    appOrigin: GesturePoint, appSize: GestureSize, windowOrigin: GesturePoint, windowSize: GestureSize
+)
+    -> GesturePoint?
+{
+    let tolerance = 1.0
+    guard appSize.isValid, windowSize.isValid,
+          appOrigin.x.isFinite, appOrigin.y.isFinite, windowOrigin.x.isFinite, windowOrigin.y.isFinite,
+          abs(appSize.width - windowSize.width) <= tolerance,
+          abs(appSize.height - windowSize.height) <= tolerance else { return nil }
+    let translation = GesturePoint(x: windowOrigin.x - appOrigin.x, y: windowOrigin.y - appOrigin.y)
+    guard abs(translation.x) >= 0.5 || abs(translation.y) >= 0.5 else { return nil }
+    return translation
+}
+
 enum TapCoordinateStrategy: String, Equatable, Sendable {
     case legacy
     case appRelative
@@ -123,9 +149,29 @@ struct GestureCoordinateSelection: Equatable, Sendable {
     let reason: String
     let normalized: GesturePoint
     let offset: GesturePoint?
+    /// The caller forced the strategy. Typed so behaviour never depends on the `reason` text.
+    let isForced: Bool
+
+    init(
+        strategy: TapCoordinateStrategy, reason: String, normalized: GesturePoint, offset: GesturePoint?,
+        isForced: Bool = false
+    ) {
+        self.strategy = strategy
+        self.reason = reason
+        self.normalized = normalized
+        self.offset = offset
+        self.isForced = isForced
+    }
 
     var anchor: GestureCoordinateAnchor {
         strategy == .legacy ? .legacyApplication : .observedApplication
+    }
+
+    /// Only an automatic point-offset selection is window-relative. Normalized selections map
+    /// onto the app frame (multi-panel devices), and a forced legacy tap stays exactly as supplied.
+    nonisolated func windowTranslation(_ translation: GesturePoint?) -> GesturePoint? {
+        guard strategy == .legacy, !isForced, offset != nil else { return nil }
+        return translation
     }
 
     nonisolated static func mappedOffset(
@@ -190,10 +236,10 @@ struct GestureCoordinateSelection: Equatable, Sendable {
     )
         -> Self
     {
-        func legacy(_ reason: String) -> Self {
-            Self(strategy: .legacy, reason: reason, normalized: .zero, offset: point)
+        func legacy(_ reason: String, isForced: Bool = false) -> Self {
+            Self(strategy: .legacy, reason: reason, normalized: .zero, offset: point, isForced: isForced)
         }
-        if forced == .legacy { return legacy("forced") }
+        if forced == .legacy { return legacy("forced", isForced: true) }
         guard let geometry else { return legacy("mappingUndefined(noObservation)") }
         let mismatch = hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen)
         guard mismatch || forced != nil else { return legacy("singlePanel") }
@@ -206,7 +252,8 @@ struct GestureCoordinateSelection: Equatable, Sendable {
             strategy: strategy,
             reason: forced == nil ? "multiPanelMismatch" : "forced",
             normalized: normalized,
-            offset: nil
+            offset: nil,
+            isForced: forced != nil
         )
     }
 

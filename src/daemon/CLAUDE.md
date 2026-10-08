@@ -153,7 +153,9 @@ input allocates the device again. `test/fixtures/desktop-wire/` records these
 exchanges against the real handlers.
 
 Open owner question: is non-persistence acceptable? Clients must register again
-after daemon restart.
+after daemon restart. (Resolved question: watching is allowed on any device and
+control stays with the owner, per the 2026-10-08 decision above; the viewer grant
+and the `input/*` ownership check above implement it.)
 
 The follow-up enforcement lane must make stream authentication consult
 `resolveObserverScope`, enforce it on observation-stream/push sockets, rebase on

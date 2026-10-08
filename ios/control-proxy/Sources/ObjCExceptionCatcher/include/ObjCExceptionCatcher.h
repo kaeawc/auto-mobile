@@ -117,9 +117,11 @@ FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizePinch(
 );
 
 /// Single touch on an explicit display; unavailable symbols permit a public-coordinate fallback.
+/// The finger presses for pressDuration, moves for moveDuration, then rests at the end point
+/// for holdDuration before lifting (a drag's drop hold).
 FOUNDATION_EXPORT BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
     CGFloat startX, CGFloat startY, CGFloat endX, CGFloat endY,
-    NSTimeInterval pressDuration, NSTimeInterval moveDuration,
+    NSTimeInterval pressDuration, NSTimeInterval moveDuration, NSTimeInterval holdDuration,
     unsigned long long displayID, NSInteger interfaceOrientation,
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 );

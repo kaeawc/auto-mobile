@@ -328,12 +328,17 @@ final class FakeDisplayGestureProvider: DisplayGestureProviding {
         actions.append(duration > 0 ? "tapPress" : "tap")
     }
 
+    var dragPresses: [TimeInterval] = []
+    var dragHolds: [TimeInterval] = []
+
     func drag(
         _: GestureCoordinateSelection, to _: GestureCoordinateSelection,
-        press _: TimeInterval, velocity _: Double?, hold _: TimeInterval
+        press: TimeInterval, velocity _: Double?, hold: TimeInterval
     )
         throws
     {
+        dragPresses.append(press)
+        dragHolds.append(hold)
         actions.append("drag")
     }
 }

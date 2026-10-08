@@ -24,14 +24,16 @@ public struct TapDiagnostics: Codable, Sendable, Equatable {
         public let coordinateConstruction: String
         public let units: String
 
+        /// `mode` defaults to tap/press from the duration; moving gestures name themselves.
         public init(
             x: Double, y: Double, durationMs: Int,
-            coordinateConstruction: String = "appFrameOriginPlusPointOffset"
+            coordinateConstruction: String = "appFrameOriginPlusPointOffset",
+            mode: String? = nil
         ) {
             self.x = x
             self.y = y
             self.durationMs = durationMs
-            mode = durationMs > 0 ? "press" : "tap"
+            self.mode = mode ?? (durationMs > 0 ? "press" : "tap")
             self.coordinateConstruction = coordinateConstruction
             units = "points"
         }

@@ -299,7 +299,7 @@ NSArray<NSDictionary<NSString *, NSNumber *> *> * _Nullable ObjCExceptionCatcher
 
 BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
     CGFloat startX, CGFloat startY, CGFloat endX, CGFloat endY,
-    NSTimeInterval pressDuration, NSTimeInterval moveDuration,
+    NSTimeInterval pressDuration, NSTimeInterval moveDuration, NSTimeInterval holdDuration,
     unsigned long long displayID, NSInteger interfaceOrientation,
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 ) {
@@ -329,11 +329,14 @@ BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
             initForTouchAtPoint:CGPointMake(startX, startY) offset:0];
         NSTimeInterval press = pressDuration > 0 ? pressDuration : 0;
         NSTimeInterval move = moveDuration > 0 ? moveDuration : 0;
+        NSTimeInterval hold = holdDuration > 0 ? holdDuration : 0;
         if (move > 0 || startX != endX || startY != endY) {
             if (press > 0) { [path moveToPoint:CGPointMake(startX, startY) atOffset:press]; }
             [path moveToPoint:CGPointMake(endX, endY) atOffset:press + move];
+            if (hold > 0) { [path moveToPoint:CGPointMake(endX, endY) atOffset:press + move + hold]; }
         }
-        NSTimeInterval liftOffset = press + move > 0.05 ? press + move : 0.05;
+        NSTimeInterval held = press + move + hold;
+        NSTimeInterval liftOffset = held > 0.05 ? held : 0.05;
         [path liftUpAtOffset:liftOffset];
         [record addPointerEventPath:path];
         NSError *synthesisError = nil;

@@ -11,7 +11,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../utils/logger";
 import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
-import { MALFORMED_URI_SEGMENT_MESSAGE } from "./resourceUriSegments";
+import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
@@ -135,9 +135,14 @@ function requestUriIsWellEncoded(uri: string): boolean {
 // instead (#10117). A URIError is blamed on the client only when the REQUEST URI
 // itself fails to decode: `encodeURIComponent` also throws it (a lone surrogate in a
 // device-reported name) for a well-formed request, and that is a server fault that
-// must stay a server error. Every other handler error is rethrown untouched.
+// must stay a server error. A contract parser's MalformedResourceUriError is the
+// same client fault already diagnosed, so it maps to invalid-params too (it used
+// to surface as -32603). Every other handler error is rethrown untouched.
 function malformedUriToMcpError(error: unknown, uri: string): unknown {
-  if (!(error instanceof URIError) || requestUriIsWellEncoded(uri)) {
+  const malformedRequest =
+    error instanceof MalformedResourceUriError ||
+    (error instanceof URIError && !requestUriIsWellEncoded(uri));
+  if (!malformedRequest) {
     return error;
   }
   logger.warn(`[ResourceRegistry] Malformed percent-encoding in resource URI ${uri}: ${error}`);

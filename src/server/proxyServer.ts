@@ -221,6 +221,27 @@ export function mcpOverloadError(error: McpOverloadError): McpError {
  * daemon socket disappears. Arbitrary nested error messages can contain daemon
  * internals, so only expose the known request-control causes.
  */
+const JSONRPC_INVALID_PARAMS = -32602;
+
+/**
+ * The daemon's invalid-params verdict (a malformed resource URI, #10117), kept as
+ * -32602 instead of being re-wrapped as an internal error. The daemon message
+ * already carries the SDK's `MCP error -32602: ` prefix, so it is stripped
+ * before McpError adds it again.
+ */
+function forwardedInvalidParamsError(error: unknown): McpError | undefined {
+  if (
+    error === null ||
+    typeof error !== "object" ||
+    !("code" in error) ||
+    error.code !== JSONRPC_INVALID_PARAMS
+  ) {
+    return undefined;
+  }
+  const message = errorMessage(error).replace(`MCP error ${JSONRPC_INVALID_PARAMS}: `, "");
+  return new McpError(JSONRPC_INVALID_PARAMS, message);
+}
+
 function safeForwardedRequestErrorMessage(error: unknown): string {
   const message = errorMessage(error);
   const cause = error instanceof Error ? error.cause : undefined;
@@ -398,6 +419,11 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
+      }
+      const invalidParams = forwardedInvalidParamsError(error);
+      if (invalidParams) {
+        logger.warn(`[ProxyServer] Resource read rejected as invalid params: ${uri}`);
+        throw invalidParams;
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
       throw new ActionableError(

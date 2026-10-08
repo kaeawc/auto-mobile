@@ -16,6 +16,7 @@ import { registerNetworkResources } from "../../src/server/networkResources";
 import { registerObservationResources } from "../../src/server/observationResources";
 import { registerPerformanceResources } from "../../src/server/performanceResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { decodeSegmentOrThrow } from "../../src/server/resourceUriSegments";
 import { registerSessionLogResources } from "../../src/server/sessionLogResources";
 import { registerSharedStorageResources } from "../../src/server/sharedStorageResources";
 import { registerStorageCapabilityResources } from "../../src/server/storageCapabilityResources";
@@ -178,6 +179,37 @@ describe("every registered resource template tolerates a malformed percent-escap
       );
       expect(outcome).not.toBeInstanceOf(URIError);
     }
+  });
+});
+
+describe("registry maps a contract parser's malformed-segment error to invalid params", () => {
+  afterAll(() => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.clearServersForTesting();
+  });
+
+  test("decodeSegmentOrThrow surfaces as -32602 with the URI, not -32603", async () => {
+    ResourceRegistry.clearResources();
+    ResourceRegistry.registerTemplate(
+      "automobile:test/contract/{name}",
+      "Contract",
+      "Decodes its capture with decodeSegmentOrThrow",
+      "application/json",
+      async (params) => ({ uri: "automobile:test", text: decodeSegmentOrThrow(params.name) }),
+    );
+    const server = new FakeMcpServer();
+    ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
+    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema)!;
+    const uri = "automobile:test/contract/%E0%A4%A";
+
+    const error = await readHandler({ params: { uri } }, {}).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+
+    expect(error).toBeInstanceOf(McpError);
+    expect((error as McpError).code).toBe(-32602);
+    expect((error as McpError).message).toContain(`(${uri})`);
   });
 });
 

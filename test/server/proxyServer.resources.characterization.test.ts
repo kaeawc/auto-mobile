@@ -4,6 +4,7 @@ import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
+  McpError,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
@@ -154,6 +155,40 @@ test.each(requests)(
     }
   },
 );
+
+test("a daemon invalid-params rejection stays -32602 through the proxy", async () => {
+  const { server, proxy, registrations } = createHarness();
+  const uri = "automobile:devices/emu/apps/%E0%A4%A/files/documents";
+  // DaemonClient keeps the daemon response's top-level code on the thrown error.
+  const daemonError = Object.assign(
+    new ActionableError(
+      `MCP error -32602: Malformed resource URI: a path segment is not valid percent-encoding. (${uri})`,
+    ),
+    { code: -32602 },
+  );
+  const read = spyOn(proxy, "readResource").mockRejectedValue(daemonError);
+  try {
+    const handler = registrations.find(([schema]) => schema === ReadResourceRequestSchema)?.[1];
+    if (!handler) {
+      throw new Error("Missing handler");
+    }
+    const error = await Promise.resolve(
+      handler({ method: "resources/read", params: { uri } }, extra),
+    ).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(McpError);
+    expect((error as McpError).code).toBe(-32602);
+    expect((error as McpError).message).toBe(
+      `MCP error -32602: Malformed resource URI: a path segment is not valid percent-encoding. (${uri})`,
+    );
+  } finally {
+    read.mockRestore();
+    await server.close();
+    await proxy.close();
+  }
+});
 
 test("resource handlers preserve response envelopes and forward the read signal", async () => {
   const { server, proxy, registrations } = createHarness();

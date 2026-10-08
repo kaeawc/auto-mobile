@@ -18,6 +18,15 @@ test("a gated-tool McpError becomes the structured response code", () => {
   });
 });
 
+test("an invalid-params McpError (malformed resource URI) keeps -32602 as the response code", () => {
+  const error = new McpError(
+    -32602,
+    "Malformed resource URI: a path segment is not valid percent-encoding.",
+  );
+  expect(mcpRequestFailureDetails(error, undefined)).toEqual({ code: -32602 });
+  expect(mcpRequestFailureDetails(new McpError(-32603, "boom"), undefined)).toEqual({});
+});
+
 test("the same prose without the marker gets no code (older server, or an unregistered name)", () => {
   expect(mcpRequestFailureDetails(new McpError(-32603, GATE_TEXT), undefined)).toEqual({});
   expect(mcpRequestFailureDetails(new Error(GATE_TEXT), undefined)).toEqual({});

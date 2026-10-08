@@ -484,8 +484,24 @@
         },
         "fontFamily": {
           "rule": {
-            "kind": "enum",
-            "values": ["default", "sansSerif", "serif", "monospace"]
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "enum",
+                "values": ["default", "sansSerif", "serif", "monospace"]
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
           },
           "optional": true
         }

@@ -173,12 +173,16 @@ const assetsInput = z
           .string()
           .min(1)
           .max(MAX_OVERLAY_ASSET_ID_LENGTH)
-          .describe("Opaque asset id that spec image nodes reference (image.asset)"),
+          .describe(
+            "Opaque asset id that spec image nodes reference (image.asset, or style.fontFamily {asset})",
+          ),
         path: z
           .string()
           .min(1)
           .optional()
-          .describe("Absolute path of a PNG, JPEG or WebP file the daemon can read"),
+          .describe(
+            "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
+          ),
         observation: z
           .string()
           .min(1)
@@ -254,7 +258,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "show, showVariants, or update with spec: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
         ),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),

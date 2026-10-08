@@ -196,7 +196,7 @@ class OverlayRenderModelTest {
         color = "#ff556677",
         textAlign = "justify",
         maxLines = 3,
-        fontFamily = "monospace",
+        fontFamily = OverlayFontFamily.Named("monospace"),
       )
     val safeArea =
       OverlaySafeAreaPadding(listOf("top", "start"), listOf("systemBars", "cutout", "ime"))
@@ -222,9 +222,12 @@ class OverlayRenderModelTest {
     )
     assertEquals(
       FontFamily.SansSerif,
-      mapOverlayStyle(OverlayStyle(fontFamily = "sansSerif")).fontFamily,
+      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("sansSerif"))).fontFamily,
     )
-    assertEquals(FontFamily.Serif, mapOverlayStyle(OverlayStyle(fontFamily = "serif")).fontFamily)
+    assertEquals(
+      FontFamily.Serif,
+      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontFamily,
+    )
     assertEquals(FontFamily.Default, mapOverlayStyle(OverlayStyle()).fontFamily)
     assertEquals(TextAlign.Center, mapOverlayStyle(OverlayStyle(textAlign = "center")).textAlign)
     assertEquals(TextAlign.End, mapOverlayStyle(OverlayStyle(textAlign = "end")).textAlign)

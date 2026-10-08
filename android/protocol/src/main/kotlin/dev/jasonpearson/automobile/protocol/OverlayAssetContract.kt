@@ -31,6 +31,9 @@ object OverlayAssetContract {
   /** Largest single asset, in decoded bytes. */
   val MAX_OVERLAY_ASSET_BYTES: Int = limit("MAX_OVERLAY_ASSET_BYTES")
 
+  /** Largest single font asset (`font/ttf`, `font/otf`), in decoded bytes. */
+  val MAX_OVERLAY_FONT_ASSET_BYTES: Int = limit("MAX_OVERLAY_FONT_ASSET_BYTES")
+
   /** Most assets held at once. */
   val MAX_OVERLAY_ASSET_COUNT: Int = limit("MAX_OVERLAY_ASSET_COUNT")
 

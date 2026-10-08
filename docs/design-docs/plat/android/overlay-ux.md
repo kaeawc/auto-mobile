@@ -219,7 +219,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `fontWeight`                                     | Integer 100–900.                                                                                                             |
 | `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
-| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
+| `fontFamily`                                     | A system name (`default`, `sansSerif`, `serif`, `monospace`) or `{asset: "<id>"}` naming an uploaded TTF/OTF font (#10443).  |
 
 Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
 No short hex, named colors, CSS functions, or separate color opacity. Style
@@ -251,7 +251,7 @@ Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
 conservative and shared with the host through `schemas/overlay-asset-contract.json`:
 4 MiB per asset, 32 assets, 16 MiB total, ids of 1 to 256 characters, and
 `image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
-with the matching signature. Putting an existing ID replaces it; a full store rejects
+with the matching signature, plus `font/ttf` and `font/otf` (2 MiB each, see Custom fonts). Putting an existing ID replaces it; a full store rejects
 the put with a clear error and never evicts. Removing an unknown ID succeeds. Assets
 sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
 on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
@@ -300,6 +300,30 @@ loops: if they are still missing, or the retry fails or is cancelled, the first
 successful result is returned with `missingAssets` and a `warning` on the tool output.
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
+
+### Custom fonts (#10443)
+
+`style.fontFamily` also accepts `{asset: "<id>"}`, an opaque id of a font uploaded through
+the same asset pipeline as images (`put_overlay_asset`, or `assets: [{id, path}]` on the
+host). The spec carries only the id; font bytes, MIME types and caps stay out of it.
+
+- Transport: `font/ttf` and `font/otf` join the contract's MIME types. The bytes must start
+  with an sfnt version tag, `0x00010000`, `true` or `OTTO`, accepted for either MIME type
+  because an OpenType file may carry TrueType outlines. TrueType collections (`ttcf`) and
+  WOFF are rejected. Fonts are never decoded as images. The per-font cap is 2 MiB
+  (`MAX_OVERLAY_FONT_ASSET_BYTES`); fonts count toward the 32-asset and 16 MiB totals
+  like images. The host detects a font from the file signature, not the extension.
+- Missing assets: a referenced font the device has no copy of is listed in
+  `overlay_result.missingAssets` with the image ids (references in `style` and `styleWhen`
+  count, including hidden nodes) and the text draws in the default family until it is
+  uploaded.
+- Rendering: the font is loaded from the stored asset file with `FontFamily(Font(file))`,
+  once per asset, and cached. A file that cannot be parsed logs one warning and draws
+  with the default family; the overlay is never failed for it. Replacing an asset reloads
+  it; removing it (or ending the session) while a spec still references it falls back to
+  the default family, the same as a removed image becoming a placeholder.
+- Weights: one file is one face, so `fontWeight` selects that face rather than a bolder
+  one. Upload a font file per weight and use `styleWhen` to choose between them.
 
 ## Motion
 

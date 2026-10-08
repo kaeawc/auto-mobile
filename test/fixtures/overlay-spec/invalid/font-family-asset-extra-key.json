@@ -1,0 +1,12 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": { "fontFamily": { "asset": "f", "weight": 1 } }
+    }
+  },
+  "expectedPath": "root.style.fontFamily.weight"
+}

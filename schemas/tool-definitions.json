@@ -18650,6 +18650,10 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
                     },
+                    "transition": {
+                      "type": "string",
+                      "enum": ["none", "fade", "expand", "slide"]
+                    },
                     "anchor": {
                       "anyOf": [
                         {
@@ -18808,6 +18812,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18849,6 +18856,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18892,6 +18902,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18929,6 +18942,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18973,6 +18989,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19015,6 +19034,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19049,6 +19071,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19091,6 +19116,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19135,6 +19163,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19178,6 +19209,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19220,6 +19254,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19273,6 +19310,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19320,6 +19360,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19366,6 +19409,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19410,6 +19456,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19451,6 +19500,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19521,6 +19573,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19571,6 +19626,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"

@@ -33,6 +33,7 @@
     "test/fixtures/observe-output/ios-keyboard-states/*.json",
     "test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json",
     "test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json",
+    "test/fixtures/ios/keyboard-modes/*.json",
     "**/*.generated.ts",
     "**/generated/**"
   ]

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { Window } from "../../../src/features/observe/Window";
+import { UNIT_TEST_ISOLATED_DATA_DIR_ENV, Window } from "../../../src/features/observe/Window";
 import type { BootedDevice } from "../../../src/models";
 import { NodeCryptoService } from "../../../src/utils/crypto";
 import { TEMP_SUBDIRS } from "../../../src/utils/tempDir";
@@ -116,6 +116,39 @@ describe("Window disk cache unit-test guard", () => {
       write.mockRestore();
       unlink.mockRestore();
     }
+  });
+
+  test("the data directory the test preload assigned does not opt into the disk cache", async () => {
+    await seed(isolation.dataDir);
+    const mkdir = spyOn(fs, "mkdir");
+    const write = spyOn(fs, "writeFile");
+    try {
+      for (const override of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {
+        const window = createWindow({
+          NODE_ENV: "test",
+          [override]: isolation.dataDir,
+          [UNIT_TEST_ISOLATED_DATA_DIR_ENV]: isolation.dataDir,
+        });
+        expect(await window.getCachedActiveWindow()).toBeNull();
+        await window.setCachedActiveWindow(cachedWindow);
+        expect(await window.getCachedActiveWindow()).toEqual(cachedWindow);
+      }
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    } finally {
+      mkdir.mockRestore();
+      write.mockRestore();
+    }
+  });
+
+  test("a test's own data directory still opts in beside the preload's", async () => {
+    await seed(isolation.dataDir);
+    const window = createWindow({
+      NODE_ENV: "test",
+      AUTOMOBILE_DATA_DIR: isolation.dataDir,
+      [UNIT_TEST_ISOLATED_DATA_DIR_ENV]: path.join(isolation.dataDir, "preload"),
+    });
+    expect(await window.getCachedActiveWindow()).toEqual(cachedWindow);
   });
 
   test("empty or whitespace overrides do not opt into the default disk cache", async () => {

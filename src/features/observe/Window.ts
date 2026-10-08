@@ -44,6 +44,12 @@ export interface GetActiveOptions {
  */
 export const DEFAULT_GET_ACTIVE_TIMEOUT_MS = 5000;
 
+/**
+ * Set by the unit-test preload to the data directory it assigned the process, so the window
+ * disk cache can tell that isolation default from a test that sets a data directory itself.
+ */
+export const UNIT_TEST_ISOLATED_DATA_DIR_ENV = "AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR";
+
 export class Window implements WindowInterface {
   private adb: ExtendedAdbExecutor;
   private cachedActiveWindow: ActiveWindowInfo | null = null;
@@ -71,8 +77,12 @@ export class Window implements WindowInterface {
     // Match the resolver's precedence and trimming: an empty primary override
     // must not opt into the default directory via the secondary alias (#9474).
     const dataDirOverride = (env.AUTOMOBILE_DATA_DIR ?? env.AUTO_MOBILE_DATA_DIR)?.trim();
+    // The unit-test preload points every process at its own data directory (#10327) and names
+    // it here; that isolation is not a test opting into the disk cache (#9487).
+    const explicitDataDir =
+      !!dataDirOverride && dataDirOverride !== env[UNIT_TEST_ISOLATED_DATA_DIR_ENV]?.trim();
     this.cacheDir =
-      env.NODE_ENV === "test" && !dataDirOverride
+      env.NODE_ENV === "test" && !explicitDataDir
         ? null
         : path.join(resolveAutoMobileBaseDir(env, homeDir), TEMP_SUBDIRS.WINDOW);
     this.adb = adbFactory.create(device);

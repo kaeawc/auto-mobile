@@ -32,6 +32,7 @@
 		21D5DA942BB1E6A17F547372 /* PinchFallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = D255CDBF98698FAA7A8CDCF3 /* PinchFallback.swift */; };
 		22D17AADC9A8AC3CE96D19A5 /* PrivacyResourceMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */; };
 		22DAF2E1E5883C0B6ADEED8D /* VoiceOverStateProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E262C2217BCFDEDBD29BE4 /* VoiceOverStateProviding.swift */; };
+		24645AE3F324347776E01EEA /* XCTestQueryTimeout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 511E6AACC1F6A3C677BAC4E2 /* XCTestQueryTimeout.swift */; };
 		24685D6865F0CEED375FB8C8 /* CommandHandler+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7F78B5F30638CA0441DFF11 /* CommandHandler+Actions.swift */; };
 		2803B9FE4B7B5CCAE86B5D63 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23E3D324A94955921D65F0F3 /* AppDelegate.swift */; };
 		280AE2C224CEC5F44C34B11C /* RequestSetHierarchyPollInterval.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D98F26E693E579BDEA4A7FB /* RequestSetHierarchyPollInterval.swift */; };
@@ -356,6 +357,7 @@
 		4EB47E18423E1A008B101D2C /* RequestAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestAction.swift; sourceTree = "<group>"; };
 		4F6A86624C2DEA1E46F8B5DD /* CommandHandler+TextInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+TextInput.swift"; sourceTree = "<group>"; };
 		4F8A0CC4855579D12DEB7BFA /* BundleId.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundleId.swift; sourceTree = "<group>"; };
+		511E6AACC1F6A3C677BAC4E2 /* XCTestQueryTimeout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCTestQueryTimeout.swift; sourceTree = "<group>"; };
 		51908107F65189FFE5F1B48E /* WebSocketFraming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketFraming.swift; sourceTree = "<group>"; };
 		520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkPreferenceClient.swift; sourceTree = "<group>"; };
 		5221B349FCFBC47E268B8C47 /* StorageEntriesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntriesResponse.swift; sourceTree = "<group>"; };
@@ -654,6 +656,7 @@
 				C9B9E032C177D0A3DDD10BAC /* WebSocketResponsePayload.swift */,
 				64BB7DB0036B1C9E9A425225 /* WebSocketServer.swift */,
 				B5861E84E2E5E07B1F45E48D /* WireError.swift */,
+				511E6AACC1F6A3C677BAC4E2 /* XCTestQueryTimeout.swift */,
 				A95FA1EB555DEABA48E644FC /* XCUIGestureCoordinateProvider.swift */,
 				C168E7FAFEE984DE769D663C /* XCUIQueryBound.swift */,
 				7D82763409BDA202A63775F6 /* Models */,
@@ -1238,6 +1241,7 @@
 				FD7D4B0C94D5E03D56F0FD31 /* WebSocketServerLoopbackTests.swift in Sources */,
 				C6FCA7F0906FAAFF8B08864B /* WindowInfo.swift in Sources */,
 				59A5A86AEBC4573A6CD96DFE /* WireError.swift in Sources */,
+				24645AE3F324347776E01EEA /* XCTestQueryTimeout.swift in Sources */,
 				12C636EBC1D6C97DCCEDCEAA /* XCUIGestureCoordinateProvider.swift in Sources */,
 				7E4BB3597B5D059F0399FEE3 /* XCUIQueryBound.swift in Sources */,
 			);

@@ -177,6 +177,11 @@ class OverlayRuntime(
             setState(action.key, it)
             touched += action.key
           }
+        is OverlayDecrementAction ->
+          action.nextValue(current.state)?.let {
+            setState(action.key, it)
+            touched += action.key
+          }
         is OverlaySetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(

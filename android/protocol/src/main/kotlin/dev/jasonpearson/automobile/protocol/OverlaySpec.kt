@@ -123,6 +123,13 @@ data class OverlayStyle(
   val textStyle: String? = null,
 )
 
+/**
+ * A literal list template: the container's children are instantiated once per [items] entry, with
+ * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
+ */
+@Serializable
+data class OverlayRepeat(val items: List<Map<String, OverlayScalar>>, val `as`: String)
+
 @Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
 
 @Serializable
@@ -197,6 +204,10 @@ data class OverlayToggleAction(val key: String) : OverlayAction()
 @Serializable
 data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
 
+@SerialName("decrement")
+@Serializable
+data class OverlayDecrementAction(val key: String, val by: Double? = null) : OverlayAction()
+
 @SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
 
 @Serializable
@@ -226,6 +237,7 @@ data class OverlayBoxNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("row")
@@ -241,6 +253,7 @@ data class OverlayRowNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("column")
@@ -256,6 +269,7 @@ data class OverlayColumnNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("text")

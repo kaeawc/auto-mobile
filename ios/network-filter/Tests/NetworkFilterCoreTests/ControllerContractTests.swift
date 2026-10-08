@@ -12,7 +12,12 @@ final class ControllerContractTests: XCTestCase {
     "code":{"executablePath":"/fixture/Fixture.app/Fixture","signingIdentifier":"dev.jasonpearson.automobile.fixture"}},\#
     "sourceProcess":{"auditToken":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="}}],\#
     "limitations":["Fixture snapshot; no network condition is applied."],\#
-    "mode":"allow_only","observedFlows":1,"version":2}
+    "mode":"app_offline","observedFlows":1,\#
+    "rules":[{"condition":"offline","droppedFlows":2,"leaseRemainingMilliseconds":14000,\#
+    "owner":"fixture-session","ownerGeneration":1759900000000,"revision":3,\#
+    "target":{"bundleId":"dev.jasonpearson.automobile.fixture",\#
+    "simulator":{"deviceSet":"/fixture/Devices","udid":"DFBF2D27-6674-42EA-AFC4-AB702275D1D4"}}}],\#
+    "version":3}
     """#
 
     private func snapshot() throws -> ProbeSnapshot {
@@ -24,9 +29,9 @@ final class ControllerContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    func testContractVersionIsTwo() {
-        XCTAssertEqual(ControllerContract.version, 2)
-        XCTAssertEqual(ControllerContract.commands, ["activate", "status", "snapshot"])
+    func testContractVersionIsThree() {
+        XCTAssertEqual(ControllerContract.version, 3)
+        XCTAssertEqual(ControllerContract.commands, ["activate", "status", "snapshot", "apply", "reset", "renew"])
     }
 
     func testStateWireValuesMatchTheDaemonContract() {
@@ -39,7 +44,7 @@ final class ControllerContractTests: XCTestCase {
     func testResultWithoutSnapshotEncodesExactlyVersionStateAndDetail() throws {
         let result = ControllerResult(state: .approvalRequired, detail: "Approve it")
         let line = try XCTUnwrap(String(data: result.encodedLine(), encoding: .utf8))
-        XCTAssertEqual(line, #"{"detail":"Approve it","state":"approval_required","version":2}"#)
+        XCTAssertEqual(line, #"{"detail":"Approve it","state":"approval_required","version":3}"#)
         XCTAssertFalse(line.contains("\n"))
     }
 
@@ -48,8 +53,8 @@ final class ControllerContractTests: XCTestCase {
         XCTAssertEqual(object["version"] as? Int, ControllerContract.version)
         XCTAssertEqual(object["state"] as? String, "ready")
         let nested = try XCTUnwrap(object["snapshot"] as? [String: Any])
-        XCTAssertEqual(nested["version"] as? Int, 2)
-        XCTAssertEqual(nested["mode"] as? String, "allow_only")
+        XCTAssertEqual(nested["version"] as? Int, 3)
+        XCTAssertEqual(nested["mode"] as? String, "app_offline")
         XCTAssertEqual(nested["observedFlows"] as? Int, 1)
     }
 
@@ -59,7 +64,32 @@ final class ControllerContractTests: XCTestCase {
         XCTAssertEqual(decoded.version, ControllerContract.version)
         XCTAssertEqual(decoded.state, .ready)
         XCTAssertEqual(decoded.detail, "ok")
-        XCTAssertEqual(decoded.snapshot?.mode, "allow_only")
+        XCTAssertEqual(decoded.snapshot?.mode, "app_offline")
+        XCTAssertEqual(decoded.snapshot?.rules?.first?.revision, 3)
+    }
+
+    func testRuleResultIsNestedAndOmittedWhenAbsent() throws {
+        let applied = ControllerResult(
+            state: .ready,
+            detail: "ok",
+            rule: NetworkRuleResult(outcome: .applied, installedRevision: 3, leaseRemainingMilliseconds: 15000)
+        )
+        let object = try jsonObject(applied)
+        let rule = try XCTUnwrap(object["rule"] as? [String: Any])
+        XCTAssertEqual(rule["outcome"] as? String, "applied")
+        XCTAssertEqual(rule["installedRevision"] as? Int, 3)
+        XCTAssertNil(try jsonObject(ControllerResult(state: .unavailable, detail: "x"))["rule"])
+    }
+
+    func testRuleOutcomeWireValues() throws {
+        let outcomes: [NetworkRuleOutcome] = [
+            .applied, .reset, .renewed, .staleGeneration, .staleRevision, .ownedByAnotherSession, .notFound,
+            .invalidLease, .invalidCommand, .capacityExceeded,
+        ]
+        XCTAssertEqual(outcomes.map(\.rawValue), [
+            "applied", "reset", "renewed", "stale_generation", "stale_revision", "owned_by_another_session",
+            "not_found", "invalid_lease", "invalid_command", "capacity_exceeded",
+        ])
     }
 
     func testUnknownStateIsRejectedByDecoding() {
@@ -86,8 +116,18 @@ final class ControllerContractTests: XCTestCase {
             ),
             "ready": ControllerResult(
                 state: .ready,
-                detail: "Allow-only provider replied; traffic isolation and shaping remain unverified.",
+                detail: "Provider replied; per-app offline isolation is unverified until the signed run (#10263).",
                 snapshot: snapshot()
+            ),
+            "rule-applied": ControllerResult(
+                state: .ready,
+                detail: "Provider answered apply: applied.",
+                rule: NetworkRuleResult(outcome: .applied, installedRevision: 3, leaseRemainingMilliseconds: 15000)
+            ),
+            "rule-owned-by-another-session": ControllerResult(
+                state: .ready,
+                detail: "Provider answered reset: owned_by_another_session.",
+                rule: NetworkRuleResult(outcome: .ownedByAnotherSession)
             ),
         ]
     }

@@ -1,7 +1,7 @@
 # network-filter-controller contract fixtures
 
 Each `*.json` file is one line of `network-filter-controller` output (contract
-version 2), byte-for-byte as the production `ControllerResult.encodedLine()`
+version 3), byte-for-byte as the production `ControllerResult.encodedLine()`
 encoder in `ios/network-filter/Sources/NetworkFilterCore/ControllerContract.swift`
 writes it, plus the trailing newline the controller prints.
 `ControllerContractTests.testCommittedFixturesMatchTheEncoder` fails when a

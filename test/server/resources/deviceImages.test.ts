@@ -349,10 +349,10 @@ describe("Device Image Resources with Fakes", () => {
           },
           {
             id: "ios.simulator.networkCondition",
-            state: "unsupported",
+            state: "supported",
             source: "platform",
             reason:
-              "Network conditions on iOS Simulator need the opt-in network-extension backend, which cannot apply them yet (#10264); getDeviceState networkCondition reports its install and approval state.",
+              "Per-app only: setDeviceState networkCondition offline or none with appId, within a session, through the opt-in network-extension backend (install and approval required; getDeviceState networkCondition reports its state). Device-wide conditions and latency or bandwidth profiles are unsupported.",
           },
           {
             id: "ios.simulator.connectivity",
@@ -413,10 +413,10 @@ describe("Device Image Resources with Fakes", () => {
           },
           {
             id: "ios.simulator.networkCondition",
-            state: "unsupported",
+            state: "supported",
             source: "platform",
             reason:
-              "Network conditions on iOS Simulator need the opt-in network-extension backend, which cannot apply them yet (#10264); getDeviceState networkCondition reports its install and approval state.",
+              "Per-app only: setDeviceState networkCondition offline or none with appId, within a session, through the opt-in network-extension backend (install and approval required; getDeviceState networkCondition reports its state). Device-wide conditions and latency or bandwidth profiles are unsupported.",
           },
           {
             id: "ios.simulator.connectivity",

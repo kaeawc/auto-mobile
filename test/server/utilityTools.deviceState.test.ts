@@ -670,8 +670,8 @@ describe("device state tools", () => {
     expect(networkFilterBridge.statusCalls).toBeGreaterThan(0);
   });
 
-  test("setDeviceState networkCondition on an iOS simulator returns the backend state's message (#10590)", async () => {
-    networkFilterBridge.setState("approval_required");
+  test("setDeviceState refuses a device-wide networkCondition on an iOS simulator (#10264)", async () => {
+    networkFilterBridge.setState("ready");
     const setTool = ToolRegistry.getTool("setDeviceState");
     const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
 
@@ -685,12 +685,13 @@ describe("device state tools", () => {
       supported: false,
       capability: "unsupported",
       backend: "network-extension",
-      controller: { state: "approval_required", contractVersion: 2 },
+      scope: "device",
       requestedProfile: "offline",
       verified: false,
     });
-    expect(payload.networkCondition.error).toContain("System Settings");
+    expect(payload.networkCondition.error).toContain("networkCondition.appId");
     expect(payload.networkCondition.error).not.toContain("host-side proxy");
+    expect(networkFilterBridge.ruleCalls).toEqual([]);
   });
 
   test("setActiveDevice binds a refreshed session device in the pool", async () => {

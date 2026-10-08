@@ -26,11 +26,12 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
  * The controller JSON contract version this daemon understands. Must match
  * `ControllerContract.version` in
  * ios/network-filter/Sources/NetworkFilterCore/ControllerContract.swift.
- * Version 2 ships with per-simulator attribution (#10589): `status`/`snapshot`
- * take `--managed` pairs and the snapshot reports per-flow attribution. There
- * is no version 1 fallback.
+ * Version 2 shipped per-simulator attribution (#10589): `status`/`snapshot`
+ * take `--managed` pairs and the snapshot reports per-flow attribution.
+ * Version 3 adds the leased per-app `apply`/`reset`/`renew` commands, the
+ * `rule` result and the snapshot's `rules` (#10264). There is no fallback.
  */
-export const NETWORK_FILTER_CONTRACT_VERSION = 2;
+export const NETWORK_FILTER_CONTRACT_VERSION = 3;
 
 /** The controller rejects more `--managed` pairs than this (`ManagedSimulator.maximumCount`). */
 export const NETWORK_FILTER_MAX_MANAGED_SIMULATORS = 256;
@@ -97,6 +98,46 @@ const networkFilterFlowSchema = z.object({
   reason: z.string().optional(),
 });
 
+/** One app on one simulator, as the provider reports a rule's target. */
+const ruleTargetSchema = z.object({
+  simulator: managedSimulatorSchema,
+  bundleId: z.string(),
+});
+
+/** An active leased rule (snapshot v3, #10264). */
+const networkFilterRuleStatusSchema = z.object({
+  target: ruleTargetSchema,
+  owner: z.string(),
+  ownerGeneration: z.number().int().nonnegative(),
+  revision: z.number().int().positive(),
+  condition: z.literal("offline"),
+  leaseRemainingMilliseconds: z.number().int().nonnegative(),
+  droppedFlows: z.number().int().nonnegative(),
+});
+export type NetworkFilterRuleStatus = z.infer<typeof networkFilterRuleStatusSchema>;
+
+/** The provider's definitive answer to `apply`, `reset` or `renew`. */
+export const networkFilterRuleOutcomeSchema = z.enum([
+  "applied",
+  "reset",
+  "renewed",
+  "stale_generation",
+  "stale_revision",
+  "owned_by_another_session",
+  "not_found",
+  "invalid_lease",
+  "invalid_command",
+  "capacity_exceeded",
+]);
+export type NetworkFilterRuleOutcome = z.infer<typeof networkFilterRuleOutcomeSchema>;
+
+const networkFilterRuleResultSchema = z.object({
+  outcome: networkFilterRuleOutcomeSchema,
+  installedRevision: z.number().int().positive().optional(),
+  leaseRemainingMilliseconds: z.number().int().nonnegative().optional(),
+});
+export type NetworkFilterRuleResult = z.infer<typeof networkFilterRuleResultSchema>;
+
 /** The provider's diagnostic snapshot; its own `version` evolves with the provider. */
 const networkFilterSnapshotSchema = z.object({
   version: z.number().int(),
@@ -105,6 +146,7 @@ const networkFilterSnapshotSchema = z.object({
   observedFlows: z.number().int().nonnegative(),
   discardedFlows: z.number().int().nonnegative(),
   managedSimulators: z.array(managedSimulatorSchema).optional(),
+  rules: z.array(networkFilterRuleStatusSchema).optional(),
   flows: z.array(networkFilterFlowSchema),
   limitations: z.array(z.string()),
 });
@@ -117,6 +159,7 @@ const controllerResultSchema = z.object({
   state: networkFilterControllerStateSchema,
   detail: z.string(),
   snapshot: networkFilterSnapshotSchema.optional(),
+  rule: networkFilterRuleResultSchema.optional(),
 });
 
 export interface NetworkFilterStatus {
@@ -125,6 +168,8 @@ export interface NetworkFilterStatus {
   detail: string;
   /** Contract version the controller reported; absent when it gave no valid answer. */
   contractVersion?: number;
+  /** `status` only: the leased rules the provider enforces right now. */
+  rules?: NetworkFilterRuleStatus[];
 }
 
 export interface NetworkFilterSnapshotResult extends NetworkFilterStatus {
@@ -133,19 +178,65 @@ export interface NetworkFilterSnapshotResult extends NetworkFilterStatus {
 }
 
 /**
- * Read-only bridge. Neither method throws: every failure (missing binary,
+ * The app a rule targets. The bridge supplies the device set, so a target is
+ * the simulator UDID plus the app's bundle identifier.
+ */
+export interface NetworkFilterRuleTarget {
+  udid: string;
+  bundleId: string;
+}
+
+/**
+ * Who sends a rule command: the owning session, its binding generation, and
+ * a revision that increases with every command the session sends.
+ */
+export interface NetworkFilterRuleOwnership {
+  owner: string;
+  ownerGeneration: number;
+  revision: number;
+}
+
+export interface NetworkFilterRuleCommandResult extends NetworkFilterStatus {
+  /**
+   * The provider's definitive answer. Absent whenever the outcome is unknown
+   * (not installed, timeout, unavailable, malformed output): the command may or
+   * may not have reached the provider, and the caller reconciles with `status`.
+   */
+  rule?: NetworkFilterRuleResult;
+}
+
+/**
+ * Bridge to the controller. No method throws: every failure (missing binary,
  * timeout, malformed output, contract mismatch) resolves to a typed state.
- * `apply`/`reset`/`renew` arrive with #10264.
  */
 export interface NetworkFilterBridge {
   status(): Promise<NetworkFilterStatus>;
   snapshot(): Promise<NetworkFilterSnapshotResult>;
+  /** Take the target app offline for `leaseMs` unless renewed (#10264). */
+  apply(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult>;
+  /** Remove the owner's rule for the target; never clears another owner's rule. */
+  reset(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+  ): Promise<NetworkFilterRuleCommandResult>;
+  /** Extend the lease of the installed revision `ownership.revision`. */
+  renew(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult>;
 }
 
 export interface ExecNetworkFilterBridgeOptions {
   executor?: HostCommandExecutor;
   /** The host's booted simulators, passed as `--managed` pairs; defaults to simctl. */
   managedSimulators?: () => Promise<ManagedSimulator[]>;
+  /** The active device set; defaults to `CORESIMULATOR_DEVICE_SET_PATH` or the default set. */
+  deviceSet?: () => string;
   /** Absolute path to `network-filter-controller`; injectable for tests and local builds. */
   controllerPath?: string;
   exists?: (path: string) => boolean;
@@ -167,6 +258,15 @@ function execFailureDetails(error: unknown): { code?: string | number; stdout: s
   const code = details.find((detail) => detail.code !== undefined)?.code;
   const stdout = details.find((detail) => detail.stdout !== undefined)?.stdout ?? "";
   return { code, stdout: stdout.toString() };
+}
+
+function activeDeviceSet(
+  dependencies: Pick<ManagedSimulatorListerDependencies, "environment" | "homeDirectory"> = {},
+): string {
+  return defaultDeviceSetRoot(
+    (dependencies.homeDirectory ?? homedir)(),
+    dependencies.environment ?? process.env,
+  );
 }
 
 export interface ManagedSimulatorListerDependencies {
@@ -200,10 +300,7 @@ export function createManagedSimulatorLister(
       );
       return [];
     }
-    const deviceSet = defaultDeviceSetRoot(
-      (dependencies.homeDirectory ?? homedir)(),
-      dependencies.environment ?? process.env,
-    );
+    const deviceSet = activeDeviceSet(dependencies);
     const udids = [...new Set(booted.map((device) => device.deviceId))].filter(
       (deviceId) => resolveIosDeviceKind({ deviceId }) === "simulator",
     );
@@ -212,6 +309,9 @@ export function createManagedSimulatorLister(
       .map((udid) => ({ deviceSet, udid }));
   };
 }
+
+type NetworkFilterRuleCommand = "apply" | "reset" | "renew";
+type NetworkFilterControllerCommand = "status" | "snapshot" | NetworkFilterRuleCommand;
 
 function managedArguments(simulators: readonly ManagedSimulator[]): string[] {
   return simulators.flatMap((simulator) => ["--managed", simulator.deviceSet, simulator.udid]);
@@ -232,6 +332,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
   private readonly exists: (path: string) => boolean;
   private readonly timeoutMs: number;
   private readonly managedSimulators: () => Promise<ManagedSimulator[]>;
+  private readonly deviceSet: () => string;
 
   constructor(options: ExecNetworkFilterBridgeOptions = {}) {
     this.executor = options.executor ?? new DefaultHostCommandExecutor();
@@ -239,19 +340,73 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     this.exists = options.exists ?? existsSync;
     this.timeoutMs = options.timeoutMs ?? NETWORK_FILTER_CONTROLLER_TIMEOUT_MS;
     this.managedSimulators = options.managedSimulators ?? createManagedSimulatorLister();
+    this.deviceSet = options.deviceSet ?? (() => activeDeviceSet());
   }
 
   async status(): Promise<NetworkFilterStatus> {
-    const result = await this.run("status");
+    const result = await this.run("status", async () =>
+      managedArguments(await this.managedSimulators()),
+    );
     return {
       state: result.state,
       detail: result.detail,
       ...(result.contractVersion !== undefined ? { contractVersion: result.contractVersion } : {}),
+      ...(result.snapshot?.rules ? { rules: result.snapshot.rules } : {}),
     };
   }
 
   snapshot(): Promise<NetworkFilterSnapshotResult> {
-    return this.run("snapshot");
+    return this.run("snapshot", async () => managedArguments(await this.managedSimulators()));
+  }
+
+  apply(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    return this.runRule("apply", target, ownership, leaseMs);
+  }
+
+  reset(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    return this.runRule("reset", target, ownership);
+  }
+
+  renew(
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs: number,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    return this.runRule("renew", target, ownership, leaseMs);
+  }
+
+  private async runRule(
+    command: NetworkFilterRuleCommand,
+    target: NetworkFilterRuleTarget,
+    ownership: NetworkFilterRuleOwnership,
+    leaseMs?: number,
+  ): Promise<NetworkFilterRuleCommandResult> {
+    const result = await this.run(command, async () => [
+      ...managedArguments([{ deviceSet: this.deviceSet(), udid: target.udid }]),
+      "--bundle-id",
+      target.bundleId,
+      "--owner",
+      ownership.owner,
+      "--owner-generation",
+      String(ownership.ownerGeneration),
+      "--revision",
+      String(ownership.revision),
+      ...(leaseMs === undefined ? [] : ["--lease-ms", String(Math.round(leaseMs))]),
+    ]);
+    const status: NetworkFilterRuleCommandResult = {
+      state: result.state,
+      detail: result.detail,
+      ...(result.contractVersion !== undefined ? { contractVersion: result.contractVersion } : {}),
+    };
+    // Only a `ready` answer that carries the provider's verdict is definitive.
+    return result.state === "ready" && result.rule ? { ...status, rule: result.rule } : status;
   }
 
   private notInstalled(): NetworkFilterSnapshotResult {
@@ -265,11 +420,14 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     return { state: "unavailable", detail };
   }
 
-  private async run(command: "status" | "snapshot"): Promise<NetworkFilterSnapshotResult> {
+  private async run(
+    command: NetworkFilterControllerCommand,
+    commandArguments: () => Promise<string[]>,
+  ): Promise<NetworkFilterSnapshotResult & { rule?: NetworkFilterRuleResult }> {
     if (!this.exists(this.controllerPath)) {
       return this.notInstalled();
     }
-    const managed = managedArguments(await this.managedSimulators());
+    const managed = await commandArguments();
     let stdout: string;
     try {
       const result = await this.executor.executeCommand(
@@ -306,7 +464,10 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     return this.parse(command, stdout);
   }
 
-  private parse(command: string, stdout: string): NetworkFilterSnapshotResult {
+  private parse(
+    command: string,
+    stdout: string,
+  ): NetworkFilterSnapshotResult & { rule?: NetworkFilterRuleResult } {
     const line = lastNonEmptyLine(stdout);
     let json: unknown;
     try {
@@ -346,6 +507,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
       detail: parsed.data.detail,
       contractVersion: parsed.data.version,
       ...(parsed.data.snapshot ? { snapshot: parsed.data.snapshot } : {}),
+      ...(parsed.data.rule ? { rule: parsed.data.rule } : {}),
     };
   }
 }
@@ -378,6 +540,9 @@ export function networkFilterNextStep(state: NetworkFilterState): string {
         `Extensions > Network Extensions, then re-run \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`
       );
     case "ready":
-      return "The network filter is ready, but offline/reset is not implemented yet (#10264).";
+      return (
+        "The network filter is ready. Pass networkCondition.appId with profile `offline` or `none` " +
+        "to take one app on this simulator offline or restore it, within a session."
+      );
   }
 }

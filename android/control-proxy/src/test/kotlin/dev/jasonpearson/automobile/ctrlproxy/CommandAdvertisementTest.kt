@@ -32,6 +32,7 @@ class CommandAdvertisementTest {
       "overlay_display_id_v1",
       "overlay_window_options_v1",
       "overlay_persistence_replay_v1",
+      "overlay_show_in_place_v1",
       "overlay_window_metadata_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
@@ -56,6 +57,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("tap_double_v1"))
       assertTrue(commands.contains("overlay_window_options_v1"))
       assertTrue(commands.contains("overlay_persistence_replay_v1"))
+      assertTrue(commands.contains("overlay_show_in_place_v1"))
       assertTrue(commands.contains("inspect_overlays"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("overlay_window_metadata_v1"))

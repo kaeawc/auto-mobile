@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { OVERLAY_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import {
   overlayOutputSchema,
   overlaySchema,
@@ -46,7 +47,7 @@ describe("overlay display targeting", () => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    client.setSupportedCommands(["overlay_display_id_v1"]);
+    client.setSupportedCommands(["overlay_display_id_v1", OVERLAY_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
     unsubscribe = registerOverlayTools({

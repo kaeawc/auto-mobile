@@ -149,6 +149,7 @@ describe("CtrlProxy command support", () => {
         "overlay_display_id_v1",
         "overlay_window_options_v1",
         "overlay_persistence_replay_v1",
+        "overlay_show_in_place_v1",
         "overlay_window_metadata_v1",
         "get_sdk_capabilities",
         "network_mock_rules_report_v1",

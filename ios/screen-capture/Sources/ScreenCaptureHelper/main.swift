@@ -35,7 +35,7 @@ _ = NSApplication.shared
 // MARK: - Logging
 
 func logError(_ message: String) {
-    FileHandle.standardError.write(Data("\(message)\n".utf8))
+    DescriptorWrite.writeDiagnostic("\(message)\n")
 }
 
 func logScreenRecordingPermissionRequired() {
@@ -108,8 +108,11 @@ func writeJSON<T: Encodable>(_ value: T) {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     do {
         let data = try encoder.encode(value)
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data("\n".utf8))
+        // A closed stdout reader is reported, not raised as an uncatchable ObjC exception.
+        guard DescriptorWrite.writeAll(data + Data("\n".utf8), toFileDescriptor: STDOUT_FILENO) else {
+            logError("error: failed to write JSON to stdout: errno \(errno)")
+            exit(1)
+        }
     } catch {
         logError("error: failed to encode JSON: \(error)")
         exit(1)

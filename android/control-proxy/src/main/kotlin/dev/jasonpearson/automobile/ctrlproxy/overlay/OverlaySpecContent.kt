@@ -1,10 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandIn
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,6 +57,7 @@ val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
 internal fun OverlayRuntimeContent(
   runtime: OverlayRuntime,
   images: OverlayImageCache? = null,
+  fonts: OverlayFontCache? = null,
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
@@ -78,6 +75,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayFontCache provides fonts,
         LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(
@@ -122,8 +120,8 @@ private fun RenderOverlayNode(
     AnimatedVisibility(
       visible = node.visible,
       modifier = parentModifier,
-      enter = fadeIn() + expandIn(),
-      exit = fadeOut() + shrinkOut(),
+      enter = overlayEnterTransition(node.source.transition),
+      exit = overlayExitTransition(node.source.transition),
     ) {
       RenderOverlayNodeContent(node, interact)
     }
@@ -139,14 +137,16 @@ private fun RenderOverlayNodeContent(
   parentModifier: Modifier = Modifier,
 ) {
   val modifier = parentModifier.then(overlayNodeModifier(node, interact))
+  // Containers whose children can appear, disappear or change animate their size with them.
+  val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
     "box" ->
-      Box(modifier, contentAlignment = node.style.alignment) {
+      Box(containerModifier, contentAlignment = node.style.alignment) {
         node.children.forEach { RenderOverlayNode(it, interact) }
       }
     "row" ->
       Row(
-        modifier,
+        containerModifier,
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
@@ -154,7 +154,7 @@ private fun RenderOverlayNodeContent(
       }
     "column" ->
       Column(
-        modifier,
+        containerModifier,
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
@@ -176,7 +176,9 @@ private fun RenderOverlayNodeContent(
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        fontFamily = if (role == null || source.fontFamily != null) node.style.fontFamily else null,
+        fontFamily =
+          if (role == null || source.fontFamily != null) rememberOverlayFontFamily(node.style)
+          else null,
         textAlign = node.style.textAlign,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,
@@ -221,6 +223,8 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "radioGroup" -> RenderOverlayRadioGroup(node, modifier, interact)
+    "listItem" -> RenderOverlayListItem(node, modifier, interact)
     "slider" -> RenderOverlaySlider(node, modifier, interact)
     "chip" -> RenderOverlayChip(node, modifier, interact)
     "card" ->
@@ -448,7 +452,8 @@ private fun overlayNodeModifier(
     actions.isNotEmpty() &&
       node.role != "textField" &&
       node.role != "bottomSheet" &&
-      node.role !in OVERLAY_COMPONENT_ROLES
+      node.role !in OVERLAY_COMPONENT_ROLES &&
+      node.role !in OVERLAY_SELECTION_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).

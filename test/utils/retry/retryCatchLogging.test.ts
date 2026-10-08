@@ -151,8 +151,11 @@ test("expected exhaustion needs only a reason, and executeOrThrow preserves the 
       ),
     ).rejects.toBe(error);
     expect(warning).not.toHaveBeenCalled();
-    expect(debug).toHaveBeenCalledTimes(1);
-    expect(debug.mock.calls[0]?.[0]).toContain("An unavailable probe is expected");
+    // Count only this executor's logs: unrelated background work (such as the
+    // logger's startup log-prune sweep) may log at debug while this test runs.
+    const retryDebug = debug.mock.calls.filter((call) => call[1] === error);
+    expect(retryDebug).toHaveLength(1);
+    expect(retryDebug[0]?.[0]).toContain("An unavailable probe is expected");
   } finally {
     warning.mockRestore();
     debug.mockRestore();

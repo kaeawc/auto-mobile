@@ -1,5 +1,6 @@
 test/fixtures/android-display/**/*.txt text eol=lf
 test/fixtures/android-display-config/*.txt text eol=lf
+test/fixtures/macos-profiles/*.txt text eol=lf
 # Real dumpsys captures whose exact bytes are asserted (issue #4329): pin to LF
 # so a Windows checkout with core.autocrlf=true cannot rewrite them to CRLF and
 # break the byte-exact fixture premise.
@@ -16,13 +17,18 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
+test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
+test/fixtures/ios/keyboard-modes/*.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
+test/fixtures/android-overlay-testtag/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf
 test/fixtures/android-action-compact/*.json text eol=lf
 test/fixtures/swipeon-auto-target/foldable.json text eol=lf
 test/fixtures/swipeon-auto-target/landscape.json text eol=lf
+test/fixtures/plan-schedule-feasibility/*.json text eol=lf
+test/fixtures/plan-coordination-params/*.json text eol=lf
 test/fixtures/swipeon-auto-target/portrait-element.json text eol=lf
 test/fixtures/identify-interactions/playground-tap-resource.json text eol=lf
 test/fixtures/identify-interactions/playground-text-fields.json text eol=lf
@@ -30,6 +36,8 @@ test/fixtures/identify-interactions/playground-text-fields.json text eol=lf
 test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
+# Generated MDM profile asserted byte-for-byte against its generator (#10595).
+docs/assets/mdm/*.mobileconfig text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.

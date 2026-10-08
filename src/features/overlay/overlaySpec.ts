@@ -251,7 +251,12 @@ const styleSchema = z
     color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
-    fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
+    fontFamily: z
+      .union([
+        z.enum(["default", "sansSerif", "serif", "monospace"]),
+        z.object({ asset: z.string().min(1) }).strict(),
+      ])
+      .optional(),
     textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();
@@ -353,6 +358,7 @@ const commonNodeShape = {
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
+  transition: z.enum(["none", "fade", "expand", "slide"]).optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
@@ -408,7 +414,44 @@ const buttonBaseSchema = z
     ...commonNodeShape,
     type: z.enum(["button"]),
     label: z.string().min(1),
-    variant: z.enum(["filled", "outlined", "text"]).optional(),
+    variant: z.enum(["filled", "tonal", "elevated", "outlined", "text"]).optional(),
+    icon: iconNameSchema.optional(),
+  })
+  .strict();
+const radioGroupBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["radioGroup"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(2)
+      .max(16),
+  })
+  .strict();
+const listItemTrailingSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.enum(["switch"]),
+      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["checkbox"]),
+      stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    })
+    .strict(),
+  z.object({ type: z.enum(["icon"]), name: iconNameSchema }).strict(),
+]);
+const listItemBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["listItem"]),
+    headline: z.string().min(1),
+    supporting: z.string().min(1).optional(),
+    leadingIcon: iconNameSchema.optional(),
+    trailing: listItemTrailingSchema.optional(),
   })
   .strict();
 const sliderBaseSchema = z
@@ -502,6 +545,8 @@ export type OverlayNode =
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
+  | z.infer<typeof radioGroupBaseSchema>
+  | z.infer<typeof listItemBaseSchema>
   | z.infer<typeof sliderBaseSchema>
   | z.infer<typeof chipBaseSchema>
   | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
@@ -523,6 +568,8 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     switchBaseSchema,
     checkboxBaseSchema,
     buttonBaseSchema,
+    radioGroupBaseSchema,
+    listItemBaseSchema,
     sliderBaseSchema,
     chipBaseSchema,
     cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
@@ -602,6 +649,8 @@ export const OVERLAY_NODE_TYPES = [
   "switch",
   "checkbox",
   "button",
+  "radioGroup",
+  "listItem",
   "slider",
   "chip",
   "card",

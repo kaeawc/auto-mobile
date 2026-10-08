@@ -50,6 +50,20 @@ import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
+import { OverlayAgentProvider } from "../features/overlay-agent/OverlayAgentProvider";
+import { NodeOverlayAgentConnector } from "../features/overlay/ios/overlayAgentClient";
+import {
+  createOverlayAgentConnect,
+  OverlayAgentInjector,
+  overlayAgentRegistry,
+  portManagerOverlayAgentPorts,
+  type OverlayAgentRecord,
+  type OverlayAgentRegistry,
+  type PreparedOverlayLaunch,
+} from "../features/overlay/ios/overlayAgentInjection";
+import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
+import { defaultTimer } from "../utils/SystemTimer";
 
 export interface InstalledAppResourceRefresh {
   invalidate(deviceId: string): void;
@@ -120,7 +134,15 @@ export interface LaunchAppExecutor {
     skipUiStability?: boolean,
     signal?: AbortSignal,
     launchArguments?: string[],
+    launchEnvironment?: Record<string, string>,
   ): Promise<LaunchAppResult>;
+}
+
+/** Injects the iOS simulator overlay agent around a launch (#10567). */
+export interface OverlayAgentLaunchInjector {
+  prepare(device: BootedDevice, bundleId: string): Promise<PreparedOverlayLaunch>;
+  attach(prepared: PreparedOverlayLaunch, pid?: number): Promise<OverlayAgentRecord>;
+  abort(prepared: PreparedOverlayLaunch): void;
 }
 
 // Injection seam for the launchApp handler (mirrors the terminateApp/crashApp
@@ -130,6 +152,21 @@ export interface LaunchAppExecutor {
 export interface LaunchAppToolDependencies {
   createLaunchApp(device: BootedDevice): LaunchAppExecutor;
   idGenerator: IdGenerator;
+  /** Agent records shared by launchApp, terminateApp and the overlay tool. */
+  overlayAgentRegistry: OverlayAgentRegistry;
+  /** Created on first `overlay: true`, so a normal launch never resolves the agent dylib. */
+  createOverlayAgentInjector(registry: OverlayAgentRegistry): OverlayAgentLaunchInjector;
+}
+
+function createDefaultOverlayAgentInjector(registry: OverlayAgentRegistry): OverlayAgentInjector {
+  return new OverlayAgentInjector({
+    dylibResolver: OverlayAgentProvider.getInstance(),
+    ports: portManagerOverlayAgentPorts,
+    registry,
+    connect: createOverlayAgentConnect(new NodeOverlayAgentConnector(), defaultTimer),
+    idGenerator: defaultIdGenerator,
+    hostEnv: process.env,
+  });
 }
 
 let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
@@ -139,6 +176,8 @@ function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
     launchAppToolDependencies = {
       createLaunchApp: (device) => new LaunchApp(device),
       idGenerator: defaultIdGenerator,
+      overlayAgentRegistry,
+      createOverlayAgentInjector: createDefaultOverlayAgentInjector,
     };
   }
   return launchAppToolDependencies;
@@ -149,6 +188,9 @@ export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependen
   launchAppToolDependencies = {
     createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
+    overlayAgentRegistry: deps.overlayAgentRegistry ?? currentDeps.overlayAgentRegistry,
+    createOverlayAgentInjector:
+      deps.createOverlayAgentInjector ?? currentDeps.createOverlayAgentInjector,
   };
 }
 
@@ -582,6 +624,14 @@ export const launchAppSchema = withAppIdAliases(
           .describe(
             "Arguments passed to the launched iOS app. Android does not support launch arguments.",
           ),
+        overlay: z
+          .boolean()
+          .optional()
+          .describe(
+            "iOS simulator only: inject the overlay agent so the overlay tool can draw over this " +
+              "app. Always relaunches the app, losing its state. Rejected on physical iOS devices " +
+              "(use the in-app SDK), on Android (overlays need no injection) and for com.apple.* apps.",
+          ),
         ...responseShapeControlFields,
       })
       // #6154: the advertised `additionalProperties: false` was not actually
@@ -795,6 +845,7 @@ export interface LaunchAppActionArgs {
   clearAppData?: boolean;
   coldBoot?: boolean;
   launchArguments?: string[];
+  overlay?: boolean;
   raw?: boolean;
   project?: "full" | "skeleton";
 }
@@ -989,6 +1040,47 @@ const listAppsHandler = async (
   }
 };
 
+function executeLaunch(
+  launchApp: LaunchAppExecutor,
+  args: LaunchAppActionArgs,
+  launchArguments: string[] | undefined,
+  overlay: OverlayLaunch | undefined,
+  signal: AbortSignal | undefined,
+): Promise<LaunchAppResult> {
+  return launchApp.execute(
+    args.appId,
+    args.clearAppData ?? false,
+    // Injection takes effect only in a fresh process.
+    (args.coldBoot ?? false) || overlay !== undefined,
+    undefined,
+    undefined,
+    undefined,
+    signal,
+    launchArguments,
+    overlay?.environment,
+  );
+}
+
+/** Clears the launch's mutation token and returns the error to throw, token redacted. */
+function launchFailure(
+  error: unknown,
+  device: BootedDevice,
+  appId: string,
+  mutationToken: string | undefined,
+): unknown {
+  if (mutationToken) {
+    iosMutationTokens.clear(device.deviceId, appId, mutationToken);
+  }
+  const safeError = redactLaunchError(error, mutationToken);
+  // A typed launch failure (uninstalled package, foreground mismatch) is
+  // already an actionable error — surface it verbatim rather than re-wrapping
+  // it as "Failed to launch app: Error: ..." (#5868).
+  if (isDeviceLostError(error) || safeError instanceof ActionableError) {
+    return safeError;
+  }
+  return toActionableError(safeError, `Failed to launch app`);
+}
+
 // Launch app handler
 const launchAppHandler = async (
   device: BootedDevice,
@@ -998,49 +1090,84 @@ const launchAppHandler = async (
 ) => {
   let mutationMayHaveHappened = false;
   let mutationToken: string | undefined;
+  const dependencies = getLaunchAppToolDependencies();
+  let overlay: OverlayLaunch | undefined;
   try {
+    signal?.throwIfAborted();
+    overlay = args.overlay ? await beginOverlayLaunch(dependencies, device, args.appId) : undefined;
     signal?.throwIfAborted();
     const prepared = prepareLaunchArguments(device, args);
     mutationToken = prepared.mutationToken;
-    const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
+    const launchApp = dependencies.createLaunchApp(device);
     mutationMayHaveHappened = true;
-    const result = await launchApp.execute(
-      args.appId,
-      args.clearAppData ?? false,
-      args.coldBoot ?? false,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-      prepared.launchArguments,
-    );
+    const result = await executeLaunch(launchApp, args, prepared.launchArguments, overlay, signal);
     signal?.throwIfAborted();
 
     const safeResult = result.error
       ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
       : result;
-    return createStructuredToolResponse(buildLaunchAppResponse(args.appId, safeResult));
+    const response = buildLaunchAppResponse(args.appId, safeResult);
+    return createStructuredToolResponse(
+      overlay ? await overlay.attach(response, result.pid) : response,
+    );
   } catch (error) {
-    if (mutationToken) {
-      iosMutationTokens.clear(device.deviceId, args.appId, mutationToken);
-    }
-    const safeError = redactLaunchError(error, mutationToken);
-    if (isDeviceLostError(error)) {
-      throw safeError;
-    }
-    // A typed launch failure (uninstalled package, foreground mismatch) is
-    // already an actionable error — surface it verbatim rather than re-wrapping
-    // it as "Failed to launch app: Error: ..." (#5868).
-    if (safeError instanceof ActionableError) {
-      throw safeError;
-    }
-    throw toActionableError(safeError, `Failed to launch app`);
+    overlay?.abort();
+    throw launchFailure(error, device, args.appId, mutationToken);
   } finally {
     if (mutationMayHaveHappened) {
       await refreshInstalledAppResources(device.deviceId);
     }
   }
 };
+
+/** The agent fields a client may see; the auth token stays in the daemon. */
+function describeOverlayAgent(agent: OverlayAgentRecord) {
+  return {
+    port: agent.port,
+    agentVersion: agent.handshake.agentVersion,
+    protocolVersion: agent.handshake.protocolVersion,
+    capabilities: agent.handshake.capabilities,
+  };
+}
+
+/** An `overlay: true` launch in progress: its env, then attach on success or abort on failure. */
+interface OverlayLaunch {
+  environment: Record<string, string>;
+  attach<T extends { message: string }>(
+    response: T,
+    pid?: number,
+  ): Promise<T & { overlayAgent: ReturnType<typeof describeOverlayAgent> }>;
+  /** Frees the port unless the agent attached; safe to call more than once. */
+  abort(): void;
+}
+
+async function beginOverlayLaunch(
+  dependencies: LaunchAppToolDependencies,
+  device: BootedDevice,
+  appId: string,
+): Promise<OverlayLaunch> {
+  const injector = dependencies.createOverlayAgentInjector(dependencies.overlayAgentRegistry);
+  const prepared = await injector.prepare(device, appId);
+  let settled = false;
+  return {
+    environment: prepared.environment,
+    async attach(response, pid) {
+      const agent = await injector.attach(prepared, pid);
+      settled = true;
+      return {
+        ...response,
+        message: `${response.message}; overlay agent ${agent.handshake.agentVersion} connected`,
+        overlayAgent: describeOverlayAgent(agent),
+      };
+    },
+    abort() {
+      if (!settled) {
+        settled = true;
+        injector.abort(prepared);
+      }
+    },
+  };
+}
 
 // Terminate app handler
 const terminateAppHandler = async (
@@ -1071,6 +1198,10 @@ const terminateAppHandler = async (
     // uninstall handler below.
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
+    }
+    if (device.platform === "ios") {
+      // Only after a successful termination: a failed one leaves the agent running and reachable.
+      getLaunchAppToolDependencies().overlayAgentRegistry.release(device.deviceId, args.appId);
     }
 
     return createStructuredToolResponse({
@@ -1242,7 +1373,26 @@ const uninstallAppHandler = async (
 };
 
 // Register tools
+let unsubscribeOverlayAgentLifecycle: (() => void) | undefined;
+
+/** A released session or a removed device ends every agent recorded on its device. */
+function subscribeOverlayAgentLifecycle(): () => void {
+  const releaseDevice = (deviceId: string) =>
+    getLaunchAppToolDependencies().overlayAgentRegistry.releaseDevice(deviceId);
+  const cleanups = [
+    SessionReleaseBroadcaster.subscribe((_sessionUuid, _reason, snapshot) => {
+      if (snapshot?.deviceId) {
+        releaseDevice(snapshot.deviceId);
+      }
+    }),
+    getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(releaseDevice),
+  ];
+  return () => cleanups.forEach((cleanup) => cleanup());
+}
+
 export function registerAppTools() {
+  unsubscribeOverlayAgentLifecycle?.();
+  unsubscribeOverlayAgentLifecycle = subscribeOverlayAgentLifecycle();
   const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {
     const permissions = new AppPermissions(device);
     const result = await permissions.getPermissions(args.appId, {
@@ -1276,7 +1426,7 @@ export function registerAppTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
-    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
+    "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. overlay:true (iOS simulators only) relaunches the app with the overlay agent injected, so its current state is lost.",
     launchAppSchema,
     launchAppHandler,
     { defaultEnabled: true, transportRecovery: "connect", outputSchema: launchAppResultSchema },

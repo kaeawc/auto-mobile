@@ -59,13 +59,22 @@ public struct ProbeSnapshot: Codable {
     public let discardedFlows: UInt64
     /// Version 2: the simulators the host allowed attribution to for this read-back.
     public let managedSimulators: [ManagedSimulator]?
+    /// Version 3: the leased rules the provider enforces right now (#10264).
+    public let rules: [NetworkRuleStatus]?
     public let flows: [ProbeFlow]
     public let limitations: [String]
 }
 
-/// Diagnostics only. This type has no rule application or blocking operation.
+/// Flow-identity diagnostics. Rules are applied by `NetworkRuleStore` and
+/// `AppFlowPolicy`; this type only records and reports.
 public final class IdentityProbe {
-    public static let version = 2
+    /// Version 3 adds `rules` and the `app_offline` mode (#10264).
+    public static let version = 3
+    /// No rule is active: every flow is allowed.
+    public static let allowOnlyMode = "allow_only"
+    /// At least one leased per-app offline rule is active.
+    public static let appOfflineMode = "app_offline"
+    public static let modes = [allowOnlyMode, appOfflineMode]
     public static let capacity = 128
     private let resolver: ProbeIdentityResolver
     private let attributionResolver: SimulatorFlowResolver
@@ -97,7 +106,12 @@ public final class IdentityProbe {
     /// Resolves identities and simulator attribution at read-back time, off the
     /// flow callback. Only `managedSimulators` can be attributed; every other flow,
     /// and every failed lookup, is reported as unattributed.
-    public func snapshot(managedSimulators: [ManagedSimulator] = []) -> ProbeSnapshot {
+    public func snapshot(
+        managedSimulators: [ManagedSimulator] = [],
+        rules: [NetworkRuleStatus] = []
+    )
+        -> ProbeSnapshot
+    {
         lock.lock()
         let retained = tokens
         let observedFlows = observed
@@ -121,15 +135,19 @@ public final class IdentityProbe {
         return ProbeSnapshot(
             version: Self.version,
             backend: "macos_network_extension",
-            mode: "allow_only",
+            mode: rules.isEmpty ? Self.allowOnlyMode : Self.appOfflineMode,
             observedFlows: observedFlows,
             discardedFlows: discardedFlows,
             managedSimulators: managedSimulators,
+            rules: rules,
             flows: flows,
             limitations: [
-                "Simulator attribution methods are unverified on a signed run (#10263); no network condition is applied.",
-                "Attribution is resolved at read-back: a process that exited since its flow is reported as unattributed.",
-                "New socket flows only; existing connections and non-socket traffic are not measured.",
+                "Simulator attribution methods are unverified on a signed run (#10263).",
+                "Offline rules drop new socket flows of one attributed app; established connections continue " +
+                    "until they close, and unattributed or conflicting flows are always allowed.",
+                "Flow history is attributed at read-back: a process that exited since its flow is reported " +
+                    "as unattributed. Offline verdicts are attributed when each flow arrives.",
+                "New socket flows only; non-socket traffic is not filtered.",
                 "Code metadata may be absent if a process exits before snapshot collection.",
                 "The newest 128 flow identities are retained; no payloads or network addresses are collected.",
             ]

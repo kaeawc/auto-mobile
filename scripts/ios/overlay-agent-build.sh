@@ -5,17 +5,25 @@
 # regression in the UIKit sources fails there; the UIKit-free core is also a SwiftPM package
 # (ios/overlay-agent) whose unit tests run on the macOS host.
 #
+# This is the single compile path: scripts/ios/build-overlay-agent.sh (the universal release build)
+# calls it once per architecture.
+#
 # Usage: scripts/ios/overlay-agent-build.sh [output-dir]   (default: scratch/overlay-agent)
+# Env:
+#   OVERLAY_AGENT_ARCH          architecture to build (default: host `uname -m`)
+#   OVERLAY_AGENT_MIN_IOS       simulator deployment target (default 17.0)
+#   OVERLAY_AGENT_SOURCES_ROOT  override the Sources dir (tests)
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-sources_root="${repo_root}/ios/overlay-agent/Sources"
+sources_root="${OVERLAY_AGENT_SOURCES_ROOT:-${repo_root}/ios/overlay-agent/Sources}"
 out_dir="${1:-${repo_root}/scratch/overlay-agent}"
 mkdir -p "${out_dir}"
 
 sdk="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-arch="$(uname -m)"
-target="${arch}-apple-ios17.0-simulator"
+arch="${OVERLAY_AGENT_ARCH:-$(uname -m)}"
+min_ios="${OVERLAY_AGENT_MIN_IOS:-17.0}"
+target="${arch}-apple-ios${min_ios}-simulator"
 
 xcrun --sdk iphonesimulator clang -target "${target}" -isysroot "${sdk}" \
   -c "${sources_root}/AutoMobileOverlayAgent/Loader.c" -o "${out_dir}/Loader.o"

@@ -75,3 +75,12 @@ tasks.withType<KotlinCompile>().configureEach {
     apiVersion.set(KotlinVersion.fromVersion(libs.versions.build.kotlin.consumer.api.get()))
   }
 }
+
+// CoordinationParamsParityTest reads the fixture the daemon's TypeScript test also runs. Declaring
+// it as an input keeps a fixture-only edit from reusing a cached test result.
+tasks.withType<Test>().configureEach {
+  inputs
+    .dir(rootDir.resolve("../test/fixtures/plan-coordination-params"))
+    .withPropertyName("coordinationParamsFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+}

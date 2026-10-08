@@ -20,6 +20,17 @@ sealed class OverlayDimension {
   data class Dp(val dp: Double) : OverlayDimension()
 }
 
+/**
+ * `style.fontFamily`: a built-in family name, or a font asset the host uploaded (#10443). The asset
+ * form carries only the opaque id; font bytes travel through `put_overlay_asset`.
+ */
+@Serializable(with = OverlayFontFamilySerializer::class)
+sealed class OverlayFontFamily {
+  data class Named(val name: String) : OverlayFontFamily()
+
+  data class Asset(val id: String) : OverlayFontFamily()
+}
+
 /** A dp number, or a Material 3 Shapes step (`none`, `extraSmall` ... `extraLarge`, `full`). */
 @Serializable(with = OverlayCornerRadiusSerializer::class)
 sealed class OverlayCornerRadius {
@@ -106,6 +117,25 @@ object OverlayDimensionSerializer :
       OverlayDimension.Fill -> JsonPrimitive("fill")
       OverlayDimension.Wrap -> JsonPrimitive("wrap")
       is OverlayDimension.Dp -> dpJson(value.dp)
+    }
+}
+
+object OverlayFontFamilySerializer :
+  OverlayJsonValueSerializer<OverlayFontFamily>("OverlayFontFamily") {
+  override fun fromJson(value: JsonElement): OverlayFontFamily {
+    if (value is JsonPrimitive && value.isString) return OverlayFontFamily.Named(value.content)
+    val data = value as? JsonObject ?: throw SerializationException("Expected font family")
+    if (data.keys != setOf("asset")) throw SerializationException("Expected only asset")
+    val id =
+      (data.getValue("asset") as? JsonPrimitive)?.takeIf { it.isString }?.content
+        ?: throw SerializationException("Expected asset id")
+    return OverlayFontFamily.Asset(id)
+  }
+
+  override fun toJson(value: OverlayFontFamily): JsonElement =
+    when (value) {
+      is OverlayFontFamily.Named -> JsonPrimitive(value.name)
+      is OverlayFontFamily.Asset -> buildJsonObject { put("asset", value.id) }
     }
 }
 

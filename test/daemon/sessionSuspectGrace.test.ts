@@ -215,7 +215,6 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
       expect(sessionManager.getSession(SESSION)).toBeNull();
-      expect(sessionManager.getSessionForDevice(DEVICE)).toBeNull();
       expect(sessionManager.getAssignedDevices().has(DEVICE)).toBe(false);
     });
 
@@ -293,14 +292,51 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
-    test("a stall far longer than the session idle timeout does not expire it either", async () => {
+    test("a stall that alone outlasts the idle window is host sleep and counts as idle (#10661)", async () => {
       monitor.start();
       timer.setCurrentTime(timer.now() + 120_000);
 
       await monitor.tick();
 
-      expect(sessionManager.getSession(SESSION)).not.toBeNull();
-      expect(sessionManager.getSessionForDevice(DEVICE)).toBe(SESSION);
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+    });
+
+    test("an owner heartbeat that wins the race after a sleep gets the same verdict as the monitor (#10661)", async () => {
+      monitor.start();
+      timer.setCurrentTime(timer.now() + 120_000);
+
+      const result = await heartbeat(OWNER);
+
+      expect(result.success).toBe(false);
+      await monitor.tick();
+      expect(sessionManager.getSession(SESSION)).toBeNull();
+    });
+
+    test("a stall shorter than the idle window is forgiven whichever timer fires first (#10661)", async () => {
+      const original = sessionManager.getSession(SESSION);
+      monitor.start();
+      // 75s of silence: past expiresAt (60s) plus grace (10s), so an unforgiven lazy lookup
+      // would release the session, but only 65s of it was lost to the stall.
+      timer.setCurrentTime(timer.now() + 75_000);
+
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      await monitor.tick();
+
+      expect(reaped).toEqual([]);
+      expect(sessionManager.getSession(SESSION)).toBe(original);
+    });
+
+    test("stall forgiveness is applied once when a lookup and the tick both notice it (#10661)", async () => {
+      monitor.start();
+      timer.setCurrentTime(timer.now() + 75_000);
+      sessionManager.getSession(SESSION);
+      const forgivenAt = sessionManager.getSession(SESSION)?.stallForgivenAt;
+      const expiresAt = sessionManager.getSession(SESSION)?.expiresAt;
+
+      await monitor.tick();
+
+      expect(sessionManager.getSession(SESSION)?.stallForgivenAt).toBe(forgivenAt);
+      expect(sessionManager.getSession(SESSION)?.expiresAt).toBe(expiresAt);
     });
 
     test("a tick only slightly late is not a stall and forgives nothing", async () => {

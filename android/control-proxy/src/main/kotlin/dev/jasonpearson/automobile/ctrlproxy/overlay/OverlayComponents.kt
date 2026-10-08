@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -19,7 +20,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -100,7 +103,10 @@ internal fun RenderOverlayToggle(
   }
 }
 
-/** A filled (default), outlined or text Material button whose tap runs the node's `onTap`. */
+/**
+ * A filled (default), tonal, elevated, outlined or text Material button, with an optional leading
+ * icon, whose tap runs the node's `onTap`.
+ */
 @Composable
 internal fun RenderOverlayButton(
   node: OverlayRenderNode,
@@ -110,10 +116,26 @@ internal fun RenderOverlayButton(
   val source = node.source as? OverlayButtonNode ?: return
   val actions = source.onTap.orEmpty()
   val onClick = { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) }
-  val content: @Composable RowScope.() -> Unit = { OverlayComponentLabel(node) }
+  val icon = overlayIcon(source.icon)
+  val padding =
+    if (icon != null) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding
+  val content: @Composable RowScope.() -> Unit = {
+    if (icon != null) {
+      Icon(
+        icon,
+        contentDescription = null,
+        Modifier.size(ButtonDefaults.IconSize),
+        tint = overlayForeground(node),
+      )
+      Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+    }
+    OverlayComponentLabel(node)
+  }
   when (source.variant) {
-    "outlined" -> OutlinedButton(onClick, modifier, content = content)
-    "text" -> TextButton(onClick, modifier, content = content)
+    "tonal" -> FilledTonalButton(onClick, modifier, contentPadding = padding, content = content)
+    "elevated" -> ElevatedButton(onClick, modifier, contentPadding = padding, content = content)
+    "outlined" -> OutlinedButton(onClick, modifier, contentPadding = padding, content = content)
+    "text" -> TextButton(onClick, modifier, contentPadding = padding, content = content)
     else ->
       // An authored gradient is painted behind the button, so its container must not cover it.
       Button(
@@ -123,10 +145,16 @@ internal fun RenderOverlayButton(
           if (node.style.source.gradient != null)
             ButtonDefaults.buttonColors(containerColor = Color.Transparent)
           else ButtonDefaults.buttonColors(),
+        contentPadding = padding,
         content = content,
       )
   }
 }
+
+/** The authored `style.color` when set, else the enclosing Material component's content color. */
+@Composable
+internal fun overlayForeground(node: OverlayRenderNode): Color =
+  if (node.style.source.color != null) node.style.color else LocalContentColor.current
 
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable
@@ -134,7 +162,7 @@ private fun OverlayComponentLabel(node: OverlayRenderNode) {
   Text(
     node.text,
     Modifier.clearAndSetSemantics {},
-    color = if (node.style.source.color != null) node.style.color else LocalContentColor.current,
+    color = overlayForeground(node),
   )
 }
 

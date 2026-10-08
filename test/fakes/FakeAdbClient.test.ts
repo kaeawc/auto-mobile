@@ -23,4 +23,32 @@ describe("FakeAdbClient", () => {
 
     expect(adb.getSpawnedProcesses()).toEqual([]);
   });
+  test("delivers exit and error to listeners attached after a spawn from a real turn", async () => {
+    const adb = new FakeAdbClient();
+    adb.setSpawnExit("screenrecord", 7);
+    adb.setSpawnError("pull", new Error("adb missing"));
+    const observed = await new Promise<string[]>((resolve) => {
+      setImmediate(async () => {
+        const events: string[] = [];
+        const exited = await adb.spawn(["shell", "screenrecord", "/sdcard/capture.mp4"]);
+        const exit = new Promise<void>((done) =>
+          exited.once("exit", (code) => {
+            events.push(`exit ${code}`);
+            done();
+          }),
+        );
+        const failed = await adb.spawn(["pull", "/sdcard/capture.mp4"]);
+        const error = new Promise<void>((done) =>
+          failed.once("error", (cause: Error) => {
+            events.push(`error ${cause.message}`);
+            done();
+          }),
+        );
+        await Promise.all([exit, error]);
+        resolve(events);
+      });
+    });
+
+    expect(observed).toEqual(["exit 7", "error adb missing"]);
+  });
 });

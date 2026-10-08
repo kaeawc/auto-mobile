@@ -135,6 +135,7 @@ Every node has required `type`. All other common properties are optional:
 | `style`           | Strict style object below.                                                                         |
 | `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
 | `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
+| `transition`      | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
 
@@ -149,27 +150,29 @@ layout room.
 
 ## Nodes
 
-| `type`        | Node-specific properties                                                                                                                         |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `box`         | Required `children` array, possibly empty; children stack.                                                                                       |
-| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                    |
-| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                      |
-| `text`        | Required `text` string, possibly empty.                                                                                                          |
-| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                        |
-| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                              |
-| `spacer`      | No node-specific properties; size comes from style.                                                                                              |
-| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                      |
-| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
-| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
-| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.                                         |
-| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`. |
-| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                         |
-| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                       |
-| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                             |
-| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                            |
-| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                               |
-| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                        |
-| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                            |
+| `type`        | Node-specific properties                                                                                                                                                                                                                    |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `box`         | Required `children` array, possibly empty; children stack.                                                                                                                                                                                  |
+| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                                                                                                               |
+| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                                                                                                                 |
+| `text`        | Required `text` string, possibly empty.                                                                                                                                                                                                     |
+| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
+| `icon`        | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
+| `spacer`      | No node-specific properties; size comes from style.                                                                                                                                                                                         |
+| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
+| `radioGroup`  | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
+| `listItem`    | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
+| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
+| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                                                                                                                    |
+| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
+| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
+| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
+| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
+| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
+| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -204,8 +207,7 @@ non-boolean is rejected like any other binding type change. A button runs its
 node carrying its label as text, a native role (`Switch`, `Checkbox`,
 `Button`), and for switch and checkbox the checkable/checked state, so `observe`
 reports them as controls and `tapOn` by `testTag` or label toggles or presses
-them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
-`listItem` and the other components in #10439 are later slices.
+them. Each reserves the Material 48 dp minimum touch target.
 
 `slider`, `chip` and `card` are the second slice. A slider is bound to a number
 state key that must already lie within `min`..`max`; `step`, when given, must
@@ -223,6 +225,21 @@ later slices. A card is a Material container whose `children` are laid out as a
 column; its `variant` selects filled, elevated or outlined, a `style.background`
 overrides the container colour, and an `onTap` makes the whole card clickable.
 A card has no accessibility label of its own.
+
+`radioGroup`, `listItem` and the button extras are the third slice of #10439. Button
+`tonal` and `elevated` are Material's filled-tonal and elevated buttons; an
+`icon` draws before the label. A radio group draws one Material radio row per
+option; a tap on a row (or its label) sets the bound string to that option's
+`value`, emits `change` (`{key, value}`) only if the value changed, and then runs
+the group's own `onTap`. A bound value matching no option leaves every option
+unselected. Each option row is its own accessibility node with the `RadioButton`
+role, its label as text and a selected state; when the group has a `testTag`, the
+option's tag is `<testTag>.<value>`. A list item is one accessibility node whose
+text is the headline (and supporting line). With a trailing switch or checkbox it
+is toggleable with the `Switch` or `Checkbox` role and checked state: a tap
+anywhere on the row flips the bound boolean, emits `change`, then runs `onTap`.
+Otherwise a row with `onTap` is a `Button` that runs it, and a row without is
+inert. A trailing `icon` is decorative.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
@@ -257,7 +274,7 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `fontWeight`                                     | Integer 100–900.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `fontFamily`                                     | A system name (`default`, `sansSerif`, `serif`, `monospace`) or `{asset: "<id>"}` naming an uploaded TTF/OTF font (#10443).                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
 of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
@@ -298,7 +315,7 @@ Heap, not the 64 MiB frame limit, is the binding constraint, so caps are
 conservative and shared with the host through `schemas/overlay-asset-contract.json`:
 4 MiB per asset, 32 assets, 16 MiB total, ids of 1 to 256 characters, and
 `image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start
-with the matching signature. Putting an existing ID replaces it; a full store rejects
+with the matching signature, plus `font/ttf` and `font/otf` (2 MiB each, see Custom fonts). Putting an existing ID replaces it; a full store rejects
 the put with a clear error and never evicts. Removing an unknown ID succeeds. Assets
 sit in the CtrlProxy cache directory and are cleared when the overlay session ends:
 on any dismissal, on service start, unbind or teardown, on `dismiss_overlay` with
@@ -348,6 +365,30 @@ successful result is returned with `missingAssets` and a `warning` on the tool o
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
 
+### Custom fonts (#10443)
+
+`style.fontFamily` also accepts `{asset: "<id>"}`, an opaque id of a font uploaded through
+the same asset pipeline as images (`put_overlay_asset`, or `assets: [{id, path}]` on the
+host). The spec carries only the id; font bytes, MIME types and caps stay out of it.
+
+- Transport: `font/ttf` and `font/otf` join the contract's MIME types. The bytes must start
+  with an sfnt version tag, `0x00010000`, `true` or `OTTO`, accepted for either MIME type
+  because an OpenType file may carry TrueType outlines. TrueType collections (`ttcf`) and
+  WOFF are rejected. Fonts are never decoded as images. The per-font cap is 2 MiB
+  (`MAX_OVERLAY_FONT_ASSET_BYTES`); fonts count toward the 32-asset and 16 MiB totals
+  like images. The host detects a font from the file signature, not the extension.
+- Missing assets: a referenced font the device has no copy of is listed in
+  `overlay_result.missingAssets` with the image ids (references in `style` and `styleWhen`
+  count, including hidden nodes) and the text draws in the default family until it is
+  uploaded.
+- Rendering: the font is loaded from the stored asset file with `FontFamily(Font(file))`,
+  once per asset, and cached. A file that cannot be parsed logs one warning and draws
+  with the default family; the overlay is never failed for it. Replacing an asset reloads
+  it; removing it (or ending the session) while a spec still references it falls back to
+  the default family, the same as a removed image becoming a placeholder.
+- Weights: one file is one face, so `fontWeight` selects that face rather than a bolder
+  one. Upload a font file per weight and use `styleWhen` to choose between them.
+
 ## Motion
 
 Overlay state changes animate by default (#10442). A node with `visibleWhen`
@@ -358,8 +399,17 @@ animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
 read when the spec changes. Only nodes with `visibleWhen` get an animation
-wrapper. Size-change animation, `transition` variants and `pressScale` are
-follow-ups.
+wrapper.
+
+`box`, `row` and `column` containers animate their size when their children
+appear, disappear or change (`animateContentSize`), gated by the same
+motion-enabled check, so a sibling slides into the freed space instead of
+jumping.
+
+A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+(instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
+fade). Absent keeps the default fade + expand. It has no effect on nodes
+without `visibleWhen`, or when motion is off. `pressScale` is a follow-up.
 
 ## Actions and state
 
@@ -396,8 +446,14 @@ Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle` and `increment` validate their `key` against the declared `state`
-(`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
-no-ops at runtime if the key's type was changed by other means. List templates
+(`root.onTap[0].key`), and are no-ops at runtime if the key's type was changed by
+other means. After an `onTap` action list finishes, if `setState`, `toggle` or
+`increment` changed state, the device emits exactly one `change` event carrying
+the final state (#10622), so host `status` follows button taps. A single changed
+key sends `{key, value}`; several send `{keys, values}`. `emit` actions still fire
+in order with the state at that point, a list that nets no change emits nothing,
+and a switch or checkbox tap keeps its own `{key, value}` change before its
+`onTap` runs. Wire patches from the host stay silent. List templates
 and a `decrement` alias are later slices of #10440.
 
 ### Conditional style: styleWhen

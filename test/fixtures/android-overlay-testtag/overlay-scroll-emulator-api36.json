@@ -1,0 +1,130 @@
+{
+  "hierarchy": {
+    "node": [
+      {
+        "actions": [
+          "accessibility_focus",
+          "focus",
+          "click",
+          "set_selection",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity"
+        ],
+        "resource-id": "A_pick",
+        "visible-to-user": true,
+        "view-id": "A_pick",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]",
+          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "210"
+        },
+        "bounds": {
+          "left": 39,
+          "top": 331,
+          "right": 186,
+          "bottom": 448
+        }
+      },
+      {
+        "actions": [
+          "accessibility_focus",
+          "focus",
+          "click",
+          "set_selection",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity"
+        ],
+        "resource-id": "A_on2",
+        "visible-to-user": true,
+        "view-id": "A_on2",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]",
+          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "226"
+        },
+        "bounds": {
+          "left": 78,
+          "top": 889,
+          "right": 230,
+          "bottom": 1006
+        }
+      },
+      {
+        "actions": [
+          "accessibility_focus",
+          "focus",
+          "click",
+          "set_selection",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity"
+        ],
+        "resource-id": "A_1d1",
+        "visible-to-user": true,
+        "view-id": "A_1d1",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]",
+          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "217"
+        },
+        "bounds": {
+          "left": 956,
+          "top": 586,
+          "right": 1104,
+          "bottom": 703
+        }
+      },
+      {
+        "actions": [
+          "accessibility_focus",
+          "focus",
+          "click",
+          "set_selection",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity"
+        ],
+        "resource-id": "A_edit3",
+        "visible-to-user": true,
+        "view-id": "A_edit3",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]",
+          "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": "243"
+        },
+        "bounds": {
+          "left": 1829,
+          "top": 1192,
+          "right": 1998,
+          "bottom": 1309
+        }
+      },
+      {
+        "actions": [
+          "accessibility_focus",
+          "focus",
+          "click",
+          "set_selection",
+          "next_at_movement_granularity",
+          "previous_at_movement_granularity"
+        ],
+        "resource-id": "A_fab",
+        "visible-to-user": true,
+        "view-id": "A_fab",
+        "clickable": "true",
+        "focusable": "true",
+        "extras": {
+          "androidx.view.accessibility.AccessibilityNodeInfoCompat.SPANS_START_KEY": "[]"
+        },
+        "bounds": {
+          "left": 39,
+          "top": 1957,
+          "right": 180,
+          "bottom": 2074
+        }
+      }
+    ]
+  }
+}

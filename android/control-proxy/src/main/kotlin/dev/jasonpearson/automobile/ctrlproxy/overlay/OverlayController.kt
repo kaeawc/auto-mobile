@@ -54,6 +54,8 @@ class OverlayController(
   private val hasAsset: (String) -> Boolean = { true },
   /** Decoded-image cache the rendered overlay draws `image` nodes from. */
   private val images: OverlayImageCache? = null,
+  /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
+  private val fonts: OverlayFontCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -183,7 +185,9 @@ class OverlayController(
         darkTheme = overlayHostDark(mappedSpec),
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
-          OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }
+          OverlayRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
+          }
         },
       )
     val blocked = lifecycle.isBlocked()

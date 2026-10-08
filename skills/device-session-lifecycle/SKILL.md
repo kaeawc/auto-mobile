@@ -199,7 +199,7 @@ is kept — same session, same `incarnation` — but:
   `runTrackedDeviceInput` ahead of its sessionless early return (tap, swipe,
   typeText, button, key, gestures), `request_observation` in the device-data
   stream server (which refuses BEFORE observing, instead of acking `success:
-true` after pushing zero frames), the `ide/*` device-addressed routes, the
+  true` after pushing zero frames), the `ide/*` device-addressed routes, the
   raw-serial `subscribe_storage` target, every target an all-device
   `subscribe_storage` expands to (`Daemon.applyStorageSubscriptionRequest`, which
   reports the refused targets so the request is not acked as complete), and the

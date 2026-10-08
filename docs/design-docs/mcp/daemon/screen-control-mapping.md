@@ -123,7 +123,7 @@ deviceY = round(frameY * frameToDevice)
 Notes and rules a client must reproduce:
 
 - **Width-based scale for both axes.** The single ratio `deviceWidth /
-frameWidthPx` scales _both_ x and y. This is exact because the frame is fitted
+  frameWidthPx` scales _both_ x and y. This is exact because the frame is fitted
   to the device aspect ratio, so the height ratio equals the width ratio.
 - **Rounding.** `round` is round-to-nearest with halves rounding **up** (Kotlin
   `roundToInt` / `Math.round`: `0.5 -> 1`, `-0.5 -> 0`).
@@ -134,7 +134,7 @@ frameWidthPx` scales _both_ x and y. This is exact because the frame is fitted
   screen produces an out-of-range coordinate that matches no element, clearing
   the selection. A **control** client must not tap an out-of-bounds point — drop
   it, or clamp it to the last addressable pixel `(deviceWidth - 1,
-deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
+  deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
   when **both** device dimensions are positive: with a zero dimension
   `(deviceWidth - 1, deviceHeight - 1)` is negative and addresses no pixel, so a
   client must **drop** the point instead. The reference `DevicePoint.clampedTo`

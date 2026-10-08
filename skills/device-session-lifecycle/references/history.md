@@ -80,7 +80,7 @@ daemon and desktop ship together):
   same-serial auto-recovery churns the just-minted epoch); startup mint done
   in the daemon's `initializeDevicePool` path because `initializeWithDevices`
   is deliberately a silent pre-populate. Latent footgun: `DaemonState
-.initialize` defaults its registry param — a 2-arg caller silently gets a
+  .initialize` defaults its registry param — a 2-arg caller silently gets a
   throwaway registry.
 - #5266 → #5313: retire was asymmetric (only disconnect monitor fired it);
   refresh eviction / liveness / idle-pruning bypassed it → stale entries.

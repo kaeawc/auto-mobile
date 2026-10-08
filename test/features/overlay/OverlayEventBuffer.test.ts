@@ -49,4 +49,13 @@ describe("OverlayEventBuffer", () => {
     expect(buffer.push(event(1))).toBe(true);
     expect(buffer.push(event(1))).toBe(false);
   });
+  test("advanceTo seeds the high-water mark without events and never lowers it", () => {
+    const buffer = new OverlayEventBuffer();
+    buffer.advanceTo(5);
+    expect(buffer.status()).toEqual({ pendingCount: 0, lastSequence: 5, droppedCount: 0 });
+    expect(buffer.push(event(5))).toBe(false);
+    expect(buffer.push(event(6))).toBe(true);
+    buffer.advanceTo(2);
+    expect(buffer.status().lastSequence).toBe(6);
+  });
 });

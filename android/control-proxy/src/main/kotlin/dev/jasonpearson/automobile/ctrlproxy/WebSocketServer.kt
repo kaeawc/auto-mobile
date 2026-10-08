@@ -61,6 +61,10 @@ class WebSocketServer(
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
   /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
   private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
+  /**
+   * Called once a client is registered, so state held back while no host was attached can go out.
+   */
+  private val onClientConnected: () -> Unit = {},
   /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
   private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
 ) {
@@ -129,7 +133,8 @@ class WebSocketServer(
 
     /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
     private val overlayRequestTypes =
-      setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
+      setOf("show_overlay", "dismiss_overlay", "inspect_overlays") +
+        overlayAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
     private val textInputRequestTypes =
@@ -277,7 +282,7 @@ class WebSocketServer(
         return "Malformed request: a numeric value is out of range or not representable."
       }
       if (
-        type in listOf("show_overlay", "update_overlay", "dismiss_overlay") &&
+        type in listOf("show_overlay", "dismiss_overlay") &&
           cause.contains("Class discriminator was missing") &&
           !cause.contains("at path:")
       ) {
@@ -330,6 +335,12 @@ class WebSocketServer(
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the overlay would silently land on the default display.
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("overlay_display_id_v1")
+    // Overlay specs honour window.layer and window.persistence. The request decoder ignores unknown
+    // spec fields, so an older device would silently show a session-scoped system-layer overlay.
+    add("overlay_window_options_v1")
+    // A device-persistent overlay buffers its events while no host is connected and replays them,
+    // and inspect_overlays reports what it is showing. Older hosts never send inspect_overlays.
+    add("overlay_persistence_replay_v1")
     // Window entries for CtrlProxy's own interactive overlay carry overlayPlacement and
     // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
     // send them and the host falls back to bounds.
@@ -462,6 +473,7 @@ class WebSocketServer(
     }
     firstClientConnection.complete(Unit)
     client.sender.start()
+    onClientConnected()
     return client
   }
 

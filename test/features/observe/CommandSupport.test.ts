@@ -144,10 +144,11 @@ describe("CtrlProxy command support", () => {
       new Set([
         ...oldApkAdvertisedCommands,
         "show_overlay",
-        "update_overlay",
         "dismiss_overlay",
         // Newer than the old-APK fixture: no older APK advertises it.
         "overlay_display_id_v1",
+        "overlay_window_options_v1",
+        "overlay_persistence_replay_v1",
         "overlay_window_metadata_v1",
         "get_sdk_capabilities",
         "network_mock_rules_report_v1",

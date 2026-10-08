@@ -438,6 +438,10 @@ data class AddHighlight(
  * `displayId`. Absent/null means the service's default display (the pre-#9308 behaviour); hosts
  * only send it to a device advertising `overlay_display_id_v1`, because an older device would
  * ignore the unknown field and silently show the overlay on the wrong display.
+ *
+ * A show whose `spec.id` is the overlay already on screen replaces it in place: it keeps the
+ * display it is on (ignoring [displayId]) and each pager's page. [reset] true starts it fresh
+ * instead. Hosts send `reset` only when true; an older device ignores it and always starts fresh.
  */
 @Serializable
 @SerialName("show_overlay")
@@ -445,16 +449,7 @@ data class ShowOverlay(
   override val requestId: String? = null,
   val spec: OverlaySpec,
   val displayId: Int? = null,
-) : WebSocketRequest()
-
-/** Replacement spec.id must equal id; the host rejects mismatches before sending. */
-@Serializable
-@SerialName("update_overlay")
-data class UpdateOverlay(
-  override val requestId: String? = null,
-  val id: String,
-  val spec: OverlaySpec? = null,
-  val state: Map<String, OverlayScalar>? = null,
+  val reset: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable
@@ -464,6 +459,16 @@ data class DismissOverlay(
   val id: String? = null,
   val all: Boolean? = null,
 ) : WebSocketRequest()
+
+/**
+ * Asks the device which overlays it is showing. Answered by one `overlay_result` carrying
+ * `overlays`. Any events buffered while no host was connected (device-persistent overlays, #10494)
+ * are delivered first, as ordinary `overlay_event` frames. Hosts only send it to a device
+ * advertising `overlay_persistence_replay_v1`.
+ */
+@Serializable
+@SerialName("inspect_overlays")
+data class InspectOverlays(override val requestId: String? = null) : WebSocketRequest()
 
 /**
  * Uploads one overlay image asset, replacing any asset with the same [id]. [dataBase64] is the

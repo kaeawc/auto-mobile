@@ -7,6 +7,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeOverlayAssetFileReader } from "../fakes/FakeOverlayAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { event } from "../helpers/overlayTestEvent";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
@@ -162,26 +163,27 @@ describe("overlay display together with assets", () => {
     expect(payload.lastResult && Object.hasOwn(payload.lastResult, "displayId")).toBe(false);
   });
 
-  test("update with a spec and assets stays on the display the overlay was shown on", async () => {
+  test("a same-id show with assets stays on the display the overlay was shown on", async () => {
     await call({ action: "show", spec, assets, display: "inner" });
-    const { payload } = await call({ action: "update", id: "panel", spec, assets });
+    const { payload } = await call({ action: "show", spec, assets });
     expect(payload.success).toBe(true);
     expect(payload.lastResult?.displayId).toBe(2);
-    const update = client.getOverlayHistory().find((entry) => entry.method === "update");
-    expect(update).toBeDefined();
-    expect(Object.hasOwn(update ?? {}, "displayId")).toBe(false);
+    expect(payload.warning).toBeUndefined();
+    expect(client.getOverlayHistory()[1]?.displayId).toBe(2);
     expect(inventoryReads()).toBe(1);
   });
 
-  test("display is still refused on update even with assets", async () => {
-    await call({ action: "show", spec, display: "inner" });
-    const { response } = await call({
-      action: "update",
-      id: "panel",
-      spec,
-      assets,
-      display: "inner",
-    });
-    expect(response.isError).toBe(true);
+  test("a dismissal while a same-id show stages assets still shows on the same display", async () => {
+    await call({ action: "show", spec, assets, display: "inner" });
+    const put = client.requestPutOverlayAsset.bind(client);
+    client.requestPutOverlayAsset = async (asset, options) => {
+      client.emitOverlayEvent(event(1, "panel", "dismissed"));
+      return put(asset, options);
+    };
+    const { payload } = await call({ action: "show", spec, assets });
+    expect(payload.success).toBe(true);
+    expect(client.getOverlayHistory()[1]?.displayId).toBe(2);
+    expect(payload.lastResult?.displayId).toBe(2);
+    expect(inventoryReads()).toBe(1);
   });
 });

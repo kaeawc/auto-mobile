@@ -60,20 +60,16 @@ class OverlayControllerTest {
   }
 
   @Test
-  fun `show update state and dismiss dispatch through the real message handler`() = runTest {
+  fun `show same-id show and dismiss dispatch through the real message handler`() = runTest {
     val actions =
       object : NoOpCtrlProxyActions() {
-        override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {
-          launch { controller.show(requestId, spec, displayId) }
-        }
-
-        override fun updateOverlay(
+        override fun showOverlay(
           requestId: String?,
-          id: String,
-          spec: OverlaySpec?,
-          state: Map<String, OverlayScalar>?,
+          spec: OverlaySpec,
+          displayId: Int?,
+          reset: Boolean,
         ) {
-          launch { controller.update(requestId, id, spec, state) }
+          launch { controller.show(requestId, spec, displayId, reset) }
         }
 
         override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
@@ -89,24 +85,22 @@ class OverlayControllerTest {
     assertResult("show", true)
     assertEquals(listOf("show"), host.calls)
     dispatch(
-      UpdateOverlay(
+      ShowOverlay(
         requestId = "spec",
-        id = "panel",
-        spec = spec().copy(window = OverlayWindow(OverlayFullscreenPlacement(), 30)),
+        spec =
+          spec()
+            .copy(
+              window = OverlayWindow(OverlayFullscreenPlacement(), 30),
+              state = mapOf("name" to OverlayScalar.Text("Jason")),
+            ),
       )
     )
     assertResult("spec", true)
     assertEquals(30, host.requests.last().opacityPercent)
-    dispatch(
-      UpdateOverlay(
-        requestId = "state",
-        id = "panel",
-        state = mapOf("name" to OverlayScalar.Text("Jason")),
-      )
-    )
-    assertResult("state", true)
     assertEquals("Jason", models.last().root.text)
-    assertEquals(listOf("show", "replace"), host.calls)
+    dispatch(ShowOverlay(requestId = "reset", spec = spec(), reset = true))
+    assertResult("reset", true)
+    assertEquals(listOf("show", "replace", "replace"), host.calls)
     dispatch(DismissOverlay(requestId = "dismiss", id = "panel"))
     assertResult("dismiss", true)
     assertEquals(1, dismissed)
@@ -124,27 +118,23 @@ class OverlayControllerTest {
     )
     assertResult("bad", false, "root.style.alpha")
     assertEquals(listOf("show"), host.calls)
-    controller.update("still-active", "panel", null, mapOf("name" to OverlayScalar.Text("updated")))
+    controller.dismiss("still-active", "panel", null)
     assertResult("still-active", true)
   }
 
   @Test
-  fun `unknown ids mismatch and invalid replacement never mutate host`() = runTest {
-    controller.update("unknown", "missing", spec(), null)
-    assertResult("unknown", false, "Unknown overlay id")
+  fun `unknown ids and an invalid same-id replacement never mutate host`() = runTest {
     controller.dismiss("missing", "missing", null)
     assertResult("missing", false, "Unknown overlay id")
     controller.show("show", spec())
-    controller.update("mismatch", "panel", spec("other"), null)
-    assertResult("mismatch", false, "spec.id")
-    controller.update(
+    val runtime = controller.activeRuntime
+    controller.show(
       "invalid",
-      "panel",
       spec().copy(window = OverlayWindow(OverlayFullscreenPlacement(), 101)),
-      null,
     )
     assertResult("invalid", false, "window.opacity")
     assertEquals(listOf("show"), host.calls)
+    assertSame(runtime, controller.activeRuntime)
   }
 
   @Test
@@ -160,28 +150,44 @@ class OverlayControllerTest {
   }
 
   @Test
-  fun `patch merges scalars adds valid keys and rejects invalid keys with canonical path`() =
-    runTest {
-      controller.show(
-        "show",
-        spec()
-          .copy(
-            state = mapOf("name" to OverlayScalar.Text("old")),
-            root = OverlayTextNode(text = "{name} {count} {enabled}"),
-          ),
-      )
-      controller.update(
-        "patch",
-        "panel",
-        null,
-        mapOf("count" to OverlayScalar.Numeric(2.0), "enabled" to OverlayScalar.BooleanValue(true)),
-      )
-      assertResult("patch", true)
-      assertEquals("old 2 true", models.last().root.text)
-      controller.update("invalid-key", "panel", null, mapOf("bad-key" to OverlayScalar.Text("bad")))
-      assertResult("invalid-key", false, "state[\"bad-key\"]")
-      assertEquals(listOf("show"), host.calls)
-    }
+  fun `a same-id show takes the new spec's state and drops values the user changed`() = runTest {
+    val toggle = OverlaySetStateAction("name", OverlayScalar.Text("tapped"))
+    controller.show(
+      "show",
+      spec()
+        .copy(
+          state = mapOf("name" to OverlayScalar.Text("old")),
+          root = OverlayTextNode(text = "{name} {count}", onTap = listOf(toggle)),
+        ),
+    )
+    controller.interact(
+      checkNotNull(controller.activeRuntime),
+      OverlayInteraction.Tap(listOf(toggle)),
+    )
+    assertEquals(
+      OverlayScalar.Text("tapped"),
+      controller.activeRuntime?.current?.state?.get("name"),
+    )
+    controller.show(
+      "again",
+      spec()
+        .copy(
+          state = mapOf("count" to OverlayScalar.Numeric(2.0)),
+          root = OverlayTextNode(text = "{name} {count}"),
+        ),
+    )
+    assertResult("again", true)
+    assertEquals(
+      mapOf("count" to OverlayScalar.Numeric(2.0)),
+      controller.activeRuntime?.current?.state,
+    )
+    controller.show(
+      "invalid-key",
+      spec().copy(state = mapOf("bad-key" to OverlayScalar.Text("bad"))),
+    )
+    assertResult("invalid-key", false, "state[\"bad-key\"]")
+    assertEquals(listOf("show", "replace"), host.calls)
+  }
 
   @Test
   fun `host rejection and exceptions are typed failures and do not install an id`() = runTest {
@@ -206,7 +212,7 @@ class OverlayControllerTest {
     controller.dismiss("dismiss-failed", "panel", null)
     assertResult("dismiss-failed", false, "failed to dismiss")
     host.accept = true
-    controller.update("old-id", "panel", spec(), null)
+    controller.dismiss("old-id", "panel", null)
     assertResult("old-id", true)
   }
 
@@ -244,39 +250,49 @@ class OverlayControllerTest {
   }
 
   @Test
-  fun `controller patch keeps runtime pages composition and sequence while full spec clamps pages`() =
-    runTest {
-      val tree =
-        OverlayPagerNode(
-          "pager",
-          children = List(3) { OverlayTextNode(text = "{page}/{pageCount} {name}") },
-        )
-      controller.show("show", spec().copy(root = tree))
-      val runtime = checkNotNull(controller.activeRuntime)
-      controller.interact(runtime, OverlayInteraction.SettledPage("pager", 2))
-      val request = host.requests.single()
-      controller.update("patch", "panel", null, mapOf("name" to OverlayScalar.Text("patch")))
-      assertSame(runtime, controller.activeRuntime)
-      assertSame(request, host.requests.single())
-      assertEquals(2, runtime.current.pages["pager"])
-      assertEquals(
-        "3/3 patch",
-        mapOverlaySpec(runtime.current.spec, runtime.current.pages).root.children.first().text,
+  fun `a same-id show keeps pager pages clamped and continues the sequence`() = runTest {
+    val tree =
+      OverlayPagerNode(
+        "pager",
+        children = List(4) { OverlayTextNode(text = "{page}/{pageCount} {name}") },
       )
-      controller.interact(runtime, OverlayInteraction.Tap(listOf(OverlayEmitAction("patched"))))
-      controller.update(
-        "replace",
-        "panel",
-        spec().copy(root = tree.copy(children = tree.children.take(2))),
-        null,
-      )
-      val replaced = checkNotNull(controller.activeRuntime)
-      assertEquals(1, replaced.current.pages["pager"])
-      assertFalse(runtime.current.active)
-      controller.interact(runtime, OverlayInteraction.Tap(listOf(OverlayEmitAction("stale"))))
-      controller.interact(replaced, OverlayInteraction.Tap(listOf(OverlayEmitAction("current"))))
-      assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
-    }
+    controller.show("show", spec().copy(root = tree))
+    val runtime = checkNotNull(controller.activeRuntime)
+    controller.interact(runtime, OverlayInteraction.SettledPage("pager", 2))
+    controller.show("again", spec().copy(root = tree))
+    val same = checkNotNull(controller.activeRuntime)
+    assertEquals(2, same.current.pages["pager"])
+    assertNotSame(runtime, same)
+    controller.interact(same, OverlayInteraction.Tap(listOf(OverlayEmitAction("kept"))))
+    controller.show("shrink", spec().copy(root = tree.copy(children = tree.children.take(2))))
+    val replaced = checkNotNull(controller.activeRuntime)
+    assertEquals(1, replaced.current.pages["pager"])
+    assertFalse(runtime.current.active)
+    assertFalse(same.current.active)
+    controller.interact(same, OverlayInteraction.Tap(listOf(OverlayEmitAction("stale"))))
+    controller.interact(replaced, OverlayInteraction.Tap(listOf(OverlayEmitAction("current"))))
+    assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
+    assertEquals(listOf("show", "replace", "replace"), host.calls)
+  }
+
+  @Test
+  fun `reset starts a same-id show fresh while another id never keeps pages`() = runTest {
+    val tree = OverlayPagerNode("pager", children = List(3) { OverlayTextNode(text = "page") })
+    controller.show("show", spec().copy(root = tree))
+    controller.interact(
+      checkNotNull(controller.activeRuntime),
+      OverlayInteraction.SettledPage("pager", 2),
+    )
+    controller.show("reset", spec().copy(root = tree), reset = true)
+    assertResult("reset", true)
+    assertEquals(0, controller.activeRuntime?.current?.pages?.get("pager"))
+    controller.interact(
+      checkNotNull(controller.activeRuntime),
+      OverlayInteraction.SettledPage("pager", 1),
+    )
+    controller.show("other", spec("other").copy(root = tree))
+    assertEquals(0, controller.activeRuntime?.current?.pages?.get("pager"))
+  }
 
   @Test
   fun `same id re-show continues sequence new ids start at one and returning ids continue`() =

@@ -174,8 +174,8 @@ test("Keystore discovery is an optional advertised Android capability", () => {
  */
 const KOTLIN_SERIAL_NAMES = [
   "show_overlay",
-  "update_overlay",
   "dismiss_overlay",
+  "inspect_overlays",
   "put_overlay_asset",
   "remove_overlay_asset",
   "request_hierarchy",
@@ -333,26 +333,22 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"displayId":2}',
     },
     {
-      builder: "updateOverlay",
-      name: "replacement (shared Kotlin literal)",
+      builder: "showOverlay",
+      name: "reset (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.updateOverlay({ requestId: "r2", id: "panel", spec: overlaySpec }),
+        ctrlProxyRequests.showOverlay({ requestId: "r2", spec: overlaySpec, reset: true }),
       ),
       expected:
-        '{"type":"update_overlay","requestId":"r2","id":"panel","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
+        '{"type":"show_overlay","requestId":"r2","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"reset":true}',
     },
     {
-      builder: "updateOverlay",
-      name: "state patch (shared Kotlin literal)",
+      builder: "showOverlay",
+      name: "reset false sends nothing",
       actual: serializeCtrlProxyRequest(
-        ctrlProxyRequests.updateOverlay({
-          requestId: "r3",
-          id: "panel",
-          state: { label: "Next", enabled: true, count: 2.5 },
-        }),
+        ctrlProxyRequests.showOverlay({ requestId: "r1", spec: overlaySpec, reset: false }),
       ),
       expected:
-        '{"type":"update_overlay","requestId":"r3","id":"panel","state":{"label":"Next","enabled":true,"count":2.5}}',
+        '{"type":"show_overlay","requestId":"r1","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}}',
     },
     {
       builder: "dismissOverlay",
@@ -369,6 +365,12 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         ctrlProxyRequests.dismissOverlay({ requestId: "r5", all: true }),
       ),
       expected: '{"type":"dismiss_overlay","requestId":"r5","all":true}',
+    },
+    {
+      builder: "inspectOverlays",
+      name: "inspect (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(ctrlProxyRequests.inspectOverlays({ requestId: "r8" })),
+      expected: '{"type":"inspect_overlays","requestId":"r8"}',
     },
     {
       builder: "putOverlayAsset",
@@ -1068,10 +1070,8 @@ describe("overlay builders enforce either/or types", () => {
     root: { type: "text" as const, text: "Hello" },
   };
   const invalidBuilders = () => {
-    // @ts-expect-error update requires exactly one source
-    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel" });
-    // @ts-expect-error update cannot combine replacement and patch
-    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel", spec, state: {} });
+    // @ts-expect-error update_overlay was removed; a same-id show replaces in place
+    ctrlProxyRequests.updateOverlay({ requestId: "r", id: "panel", spec });
     // @ts-expect-error dismiss requires exactly one target
     ctrlProxyRequests.dismissOverlay({ requestId: "r" });
     // @ts-expect-error dismiss cannot combine id and all

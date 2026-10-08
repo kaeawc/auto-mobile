@@ -33,7 +33,6 @@ async function harness(
     "full_command_set_v1",
     "request_id_echo_v1",
     "show_overlay",
-    "update_overlay",
     "dismiss_overlay",
   ],
 ) {
@@ -76,7 +75,7 @@ afterEach(async () => {
 });
 
 describe("CtrlProxy overlays", () => {
-  test.each(["show_overlay", "update_overlay", "dismiss_overlay"])(
+  test.each(["show_overlay", "dismiss_overlay"])(
     "sends %s and correlates the result",
     async (type) => {
       const { client, socket, receive } = await harness();
@@ -91,17 +90,12 @@ describe("CtrlProxy overlays", () => {
         const pending =
           type === "show_overlay"
             ? client.requestShowOverlay(spec)
-            : type === "update_overlay"
-              ? client.requestUpdateOverlay({ id: "panel", state: { enabled: false } })
-              : client.requestDismissOverlay({ all: true });
+            : client.requestDismissOverlay({ all: true });
         const message = await sent;
         expect(message.type).toBe(type);
         expect(message.requestId).toBeString();
         if (type === "show_overlay") {
           expect(message.spec).toEqual(spec);
-        }
-        if (type === "update_overlay") {
-          expect(message.state).toEqual({ enabled: false });
         }
         if (type === "dismiss_overlay") {
           expect(message.all).toBe(true);
@@ -200,9 +194,72 @@ describe("CtrlProxy overlays", () => {
     });
   });
 
-  test.each(["show_overlay", "update_overlay"])(
+  describe("inspect", () => {
+    const inspectable = [
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "inspect_overlays",
+      "overlay_persistence_replay_v1",
+    ];
+
+    test("sends inspect_overlays and returns the overlays and dropped count", async () => {
+      const { client, socket, receive } = await harness(inspectable);
+      let finish!: (value: Record<string, unknown>) => void;
+      const sent = new Promise<Record<string, unknown>>((resolve) => {
+        finish = resolve;
+      });
+      const send = spyOn(socket, "send").mockImplementation((data) =>
+        finish(JSON.parse(String(data))),
+      );
+      try {
+        const pending = client.requestInspectOverlays();
+        const message = await sent;
+        expect(message.type).toBe("inspect_overlays");
+        const entry = {
+          id: "proto",
+          persistent: true,
+          state: { label: "typed" },
+          pages: { pager: 1 },
+          lastSequence: 4,
+        };
+        await receive({
+          type: "overlay_result",
+          timestamp: 42,
+          requestId: message.requestId,
+          success: true,
+          overlays: [entry],
+          droppedEvents: 3,
+        });
+        expect(await pending).toMatchObject({
+          success: true,
+          overlays: [entry],
+          droppedEvents: 3,
+        });
+      } finally {
+        send.mockRestore();
+      }
+    });
+
+    test.each([
+      ["without the flag", ["full_command_set_v1", "inspect_overlays"]],
+      ["on a legacy handshake", ["inspect_overlays"]],
+    ])("%s refuses before sending", async (_name, commands) => {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expect(client.requestInspectOverlays()).rejects.toThrow(
+          "overlay_persistence_replay_v1",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    });
+  });
+
+  test.each(["show_overlay"])(
     "%s surfaces missingAssets as a warning on a successful result",
-    async (type) => {
+    async () => {
       const { client, socket, receive } = await harness();
       let finish!: (value: Record<string, unknown>) => void;
       const sent = new Promise<Record<string, unknown>>((resolve) => {
@@ -212,10 +269,7 @@ describe("CtrlProxy overlays", () => {
         finish(JSON.parse(String(data))),
       );
       try {
-        const pending =
-          type === "show_overlay"
-            ? client.requestShowOverlay(spec)
-            : client.requestUpdateOverlay({ id: "panel", state: { enabled: false } });
+        const pending = client.requestShowOverlay(spec);
         const message = await sent;
         await receive({
           type: "overlay_result",
@@ -264,9 +318,9 @@ describe("CtrlProxy overlays", () => {
   });
 
   test.each(
-    [[], ["full_command_set_v1"], ["full_command_set_v1", "update_overlay", "dismiss_overlay"]].map(
-      (commands) => ({ commands }),
-    ),
+    [[], ["full_command_set_v1"], ["full_command_set_v1", "dismiss_overlay"]].map((commands) => ({
+      commands,
+    })),
   )("old capabilities $commands throw before sending", async ({ commands }) => {
     const { client, socket } = await harness(commands);
     const send = spyOn(socket, "send");
@@ -363,7 +417,7 @@ describe("CtrlProxy overlays", () => {
       value: { ...spec, state: { "bad-key": true } },
       path: 'state["bad-key"]',
     },
-  ])("rejects $label before show or replacement update dispatch", async ({ value, path }) => {
+  ])("rejects $label before show dispatch", async ({ value, path }) => {
     const { client, socket } = await harness();
     const send = spyOn(socket, "send");
     try {
@@ -371,7 +425,6 @@ describe("CtrlProxy overlays", () => {
       const invalid = value as typeof spec;
 
       await expectRefusal(client.requestShowOverlay(invalid), path);
-      await expectRefusal(client.requestUpdateOverlay({ id: spec.id, spec: invalid }), path);
       expect(send).not.toHaveBeenCalled();
     } finally {
       send.mockRestore();
@@ -379,25 +432,15 @@ describe("CtrlProxy overlays", () => {
   });
 
   test.each([
-    { update: { id: "panel", state: { "bad-key": true } }, path: "state" },
-    { update: { id: "other", spec }, path: "spec.id" },
-  ])("invalid update $path never dispatches", async ({ update, path }) => {
-    const { client, socket } = await harness();
-    const send = spyOn(socket, "send");
-    try {
-      await expectRefusal(client.requestUpdateOverlay(update), path);
-      expect(send).not.toHaveBeenCalled();
-    } finally {
-      send.mockRestore();
-    }
-  });
-
-  test("matching replacement id sends", async () => {
+    [true, true],
+    [false, undefined],
+    [undefined, undefined],
+  ])("reset %p sends reset %p", async (reset, wire) => {
     const { client, socket, receive } = await harness();
+    const frames: Record<string, unknown>[] = [];
     const send = spyOn(socket, "send").mockImplementation((data) => {
       const frame = JSON.parse(String(data));
-      expect(frame.spec).toEqual(spec);
-      expect(frame.id).toBe(spec.id);
+      frames.push(frame);
       void receive({
         type: "overlay_result",
         requestId: frame.requestId,
@@ -406,9 +449,12 @@ describe("CtrlProxy overlays", () => {
       });
     });
     try {
-      expect(await client.requestUpdateOverlay({ id: spec.id, spec })).toMatchObject({
-        success: true,
-      });
+      expect(
+        await client.requestShowOverlay(spec, 5000, undefined, undefined, reset),
+      ).toMatchObject({ success: true });
+      expect(frames).toHaveLength(1);
+      expect(frames[0].reset).toBe(wire);
+      expect(Object.hasOwn(frames[0], "reset")).toBe(wire !== undefined);
     } finally {
       send.mockRestore();
     }
@@ -419,11 +465,9 @@ describe("CtrlProxy overlays", () => {
     const failure = { success: false, error: "configured" };
     fake.setOverlayResult(failure);
     expect(await fake.requestShowOverlay(spec, 25)).toEqual(failure);
-    expect(await fake.requestUpdateOverlay({ id: spec.id, spec }, 30)).toEqual(failure);
     expect(await fake.requestDismissOverlay({ all: true }, 35)).toEqual(failure);
     expect(fake.getOverlayHistory()).toEqual([
       { method: "show", spec, timeoutMs: 25, perf: undefined },
-      { method: "update", update: { id: spec.id, spec }, timeoutMs: 30, perf: undefined },
       { method: "dismiss", target: { all: true }, timeoutMs: 35, perf: undefined },
     ]);
     const received: OverlayEvent[] = [];
@@ -451,6 +495,31 @@ describe("CtrlProxy overlays", () => {
     unsubscribe();
     await receive({ ...event, sequence: 2 });
     expect(received).toHaveLength(1);
+  });
+
+  test("events pushed while nobody listens go to the next subscriber in order", async () => {
+    const { client, receive } = await harness();
+    await receive(event);
+    await receive({ ...event, sequence: 2 });
+    const received: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => received.push(value));
+    await receive({ ...event, sequence: 3 });
+    expect(received.map((value) => value.sequence)).toEqual([1, 2, 3]);
+
+    const later: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => later.push(value));
+    expect(later).toEqual([]);
+  });
+
+  test("staged events are bounded to the device's offline ring", async () => {
+    const { client, receive } = await harness();
+    for (let sequence = 1; sequence <= 205; sequence++) {
+      await receive({ ...event, sequence });
+    }
+    const received: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => received.push(value));
+    expect(received).toHaveLength(200);
+    expect(received[0]?.sequence).toBe(6);
   });
 
   test("listener errors are logged and other listeners still receive", async () => {

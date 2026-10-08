@@ -99,7 +99,7 @@ class OverlayLifecycleTest {
     }
 
   @Test
-  fun `ttl arms on show restarts on interaction and state patch then expires exactly once`() =
+  fun `ttl arms on show restarts on interaction and same-id show then expires exactly once`() =
     runTest {
       show()
       assertEquals(TTL, timer.tasks.single().deadline)
@@ -109,7 +109,7 @@ class OverlayLifecycleTest {
       )
       assertTrue(timer.tasks.first().cancelled)
       timer.advance(TTL - 1)
-      controller.update(null, "panel", null, mapOf("label" to OverlayScalar.Text("patch")))
+      controller.show(null, spec().copy(state = mapOf("label" to OverlayScalar.Text("patch"))))
       timer.advance(TTL - 1)
       assertTrue(host.isShowing)
       timer.advance(1)
@@ -192,7 +192,7 @@ class OverlayLifecycleTest {
     }
 
   @Test
-  fun `rejected update leaves the idle deadline unchanged`() = runTest {
+  fun `rejected same-id show leaves the idle deadline unchanged`() = runTest {
     val rejecting =
       OverlayController(
         host,
@@ -202,7 +202,7 @@ class OverlayLifecycleTest {
       )
     rejecting.show(null, spec())
     val task = timer.tasks.single()
-    rejecting.update(null, "panel", null, mapOf("bad-key" to OverlayScalar.Text("invalid")))
+    rejecting.show(null, spec().copy(state = mapOf("bad-key" to OverlayScalar.Text("invalid"))))
     assertSame(task, timer.tasks.single())
     timer.advance(TTL)
     assertDismiss("ttl")

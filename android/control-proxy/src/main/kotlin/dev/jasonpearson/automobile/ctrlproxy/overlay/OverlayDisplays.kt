@@ -26,8 +26,11 @@ class OverlayDisplayWindow(
 )
 
 fun interface OverlayDisplayWindows {
-  /** Null when the display is unknown, disconnected, or cannot take an accessibility overlay. */
-  fun open(displayId: Int): OverlayDisplayWindow?
+  /**
+   * Null when the display is unknown, disconnected, or cannot take a window of [layer]'s type. The
+   * window context is created for that type, so a window added through it must use the same one.
+   */
+  fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow?
 }
 
 /**
@@ -46,13 +49,11 @@ class AndroidOverlayDisplays(
     displayId == Display.DEFAULT_DISPLAY || display(displayId) != null
 
   @TargetApi(Build.VERSION_CODES.R)
-  override fun open(displayId: Int): OverlayDisplayWindow? {
+  override fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow? {
     if (sdkInt < Build.VERSION_CODES.R) return null
     val display = display(displayId) ?: return null
     val windowContext =
-      service
-        .createDisplayContext(display)
-        .createWindowContext(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, null)
+      service.createDisplayContext(display).createWindowContext(layer.windowType, null)
     val windowManager = windowContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
     return windowManager?.let {
       OverlayDisplayWindow(

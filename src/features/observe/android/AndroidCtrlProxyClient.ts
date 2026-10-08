@@ -133,6 +133,8 @@ import {
   ANDROID_REQUEST_ID_ECHO_CAPABILITY,
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_WINDOW_OPTIONS_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -186,7 +188,6 @@ import type {
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
-  OverlayUpdate,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import {
@@ -1308,17 +1309,14 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
-  ): Promise<OverlayResult>;
-  requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    reset?: boolean,
   ): Promise<OverlayResult>;
   requestDismissOverlay(
     target: OverlayDismiss,
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult>;
+  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult>;
   requestPutOverlayAsset(
     asset: OverlayAssetUpload,
     options?: OverlayAssetRequestOptions,
@@ -3593,15 +3591,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    reset?: boolean,
   ): Promise<OverlayResult> {
-    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId);
-  }
-  requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    return this.overlays.requestUpdateOverlay(update, timeoutMs, perf);
+    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId, reset);
   }
   requestDismissOverlay(
     target: OverlayDismiss,
@@ -3609,6 +3601,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
   ): Promise<OverlayResult> {
     return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
+  }
+  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult> {
+    return this.overlays.requestInspectOverlays(timeoutMs, perf);
   }
   requestPutOverlayAsset(
     asset: OverlayAssetUpload,
@@ -5326,7 +5321,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         [
           "request_click_focused_input",
           "show_overlay",
-          "update_overlay",
           "dismiss_overlay",
           "put_overlay_asset",
           "remove_overlay_asset",
@@ -5755,6 +5749,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         timestamp: message.timestamp,
         ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
+          : {}),
+        ...(Array.isArray(message.overlays) ? { overlays: message.overlays } : {}),
+        ...(typeof message.droppedEvents === "number"
+          ? { droppedEvents: message.droppedEvents }
           : {}),
       })),
 
@@ -6841,7 +6839,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (
       messageType === "gesture_display_id_v1" ||
       messageType === "tap_double_v1" ||
-      messageType === OVERLAY_DISPLAY_CAPABILITY
+      messageType === OVERLAY_DISPLAY_CAPABILITY ||
+      messageType === OVERLAY_WINDOW_OPTIONS_CAPABILITY ||
+      messageType === OVERLAY_PERSISTENCE_REPLAY_CAPABILITY
     ) {
       return this.supportedCommands?.has(messageType) === true;
     }

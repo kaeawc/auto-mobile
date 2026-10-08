@@ -93,20 +93,30 @@ class OverlayDisplayControllerTest {
   }
 
   @Test
-  fun `replacement spec update stays on the display the overlay was shown on`() = runTest {
+  fun `a same-id show stays on the display the overlay was shown on`() = runTest {
     connected += 2
     controller.show("a", spec(), displayId = 2)
-    controller.update("b", "panel", spec(), null)
+    controller.show("b", spec())
+    controller.show("c", spec(), displayId = 9) // Ignored in place, so never refused.
     assertEquals(true to null, results.last)
-    assertEquals(listOf("show", "replace"), host.calls)
-    assertEquals(listOf(2, 2), host.requests.map { it.displayId })
+    assertEquals(listOf("show", "replace", "replace"), host.calls)
+    assertEquals(listOf(2, 2, 2), host.requests.map { it.displayId })
   }
 
   @Test
-  fun `showing again on another display replaces on that display`() = runTest {
+  fun `reset moves a same-id show to the requested display`() = runTest {
+    connected += 2
+    controller.show("a", spec(), displayId = 2)
+    controller.show("b", spec(), reset = true)
+    assertEquals(true to null, results.last)
+    assertEquals(listOf(2, 0), host.requests.map { it.displayId })
+  }
+
+  @Test
+  fun `showing another id on another display replaces on that display`() = runTest {
     connected += 2
     controller.show("a", spec())
-    controller.show("b", spec(), displayId = 2)
+    controller.show("b", spec("other"), displayId = 2)
     assertEquals(listOf("show", "replace"), host.calls)
     assertEquals(listOf(0, 2), host.requests.map { it.displayId })
   }

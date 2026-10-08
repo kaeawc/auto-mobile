@@ -2,12 +2,19 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { OverlayEvent, OverlayResult } from "../observe/android/ctrlProxyProtocol";
 
-export type OverlayMutation = "show" | "update" | "dismiss";
+export type OverlayMutation = "show" | "dismiss";
 export interface OverlayLastResult {
   id?: string;
   all?: true;
   lastAction: OverlayMutation;
-  /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
+  /**
+   * Android logical display the overlay is on: the one requested for a fresh show; a same-id show
+   * without reset and a dismiss echo the shown overlay's.
+   */
+  /** Reported by the device through `inspect`, not shown by this host. */
+  adopted?: true;
+  /** Adopted overlays only: the device keeps it after the host disconnects (`persistence: "device"`). */
+  persistent?: boolean;
   displayId?: number;
   success: boolean;
   error?: string;
@@ -19,6 +26,12 @@ export interface OverlayEventState {
   state: OverlayEvent["state"];
   lastKnown: true;
 }
+export interface AdoptedOverlay {
+  id: string;
+  persistent?: boolean;
+  pages: OverlayEvent["pages"];
+  state: OverlayEvent["state"];
+}
 export interface OverlayStatus {
   overlays: (OverlayLastResult & Partial<OverlayEventState>)[];
   lastResult?: OverlayLastResult;
@@ -29,10 +42,22 @@ export interface OverlayScope {
 }
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
+  /**
+   * The overlay currently shown with this id on the device, from any session. The device holds one
+   * active overlay, so whether a same-id show replaces in place is a device-wide fact.
+   */
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined;
   startShow(scope: OverlayScope): void;
+  /**
+   * The device reported this overlay as showing (`inspect`). Presence and its last known
+   * pages/state come from the device, replacing whatever the host remembered for the device.
+   */
+  adopt(scope: OverlayScope, overlay: AdoptedOverlay): void;
   recordEvent(scope: OverlayScope, event: OverlayEvent): void;
   /** The device reported a terminal dismissal for this overlay; its presence is gone. */
   dismissed(scope: OverlayScope, id: string): void;
+  /** Ids any session on the device still lists as shown. */
+  shownIds(deviceId: string): readonly string[];
   clearDevice(deviceId: string): void;
   /** Forgets every scope on each device the session touched; returns those device ids. */
   clearSession(sessionUuid: string): readonly string[];
@@ -84,12 +109,50 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
     };
   }
 
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        return { ...entry };
+      }
+    }
+    return undefined;
+  }
+
   /** Only events after this show attempt can establish its successful snapshot. */
   startShow(scope: OverlayScope): void {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
     if (stored) {
       stored.pendingSnapshot = undefined;
     }
+  }
+
+  adopt(scope: OverlayScope, overlay: AdoptedOverlay): void {
+    const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
+    const stored = this.scopes.get(key) ?? {
+      ...scope,
+      shown: new Map<string, OverlayLastResult>(),
+    };
+    // The device holds one overlay; what it reports replaces every session's presence.
+    this.clearShown(scope.deviceId);
+    const entry: OverlayLastResult = {
+      id: overlay.id,
+      lastAction: "show",
+      adopted: true,
+      ...(overlay.persistent === undefined ? {} : { persistent: overlay.persistent }),
+      success: true,
+      timestamp: this.clock.now(),
+    };
+    stored.lastResult = entry;
+    stored.shown.set(overlay.id, entry);
+    stored.pendingSnapshot = undefined;
+    stored.snapshot = {
+      id: overlay.id,
+      pages: { ...overlay.pages },
+      state: { ...overlay.state },
+      lastKnown: true,
+    };
+    this.remember(key, stored);
   }
 
   /** Accepted pushes may precede the successful show acknowledgement. */
@@ -120,7 +183,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   ): OverlayLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
-    // An update or dismiss acts on the overlay already shown, wherever it was shown.
+    // A dismiss acts on the overlay already shown, wherever it was shown.
     const shownDisplay =
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
@@ -197,6 +260,18 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
 
   dismissed(scope: OverlayScope, id: string): void {
     this.clearShown(scope.deviceId, id);
+  }
+
+  shownIds(deviceId: string): readonly string[] {
+    const ids = new Set<string>();
+    for (const known of this.scopes.values()) {
+      if (known.deviceId === deviceId) {
+        for (const id of known.shown.keys()) {
+          ids.add(id);
+        }
+      }
+    }
+    return Array.from(ids);
   }
 
   private createResult(

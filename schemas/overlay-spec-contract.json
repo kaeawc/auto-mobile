@@ -3309,6 +3309,20 @@
             "max": 100
           },
           "optional": true
+        },
+        "layer": {
+          "rule": {
+            "kind": "enum",
+            "values": ["app", "system"]
+          },
+          "optional": true
+        },
+        "persistence": {
+          "rule": {
+            "kind": "enum",
+            "values": ["session", "device"]
+          },
+          "optional": true
         }
       }
     },

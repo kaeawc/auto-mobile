@@ -77,13 +77,13 @@ describe("overlay tool assets", () => {
     expect(reader.reads).toEqual(["/img/logo.png"]);
   });
 
-  test("update with a spec uploads assets; the spec on the wire carries only the id", async () => {
+  test("a same-id show uploads assets; the spec on the wire carries only the id", async () => {
     await call({ action: "show", spec });
-    const { payload } = await call({ action: "update", id: "panel", spec, assets });
+    const { payload } = await call({ action: "show", spec, assets });
     expect(payload.success).toBe(true);
     expect(client.getOverlayAssetHistory()).toHaveLength(1);
-    const updates = client.getOverlayHistory().filter((entry) => entry.method === "update");
-    expect(JSON.stringify(updates)).not.toContain("/img/logo.png");
+    expect(client.getOverlayHistory()).toHaveLength(2);
+    expect(JSON.stringify(client.getOverlayHistory())).not.toContain("/img/logo.png");
   });
 
   test("an unreadable asset fails the call before anything is sent or shown", async () => {
@@ -152,7 +152,6 @@ describe("overlay tool assets", () => {
 
   test("assets are rejected on actions that cannot use them and malformed entries", async () => {
     for (const input of [
-      { action: "update", id: "panel", state: {}, assets },
       { action: "dismiss", id: "panel", assets },
       { action: "status", assets },
       { action: "show", spec, assets: [] },
@@ -184,10 +183,10 @@ describe("overlay tool assets", () => {
       expect(client.getOverlayHistory()).toHaveLength(1);
     });
 
-    test("update with a spec surfaces missing assets too", async () => {
+    test("a same-id show surfaces missing assets too", async () => {
       await call({ action: "show", spec });
       client.setOverlayResult({ success: true, missingAssets: ["avatar"] });
-      const { payload } = await call({ action: "update", id: "panel", spec });
+      const { payload } = await call({ action: "show", spec });
       expect(payload.missingAssets).toEqual(["avatar"]);
       expect(payload.warning).toContain("'avatar'");
     });

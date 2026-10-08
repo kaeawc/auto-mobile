@@ -2,23 +2,26 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import android.util.Log
 import android.view.Display
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidator
+import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
+/** The CtrlProxy application id, named in errors that tell the host which package to grant. */
+const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+
 fun interface OverlayResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
   /**
-   * A successful `show_overlay` or `update_overlay` that references assets the device does not
-   * have: a warning carried by the same single `overlay_result`, so the host can re-upload. Sinks
-   * that predate it drop the list.
+   * A successful `show_overlay` that references assets the device does not have: a warning carried
+   * by the same single `overlay_result`, so the host can re-upload. Sinks that predate it drop the
+   * list.
    */
   suspend fun sendWithMissingAssets(
     requestId: String?,
@@ -26,12 +29,20 @@ fun interface OverlayResultSink {
     error: String?,
     missingAssets: List<String>,
   ) = send(requestId, success, error)
+
+  /** The reply to `inspect_overlays`. Sinks that predate it answer a bare success. */
+  suspend fun sendOverlayStatus(
+    requestId: String?,
+    overlays: List<OverlayStatusEntry>,
+    droppedEvents: Long,
+  ) = send(requestId, true, null)
 }
 
 /**
  * One active ID/spec, serialized with host mutations. Validation/mapping happen before replacement;
- * rejected requests retain the previous spec/window. State patches merge, including new valid keys;
- * the canonical validator supplies key rules and JSON paths. There is no opacity-only wire field.
+ * rejected requests retain the previous spec/window. Every show carries a full spec whose state is
+ * authoritative; the canonical validator supplies key rules and JSON paths. There is no
+ * opacity-only wire field.
  */
 class OverlayController(
   private val host: InteractiveOverlayHost,
@@ -50,15 +61,30 @@ class OverlayController(
    * show replacement or a temporary lock-screen hide.
    */
   private val clearAssets: () -> Unit = {},
-  /** Whether the asset store holds [id]; `show` and `update` report referenced ids that fail. */
+  /** Whether the asset store holds [id]; `show` reports referenced ids that fail. */
   private val hasAsset: (String) -> Boolean = { true },
   /** Decoded-image cache the rendered overlay draws `image` nodes from. */
   private val images: OverlayImageCache? = null,
+  /**
+   * Whether this package may add `window.layer: "app"` windows (SYSTEM_ALERT_WINDOW); a request for
+   * that layer without it fails before anything is replaced, naming the appop to grant.
+   */
+  private val appLayerPermitted: () -> Boolean = { true },
+  private val packageName: String = DEFAULT_CTRL_PROXY_PACKAGE,
+  /** Events a device-persistent overlay produced while no host was connected. */
+  private val offlineEvents: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer(),
   /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
   private val fonts: OverlayFontCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
+
+  /**
+   * Whether the overlay on screen is in the application-overlay layer, whose windows the system
+   * reports to accessibility as `TYPE_SYSTEM` rather than as an accessibility overlay.
+   */
+  val isAppLayerShowing: Boolean
+    get() = host.isShowing && activeRequest?.layer == OverlayWindowLayer.APP
 
   /**
    * Placement and opacity of the overlay currently drawn, for the hierarchy capture
@@ -88,7 +114,7 @@ class OverlayController(
   private var activeObserverSession = 0
   // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
   private var disconnectPending = false
-  private var activeRequest: InteractiveOverlayRequest? = null
+  @Volatile private var activeRequest: InteractiveOverlayRequest? = null
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false
@@ -96,41 +122,28 @@ class OverlayController(
     classDiscriminator = "type"
   }
 
-  /** [displayId] null means the default display, exactly as before display targeting. */
-  suspend fun show(requestId: String?, spec: OverlaySpec, displayId: Int? = null) =
+  /**
+   * Always renders the full [spec]. When [spec]'s id is the overlay on screen and [reset] is false,
+   * it replaces that overlay in place: it stays on the display it was shown on ([displayId] is
+   * ignored) and each pager keeps its page, matched by pager id and clamped to the new page count.
+   * The new spec's state is authoritative; values the user changed are not carried over. Otherwise
+   * (another id, nothing shown, or [reset]) it is a fresh show on [displayId], where null means the
+   * default display, exactly as before display targeting.
+   */
+  suspend fun show(
+    requestId: String?,
+    spec: OverlaySpec,
+    displayId: Int? = null,
+    reset: Boolean = false,
+  ) =
     execute(requestId) {
+      val inPlace = !reset && activeRuntime?.current?.spec?.id == spec.id
       display(
         spec,
         replace = activeRuntime != null,
-        displayId = displayId ?: Display.DEFAULT_DISPLAY,
+        preservePages = inPlace,
+        displayId = if (inPlace) shownDisplayId() else displayId ?: Display.DEFAULT_DISPLAY,
       )
-      missingAssets()
-    }
-
-  suspend fun update(
-    requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
-  ) =
-    execute(requestId) {
-      val current = activeRuntime?.current?.spec
-      require(current?.id == id) { "Unknown overlay id: $id" }
-      require((spec == null) != (state == null)) { "Exactly one of spec or state is required" }
-      require(spec == null || spec.id == id) { "spec.id: Must match overlay id $id" }
-      // A replacement spec stays on the display the overlay was shown on.
-      if (spec != null)
-        display(spec, replace = true, preservePages = true, displayId = shownDisplayId())
-      else {
-        val patched =
-          validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
-        render(patched) // Validate Compose sizes too, before mutating the live runtime.
-        val runtime = checkNotNull(activeRuntime)
-        runtime.replace(patched)
-        armIdle(runtime)
-        ensureShowing(runtime)
-        syncTextFieldFocus(runtime)
-      }
       missingAssets()
     }
 
@@ -181,12 +194,13 @@ class OverlayController(
     val validated = validate(spec)
     val request = render(validated).copy(displayId = displayId)
     requireDisplayAvailable(displayId)
+    requireLayerPermitted(request.layer)
     val previous = activeRuntime
     val observerSession = lifecycle.observerSession()
     val runtime =
       OverlayRuntime(
         validated,
-        eventSink,
+        if (isDevicePersistent(validated)) offlineAwareSink else eventSink,
         clock,
         nextSequence = {
           val next = (sequences[validated.id] ?: 0L) + 1
@@ -223,8 +237,55 @@ class OverlayController(
     disconnectPending = false
     armIdle(runtime)
     // The session's last client can leave before this queued show runs; nothing would remove it.
-    if (lifecycle.clientCount() == 0) dismissForDisconnect(runtime)
+    // A device-persistent overlay is meant to outlive its clients, so it stays.
+    if (lifecycle.clientCount() == 0 && !runtime.persistent) dismissForDisconnect(runtime)
   }
+
+  private val OverlayRuntime.persistent: Boolean
+    get() = isDevicePersistent(current.spec)
+
+  /**
+   * A device-persistent overlay keeps emitting with no host attached. Those events wait in
+   * [offlineEvents] and go out, oldest first, ahead of the next live event. Runs under [mutex].
+   */
+  private val offlineAwareSink = OverlayEventSink { event ->
+    // A live event never overtakes an older held one: the host ignores lower sequences.
+    if (lifecycle.clientCount() == 0 || !replayOfflineEvents()) offlineEvents.add(event)
+    else eventSink.send(event)
+  }
+
+  /**
+   * Delivers what was buffered while no host was connected. An event leaves the buffer only once it
+   * is handed to the sink: when delivery fails, or the host goes away mid-replay, that event and
+   * the rest are put back for the next connect or inspect. Returns whether everything went out.
+   */
+  private suspend fun replayOfflineEvents(): Boolean {
+    val pending = offlineEvents.drain()
+    for ((index, event) in pending.withIndex()) {
+      if (lifecycle.clientCount() == 0) {
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
+      }
+      try {
+        eventSink.send(event)
+      } catch (error: CancellationException) {
+        offlineEvents.restore(pending.subList(index, pending.size))
+        throw error
+      } catch (error: Exception) {
+        Log.w("OverlayController", "Buffered overlay event delivery failed", error)
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
+      }
+    }
+    return true
+  }
+
+  private fun requireLayerPermitted(layer: OverlayWindowLayer) =
+    require(layer != OverlayWindowLayer.APP || appLayerPermitted()) {
+      "window.layer: app needs Android 8.0+ and SYSTEM_ALERT_WINDOW for $packageName, which is " +
+        "not granted. Grant it with `adb shell appops set $packageName SYSTEM_ALERT_WINDOW " +
+        "allow`, or omit window.layer to use the system layer."
+    }
 
   /** Shared by dismiss_overlay and the dismiss action, under the controller mutex. */
   private suspend fun removeActive(): Boolean {
@@ -299,6 +360,11 @@ class OverlayController(
     delayMillis: Long = lifecycle.ttlMillis,
     retriesLeft: Int = OVERLAY_DISMISS_MAX_RETRIES,
   ) {
+    // A device-persistent overlay is a standalone mock with nobody to re-show it: never idle out.
+    if (runtime.persistent) {
+      lifecycle.cancel()
+      return
+    }
     lifecycle.arm(delayMillis) { token ->
       signal {
         if (runtime === activeRuntime && lifecycle.isCurrent(token)) {
@@ -330,6 +396,48 @@ class OverlayController(
     }
   }
 
+  /**
+   * Answers `inspect_overlays`: delivers any buffered events first, then reports the overlay the
+   * device is showing, so a host that lost its status (a released session, a new daemon) can adopt
+   * it again. The wire order is the events, then the single `overlay_result`.
+   */
+  suspend fun inspect(requestId: String?) = mutex.withLock {
+    try {
+      check(!destroyed) { "Overlay host destroyed" }
+      // Reporting lastSequence while events are still held would make the host skip them as
+      // duplicates on the next inspect, so an incomplete replay fails this inspect instead.
+      check(replayOfflineEvents()) {
+        "Buffered overlay events could not be delivered; the device kept them, retry inspect"
+      }
+      val overlays = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
+      sink.sendOverlayStatus(requestId, overlays, offlineEvents.dropped)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay inspect failed", error)
+      sink.send(requestId, false, error.message ?: "Overlay inspect failed")
+    }
+  }
+
+  private fun statusOf(runtime: OverlayRuntime): OverlayStatusEntry {
+    val id = runtime.current.spec.id
+    return OverlayStatusEntry(
+      id = id,
+      persistent = runtime.persistent,
+      state = runtime.current.state.toMap(),
+      pages = runtime.current.pages.toMap(),
+      lastSequence = sequences[id] ?: 0L,
+    )
+  }
+
+  /**
+   * A host connected: hand it the events a device-persistent overlay buffered while it was away.
+   */
+  suspend fun onClientConnected() =
+    signal(retryDisconnect = false) {
+      replayOfflineEvents()
+    }
+
   /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
   suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {
     lifecycle.ttlMillis = millis
@@ -339,6 +447,8 @@ class OverlayController(
   suspend fun onClientCountChanged(count: Int, observerSession: Int? = null) =
     signal(retryDisconnect = false) {
       require(count >= 0) { "Client count must be nonnegative" }
+      // A device-persistent overlay keeps running offline, and keeps the assets it draws.
+      if (activeRuntime?.persistent == true) return@signal
       // A delayed disconnect from a previous observer session cannot dismiss a newly shown overlay.
       if (count == 0 && (observerSession == null || observerSession == activeObserverSession))
         activeRuntime?.let { dismissForDisconnect(it) }
@@ -415,20 +525,6 @@ class OverlayController(
       Log.w("OverlayController", "Overlay window could not be restored", error)
       false
     }
-
-  /**
-   * A state-only update never touches the host, so a window the host cleared as detached would
-   * leave the runtime windowless while the request reports success. A lock-hidden window is
-   * legitimate (restored on unlock) and keeps the patched state; otherwise restore it now, and fail
-   * the request when the overlay could not come back (the runtime then ended once, as teardown).
-   */
-  private suspend fun ensureShowing(runtime: OverlayRuntime) {
-    if (host.isShowing || lifecycle.isBlocked()) return
-    relayoutOrRestore(runtime)
-    check(runtime === activeRuntime && (host.isShowing || lifecycle.isBlocked())) {
-      "Overlay window was lost and could not be restored"
-    }
-  }
 
   /**
    * The window may hold input focus only while a text field is visible in the CURRENT tree, so a

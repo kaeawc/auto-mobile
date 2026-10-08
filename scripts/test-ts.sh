@@ -4,7 +4,9 @@
 #
 #   unit        Hermetic *.test.ts tests, excluding integration and stress.
 #               Files on test/shared-process-allowlist.txt share one process
-#               per shard; the rest run with --isolate (#10583).
+#               per shard; the rest run with --isolate, in sequential
+#               processes of AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE files
+#               (0 = one process) so no isolated process ages (#10583).
 #   changed     Unit tests affected by worktree/ref changes (local feedback).
 #   integration Real-I/O *.integration.test.ts tests.
 #   stress      Explicit test/stress/** tests.
@@ -83,6 +85,12 @@ validate_positive_integer() {
 validate_positive_integer "AUTOMOBILE_UNIT_TEST_WORKERS" "$unit_workers"
 if [[ "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES+x}" == x ]]; then
   validate_positive_integer "AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES"
+fi
+# 0 keeps one isolated process per shard; see scripts/lib/bun-unit-groups.sh.
+isolated_chunk_size="$(unit_isolated_chunk_size)"
+if ! [[ "$isolated_chunk_size" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer below 1000000000, got: ${isolated_chunk_size}" >&2
+  exit 2
 fi
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"
 
@@ -357,10 +365,12 @@ configure_unit_shard_groups() {
   if [[ "$shared_total" -gt "$shard" ]]; then
     AUTOMOBILE_UNIT_SHARED_FILE_COUNT=$(((shared_total - shard + worker_count - 1) / worker_count))
   fi
-  # Chunked shards split inside bun-unit-chunks.sh. An unchunked shard with
-  # shared files runs both groups through bun-unit-groups.sh under the same
-  # watchdog; a shard without shared files keeps the direct invocation.
-  if [[ "$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 && -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+  # Nightly-chunked shards split inside bun-unit-chunks.sh. Other shards run
+  # their groups (shared process, then fixed-size isolated chunks) through
+  # bun-unit-groups.sh under the same watchdog; with no shared files and an
+  # isolated chunk size of 0 the direct single invocation is kept.
+  if [[ -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" &&
+    ("$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 || "$isolated_chunk_size" -gt 0) ]]; then
     shard_args=(bash "$ROOT/scripts/lib/bun-unit-groups.sh" "$ROOT" "$runner_os"
       "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
   fi
@@ -383,7 +393,10 @@ configure_unit_shard_groups() {
 #                  2 * (budget + overhead) = 2 * (720 + 60) = 1560s (26 min)
 #   A retry starts only while elapsed + budget + overhead <= lane cap, so the
 #   lane ends within its cap however many shards retry: retries run in
-#   parallel, each launched as soon as its first attempt is reaped. Job
+#   parallel, each launched as soon as its first attempt is reaped. Attempts
+#   are reaped in completion order (#10644), so `elapsed` is the lane time at
+#   which that first attempt actually ended, not when a slower lower-index
+#   shard did; every attempt still ends by its start + budget + overhead. Job
 #   timeouts in pull_request.yml and merge.yml are sized against this cap.
 # Chunked shards (AUTOMOBILE_UNIT_TEST_CHUNK_FILES, nightly macOS) share one
 # lane-wide deadline by design and are not retried; neither is the changed lane.
@@ -495,8 +508,8 @@ launch_unit_shard() {
       ${shard_args[@]+"${shard_args[@]}"} \
         ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
     fi
-    # The parent reaps shards in index order, so its clock would report every
-    # shard as finishing with the slowest earlier one (#10583). Record this
+    # The parent reaps shards by polling, after the end probe and timing
+    # summary, so its clock would overstate the test run (#10583). Record this
     # attempt's own test wall time before the end probe and timing summary.
     printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
     run_runner_calibration "$calibration_file" "$calibration_label end"
@@ -619,9 +632,17 @@ run_unit_shards() {
   local shard_elapsed_seconds=()
   local shard_statuses=()
   local retry_shards=()
+  local pending_shards=()
+  local still_pending=()
+  local reaped_any
   local unit_shard_retries="${AUTOMOBILE_UNIT_SHARD_RETRIES:-1}"
+  local reap_poll_seconds="${AUTOMOBILE_UNIT_SHARD_POLL_SECONDS:-0.2}"
   if [[ "$unit_shard_retries" != 0 && "$unit_shard_retries" != 1 ]]; then
     echo "AUTOMOBILE_UNIT_SHARD_RETRIES must be 0 or 1, got: ${unit_shard_retries}" >&2
+    return 2
+  fi
+  if ! [[ "$reap_poll_seconds" =~ ^[0-9]+(\.[0-9]+)?$ && "$reap_poll_seconds" =~ [1-9] ]]; then
+    echo "AUTOMOBILE_UNIT_SHARD_POLL_SECONDS must be a positive number of seconds, got: ${reap_poll_seconds}" >&2
     return 2
   fi
   lane_start=$(date +%s)
@@ -699,21 +720,40 @@ run_unit_shards() {
   fi
 
   rc=0
-  for ((index = 0; index < worker_count; index += 1)); do
-    shard_status=0
-    wait "${pids[$index]}" || shard_status=$?
-    # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
-    if unit_shard_should_retry "$index" "$shard_status"; then
-      retry_unit_shard "$index" "$shard_status"
-      retry_shards+=("$index")
-      continue
-    fi
-    finish_unit_shard "$index" "$shard_status"
+  # Reap attempts in completion order (#10644): a shard whose first attempt
+  # ends is reaped (and, on an infra exit, retried) at once instead of after
+  # every lower-index shard, so its retry window is judged at its real end
+  # time. Bash 3.2 (macOS) has no `wait -n`, so poll the live attempts with
+  # `kill -0`; Bash reaps exited children on SIGCHLD and `wait PID` still
+  # returns the remembered status. The interval adds at most one poll of
+  # latency per reap, well inside UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS.
+  for ((shard = 0; shard < worker_count; shard += 1)); do
+    pending_shards+=("$shard")
   done
-  for index in ${retry_shards[@]+"${retry_shards[@]}"}; do
-    shard_status=0
-    wait "${pids[$index]}" || shard_status=$?
-    finish_unit_shard "$index" "$shard_status"
+  while [[ "${#pending_shards[@]}" -gt 0 ]]; do
+    still_pending=()
+    reaped_any=0
+    for index in "${pending_shards[@]}"; do
+      if kill -0 "${pids[$index]}" 2> /dev/null; then
+        still_pending+=("$index")
+        continue
+      fi
+      reaped_any=1
+      shard_status=0
+      wait "${pids[$index]}" || shard_status=$?
+      # shellcheck disable=SC2310 # A predicate: a false result is expected control flow.
+      if [[ "${shard_attempts[$index]}" -eq 1 ]] && unit_shard_should_retry "$index" "$shard_status"; then
+        retry_unit_shard "$index" "$shard_status"
+        retry_shards+=("$index")
+        still_pending+=("$index")
+        continue
+      fi
+      finish_unit_shard "$index" "$shard_status"
+    done
+    pending_shards=(${still_pending[@]+"${still_pending[@]}"})
+    if [[ "$reaped_any" -eq 0 && "${#pending_shards[@]}" -gt 0 ]]; then
+      sleep "$reap_poll_seconds"
+    fi
   done
 
   if [[ "$shard_mode" == "unit" ]]; then

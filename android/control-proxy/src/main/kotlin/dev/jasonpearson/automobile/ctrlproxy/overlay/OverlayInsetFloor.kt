@@ -14,12 +14,12 @@ import kotlin.math.roundToInt
  * Pixels at the window's bottom edge that the host guarantees content keeps clear of, whatever the
  * window's own inset dispatch reports (#10156).
  *
- * The `showVariants` control row asks for `systemBars` safe-area padding on every edge. On the
- * device its top edge cleared the status bar but its bottom edge stayed under the gesture
- * navigation bar, in fullscreen and in `bottomCenter`, portrait and landscape: the navigation bar
- * inset never reached the overlay window's own Compose inset values. The display's window metrics
- * (the same source the observation's `insets` come from) do carry it, so the renderer takes the
- * larger of the two.
+ * Content that asks for `systemBars` safe-area padding on every edge (first seen on a carousel's
+ * control row) cleared the status bar at its top edge on the device, but its bottom edge stayed
+ * under the gesture navigation bar, in fullscreen and in `bottomCenter`, portrait and landscape:
+ * the navigation bar inset never reached the overlay window's own Compose inset values. The
+ * display's window metrics (the same source the observation's `insets` come from) do carry it, so
+ * the renderer takes the larger of the two.
  */
 internal data class OverlayInsetFloor(val bottom: Int = 0) {
   fun asComposeInsets(): ComposeWindowInsets = ComposeWindowInsets(0, 0, 0, bottom)

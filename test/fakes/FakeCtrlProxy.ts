@@ -22,7 +22,6 @@ import type {
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
-  OverlayUpdate,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
@@ -62,7 +61,17 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       this.supportedCommands.add(command);
     }
   }
+  private probeEvents: OverlayEvent[] = [];
+  /** Events a capability probe delivers, as a device draining its offline ring on connect. */
+  setProbeEvents(events: OverlayEvent[]): void {
+    this.probeEvents = events;
+  }
   async supportsCommand(name: string): Promise<boolean> {
+    const events = this.probeEvents;
+    this.probeEvents = [];
+    for (const event of events) {
+      this.emitOverlayEvent(event);
+    }
     return this.supportedCommands.has(name);
   }
   private tapHistory: Array<{
@@ -108,8 +117,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         timeoutMs: number;
         perf?: PerformanceTracker;
         displayId?: number;
+        reset?: boolean;
       }
-    | { method: "update"; update: OverlayUpdate; timeoutMs: number; perf?: PerformanceTracker }
     | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
   private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
@@ -120,7 +129,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.overlayResult = result;
   }
 
-  /** Results returned, in order, by the next show/update requests before the default. */
+  /** Results returned, in order, by the next show requests before the default. */
   queueOverlayResults(...results: OverlayResult[]): void {
     this.queuedOverlayResults.push(...results);
   }
@@ -138,6 +147,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     timeoutMs = 5000,
     perf?: PerformanceTracker,
     displayId?: number,
+    reset?: boolean,
   ): Promise<OverlayResult> {
     this.checkFailure("requestShowOverlay");
     this.overlayHistory.push({
@@ -146,17 +156,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       timeoutMs,
       perf,
       ...(displayId === undefined ? {} : { displayId }),
+      ...(reset === undefined ? {} : { reset }),
     });
-    return this.nextOverlayResult();
-  }
-
-  async requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs = 5000,
-    perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    this.checkFailure("requestUpdateOverlay");
-    this.overlayHistory.push({ method: "update", update, timeoutMs, perf });
     return this.nextOverlayResult();
   }
 
@@ -168,6 +169,33 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.checkFailure("requestDismissOverlay");
     this.overlayHistory.push({ method: "dismiss", target, timeoutMs, perf });
     return this.overlayResult;
+  }
+
+  private inspectReply: { events: OverlayEvent[]; result: OverlayResult } = {
+    events: [],
+    result: { success: true, overlays: [], droppedEvents: 0 },
+  };
+  private inspectCount = 0;
+
+  /** What the next inspect delivers: `events` first (as the device replays), then `result`. */
+  setInspectReply(result: OverlayResult, events: OverlayEvent[] = []): void {
+    this.inspectReply = { events, result };
+  }
+
+  getInspectCount(): number {
+    return this.inspectCount;
+  }
+
+  async requestInspectOverlays(
+    _timeoutMs = 5000,
+    _perf?: PerformanceTracker,
+  ): Promise<OverlayResult> {
+    this.checkFailure("requestInspectOverlays");
+    this.inspectCount++;
+    for (const event of this.inspectReply.events) {
+      this.emitOverlayEvent(event);
+    }
+    return this.inspectReply.result;
   }
 
   private overlayAssetResult: OverlayAssetResult = {

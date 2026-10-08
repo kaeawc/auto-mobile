@@ -25,7 +25,7 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
       snapshot.pages.pager = 7;
       snapshot.state.title = "caller mutation";
     }
-    store.record(scope, "update", { id: "panel" }, { success: false });
+    store.record(scope, "show", { id: "panel" }, { success: false });
     expect(store.status(scope).overlays[0]).toMatchObject({
       pages: { pager: 2 },
       state: { title: "Hello" },
@@ -67,7 +67,7 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
     const store = new InMemoryOverlayStatusStore(new FakeTimer(), 2);
     store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
     store.record({ sessionUuid: "b", deviceId: "dev-b" }, "show", { id: "b" }, ok);
-    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "update", { id: "a" }, ok);
+    store.record({ sessionUuid: "a", deviceId: "dev-a" }, "show", { id: "a" }, ok);
     store.record({ sessionUuid: "c", deviceId: "dev-c" }, "show", { id: "c" }, ok);
     expect(store.status({ sessionUuid: "a", deviceId: "dev-a" }).overlays).toHaveLength(1);
     expect(store.status({ sessionUuid: "b", deviceId: "dev-b" }).overlays).toEqual([]);
@@ -82,5 +82,39 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
     );
     store.clearSession("a");
     expect(store.status({ sessionUuid: "b", deviceId: "dev" })).toEqual({ overlays: [] });
+  });
+
+  test("adopt takes the device report as presence and last known pages and state", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    const scope = { deviceId: "dev", sessionUuid: "new" };
+    store.adopt(scope, { id: "panel", pages: { pager: 1 }, state: { title: "typed" } });
+    expect(store.status(scope).overlays).toMatchObject([
+      {
+        id: "panel",
+        adopted: true,
+        lastAction: "show",
+        success: true,
+        pages: { pager: 1 },
+        state: { title: "typed" },
+        lastKnown: true,
+      },
+    ]);
+    // The device holds one overlay: a different report replaces the earlier presence.
+    store.adopt(scope, { id: "other", pages: {}, state: {} });
+    expect(store.status(scope).overlays.map((entry) => entry.id)).toEqual(["other"]);
+    store.dismissed(scope, "other");
+    expect(store.status(scope).overlays).toEqual([]);
+  });
+});
+
+describe("InMemoryOverlayStatusStore.shownOnDevice", () => {
+  test("finds a shown overlay from any session on that device only, as a copy", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    store.record({ sessionUuid: "a", deviceId: "dev" }, "show", { id: "panel" }, ok, 2);
+    expect(store.shownOnDevice("dev", "panel")?.displayId).toBe(2);
+    expect(store.shownOnDevice("other", "panel")).toBeUndefined();
+    expect(store.shownOnDevice("dev", "missing")).toBeUndefined();
+    store.dismissed({ sessionUuid: "b", deviceId: "dev" }, "panel");
+    expect(store.shownOnDevice("dev", "panel")).toBeUndefined();
   });
 });

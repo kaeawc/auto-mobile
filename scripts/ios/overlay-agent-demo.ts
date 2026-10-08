@@ -4,12 +4,11 @@
  *
  *   bun scripts/ios/overlay-agent-demo.ts launch <udid> <bundleId> [--test-hooks]   relaunch the app with the agent injected
  *   bun scripts/ios/overlay-agent-demo.ts tap <nodeId>              simulate_tap (needs --test-hooks); prints the reply and the overlay_events it caused
- *   bun scripts/ios/overlay-agent-demo.ts variants [--screenshot <udid>]   swipeable carousel, waits for a pick
  *   bun scripts/ios/overlay-agent-demo.ts floating                  floating card over a live app
  *   bun scripts/ios/overlay-agent-demo.ts sheet                     bottom sheet with a text field
  *   bun scripts/ios/overlay-agent-demo.ts status | dismiss | events
  *
- * Specs go through the same validator and showVariants composer as the Android path. `launch`
+ * Specs go through the same validator as the Android path. `launch`
  * passes a host-chosen port and a fresh auth token to the agent (#10566) and saves both to
  * scratch/overlay-agent/session.json for the other commands.
  */
@@ -24,7 +23,6 @@ import {
 } from "../../src/features/overlay/ios/overlayAgentClient";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
-import { composeVariantCarousel } from "../../src/features/overlay/overlayVariants";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 
 const PORT = Number(process.env.AUTOMOBILE_OVERLAY_PORT ?? 8771);
@@ -72,117 +70,6 @@ function validated(spec: unknown): OverlaySpec {
     throw new Error(`Invalid spec at ${result.error.path}: ${result.error.message}`);
   }
   return spec as OverlaySpec;
-}
-
-/**
- * A variant page whose chips are live: a tap records the choice in spec state, which shows an
- * in-layout toast reading it back through `{key}` interpolation, and tells the host via `emit`.
- * Keys are per variant so each page keeps its own choice while the pager swipes.
- */
-function card(id: string, title: string, body: string, background: string, accent: string) {
-  const choice = `${id}_choice`;
-  const toast = `${id}_toast`;
-  return {
-    type: "column" as const,
-    style: {
-      width: "fill" as const,
-      height: "fill" as const,
-      background,
-      padding: { top: 120, start: 24, end: 24, bottom: 24 },
-      spacing: 16,
-    },
-    children: [
-      {
-        type: "text" as const,
-        text: title,
-        style: { textSize: 34, fontWeight: 700, color: accent },
-      },
-      { type: "text" as const, text: body, style: { textSize: 17, color: "#FF8E8E93" } },
-      {
-        type: "row" as const,
-        style: { spacing: 12 },
-        children: ["One", "Two", "Three"].map((label) => ({
-          type: "text" as const,
-          text: label,
-          testTag: `${id}-chip-${label.toLowerCase()}`,
-          onTap: [
-            { type: "setState" as const, key: choice, value: label },
-            { type: "setState" as const, key: toast, value: true },
-            { type: "emit" as const, name: "chip", payload: { variant: id, label } },
-          ],
-          style: {
-            background: accent,
-            color: "#FFFFFFFF",
-            cornerRadius: 18,
-            padding: { top: 8, bottom: 8, start: 16, end: 16 },
-          },
-        })),
-      },
-      {
-        type: "row" as const,
-        testTag: `${id}-toast`,
-        visibleWhen: { key: toast, equals: true },
-        // Tapping the toast hides it again; there is no timer vocabulary for auto-dismiss.
-        onTap: [{ type: "setState" as const, key: toast, value: false }],
-        style: {
-          background: "#E6202124",
-          cornerRadius: 12,
-          padding: { top: 12, bottom: 12, start: 16, end: 16 },
-          spacing: 8,
-        },
-        children: [
-          { type: "icon" as const, name: "check" as const, style: { color: accent, textSize: 17 } },
-          {
-            type: "text" as const,
-            text: `You picked {${choice}}`,
-            style: { color: "#FFFFFFFF", textSize: 15 },
-          },
-        ],
-      },
-    ],
-  };
-}
-
-function screenshotBase64(udid: string): string {
-  const path = join(AGENT_DIR, "variant-screenshot.png");
-  const shot = spawnSync("xcrun", ["simctl", "io", udid, "screenshot", path]);
-  if (shot.status !== 0) {
-    throw new Error(`simctl screenshot failed: ${shot.stderr.toString()}`);
-  }
-  return readFileSync(path).toString("base64");
-}
-
-async function variants(agent: OverlayAgentClient, screenshotUdid?: string): Promise<void> {
-  const list: Array<Record<string, unknown>> = [
-    {
-      label: "Calm",
-      spec: card("calm", "Good morning", "A quieter home screen.", "#FFF2F7F2", "#FF2E7D32"),
-    },
-    {
-      label: "Bold",
-      spec: card("bold", "Hey there!", "Big type, loud color.", "#FFFFF3E0", "#FFE65100"),
-    },
-    {
-      label: "Night",
-      spec: card("night", "Evening", "Dark variant for comparison.", "#FF101418", "#FF90CAF9"),
-    },
-  ];
-  if (screenshotUdid !== undefined) {
-    const upload = await agent.request("put_overlay_asset", {
-      id: "current-screen",
-      mimeType: "image/png",
-      dataBase64: screenshotBase64(screenshotUdid),
-    });
-    console.log("asset", JSON.stringify(upload));
-    list.push({ label: "Current", image: { asset: "current-screen", contentScale: "fit" } });
-  }
-  const spec = composeVariantCarousel({ id: "variants-demo", variants: list });
-  console.log("show", JSON.stringify(await agent.request("show_overlay", { spec })));
-  console.log("Swipe or tap ◀ ▶ in the simulator, then tap ✓ to pick. Waiting...");
-  await waitForEvent(
-    agent,
-    (event) => (event.kind === "emit" && event.name === "selected") || event.kind === "dismissed",
-  );
 }
 
 const floatingSpec = () =>
@@ -329,11 +216,6 @@ async function main(): Promise<void> {
   const agent = await openAgent();
   try {
     switch (command) {
-      case "variants": {
-        const flag = rest.indexOf("--screenshot");
-        await variants(agent, flag >= 0 ? rest[flag + 1] : undefined);
-        break;
-      }
       case "floating":
         console.log(JSON.stringify(await agent.request("show_overlay", { spec: floatingSpec() })));
         break;

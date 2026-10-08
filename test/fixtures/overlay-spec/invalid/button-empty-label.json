@@ -1,0 +1,15 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "button",
+      "label": ""
+    }
+  },
+  "expectedPath": "root.label"
+}

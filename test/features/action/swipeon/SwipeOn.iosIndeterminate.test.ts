@@ -28,7 +28,7 @@ function harness() {
   const voiceOverExecutor = new FakeTalkBackSwipeExecutor();
   const action = new SwipeOn({ name: "iOS fake", deviceId: "ios-9972", platform: "ios" }, null, {
     observeScreen,
-    finder: new FakeScrollableElementsQuery(),
+    scrollables: new FakeScrollableElementsQuery(),
     timer,
     voiceOverExecutor,
     accessibilityDetector: new FakeAccessibilityDetector(),

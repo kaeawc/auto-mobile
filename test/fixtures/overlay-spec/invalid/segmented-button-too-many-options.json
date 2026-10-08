@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "mode": "a" },
+    "root": {
+      "type": "segmentedButton",
+      "stateKey": "mode",
+      "options": [
+        { "value": "a", "label": "A" },
+        { "value": "b", "label": "B" },
+        { "value": "c", "label": "C" },
+        { "value": "d", "label": "D" },
+        { "value": "e", "label": "E" },
+        { "value": "f", "label": "F" }
+      ]
+    }
+  },
+  "expectedPath": "root.options"
+}

@@ -99,11 +99,29 @@ fun OverlaySpecContent(
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact)
       modalOverlaySheets(root).forEach { node ->
-        key(node.identity) {
-          RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact)
-        }
+        key(node.identity) { RenderOverlayModal(node, interact) }
       }
     }
+  }
+}
+
+@Composable
+private fun RenderOverlayModal(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
+  val modifier = overlayNodeModifier(node, interact)
+  when (node.role) {
+    "dialog" ->
+      RenderOverlayDialog(node, modifier, interact) {
+        node.children.forEach {
+          RenderOverlayNode(
+            it,
+            interact,
+            columnWeight(it),
+            it.weightAxis(OverlayWeightAxis.VERTICAL),
+          )
+        }
+      }
+    "snackbar" -> RenderOverlaySnackbar(node, modifier, interact)
+    else -> RenderOverlaySheet(node, modifier, interact)
   }
 }
 
@@ -238,8 +256,18 @@ private fun RenderOverlayNodeContent(
     "pager" -> RenderOverlayPager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderOverlayNavigation(node, modifier, interact)
-    "bottomSheet" ->
-      Unit // Modal content is hoisted above the whole author tree, within this window.
+    "bottomSheet",
+    "dialog",
+    "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
+    "iconButton" -> RenderOverlayIconButton(node, modifier, interact)
+    "fab" -> RenderOverlayFab(node, modifier, interact)
+    "segmentedButton" -> RenderOverlaySegmentedButton(node, modifier, interact)
+    "topAppBar" -> RenderOverlayTopAppBar(node, modifier, interact)
+    "divider" -> RenderOverlayDivider(node, modifier)
+    "badge" -> RenderOverlayBadge(node, modifier)
+    "progress" -> RenderOverlayProgress(node, modifier)
+    "timePicker" -> RenderOverlayTimePicker(node, modifier, interact)
+    "datePicker" -> RenderOverlayDatePicker(node, modifier, interact)
     "textField" -> RenderOverlayTextField(node, modifier, interact)
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
@@ -484,9 +512,10 @@ private fun overlayNodeModifier(
   val tappable =
     actions.isNotEmpty() &&
       node.role != "textField" &&
-      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_MODAL_ROLES &&
       node.role !in OVERLAY_COMPONENT_ROLES &&
-      node.role !in OVERLAY_SELECTION_ROLES
+      node.role !in OVERLAY_SELECTION_ROLES &&
+      node.role !in OVERLAY_MATERIAL_ROLES
   var modifier: Modifier = Modifier
   // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
   // keep the layout slot it would have had.
@@ -543,7 +572,8 @@ private fun overlayNodeModifier(
       node.children,
       node.contentDescription,
     )
-  val state = overlayStateDescription(node.role, node.page, node.children.size)
+  val state =
+    overlayStateDescription(node.role, node.page, node.children.size, overlayPickerValue(node))
   // A layout container with nothing of its own to report gets no semantics node, so its children
   // join the nearest reporting ancestor, as with Compose's own layouts (#10446).
   if (!isSemanticsFreeContainer(node, tappable, description, state)) {
@@ -600,7 +630,7 @@ private fun overlayNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
+  setOf("box", "row", "column", "scroll", "pager", "spacer", "card", "divider")
 
 /**
  * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
@@ -645,7 +675,7 @@ internal fun overlayContentDescription(
   when {
     !authored.isNullOrEmpty() -> authored
     text.isNotEmpty() -> text
-    tappable && !iconName.isNullOrEmpty() -> iconName
+    (tappable || role in OVERLAY_ICON_CONTROL_ROLES) && !iconName.isNullOrEmpty() -> iconName
     role in CHILD_LABELLED_ROLES -> null
     role !in SEMANTICS_FREE_CONTAINERS -> role
     !tappable -> null
@@ -668,9 +698,29 @@ private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
   }
 }
 
-/** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
-internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =
-  if (role == "pager" && pageCount > 0) "Page ${page + 1} of $pageCount" else null
+/**
+ * A pager reports its position (`Page 2 of 4`) and a time or date picker its bound [value]
+ * (`07:30`, `2026-10-08`); other roles carry no state of their own here.
+ */
+internal fun overlayStateDescription(
+  role: String,
+  page: Int,
+  pageCount: Int,
+  value: String? = null,
+): String? =
+  when {
+    role == "pager" && pageCount > 0 -> "Page ${page + 1} of $pageCount"
+    role == "timePicker" || role == "datePicker" -> value
+    else -> null
+  }
+
+/** A time picker's bound value as 24-hour `HH:mm`, or a date picker's `YYYY-MM-DD`. */
+internal fun overlayPickerValue(node: OverlayRenderNode): String? =
+  when (node.role) {
+    "timePicker" -> String.format(java.util.Locale.ROOT, "%02d:%02d", node.hour, node.minute)
+    "datePicker" -> node.selectedValue
+    else -> null
+  }
 
 /**
  * A node with no authored size on the main axis of its Row/Column `weight` ([weighted]) takes the

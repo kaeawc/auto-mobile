@@ -433,13 +433,15 @@ function pagerErrors(context: Context): OverlayValidationError | undefined {
   }
   return undefined;
 }
+/** A radio group or segmented button binds a string key to one of its unique option values. */
 function radioGroupErrors(
   value: Record<string, unknown>,
   path: string,
   stored: unknown,
 ): OverlayValidationError | undefined {
+  const name = value.type === "segmentedButton" ? "Segmented button" : "Radio group";
   if (typeof stored !== "string") {
-    return fail(`${path}.stateKey`, "Radio group requires a string state key");
+    return fail(`${path}.stateKey`, `${name} requires a string state key`);
   }
   const values = new Set<unknown>();
   for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
@@ -450,6 +452,69 @@ function radioGroupErrors(
     values.add(optionValue);
   }
   return undefined;
+}
+/** An extended FAB (one with a label) has a single size, so `size` applies only to icon FABs. */
+function fabErrors(
+  value: Record<string, unknown>,
+  path: string,
+): OverlayValidationError | undefined {
+  return typeof value.label === "string" && value.size !== undefined
+    ? fail(`${path}.size`, "Extended FAB cannot set size")
+    : undefined;
+}
+/** A bound progress indicator is determinate over 0..max (default 1); unbound is indeterminate. */
+function progressErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  if (typeof value.stateKey !== "string") {
+    return value.max === undefined ? undefined : fail(`${path}.max`, "Requires stateKey");
+  }
+  const max = typeof value.max === "number" ? value.max : 1;
+  if (max <= 0) {
+    return fail(`${path}.max`, "Progress max must be greater than 0");
+  }
+  if (typeof stored !== "number" || !Number.isFinite(stored) || stored < 0 || stored > max) {
+    return fail(`${path}.stateKey`, "Progress requires a numeric state key within 0 and max");
+  }
+  return undefined;
+}
+/** A time picker binds two distinct integer keys: hour 0..23 and minute 0..59. */
+function timePickerErrors(
+  value: Record<string, unknown>,
+  path: string,
+  state: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const fields = [
+    { field: "hourKey", max: 23, message: "Time picker hour requires an integer 0..23 state key" },
+    {
+      field: "minuteKey",
+      max: 59,
+      message: "Time picker minute requires an integer 0..59 state key",
+    },
+  ];
+  for (const { field, max, message } of fields) {
+    const key = value[field];
+    const stored = typeof key === "string" ? state[key] : undefined;
+    if (!numberValid(stored, { kind: "number", integer: true, min: 0, max })) {
+      return fail(`${path}.${field}`, message);
+    }
+  }
+  return value.hourKey === value.minuteKey
+    ? fail(`${path}.minuteKey`, "Time picker hour and minute keys must differ")
+    : undefined;
+}
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/** A `YYYY-MM-DD` calendar date in 1900..2100, the Material date picker's year range. */
+function isOverlayDate(value: unknown): boolean {
+  if (typeof value !== "string" || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) {
+    return false;
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const days = month === 2 && leap ? 29 : DAYS_IN_MONTH[month - 1];
+  return year >= 1900 && year <= 2100 && days !== undefined && day >= 1 && day <= days;
 }
 /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
 function listItemBindingErrors(
@@ -501,8 +566,8 @@ function chipErrors(
   if (value.variant === "filter" && !bound) {
     return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
   }
-  if (value.variant === "assist" && bound) {
-    return fail(`${path}.stateKey`, "Assist chip cannot bind a state key");
+  if (value.variant !== undefined && value.variant !== "filter" && bound) {
+    return fail(`${path}.stateKey`, "Only a filter chip can bind a state key");
   }
   if (bound && typeof stored !== "boolean") {
     return fail(`${path}.stateKey`, "Filter chip requires a boolean state key");
@@ -524,10 +589,33 @@ function componentBindingErrors(
   if (value.type === "slider") {
     return sliderErrors(value, path, stored);
   }
-  if (value.type === "radioGroup") {
-    return radioGroupErrors(value, path, stored);
+  return componentFormErrors(value, path, stored, state);
+}
+function componentFormErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+  state: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  switch (value.type) {
+    case "radioGroup":
+    case "segmentedButton":
+      return radioGroupErrors(value, path, stored);
+    case "chip":
+      return chipErrors(value, path, stored);
+    case "fab":
+      return fabErrors(value, path);
+    case "progress":
+      return progressErrors(value, path, stored);
+    case "timePicker":
+      return timePickerErrors(value, path, state);
+    case "datePicker":
+      return isOverlayDate(stored)
+        ? undefined
+        : fail(`${path}.stateKey`, "Date picker requires a YYYY-MM-DD state key in 1900..2100");
+    default:
+      return undefined;
   }
-  return value.type === "chip" ? chipErrors(value, path, stored) : undefined;
 }
 function bindingErrors(
   context: Context,
@@ -552,19 +640,27 @@ function bindingErrors(
   }
   return undefined;
 }
+/** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
+const MODAL_NAMES: Record<string, string | undefined> = {
+  bottomSheet: "Sheet",
+  dialog: "Dialog",
+  snackbar: "Snackbar",
+};
 function sheetBindingErrors(
   context: Context,
   data: Record<string, unknown>,
 ): OverlayValidationError | undefined {
   const state = object(data.state) ?? {};
   for (const { value, path } of context.nodes) {
-    if (value.type !== "bottomSheet") {
+    const type = String(value.type);
+    const name = Object.hasOwn(MODAL_NAMES, type) ? MODAL_NAMES[type] : undefined;
+    if (name === undefined) {
       continue;
     }
     const condition = object(value.openWhen);
     const key = condition?.key;
     if (typeof key === "string" && Object.hasOwn(state, key) && typeof state[key] !== "boolean") {
-      return fail(`${path}.openWhen.key`, "Sheet requires a boolean state key");
+      return fail(`${path}.openWhen.key`, `${name} requires a boolean state key`);
     }
   }
   return undefined;

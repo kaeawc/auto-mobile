@@ -512,7 +512,7 @@ const chipBaseSchema = z
     ...commonNodeShape,
     type: z.enum(["chip"]),
     label: z.string().min(1),
-    variant: z.enum(["assist", "filter"]).optional(),
+    variant: z.enum(["assist", "filter", "input", "suggestion"]).optional(),
     stateKey: z
       .string()
       .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
@@ -525,6 +525,106 @@ const cardBaseSchema = z
     type: z.enum(["card"]),
     variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })
+  .strict();
+const stateKeyFieldSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+const actionListSchema = z.array(actionSchema).min(1).max(32);
+// An icon-only control in a top app bar: the icon, its accessible label and its tap.
+const appBarActionSchema = z
+  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
+// A dialog or snackbar button: a tap closes its container, then runs `onTap`.
+const dialogButtonSchema = z
+  .object({ label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
+const iconButtonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["iconButton"]),
+    icon: iconNameSchema,
+    variant: z.enum(["standard", "filled", "tonal", "outlined"]).optional(),
+  })
+  .strict();
+const fabBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["fab"]),
+    icon: iconNameSchema,
+    label: z.string().min(1).optional(),
+    size: z.enum(["small", "regular", "large"]).optional(),
+  })
+  .strict();
+const segmentedButtonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["segmentedButton"]),
+    stateKey: stateKeyFieldSchema,
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(2)
+      .max(5),
+  })
+  .strict();
+const topAppBarBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["topAppBar"]),
+    title: z.string().min(1),
+    variant: z.enum(["small", "centerAligned", "medium", "large"]).optional(),
+    navigationIcon: appBarActionSchema.optional(),
+    actions: z.array(appBarActionSchema).min(1).max(3).optional(),
+  })
+  .strict();
+const dividerBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["divider"]),
+    orientation: z.enum(["horizontal", "vertical"]).optional(),
+  })
+  .strict();
+const badgeBaseSchema = z
+  .object({ ...commonNodeShape, type: z.enum(["badge"]), text: z.string().min(1).optional() })
+  .strict();
+const progressBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["progress"]),
+    variant: z.enum(["linear", "circular"]).optional(),
+    stateKey: stateKeyFieldSchema.optional(),
+    max: z.number().finite().optional(),
+  })
+  .strict();
+const dialogBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["dialog"]),
+    openWhen: sheetConditionSchema,
+    title: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    icon: iconNameSchema.optional(),
+    confirm: dialogButtonSchema,
+    dismiss: dialogButtonSchema.optional(),
+  })
+  .strict();
+const snackbarBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["snackbar"]),
+    openWhen: sheetConditionSchema,
+    text: z.string().min(1),
+    action: dialogButtonSchema.optional(),
+  })
+  .strict();
+const timePickerBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["timePicker"]),
+    hourKey: stateKeyFieldSchema,
+    minuteKey: stateKeyFieldSchema,
+    is24Hour: z.boolean().optional(),
+  })
+  .strict();
+const datePickerBaseSchema = z
+  .object({ ...commonNodeShape, type: z.enum(["datePicker"]), stateKey: stateKeyFieldSchema })
   .strict();
 const scrollBaseSchema = z
   .object({
@@ -592,6 +692,17 @@ export type OverlayNode =
   | z.infer<typeof sliderBaseSchema>
   | z.infer<typeof chipBaseSchema>
   | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
+  | z.infer<typeof iconButtonBaseSchema>
+  | z.infer<typeof fabBaseSchema>
+  | z.infer<typeof segmentedButtonBaseSchema>
+  | z.infer<typeof topAppBarBaseSchema>
+  | z.infer<typeof dividerBaseSchema>
+  | z.infer<typeof badgeBaseSchema>
+  | z.infer<typeof progressBaseSchema>
+  | (z.infer<typeof dialogBaseSchema> & { child?: OverlayNode })
+  | z.infer<typeof snackbarBaseSchema>
+  | z.infer<typeof timePickerBaseSchema>
+  | z.infer<typeof datePickerBaseSchema>
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -615,6 +726,17 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     sliderBaseSchema,
     chipBaseSchema,
     cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
+    iconButtonBaseSchema,
+    fabBaseSchema,
+    segmentedButtonBaseSchema,
+    topAppBarBaseSchema,
+    dividerBaseSchema,
+    badgeBaseSchema,
+    progressBaseSchema,
+    dialogBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema).optional() }),
+    snackbarBaseSchema,
+    timePickerBaseSchema,
+    datePickerBaseSchema,
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -716,6 +838,17 @@ export const OVERLAY_NODE_TYPES = [
   "slider",
   "chip",
   "card",
+  "iconButton",
+  "fab",
+  "segmentedButton",
+  "topAppBar",
+  "divider",
+  "badge",
+  "progress",
+  "dialog",
+  "snackbar",
+  "timePicker",
+  "datePicker",
   "scroll",
   "pager",
   "tabBar",

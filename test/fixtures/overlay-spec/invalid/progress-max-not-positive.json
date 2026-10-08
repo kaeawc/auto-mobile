@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "p": 0 },
+    "root": { "type": "progress", "stateKey": "p", "max": 0 }
+  },
+  "expectedPath": "root.max"
+}

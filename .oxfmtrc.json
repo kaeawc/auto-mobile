@@ -26,6 +26,7 @@
     "test/fixtures/swipeon-auto-target/*.json",
     "test/fixtures/identify-interactions/*.json",
     "test/fixtures/android-ime-window/*.json",
+    "test/fixtures/android-overlay-testtag/*.json",
     "test/fixtures/android-enabled/*.json",
     "test/fixtures/android-action-compact/*.json",
     "test/fixtures/android-launcher/*.json",

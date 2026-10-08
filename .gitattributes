@@ -19,6 +19,7 @@ test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
+test/fixtures/android-overlay-testtag/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf
 test/fixtures/android-action-compact/*.json text eol=lf
 test/fixtures/swipeon-auto-target/foldable.json text eol=lf

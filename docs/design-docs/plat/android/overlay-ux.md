@@ -981,11 +981,9 @@ JSON decoders retain the last value. They are not unknown fields.
 }
 ```
 
-The committed `doc-example-3` fixture renders this example in the screenshot gallery with a
-`bounds` anchor in place of the element anchor: a renderer given an unresolved element anchor is
-refused, and only the host resolves selectors, so rendered fixtures carry resolved bounds. The
-element-anchor shape stays covered by validation-only fixtures (`floating-element-anchor`,
-`exact-selector-depth`).
+The committed `doc-example-3` fixture is this example verbatim. The renderer refuses an unresolved
+element anchor, so the screenshot gallery substitutes a fixed resolved `bounds` anchor (same
+alignment) before rendering; only the host resolves selectors.
 
 ## Shared verification and sibling updates
 

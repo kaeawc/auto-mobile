@@ -1,4 +1,4 @@
-@testable import AutoMobileOverlayAgent
+@testable import AutoMobileOverlayAgentCore
 import Foundation
 import XCTest
 

@@ -1,9 +1,9 @@
 import Foundation
 
 // Pure, UIKit-free connection protocol for the overlay agent (#10566): launch configuration,
-// newline framing and the hello/auth gate. The Swift package builds only this file (and its
-// tests) on macOS; scripts/ios/overlay-agent-build.sh compiles it into the simulator dylib with
-// the UIKit sources.
+// newline framing and the hello/auth gate. Part of the UIKit-free core target, so `swift test`
+// covers it on macOS; scripts/ios/overlay-agent-build.sh compiles it into the simulator dylib
+// with the UIKit sources.
 
 /// Wire contract the host checks in `hello_result`.
 enum OverlayAgentProtocol {

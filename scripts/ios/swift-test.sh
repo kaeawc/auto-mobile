@@ -68,12 +68,12 @@ echo ""
 # XCTestRunner unit tests run on macOS (integration tests are handled by xctestrunner-integration-tests.sh)
 TESTABLE_PACKAGES=(
     "highlight-core"
+    "overlay-agent"
     "auto-mobile-sdk"
     "control-proxy"
     "XCTestRunner"
     "screen-capture"
     "network-filter"
-    "overlay-agent"
 )
 
 # Total tests executed in a `swift test` transcript.

@@ -524,7 +524,7 @@ private fun overlayNodeModifier(
     this[OverlayRole] = node.role
     if (node.role == "icon" || node.role == "image") role = Role.Image
     // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
-    overlayContentDescription(node.role, node.text, node.iconName, tappable)?.let {
+    overlayContentDescription(node.role, node.text, node.iconName, tappable, node.children)?.let {
       contentDescription = it
     }
     overlayStateDescription(node.role, node.page, node.children.size)?.let {
@@ -577,22 +577,41 @@ private val SEMANTICS_FREE_CONTAINERS =
 
 /**
  * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
- * its icon name. Layout containers with neither text nor actions get none, so they stay out of the
- * skeleton instead of being labelled by their node kind ("box", "row"). Every other node keeps its
- * kind as the label.
+ * its icon name, and so does a tappable layout container whose only content is an icon (a FAB). A
+ * layout container is never labelled by its node kind ("box", "row") while it has content
+ * (#10524, #10608): its children label it instead. Only a tappable container with no children at
+ * all keeps its kind, as nothing else names it. Every other node keeps its kind as the label.
  */
 internal fun overlayContentDescription(
   role: String,
   text: String,
   iconName: String?,
   tappable: Boolean,
+  children: List<OverlayRenderNode> = emptyList(),
 ): String? =
   when {
     text.isNotEmpty() -> text
     tappable && !iconName.isNullOrEmpty() -> iconName
-    !tappable && role in SEMANTICS_FREE_CONTAINERS -> null
-    else -> role
+    role !in SEMANTICS_FREE_CONTAINERS -> role
+    !tappable -> null
+    children.isEmpty() -> role
+    else -> overlayIconOnlyLabel(children)
   }
+
+/**
+ * The icon name when the only visible content under a container is one named icon, possibly inside
+ * plain single-child layout containers; null for any other content.
+ */
+private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
+  val only = children.filter { it.visible }.singleOrNull() ?: return null
+  return when {
+    only.role == "icon" -> only.iconName?.takeIf { it.isNotEmpty() }
+    only.role in SEMANTICS_FREE_CONTAINERS &&
+      only.text.isEmpty() &&
+      only.source?.onTap.isNullOrEmpty() -> overlayIconOnlyLabel(only.children)
+    else -> null
+  }
+}
 
 /** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
 internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =

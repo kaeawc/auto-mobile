@@ -14,6 +14,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -227,5 +228,38 @@ class OverlayNodeLayoutTest {
     assertEquals(dp(50f), root.tagged("maxFill").boundsInRoot.width, 0.5f)
     assertEquals(dp(80f), root.tagged("minDp").boundsInRoot.width, 0.5f)
     assertEquals(dp(40f), root.tagged("maxDp").boundsInRoot.height, 0.5f)
+  }
+
+  @Test
+  fun `an icon-only tappable container is labelled by its icon, not its kind`() {
+    val root =
+      render(
+        OverlayColumnNode(
+          children =
+            listOf(
+              OverlayBoxNode(
+                testTag = "fab",
+                onTap = tap,
+                children = listOf(OverlayIconNode(name = "add")),
+              ),
+              OverlayRowNode(
+                testTag = "settings",
+                onTap = tap,
+                children = listOf(OverlayIconNode(name = "settings")),
+              ),
+              OverlayRowNode(
+                testTag = "save",
+                onTap = tap,
+                children = listOf(OverlayIconNode(name = "save"), OverlayTextNode(text = "Save")),
+              ),
+            )
+        )
+      )
+    fun label(tag: String) =
+      root.tagged(tag).config.getOrElseNullable(SemanticsProperties.ContentDescription) { null }
+    assertEquals(listOf("add"), label("fab"))
+    assertEquals(listOf("settings"), label("settings"))
+    // Mixed content labels the container through its children, never as "row".
+    assertNull(label("save"))
   }
 }

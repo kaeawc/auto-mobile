@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import dev.jasonpearson.automobile.protocol.OverlayStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -24,7 +25,34 @@ class OverlaySemanticsTest {
   }
 
   @Test
-  fun `a tappable container and non-container kinds keep their kind`() {
+  fun `a tappable container whose only content is an icon reads as the icon`() {
+    val icon = node("icon", text = "add", iconName = "add")
+    assertEquals("add", overlayContentDescription("box", "", null, true, listOf(icon)))
+    assertEquals(
+      "add",
+      overlayContentDescription(
+        "row",
+        "",
+        null,
+        true,
+        listOf(node("box", children = listOf(icon))),
+      ),
+    )
+  }
+
+  @Test
+  fun `a tappable container with other content is not labelled by its kind`() {
+    val icon = node("icon", text = "add", iconName = "add")
+    val text = node("text", text = "Add")
+    assertNull(overlayContentDescription("row", "", null, true, listOf(icon, text)))
+    assertNull(overlayContentDescription("box", "", null, true, listOf(text)))
+    assertNull(
+      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text))
+    )
+  }
+
+  @Test
+  fun `a childless tappable container and non-container kinds keep their kind`() {
     assertEquals("box", overlayContentDescription("box", "", null, tappable = true))
     assertEquals("icon", overlayContentDescription("icon", "", null, tappable = false))
     assertEquals("tabBar", overlayContentDescription("tabBar", "", null, tappable = false))
@@ -36,4 +64,21 @@ class OverlaySemanticsTest {
     assertNull(overlayStateDescription("pager", 0, 0))
     assertNull(overlayStateDescription("row", 1, 4))
   }
+
+  private fun node(
+    role: String,
+    text: String = "",
+    iconName: String? = null,
+    children: List<OverlayRenderNode> = emptyList(),
+  ) =
+    OverlayRenderNode(
+      role = role,
+      text = text,
+      testTag = null,
+      visible = true,
+      style = mapOverlayStyle(OverlayStyle()),
+      safeArea = null,
+      iconName = iconName,
+      children = children,
+    )
 }

@@ -133,6 +133,9 @@ fun AutoMobileDesktopApp(
   // system-tray icon share one daemon-health source instead of each running its own 5s poll
   // (#4858).
   daemonConnectionState: ConnectionState = ConnectionState.Connecting,
+  // False while the window is closed to the tray (#10695): after a short grace the desktop session
+  // releases the focused device, and showing the window binds it again on the next input.
+  windowVisible: Boolean = true,
 ) {
   val graph = LocalAutoMobileGraph.current
 
@@ -144,7 +147,11 @@ fun AutoMobileDesktopApp(
   val desktopSocketPath =
     remember(usesUnixSocket) { if (usesUnixSocket) DaemonSocketPaths.socketPath() else null }
   val desktopSessionState =
-    rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding) {
+    rememberDesktopDaemonSession(
+      desktopSocketPath,
+      desktopSessionBinding,
+      hostVisible = windowVisible,
+    ) {
       refreshAfterDaemonRecovery()
     }
   val desktopDaemonSession = desktopSessionState.session

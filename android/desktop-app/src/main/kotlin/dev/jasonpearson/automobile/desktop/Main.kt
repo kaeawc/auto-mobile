@@ -222,6 +222,7 @@ fun main() {
             menuBarActions = menuBarActions,
             openPaletteRequest = openPaletteRequest,
             daemonConnectionState = daemonState,
+            windowVisible = isWindowVisible,
           )
         }
       }

@@ -44,6 +44,14 @@ internal const val BIND_ERROR_RETRY_INTERVAL_MS = 30_000L
 private const val BIND_ERROR_RETRY_TICKS =
   (BIND_ERROR_RETRY_INTERVAL_MS / HEARTBEAT_INTERVAL_MS).toInt()
 
+/**
+ * How long the host (the desktop window, the IDE tool window) may stay hidden before the session
+ * releases the device it holds (#10695). Short enough that a window closed to the tray stops
+ * holding a device nobody is looking at; long enough that a quick hide/show or a tool-window toggle
+ * does not churn the session.
+ */
+const val HIDDEN_RELEASE_GRACE_MS = 10_000L
+
 data class DesktopDaemonSessionBinding(val deviceId: String, val platform: String)
 
 data class DesktopDaemonSessionState(
@@ -117,6 +125,14 @@ fun rememberDesktopDaemonSession(
   sessionFactory: (String) -> DesktopDaemonSession = { DesktopDaemonSession.create(it) },
   ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   cleanupDispatcher: CoroutineDispatcher = Dispatchers.IO,
+  /**
+   * Whether the user can see the host showing the bound device (#10695). After
+   * [hiddenReleaseGraceMs] hidden, the session drops any device it holds (by rotating, as closing
+   * the last pane does) and the pick is viewed passively, exactly like an idle release: showing the
+   * host again binds nothing until the user interacts with the device or takes control.
+   */
+  hostVisible: Boolean = true,
+  hiddenReleaseGraceMs: Long = HIDDEN_RELEASE_GRACE_MS,
   onDaemonRecovered: suspend () -> Boolean = { true },
 ): DesktopDaemonSessionState {
   // Bumped when the last pane closes while the session holds a device (#10659). Releasing a
@@ -156,6 +172,17 @@ fun rememberDesktopDaemonSession(
         }
       }
     }
+  // Survives a session rotation like the idle-released device: the rotation it triggers must not
+  // re-bind while the host is still hidden.
+  var hiddenPastGrace by remember(socketPath) { mutableStateOf(false) }
+  LaunchedEffect(hostVisible, hiddenReleaseGraceMs) {
+    if (hostVisible) {
+      hiddenPastGrace = false
+    } else {
+      delay(hiddenReleaseGraceMs)
+      hiddenPastGrace = true
+    }
+  }
   val bindingMutex = remember(session) { Mutex() }
   val bindingGeneration = remember(session) { AtomicLong(0L) }
 
@@ -176,7 +203,7 @@ fun rememberDesktopDaemonSession(
     }
   }
 
-  LaunchedEffect(session, binding.value, controlRequests) {
+  LaunchedEffect(session, binding.value, controlRequests, hiddenPastGrace) {
     val generation = bindingGeneration.incrementAndGet()
     val target = binding.value
     boundDeviceId = null
@@ -198,6 +225,18 @@ fun rememberDesktopDaemonSession(
     // view; only the same pick with no user action since the release stays passive.
     if (target?.deviceId != idleReleasedDeviceId || controlRequests > 0) {
       idleReleasedDeviceId = null
+    }
+    if (hiddenPastGrace && target != null) {
+      // Nobody can see the pick (#10695): view it passively, as after an idle release, so showing
+      // the host again only re-binds on the user's next input or Take control. A held device is
+      // released by rotating the session, the same as closing the last pane. A session with an
+      // earlier Take control is rotated too, or that request would re-bind once the host shows.
+      idleReleasedDeviceId = target.deviceId
+      if (session.holdsDevice || controlRequests > 0) {
+        LOG.info("Desktop host hidden; releasing ${target.deviceId} until it is used again")
+        sessionEpoch++
+        return@LaunchedEffect
+      }
     }
     val passive = target != null && idleReleasedDeviceId == target.deviceId
     val carried = carriedBindError?.takeIf { it.first == target?.deviceId && controlRequests == 0 }

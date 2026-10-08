@@ -626,6 +626,12 @@ fun AutoMobileContent(
    * reference desktop app opts in.
    */
   enableDeviceControl: Boolean = false,
+  /**
+   * Whether the host (the IDE tool window) is showing this content (#10695). While it stays hidden
+   * past a short grace the daemon session releases the picked device; it binds again on the next
+   * input or Take control after the host is shown.
+   */
+  hostVisible: Boolean = true,
 ) {
   // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
   // pane-visibility and overlay state to it so the native menu items and the
@@ -834,7 +840,12 @@ fun AutoMobileContent(
         dataSourceMode == DataSourceMode.Real && it.connectionType == McpConnectionType.UnixSocket
       }
       ?.let { it.socketPath ?: DaemonSocketPaths.socketPath() }
-  val desktopSessionState = rememberDesktopDaemonSession(desktopSocketPath, desktopSessionBinding)
+  val desktopSessionState =
+    rememberDesktopDaemonSession(
+      desktopSocketPath,
+      desktopSessionBinding,
+      hostVisible = hostVisible,
+    )
   val desktopDaemonSession = desktopSessionState.session
 
   // Client provider function for dashboards to access MCP data

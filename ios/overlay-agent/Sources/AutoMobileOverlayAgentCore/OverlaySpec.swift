@@ -69,7 +69,21 @@ struct OverlaySpec: Decodable {
     let id: String
     let window: WindowSpec
     let state: [String: JSONValue]?
+    /// The node tree with every `repeat` list template already expanded (see `OverlayRepeat`).
     let root: OverlayNode
+
+    private enum CodingKeys: String, CodingKey {
+        case id, window, state, root
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        window = try container.decode(WindowSpec.self, forKey: .window)
+        state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
+        let raw = try container.decode(JSONValue.self, forKey: .root)
+        root = try JSONDecoder().decode(OverlayNode.self, from: JSONEncoder().encode(OverlayRepeat.expand(raw)))
+    }
 }
 
 struct WindowSpec: Decodable {
@@ -137,6 +151,35 @@ struct Style: Decodable {
     let textAlign: String?
     let maxLines: Int?
     let fontFamily: String?
+
+    /// Android's `mergedOver`: properties set on `overlay` win, unset ones keep this style's value.
+    /// A present property replaces the base value as a whole (`padding` and `border` included).
+    func merged(with overlay: Style) -> Style {
+        Style(
+            width: overlay.width ?? width,
+            height: overlay.height ?? height,
+            padding: overlay.padding ?? padding,
+            background: overlay.background ?? background,
+            cornerRadius: overlay.cornerRadius ?? cornerRadius,
+            border: overlay.border ?? border,
+            alpha: overlay.alpha ?? alpha,
+            alignment: overlay.alignment ?? alignment,
+            arrangement: overlay.arrangement ?? arrangement,
+            spacing: overlay.spacing ?? spacing,
+            textSize: overlay.textSize ?? textSize,
+            fontWeight: overlay.fontWeight ?? fontWeight,
+            color: overlay.color ?? color,
+            textAlign: overlay.textAlign ?? textAlign,
+            maxLines: overlay.maxLines ?? maxLines,
+            fontFamily: overlay.fontFamily ?? fontFamily
+        )
+    }
+}
+
+/// One `styleWhen` entry: `style` is merged over the node's own style while `when` holds.
+struct StyleWhen: Decodable {
+    let when: Condition
+    let style: Style
 }
 
 struct OverlayAction: Decodable {
@@ -147,7 +190,7 @@ struct OverlayAction: Decodable {
     let page: JSONValue?
     let key: String?
     let value: JSONValue?
-    /// `increment` step; 1 when omitted.
+    /// `increment`/`decrement` step; 1 when omitted.
     let by: Double?
 }
 
@@ -254,6 +297,7 @@ final class OverlayNode: Decodable {
     let testTag: String?
     let onTap: [OverlayAction]?
     let style: Style?
+    let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
     let safeAreaPadding: SafeAreaPadding?
     let children: [OverlayNode]?
@@ -278,6 +322,15 @@ final class OverlayNode: Decodable {
     let detents: [Detent]?
     let scrim: String?
     let dragHandle: Bool?
+
+    /// Android's `resolveOverlayStyle`: every `styleWhen` entry whose condition holds is merged over
+    /// `style` in authored order, so a later matching entry wins per property. Nil when the node has
+    /// no style at all and no entry matches.
+    func resolvedStyle(state: [String: JSONValue]) -> Style? {
+        (styleWhen ?? []).filter { $0.when.holds(state) }.reduce(style) { resolved, entry in
+            resolved.map { $0.merged(with: entry.style) } ?? entry.style
+        }
+    }
 
     /// Pager ids and their page counts, so `setPage` can clamp without consulting the view tree.
     func collectPagers(into counts: inout [String: Int]) {

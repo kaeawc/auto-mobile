@@ -284,6 +284,43 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     expect(ownerOf("android-session")).toBe("harness-token");
   });
 
+  test("a latest-binding conflict that outlasts lease plus grace stops claiming and fences the binding (#10664)", async () => {
+    const foreignHeartbeat = async (claimLivenessOwnership: boolean): Promise<void> => {
+      await handleDaemonRequest(
+        {
+          id: "foreign",
+          type: "daemon_request",
+          method: "daemon/heartbeat",
+          params: {
+            sessionId: "android-session",
+            livenessPolicy: "heartbeat",
+            livenessOwnerToken: "other-harness",
+            ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
+          },
+        },
+        daemonStateFor(sessionManager),
+      );
+    };
+    await foreignHeartbeat(true);
+    const proxy = createProxy({ token: "harness-token", initialSessionUuid: "android-session" });
+    await proxy.ensureConnected();
+
+    // The foreign owner keeps its lease live past the conflict leash (lease plus grace plus one tick).
+    for (let tick = 0; tick < 14; tick++) {
+      await foreignHeartbeat(false);
+      await timer.advanceTimeAsync(INTERVAL_MS);
+    }
+
+    const before = replies.length;
+    await timer.advanceTimeAsync(INTERVAL_MS * 3);
+    expect(replies.length).toBe(before);
+    await foreignHeartbeat(false);
+    expect(ownerOf("android-session")).toBe("other-harness");
+    await expect(proxy.callTool("tapOn", {})).rejects.toMatchObject({
+      reason: "liveness-owner-conflict",
+    });
+  });
+
   test("a held session whose conflict outlasts lease plus grace is dropped alone", async () => {
     const foreignHeartbeat = async (claimLivenessOwnership: boolean): Promise<void> => {
       await handleDaemonRequest(

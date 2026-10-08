@@ -755,10 +755,19 @@ test.each(["android", "ios"] as const)(
     const ownerId = requests.generateId("owner-action");
     const owner = requests.register(ownerId, "owner-action", 1000, () => ({ ok: false }));
     try {
-      await expect(
-        client.requestHierarchySyncForObserver(new NoOpPerformanceTracker(), false, undefined, 30),
-      ).rejects.toThrow("Owner's in-flight request exceeded the observer hierarchy deadline");
-      expect(requests.isPending(ownerId)).toBe(true);
+      // Sample the owner as the observer rejects: auto-advance keeps moving fake time
+      // afterwards and would expire the owner's own 1000 ms timeout next.
+      const observed = await client
+        .requestHierarchySyncForObserver(new NoOpPerformanceTracker(), false, undefined, 30)
+        .then(
+          () => ({ error: undefined, ownerPending: requests.isPending(ownerId) }),
+          (error: unknown) => ({ error, ownerPending: requests.isPending(ownerId) }),
+        );
+      expect(observed.error).toBeInstanceOf(Error);
+      expect((observed.error as Error).message).toContain(
+        "Owner's in-flight request exceeded the observer hierarchy deadline",
+      );
+      expect(observed.ownerPending).toBe(true);
     } finally {
       requests.resolve(ownerId, { ok: true });
       await owner;

@@ -307,6 +307,16 @@ class PlanSchemaValidatorTest {
                 params:
                   device: A
                   text: Button
+        - tool: criticalSection
+          params:
+            device: B
+            lock: sync-point
+            deviceCount: 2
+            steps:
+              - tool: tapOn
+                params:
+                  device: B
+                  text: Button
       """
         .trimIndent()
 

@@ -1,4 +1,15 @@
 import { Timer } from "../../src/utils/SystemTimer";
+import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+
+// Events the auto-advance pump fires before yielding one real event-loop turn.
+const AUTO_ADVANCE_EVENTS_PER_BURST = 100;
+// Consecutive full bursts (work never went idle) before the pump falls back to
+// firing one event per real event-loop turn with no quiescence drain. Real tests
+// settle well inside this; an endless poller (often one a test abandoned) would
+// otherwise spend a burst of drains on every real turn for the rest of the
+// process. Under `bun test --parallel` such a poller outlives its file, and a few
+// of them starved whole CI unit shards past the wall-clock watchdog.
+const AUTO_ADVANCE_BURSTS_BEFORE_THROTTLE = 10;
 
 /**
  * Pending sleep call information
@@ -34,16 +45,6 @@ interface PendingInterval {
 }
 
 /**
- * Work waiting for auto-advance dispatch.
- */
-interface PendingAutoAdvanceTask {
-  dueAt: number;
-  registrationOrder: number;
-  callback: () => void;
-  resolveOnReset?: () => void;
-}
-
-/**
  * Fake Timer implementation for testing.
  *
  * All time-related operations are controlled manually:
@@ -66,25 +67,38 @@ export class FakeTimer implements Timer {
   private nextTimeoutId: number = 1;
   private nextIntervalId: number = 1000000;
   private autoAdvance: boolean = false;
-  private pendingAutoAdvanceTasks: PendingAutoAdvanceTask[] = [];
-  private nextAutoAdvanceTaskOrder: number = 1;
-  private autoAdvanceDispatchScheduled: boolean = false;
-  // Invalidates auto-advance callbacks that were scheduled before reset().
+  private autoAdvancePumpRunning: boolean = false;
+  private pacedIntervalTickScheduled: boolean = false;
+  private consecutiveBursts: number = 0;
+  // Bumped by reset() so auto-advance work in flight from before the reset (a pump
+  // parked on an await, a throttled or paced real-turn tick) stops instead of
+  // firing the next test's registrations with stale pump state.
   private autoAdvanceGeneration: number = 0;
   // Monotonic registration counter so manual advanceTime() can break equal
   // due-time ties by FIFO registration order across sleeps/timeouts/intervals.
   private nextEventSeq: number = 1;
-  // Track cancelled timeout IDs for autoAdvance mode.
-  private cancelledTimeoutIds: Set<number> = new Set();
-  // Track cancelled interval IDs for autoAdvance mode.
-  private cancelledIntervalIds: Set<number> = new Set();
 
   /**
    * Enable auto-advance mode where sleeps and timeouts resolve asynchronously.
    * Use this for tests that don't need to control time explicitly.
+   *
+   * A microtask-only pump waits for the timer state to go quiet (see
+   * drainUntilQuiescent), then fires the next due sleep, timeout, or interval
+   * tick in due order (FIFO on equal deadlines), one event per drain. It never
+   * waits on the real event loop, so a starved runner cannot stretch a test's
+   * real-time budget while fake time crawls. Two bounds keep endless background
+   * work from running away: every AUTO_ADVANCE_EVENTS_PER_BURST events the pump
+   * yields one real turn, and while only intervals are pending it fires one tick
+   * per real turn; and after AUTO_ADVANCE_BURSTS_BEFORE_THROTTLE consecutive
+   * bursts without going idle the pump drops to one event per real turn (no
+   * drain) until nothing is pending. Work that completes only on a real event-loop turn (a real
+   * socket, a fake or test step that answers via setImmediate) loses any race
+   * against a pending fake deadline: deliver it on a microtask or
+   * process.nextTick instead.
    */
   enableAutoAdvance(): void {
     this.autoAdvance = true;
+    this.kickAutoAdvancePump();
   }
 
   /**
@@ -94,12 +108,7 @@ export class FakeTimer implements Timer {
    */
   async sleep(ms: number): Promise<void> {
     this.sleepHistory.push(ms);
-    if (this.autoAdvance) {
-      return new Promise<void>((resolve) => {
-        this.enqueueAutoAdvanceTask(resolve, ms, resolve);
-      });
-    }
-    return new Promise<void>((resolve) => {
+    const sleeping = new Promise<void>((resolve) => {
       this.pendingSleeps.push({
         ms,
         resolve,
@@ -107,6 +116,8 @@ export class FakeTimer implements Timer {
         seq: this.nextEventSeq++,
       });
     });
+    this.kickAutoAdvancePump();
+    return sleeping;
   }
 
   /**
@@ -165,12 +176,13 @@ export class FakeTimer implements Timer {
       if (next === undefined) {
         break;
       }
-      this.currentTime = next.dueAt;
+      this.currentTime = Math.max(this.currentTime, next.dueAt);
       next.fire();
       await afterEvent();
     }
 
-    this.currentTime = target;
+    // Auto-advance may have moved the clock past target while this awaited.
+    this.currentTime = Math.max(this.currentTime, target);
   }
 
   /**
@@ -221,8 +233,7 @@ export class FakeTimer implements Timer {
 
   /**
    * Fake milliseconds until the earliest pending sleep, timeout, or interval tick is
-   * due, or undefined when nothing is pending. Manual mode only: auto-advance work is
-   * dispatched on its own and is not counted.
+   * due, or undefined when nothing is pending. Auto-advanced work is counted too.
    */
   getMsUntilNextDueEvent(): number | undefined {
     const next = this.nextDueEvent(Number.POSITIVE_INFINITY);
@@ -324,23 +335,17 @@ export class FakeTimer implements Timer {
    * Reset all state (clears pending sleeps, timeouts, intervals, history, and time).
    */
   reset(): void {
-    this.autoAdvanceGeneration++;
     // Resolve all pending sleeps before clearing to avoid hanging promises
     this.resolveAll();
+    this.autoAdvanceGeneration++;
+    this.consecutiveBursts = 0;
     this.sleepHistory = [];
     this.currentTime = 0;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];
-    for (const task of this.pendingAutoAdvanceTasks) {
-      task.resolveOnReset?.();
-    }
-    this.pendingAutoAdvanceTasks = [];
-    this.nextAutoAdvanceTaskOrder = 1;
     this.nextEventSeq = 1;
     this.nextTimeoutId = 1;
     this.nextIntervalId = 1000000;
-    this.cancelledTimeoutIds.clear();
-    this.cancelledIntervalIds.clear();
   }
 
   /**
@@ -357,17 +362,7 @@ export class FakeTimer implements Timer {
    */
   setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextTimeoutId as unknown as NodeJS.Timeout;
-    const numericId = this.nextTimeoutId;
     this.nextTimeoutId++;
-    if (this.autoAdvance) {
-      this.enqueueAutoAdvanceTask(() => {
-        if (!this.cancelledTimeoutIds.has(numericId)) {
-          callback();
-        }
-        this.cancelledTimeoutIds.delete(numericId);
-      }, ms);
-      return id;
-    }
     this.pendingTimeouts.push({
       id,
       callback,
@@ -375,6 +370,7 @@ export class FakeTimer implements Timer {
       timestamp: this.currentTime,
       seq: this.nextEventSeq++,
     });
+    this.kickAutoAdvancePump();
     return id;
   }
 
@@ -383,8 +379,6 @@ export class FakeTimer implements Timer {
    */
   clearTimeout(handle: NodeJS.Timeout): void {
     this.pendingTimeouts = this.pendingTimeouts.filter((t) => t.id !== handle);
-    // Also mark as cancelled for autoAdvance mode where callback is already scheduled
-    this.cancelledTimeoutIds.add(handle as unknown as number);
   }
 
   /**
@@ -394,33 +388,7 @@ export class FakeTimer implements Timer {
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextIntervalId as unknown as NodeJS.Timeout;
-    const numericId = this.nextIntervalId;
     this.nextIntervalId++;
-    if (this.autoAdvance) {
-      const period = ms > 0 ? ms : 1;
-      const generation = this.autoAdvanceGeneration;
-      const scheduleNext = (): void =>
-        this.enqueueAutoAdvanceTask(() => {
-          if (
-            generation === this.autoAdvanceGeneration &&
-            !this.cancelledIntervalIds.has(numericId)
-          ) {
-            callback();
-            if (
-              generation === this.autoAdvanceGeneration &&
-              !this.cancelledIntervalIds.has(numericId)
-            ) {
-              scheduleNext();
-              return;
-            }
-          }
-          if (generation === this.autoAdvanceGeneration) {
-            this.cancelledIntervalIds.delete(numericId);
-          }
-        }, period);
-      scheduleNext();
-      return id;
-    }
     this.pendingIntervals.push({
       id,
       callback,
@@ -429,6 +397,7 @@ export class FakeTimer implements Timer {
       lastFiredAt: this.currentTime,
       seq: this.nextEventSeq++,
     });
+    this.kickAutoAdvancePump();
     return id;
   }
 
@@ -437,7 +406,6 @@ export class FakeTimer implements Timer {
    */
   clearInterval(handle: NodeJS.Timeout): void {
     this.pendingIntervals = this.pendingIntervals.filter((i) => i.id !== handle);
-    this.cancelledIntervalIds.add(handle as unknown as number);
   }
 
   /**
@@ -526,50 +494,151 @@ export class FakeTimer implements Timer {
     return result as T;
   }
 
-  /**
-   * Queue auto-advance work. Dispatching one task per event-loop turn gives
-   * callers a chance to schedule competing deadlines before fake time moves.
-   */
-  private enqueueAutoAdvanceTask(
-    callback: () => void,
-    ms: number,
-    resolveOnReset?: () => void,
-  ): void {
-    this.pendingAutoAdvanceTasks.push({
-      dueAt: this.currentTime + Math.max(0, ms),
-      registrationOrder: this.nextAutoAdvanceTaskOrder++,
-      callback,
-      resolveOnReset,
-    });
-    this.scheduleAutoAdvanceDispatch();
-  }
-
-  private scheduleAutoAdvanceDispatch(): void {
-    if (this.autoAdvanceDispatchScheduled) {
+  /** Start the microtask pump if auto-advance is on and it is not already running. */
+  private kickAutoAdvancePump(): void {
+    if (!this.autoAdvance || this.autoAdvancePumpRunning) {
       return;
     }
-    this.autoAdvanceDispatchScheduled = true;
+    this.autoAdvancePumpRunning = true;
+    queueMicrotask(() => void this.runAutoAdvancePump());
+  }
+
+  private async runAutoAdvancePump(): Promise<void> {
+    const generation = this.autoAdvanceGeneration;
+    let then: "stop" | "restart" | "burst" | "pacedInterval" = "stop";
+    try {
+      for (let event = 0; event < AUTO_ADVANCE_EVENTS_PER_BURST; event++) {
+        // process.nextTick callbacks queued from a microtask run only once the
+        // microtask queue empties, which an active drain never lets happen; let
+        // them (e.g. a fake child's "exit") land before fake time moves.
+        await flushNextTicks();
+        // Hitting the drain's turn cap only means work is still active; fire the
+        // next event anyway, as a real clock would.
+        await drainUntilQuiescent(this, { description: "auto-advanced FakeTimer" }).catch(
+          () => undefined,
+        );
+        // Ticks queued by continuations during the drain land before the deadline too.
+        await flushNextTicks();
+        if (generation !== this.autoAdvanceGeneration) {
+          then = "restart";
+          return;
+        }
+        if (this.onlyIntervalsPending()) {
+          then = "pacedInterval";
+          return;
+        }
+        if (!this.fireNextDueEvent()) {
+          return;
+        }
+      }
+      then = "burst";
+    } finally {
+      if (then === "burst" && ++this.consecutiveBursts >= AUTO_ADVANCE_BURSTS_BEFORE_THROTTLE) {
+        // Still busy after this many bursts: almost certainly an endless poll.
+        // Keep firing in due order, but at one event per real turn, as a real
+        // clock-driven loop would cost. The pump stays marked running meanwhile.
+        this.scheduleThrottledTick();
+      } else if (then === "burst") {
+        // An endless poll would otherwise monopolize the microtask queue; give the
+        // host one real turn, then keep pumping. The pump stays marked running
+        // until then, so new registrations cannot restart it from a microtask.
+        setImmediate(() => {
+          this.autoAdvancePumpRunning = false;
+          this.kickAutoAdvancePump();
+        });
+      } else {
+        this.consecutiveBursts = 0;
+        this.autoAdvancePumpRunning = false;
+        if (then === "pacedInterval") {
+          this.schedulePacedIntervalTick();
+        } else if (then === "restart") {
+          // Work registered after reset() could not kick a pump that was running.
+          this.kickAutoAdvancePump();
+        }
+      }
+    }
+  }
+
+  /**
+   * Throttled pump: fire one due event per real event-loop turn, skipping the
+   * quiescence drain (the real turn already flushes microtasks and nextTicks).
+   * Returns to the microtask pump once nothing is pending.
+   */
+  private scheduleThrottledTick(): void {
+    const generation = this.autoAdvanceGeneration;
     setImmediate(() => {
-      this.autoAdvanceDispatchScheduled = false;
-      const task = this.takeNextAutoAdvanceTask();
-      if (task === undefined) {
+      if (generation === this.autoAdvanceGeneration && this.fireNextDueEvent()) {
+        this.scheduleThrottledTick();
         return;
       }
-
-      this.currentTime = Math.max(this.currentTime, task.dueAt);
-      task.callback();
-      this.scheduleAutoAdvanceDispatch();
+      this.consecutiveBursts = 0;
+      this.autoAdvancePumpRunning = false;
+      // Anything registered during the final event's settle restarts the pump.
+      this.kickAutoAdvancePump();
     });
   }
 
-  private takeNextAutoAdvanceTask(): PendingAutoAdvanceTask | undefined {
-    if (this.pendingAutoAdvanceTasks.length === 0) {
-      return undefined;
-    }
-
-    this.pendingAutoAdvanceTasks.sort(
-      (left, right) => left.dueAt - right.dueAt || left.registrationOrder - right.registrationOrder,
+  private onlyIntervalsPending(): boolean {
+    return (
+      this.pendingIntervals.length > 0 &&
+      this.pendingSleeps.length === 0 &&
+      this.pendingTimeouts.length === 0
     );
-    return this.pendingAutoAdvanceTasks.shift();
   }
+
+  /**
+   * With only intervals pending, nothing is waiting on fake time except periodic
+   * background work (heartbeats, pollers) that never ends on its own. Pumping it
+   * from microtasks would spin fake time forward without bound while the rest of
+   * the test waits, so fire one tick per real event-loop turn instead.
+   */
+  private schedulePacedIntervalTick(): void {
+    if (this.pacedIntervalTickScheduled) {
+      return;
+    }
+    this.pacedIntervalTickScheduled = true;
+    const generation = this.autoAdvanceGeneration;
+    setImmediate(() => {
+      this.pacedIntervalTickScheduled = false;
+      if (this.autoAdvancePumpRunning) {
+        return;
+      }
+      if (generation !== this.autoAdvanceGeneration) {
+        // Reset since scheduling: let a fresh pump pass decide what drives now.
+        this.kickAutoAdvancePump();
+        return;
+      }
+      if (this.onlyIntervalsPending()) {
+        this.fireNextDueEvent();
+      }
+      if (this.onlyIntervalsPending()) {
+        // Still only background ticks: stay on the cheap per-turn path. A full pump
+        // pass costs a quiescence drain per tick, and an abandoned interval that no
+        // test cleared would then tax every later test sharing the process (the
+        // Windows single-process run starved a real logger flush past its 5s budget).
+        // Anything the tick registers later restarts the pump through its own kick.
+        this.schedulePacedIntervalTick();
+        return;
+      }
+      this.kickAutoAdvancePump();
+    });
+  }
+
+  /** Fire exactly one earliest-due event (FIFO on ties); false when nothing is pending. */
+  private fireNextDueEvent(): boolean {
+    const earliest = this.nextDueEvent(Number.POSITIVE_INFINITY);
+    if (earliest === undefined) {
+      return false;
+    }
+    // Re-select with a finite window so a zero-period interval records a finite
+    // lastFiredAt; the selection itself is unchanged.
+    const event = this.nextDueEvent(earliest.dueAt) ?? earliest;
+    this.currentTime = Math.max(this.currentTime, event.dueAt);
+    event.fire();
+    return true;
+  }
+}
+
+function flushNextTicks(): Promise<void> {
+  return new Promise<void>((resolve) => process.nextTick(resolve));
 }

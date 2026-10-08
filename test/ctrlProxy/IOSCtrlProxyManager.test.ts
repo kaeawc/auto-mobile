@@ -3343,10 +3343,12 @@ describe("IOSCtrlProxyManager", function () {
       (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 12345;
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
-      let healthyAfterTeardown = false;
+      // Healthy only once the fresh runner has been spawned. Keyed on the spawn,
+      // not on the test's progress, because auto-advance keeps running the retry's
+      // health window while the test awaits the original start's rejection.
       fakeExecutor.setCommandHandler("curl -s", () =>
         createExecResult(
-          healthyAfterTeardown
+          fakeExecutor.getSpawnedProcesses().length > 0
             ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
             : "",
           "",
@@ -3378,7 +3380,6 @@ describe("IOSCtrlProxyManager", function () {
 
         releaseTeardown.resolve();
         await expect(originalStart).rejects.toThrow("CtrlProxy failed to start within timeout");
-        healthyAfterTeardown = true;
         await retryStart;
       });
 

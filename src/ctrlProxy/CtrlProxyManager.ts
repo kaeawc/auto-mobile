@@ -7,6 +7,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceLostError } from "../models/DeviceLostError";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
+import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
 import {
   AdbDeviceOfflineError,
   isAdbDeviceOfflineError,
@@ -975,6 +976,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const deviceError = this.statusInspectionDeviceError(error);
     if (deviceError) {
       throw deviceError;
+    }
+    // A timed-out package listing says nothing about whether CtrlProxy is
+    // installed; returning false would start a multi-minute reinstall (#10630).
+    if (status === "installation" && error instanceof AdbCommandTimeoutError) {
+      throw toActionableError(
+        error,
+        "CtrlProxy install status check timed out; the device may be overloaded, retry device acquisition",
+      );
     }
     logger.warn(`[CTRL_PROXY] Error checking ${status} status: ${error}`);
     return false;

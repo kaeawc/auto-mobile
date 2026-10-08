@@ -248,6 +248,16 @@ origin is the top-left of the complete current screen, including system UI:
 - Valid coordinates are half-open: `0 <= x < width` and `0 <= y < height`.
 - A point already in the platform-native space is not density-, inset-,
   Retina-scale-, canonical-pixel-, or rotation-transformed.
+- iPad windowed apps (iOS 27 "Windowed Apps", #6635) are the exception: XCTest
+  reports the app and its hierarchy relative to the app window, so `observe`
+  reports the window's size as `screenSize` and window-relative bounds. `tapAt`,
+  `tapOn`, `swipeOn`, and `dragAndDrop` take points in that window space, and the
+  iOS runner adds the window's on-screen origin before it delivers the gesture.
+  SpringBoard system alerts shown over the app are reported in the same window
+  space, so their bounds can be negative or extend past the window.
+  Points outside the window (other apps, the Dock) are not addressable while a
+  windowed app is observed. A full-screen screenshot is not offset by the window
+  origin; subtract it to compare screenshot pixels with observed bounds.
 
 `tapAt({ x, y })` performs one tap in those native units. Set
 `coordinateSpace: "normalized"` for values from 0 to 1, or `"percent"` for
@@ -435,6 +445,12 @@ info.extras.putString("test-tag", "widget_<id>")
 Keep `contentDescription` as the accessibility-owned label. `observe` exposes the
 ID as `testTag` in its searchable output; select it with
 `tapOn({ testTag: "widget_<id>" })`. The raw hierarchy field is `test-tag`.
+
+Compose with `testTagsAsResourceId = true` (including the AutoMobile overlay)
+reports `Modifier.testTag` as a bare `resource-id` and no `test-tag`. A
+`testTag` selector therefore matches nodes by `test-tag` first; only when no
+node carries that tag does it match a node without a `test-tag` whose
+`resource-id` equals the tag exactly (no `pkg:id/` suffix matching).
 
 Semantic node actions using `testTag`, `uniqueId`, or collection row + column
 (with a stable ID) require a CtrlProxy runner that advertises node-action selector
@@ -656,7 +672,7 @@ display. The one missing-asset re-send goes to the same resolved display without
 display inventory. `update` with `assets` stays on the display the overlay is already on.
 
 `show`, `showVariants`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
-or `{ id, observation }` that uploads images before the overlay is sent, so no
+or `{ id, observation }` that uploads images (or, with `path`, TTF/OTF fonts) before the overlay is sent, so no
 separate upload step is needed. `path` is an absolute path the daemon can read
 (relative paths are rejected); `observation` is an
 `automobile:observation/{deviceId}/{observationId}/screenshot` URI (the
@@ -665,8 +681,10 @@ as reading that resource does: the observation must still be its device's
 current one, a capture still in flight is awaited, and no session ownership is
 needed because the resource itself needs none. Each entry has exactly one of
 the two. The type is detected from the bytes' signature and must be PNG, JPEG
-or WebP, up to 4 MiB per asset, 16 MiB and 32 assets per call, with unique ids.
-Image nodes reference an `id` (`image.asset`; nav items use `image`); the spec
+or WebP, up to 4 MiB per asset, or a TrueType/OpenType font (`.ttf`/`.otf`,
+`path` only), up to 2 MiB per font; 16 MiB and 32 assets per call in total, with
+unique ids. Image nodes reference an `id` (`image.asset`; nav items use `image`);
+`style.fontFamily: {"asset": "<id>"}` references an uploaded font; the spec
 never carries paths or bytes. Every file is read and checked first, so an
 unreadable file, unsupported format or exceeded cap fails the call with nothing
 sent. Uploads then run one at a time. Any failure (a device refusal, an old
@@ -1234,7 +1252,7 @@ subtree, or the whole active-window tree when owner-less.
 | Tool                                                                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 📱 <code>listApps</code>                                                                         | Lists installed apps with optional label/launchability when reported (`device`, `type`, `search`, `profile`; default `type=launchable`).                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects non-empty launch arguments; an app already in the foreground is a success flagged `alreadyForeground`.                                                                                                                                                                                                      |
+| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name. On iOS, optional `launchArguments` start a fresh process and pass argv after the bundle ID. DEBUG storage writes require a launch-scoped mutation token; the daemon supplies it when `--allow-storage-mutations` is present. Android rejects non-empty launch arguments; an app already in the foreground is a success flagged `alreadyForeground`. On iOS simulators, `overlay: true` relaunches the app with the overlay agent injected (state is lost); physical iOS, Android and `com.apple.*` apps reject it.                                       |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ♻️ <code>appLifecycle</code>                                                                     | State-preserving background-process kill for saved-state restoration tests (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -2401,7 +2419,12 @@ with optional `error` and requested field results: `doNotDisturb`, `connectivity
 also include `displays` and `unsupported` field names. Field results report
 `supported` and optional verification, capability, method, values, warning, or
 error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
-`restored`; degraded network writes report capability `partial`. Setter TTL
+`restored`; degraded network writes report capability `partial`. On an iOS
+Simulator, `networkCondition` is per-app only: `offline` or `none` with `appId`,
+within a session, through the opt-in network filter. It reports `scope: "app"`,
+the acknowledged `rule` (revision, owner generation, lease), `coverage: "partial"`
+and `limitations`; reads list the provider's active `rules` for that simulator.
+Setter TTL
 rejection and biometric capture failures also return structured failure payloads
 without MCP `isError`.
 

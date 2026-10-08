@@ -368,6 +368,8 @@ interface CtrlProxyActions {
 
   fun discoverKeystore(requestId: String?, packageName: String)
 
+  fun getSdkCapabilities(requestId: String?, packageName: String)
+
   fun listDataStores(requestId: String?, packageName: String, adapterName: String)
 
   fun getDataStore(

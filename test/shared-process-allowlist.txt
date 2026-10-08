@@ -465,7 +465,6 @@ test/features/overlay/overlayAssetUploader.test.ts
 test/features/overlay/overlayAssets.test.ts
 test/features/overlay/overlayIcons.test.ts
 test/features/overlay/overlayMissingAssets.test.ts
-test/features/overlay/overlayVariants.test.ts
 test/features/performance/DisplayedTimeMetricsCollector.test.ts
 test/features/performance/PerfWindowBuffer.test.ts
 test/features/performance/PerformanceAudit.refreshRate.test.ts
@@ -775,7 +774,6 @@ test/server/observeWaitForMultiPanel.test.ts
 test/server/overlayDisplay.test.ts
 test/server/overlayDisplayAssets.test.ts
 test/server/overlayToolAssets.test.ts
-test/server/overlayVariantsIntegration.test.ts
 test/server/ping.test.ts
 test/server/planHealthSummary.test.ts
 test/server/platform/PlatformClient.test.ts

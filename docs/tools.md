@@ -2409,7 +2409,12 @@ with optional `error` and requested field results: `doNotDisturb`, `connectivity
 also include `displays` and `unsupported` field names. Field results report
 `supported` and optional verification, capability, method, values, warning, or
 error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
-`restored`; degraded network writes report capability `partial`. Setter TTL
+`restored`; degraded network writes report capability `partial`. On an iOS
+Simulator, `networkCondition` is per-app only: `offline` or `none` with `appId`,
+within a session, through the opt-in network filter. It reports `scope: "app"`,
+the acknowledged `rule` (revision, owner generation, lease), `coverage: "partial"`
+and `limitations`; reads list the provider's active `rules` for that simulator.
+Setter TTL
 rejection and biometric capture failures also return structured failure payloads
 without MCP `isError`.
 

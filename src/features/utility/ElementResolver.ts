@@ -3,6 +3,7 @@ import {
   STABLE_VIEW_ID_PREFIX,
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_TEXT_HASH_LENGTH,
+  isSdkInjectedNode,
 } from "../observe/android/StableNodeIdentity";
 
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
@@ -357,6 +358,19 @@ function isIdOnlySelector(selector: ResolverSelector): boolean {
     selector.text === undefined &&
     selector.contentDescription === undefined
   );
+}
+
+/**
+ * An iOS capture merges the in-app SDK snapshot into the XCUITest tree; SDK nodes no
+ * XCUITest node matched are injected beside it. That snapshot can lag the screen (it
+ * still held the pre-keyboard layout right after a focus tap, #10266), so a container
+ * with an identifier shows up again as an SDK node at its old position. When XCUITest
+ * captured a node with that identifier, the SDK copies are duplicates of it; drop them
+ * so they cannot make the container ambiguous.
+ */
+function preferCapturedContainerMatches<T extends { node: SearchableEntry }>(matches: T[]): T[] {
+  const captured = matches.filter(({ node }) => !isSdkInjectedNode(node.source));
+  return captured.length > 0 && captured.length < matches.length ? captured : matches;
 }
 
 export function isWithin(
@@ -715,6 +729,9 @@ export class ElementResolver {
       // can be captured twice, the real node plus an empty nested node with the
       // same id, and only the outer node holds the container's children (#10266).
       const keepOutermost = isIdOnlySelector(selector);
+      if (keepOutermost) {
+        matched.matches = preferCapturedContainerMatches(matched.matches);
+      }
       matched.matches = matched.matches.filter(
         ({ node }) =>
           !matched.matches.some(

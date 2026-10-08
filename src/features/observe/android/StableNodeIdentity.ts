@@ -170,8 +170,12 @@ function attributesOf(node: Record<string, unknown>): Record<string, unknown> {
     : node;
 }
 
-/** iOS keeps SDK extras beside $, rather than inside the attribute slot. */
-function isSdkInjectedNode(node: Record<string, unknown>): boolean {
+/**
+ * Whether an iOS node was injected from the in-app SDK snapshot (`sdk.source=sdkWalker`)
+ * because no XCUITest node matched it. iOS keeps SDK extras beside $, rather than inside
+ * the attribute slot.
+ */
+export function isSdkInjectedNode(node: Record<string, unknown>): boolean {
   const extras = node.extras ?? attributesOf(node).extras;
   return (
     !!extras &&

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -284,6 +284,22 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
     expect(creator.ownsForward(8767)).toBe(true);
     expect(successor.ownsForward(8767)).toBe(false);
     expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("reports only a live foreign lease owner as evidence of another daemon (#10690)", () => {
+    const probe = new FakeOwnerProbe({ kind: "unreachable", detail: "unused" });
+    const mine = lease(probe);
+    expect(mine.liveForeignOwnerPid()).toBeUndefined();
+
+    const owner = foreignOwner();
+    expect(mine.liveForeignOwnerPid()).toBe(FOREIGN_PID);
+    expect(owner.liveForeignOwnerPid()).toBeUndefined();
+    owner.release();
+    expect(mine.liveForeignOwnerPid()).toBeUndefined();
+
+    // A lock naming a dead pid is not evidence.
+    writeFileSync(join(dir, ctrlProxyForwardLeaseFileName(DEVICE)), "2000000000\n");
+    expect(mine.liveForeignOwnerPid()).toBeUndefined();
   });
 
   test("forks share forward records, and records stay out of the lease listing", () => {

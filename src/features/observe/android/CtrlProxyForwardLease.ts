@@ -105,6 +105,13 @@ export interface CtrlProxyForwardLease {
   ownsForward?(localPort: number): boolean;
   /** The directory holding the lease and forward records, for diagnostics. */
   ownershipDirectory?(): string;
+  /**
+   * PID of a live process other than this one that holds the device's lease:
+   * positive evidence that another daemon owns an unrecorded forward. Absent,
+   * dead, or own-process owners yield `undefined`, so a leftover forward from
+   * an older daemon stays reclaimable (issue #10690 upgrade path).
+   */
+  liveForeignOwnerPid?(): number | undefined;
 }
 
 export interface FileCtrlProxyForwardLeaseDeps {
@@ -340,6 +347,11 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     return this.lockDir();
   }
 
+  public liveForeignOwnerPid(): number | undefined {
+    const pid = readLockOwnerPid(this.resolveLockPath());
+    return pid === undefined || pid === this.pid ? undefined : pid;
+  }
+
   /** A separate holder on the same process lease for one detached observer. */
   public fork(): CtrlProxyForwardLease {
     let acquired = false;
@@ -361,6 +373,7 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       forgetOwnedForward: (localPort) => this.forgetOwnedForward(localPort),
       ownsForward: (localPort) => this.ownsForward(localPort),
       ownershipDirectory: () => this.ownershipDirectory(),
+      liveForeignOwnerPid: () => this.liveForeignOwnerPid(),
       // A fork can meet the same idle or orphaned foreign owner as the singleton.
       tryReclaimFromStaleOwner: async () => {
         const result = await this.reclaimHolder();

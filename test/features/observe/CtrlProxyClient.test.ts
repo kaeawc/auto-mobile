@@ -8,7 +8,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
@@ -17,6 +17,7 @@ import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyF
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import {
   FileCtrlProxyForwardLease,
+  ctrlProxyForwardLeaseFileName,
   ctrlProxyOwnedForwardFileName,
   type ForwardLeaseReclaimResult,
 } from "../../../src/features/observe/android/CtrlProxyForwardLease";
@@ -1990,6 +1991,8 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("forward ownership across coordination directories (#10690)", function () {
+    // Above any real pid_max, so it never names a live process.
+    const DEAD_PID = 2_000_000_000;
     const coordinationDirs: string[] = [];
 
     afterEach(function () {
@@ -2075,16 +2078,69 @@ describe("AndroidCtrlProxyClient", function () {
         );
 
     for (const foreignPort of [8765, 52001]) {
-      test(`leaves another daemon's tcp:${foreignPort} forward on the device in place and fails actionably`, async function () {
+      test(`reclaims an unrecorded tcp:${foreignPort} forward when no daemon holds a lease (#10690 upgrade)`, async function () {
         await accessibilityServiceClient.close();
         AndroidCtrlProxyClient.resetInstances();
         fakeAdb.clearHistory();
-        // Daemon A created the forward and recorded it in its own coordination directory.
-        daemonLease(newCoordinationDir(), process.ppid).recordOwnedForward(foreignPort);
+        const table = installSharedForwardTable([
+          `${testDevice.deviceId} tcp:${foreignPort} tcp:8765`,
+        ]);
+
+        const client = daemonClient(daemonLease(newCoordinationDir()));
+        registerTestSingleton(client);
+        try {
+          await client.setupPortForwarding();
+
+          expect(removalsAndCreations()).toEqual([
+            `forward --remove tcp:${foreignPort}`,
+            "forward tcp:8765 tcp:8765",
+          ]);
+          expect(table.rows()).toEqual([`${testDevice.deviceId} tcp:8765 tcp:8765`]);
+        } finally {
+          await client.close();
+          AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+        }
+      });
+    }
+
+    test("reclaims an unrecorded forward whose lease owner is dead", async function () {
+      await accessibilityServiceClient.close();
+      AndroidCtrlProxyClient.resetInstances();
+      fakeAdb.clearHistory();
+      const dir = newCoordinationDir();
+      // A daemon that died holding the lease leaves a lock naming a dead pid.
+      writeFileSync(join(dir, ctrlProxyForwardLeaseFileName(testDevice.deviceId)), `${DEAD_PID}\n`);
+      const table = installSharedForwardTable([`${testDevice.deviceId} tcp:8765 tcp:8765`]);
+
+      const client = daemonClient(daemonLease(dir));
+      registerTestSingleton(client);
+      try {
+        await client.setupPortForwarding();
+
+        expect(removalsAndCreations()).toEqual([
+          "forward --remove tcp:8765",
+          "forward tcp:8765 tcp:8765",
+        ]);
+        expect(table.rows()).toEqual([`${testDevice.deviceId} tcp:8765 tcp:8765`]);
+      } finally {
+        await client.close();
+        AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+      }
+    });
+
+    for (const foreignPort of [8765, 52001]) {
+      test(`leaves an unrecorded tcp:${foreignPort} forward in place while a live daemon holds the lease`, async function () {
+        await accessibilityServiceClient.close();
+        AndroidCtrlProxyClient.resetInstances();
+        fakeAdb.clearHistory();
+        const dir = newCoordinationDir();
+        // Daemon A is alive and holds the device lease; its forward is unrecorded here.
+        const daemonA = daemonLease(dir, process.ppid);
+        expect(daemonA.tryAcquire()).toBe(true);
         const foreignRow = `${testDevice.deviceId} tcp:${foreignPort} tcp:8765`;
         const table = installSharedForwardTable([foreignRow]);
 
-        const client = daemonClient(daemonLease(newCoordinationDir()));
+        const client = daemonClient(daemonLease(dir));
         registerTestSingleton(client);
         try {
           const failure = await client.setupPortForwarding().then(
@@ -2093,15 +2149,10 @@ describe("AndroidCtrlProxyClient", function () {
           );
 
           expect(failure).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
-          expect((failure as Error).message).toContain(
-            `${testDevice.deviceId} is driven by another AutoMobile daemon`,
-          );
-          expect((failure as Error).message).toContain(
-            `adb -s ${testDevice.deviceId} forward --remove tcp:${foreignPort}`,
-          );
           expect(removalsAndCreations()).toEqual([]);
           expect(table.rows()).toEqual([foreignRow]);
         } finally {
+          daemonA.release();
           await client.close();
           AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
         }
@@ -2109,13 +2160,43 @@ describe("AndroidCtrlProxyClient", function () {
       });
     }
 
-    test("two daemons with separate coordination directories never remove each other's forward", async function () {
+    test("the orphan sweep refuses an unrecorded forward when a live foreign lease owner is reported", async function () {
+      await accessibilityServiceClient.close();
+      AndroidCtrlProxyClient.resetInstances();
+      fakeAdb.clearHistory();
+      const foreignRow = `${testDevice.deviceId} tcp:8765 tcp:8765`;
+      const table = installSharedForwardTable([foreignRow]);
+      const lease = daemonLease(newCoordinationDir());
+      lease.liveForeignOwnerPid = () => process.ppid;
+
+      const client = daemonClient(lease);
+      registerTestSingleton(client);
+      try {
+        const failure = await client.sweepOrphanedCtrlProxyPortForwards().then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+        expect(failure).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+        expect((failure as Error).message).toContain(
+          `${testDevice.deviceId} is driven by another AutoMobile daemon`,
+        );
+        expect((failure as CtrlProxyForwardingLeaseConflictError).ownerPid).toBe(process.ppid);
+        expect(removalsAndCreations()).toEqual([]);
+        expect(table.rows()).toEqual([foreignRow]);
+      } finally {
+        await client.close();
+        AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+      }
+    });
+
+    test("two daemons sharing a coordination directory never remove each other's forward", async function () {
       await accessibilityServiceClient.close();
       AndroidCtrlProxyClient.resetInstances();
       fakeAdb.clearHistory();
       const table = installSharedForwardTable([]);
       const dirA = newCoordinationDir();
-      const dirB = newCoordinationDir();
+      const dirB = dirA;
       const daemonA = daemonClient(daemonLease(dirA));
       const daemonB = daemonClient(daemonLease(dirB));
       const ownRow = `${testDevice.deviceId} tcp:8765 tcp:8765`;
@@ -2125,8 +2206,9 @@ describe("AndroidCtrlProxyClient", function () {
         expect(table.rows()).toEqual([ownRow]);
         expect(existsSync(join(dirA, marker))).toBe(true);
 
-        await expect(daemonB.setupPortForwarding()).rejects.toBeInstanceOf(
-          CtrlProxyForwardingLeaseConflictError,
+        // Same pid, so the in-process lease conflict is a plain Error.
+        await expect(daemonB.setupPortForwarding()).rejects.toThrow(
+          "Another AutoMobile process owns CtrlProxy forwarding",
         );
         expect(table.rows()).toEqual([ownRow]);
         expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8765");

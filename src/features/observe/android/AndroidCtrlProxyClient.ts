@@ -5183,14 +5183,40 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     if (foreignPorts.size > 0) {
+      await this.resolveUnrecordedCtrlProxyForwards([...foreignPorts], signal);
+    }
+  }
+
+  /**
+   * No live daemon holds a lease for this device, so unrecorded forwards are
+   * leftovers from an older daemon (upgrade path): record and remove them (#10690).
+   */
+  private async resolveUnrecordedCtrlProxyForwards(
+    ports: number[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const liveOwnerPid = this.ctrlProxyForwardLease.liveForeignOwnerPid?.();
+    if (liveOwnerPid !== undefined) {
       throw new CtrlProxyForwardingLeaseConflictError(
         describeForeignCtrlProxyForwards(
           this.device.deviceId,
-          [...foreignPorts],
+          ports,
           this.ctrlProxyForwardLease.ownershipDirectory?.(),
         ),
-        undefined,
+        liveOwnerPid,
       );
+    }
+    for (const port of ports) {
+      logger.warn(
+        `[CTRL_PROXY] Reclaiming legacy/unrecorded CtrlProxy forward on ${this.device.deviceId} ` +
+          `tcp:${port}: no live daemon owns it`,
+      );
+      this.ctrlProxyForwardLease.recordOwnedForward?.(port);
+      if (!(await this.removeCtrlProxyPortForward(port, signal))) {
+        throw new Error(
+          `Failed to reclaim unrecorded CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
+        );
+      }
     }
   }
 

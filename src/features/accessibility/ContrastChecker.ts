@@ -32,6 +32,14 @@ const LARGE_TEXT_MIN_BOX_HEIGHT_DP = 32;
  * never taken as proof of large text.
  */
 const LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP = 40;
+/** A pixel this far from the background counts as ink. */
+const INK_MIN_DISTANCE = 40;
+/** Grid probes spent locating the ink extent of an element. */
+const INK_SCAN_MAX_PROBES = 16384;
+/** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
+const GLYPH_PIXEL_MAX_DISTANCE = 30;
+/** How far from a sample point to look for the colour a stroke away. */
+const GLYPH_NEIGHBOUR_OFFSET = 12;
 
 /** The text size in px the capture reported for this element, or null when absent or unusable. */
 function reportedTextSizePx(element: Element): number | null {
@@ -878,11 +886,65 @@ export class ContrastChecker {
     };
   }
 
+  /**
+   * Bounding box of the pixels that differ from `background`, found on a coarse grid
+   * (at most ~16k probes) so a wide, mostly empty box (a hint in a text field) is not
+   * sampled uniformly: 4096 evenly spaced samples of a 2000x176px box hit only a handful
+   * of glyph pixels, too few to out-vote the background (#10290). Null when the ink
+   * covers most of the box (dense foreground; uniform sampling is already right) or
+   * nothing differs.
+   */
+  private inkBounds(
+    image: RawImage,
+    bounds: Element["bounds"],
+    background: RGB,
+  ): Element["bounds"] | null {
+    const left = Math.ceil(bounds.left);
+    const top = Math.ceil(bounds.top);
+    const width = Math.ceil(bounds.right) - left;
+    const height = Math.ceil(bounds.bottom) - top;
+    const step = Math.max(1, Math.ceil(Math.sqrt((width * height) / INK_SCAN_MAX_PROBES)));
+    let inkLeft = Infinity;
+    let inkTop = Infinity;
+    let inkRight = -Infinity;
+    let inkBottom = -Infinity;
+    let probes = 0;
+    let ink = 0;
+    for (let y = 0; y < height; y += step) {
+      for (let x = 0; x < width; x += step) {
+        probes++;
+        if (
+          this.colorDistance(this.resolvePixelColor(image, left + x, top + y), background) >
+          INK_MIN_DISTANCE
+        ) {
+          ink++;
+          inkLeft = Math.min(inkLeft, x);
+          inkTop = Math.min(inkTop, y);
+          inkRight = Math.max(inkRight, x);
+          inkBottom = Math.max(inkBottom, y);
+        }
+      }
+    }
+    if (ink === 0 || ink > probes * 0.5) {
+      return null;
+    }
+    const pad = step + 2;
+    const inked = {
+      left: left + Math.max(0, inkLeft - pad),
+      top: top + Math.max(0, inkTop - pad),
+      right: left + Math.min(width, inkRight + pad + 1),
+      bottom: top + Math.min(height, inkBottom + pad + 1),
+    };
+    const smaller = (inked.right - inked.left) * (inked.bottom - inked.top) <= width * height * 0.5;
+    return smaller && inked.right - inked.left >= 2 && inked.bottom - inked.top >= 2 ? inked : null;
+  }
+
   private sampleElementColors(
     image: RawImage,
     bounds: Element["bounds"],
   ): { textColor: RGB; backgroundColor: RGB } {
-    const pixels = this.elementPixels(image, this.interiorBounds(bounds));
+    const interior = this.interiorBounds(bounds);
+    const pixels = this.elementPixels(image, interior);
     const clusters = this.colorClusters(pixels);
     let backgroundColor = clusters[0].color;
     const perimeterPixels = this.perimeterPixels(image, bounds);
@@ -911,10 +973,16 @@ export class ContrastChecker {
     ) {
       backgroundColor = this.averageColor(perimeterPixels);
     }
-    const supported = clusters.filter(
+    // Foreground candidates come from the ink extent when the glyphs are sparse in the box.
+    const ink = this.inkBounds(image, interior, backgroundColor);
+    const inkPixels = ink ? this.elementPixels(image, ink) : pixels;
+    const textClusters = ink ? this.colorClusters(inkPixels) : clusters;
+    const supported = textClusters.filter(
       (cluster) =>
-        cluster.count >= Math.max(2, pixels.length * 0.0025) &&
-        !this.isSimilarColor(cluster.color, backgroundColor),
+        cluster.count >= Math.max(2, inkPixels.length * 0.0025) &&
+        !this.isSimilarColor(cluster.color, backgroundColor) &&
+        // JPEG ringing around glyphs sits just outside the similarity radius; it is not ink.
+        (!ink || this.colorDistance(cluster.color, backgroundColor) > INK_MIN_DISTANCE),
     );
     const textColor = this.selectTextColor(supported, backgroundColor, perimeter);
     return { textColor, backgroundColor };
@@ -1020,14 +1088,57 @@ export class ContrastChecker {
         colors.length >= (2 * radius + 1) ** 2 * 0.2 &&
         background.count >= colors.length * 0.2
       ) {
-        return this.colorClusters(
+        const local = this.colorClusters(
           colors.filter((color) => this.isSimilarColor(color, background.color)),
           false,
         )[0].color;
+        return this.isGlyphPixel(image, bounds, elementColors, local, x, y)
+          ? elementColors.backgroundColor
+          : local;
       }
     }
 
     return elementColors.backgroundColor;
+  }
+
+  /**
+   * A point on a glyph stroke yields the stroke itself as its "background" (JPEG ringing
+   * and anti-aliasing put it just outside the text colour's similarity radius), which would
+   * report ~1:1 for legible text. Treat it as the dominant background instead (#10290).
+   */
+  private isGlyphPixel(
+    image: RawImage,
+    bounds: Element["bounds"],
+    elementColors: ElementColors,
+    color: RGB,
+    x: number,
+    y: number,
+  ): boolean {
+    if (
+      this.colorDistance(color, elementColors.textColor) > GLYPH_PIXEL_MAX_DISTANCE ||
+      this.colorDistance(color, elementColors.textColor) >=
+        this.colorDistance(color, elementColors.backgroundColor)
+    ) {
+      return false;
+    }
+    // A stroke is narrow: the colour a few strokes away is the dominant background. A
+    // genuinely text-coloured region (a gradient end, an image) is not surrounded by it.
+    const around = [
+      [GLYPH_NEIGHBOUR_OFFSET, 0],
+      [-GLYPH_NEIGHBOUR_OFFSET, 0],
+      [0, GLYPH_NEIGHBOUR_OFFSET],
+      [0, -GLYPH_NEIGHBOUR_OFFSET],
+    ].filter(([dx, dy]) =>
+      this.isSimilarColor(
+        this.resolvePixelColor(
+          image,
+          clamp(x + dx, bounds.left, bounds.right - 1),
+          clamp(y + dy, bounds.top, bounds.bottom - 1),
+        ),
+        elementColors.backgroundColor,
+      ),
+    );
+    return around.length >= 3;
   }
 
   private setBackgroundCache(bounds: Element["bounds"], color: RGB): void {

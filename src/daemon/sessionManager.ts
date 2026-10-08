@@ -70,7 +70,7 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
-import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "./SessionHeartbeatMonitor";
+import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionIdleTimeoutMs,
@@ -603,6 +603,13 @@ export type ActiveSessionExecutionChecker = (
   sessionId: string,
   query?: ActiveSessionExecutionQuery,
 ) => boolean;
+
+/**
+ * The latest request deadline among a session's in-flight executions, on the session manager's
+ * clock; `Number.POSITIVE_INFINITY` or undefined when some execution carries no deadline. Same
+ * contract as `SessionExecutionProbe.latestExecutionDeadlineMs` (#10712).
+ */
+export type SessionExecutionDeadlineLookup = (sessionId: string) => number | undefined;
 
 export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
 
@@ -1296,6 +1303,8 @@ export class SessionManager {
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
+  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
   // tool call, env-overridable (see `./sessionLivenessWindows`).
@@ -1536,6 +1545,15 @@ export class SessionManager {
    */
   setActiveSessionExecutionChecker(checker: ActiveSessionExecutionChecker): void {
     this.activeSessionExecutionChecker = checker;
+  }
+
+  /**
+   * Sibling of {@link setActiveSessionExecutionChecker}: how the idle sweep learns the request
+   * deadline that bounds an in-flight execution's veto, so it judges the veto with the same
+   * shared policy as the heartbeat and owner-disconnect paths (#10712, #10713).
+   */
+  setSessionExecutionDeadlineLookup(lookup: SessionExecutionDeadlineLookup): void {
+    this.sessionExecutionDeadlineLookup = lookup;
   }
 
   /**
@@ -6507,24 +6525,28 @@ export class SessionManager {
     if (this.timer.now() <= idleDeadline) {
       return false;
     }
-    return (
-      !this.activeSessionExecutionChecker(session.sessionId) ||
-      this.hasUnsettledExecutionOutlivedVetoCeiling(session)
-    );
+    return !isReleaseVetoedByExecutions({
+      hasActiveExecutions: this.activeSessionExecutionChecker(session.sessionId),
+      now: this.timer.now(),
+      ...this.idleExecutionVetoBoundInput(session),
+    });
   }
 
   /**
-   * Whether an in-flight execution has vetoed this session's idle release for longer than
-   * {@link UNSETTLED_EXECUTION_VETO_CEILING_MS} (#10713). Every call start refreshes `expiresAt`,
-   * so the veto has held since the idle deadline passed; past the ceiling the call has outlived
-   * any request deadline it could have had, and the idle sweep releases the session the same way
-   * the heartbeat and owner-disconnect paths already do (#10663).
+   * The facts the shared unsettled-execution policy (#10712) bounds an idle-release veto by
+   * (#10713). Every call start refreshes `expiresAt`, so the veto has held since the idle deadline
+   * passed: it lasts until the vetoing calls' request deadline plus grace, or, when some call has
+   * no deadline, the ceiling after the idle deadline — the same bound the heartbeat and
+   * owner-disconnect paths apply (#10663).
    */
-  private hasUnsettledExecutionOutlivedVetoCeiling(session: Session): boolean {
-    return (
-      this.timer.now() - (session.expiresAt + suspectGraceMsFor(session)) >=
-      UNSETTLED_EXECUTION_VETO_CEILING_MS
-    );
+  private idleExecutionVetoBoundInput(session: Session): {
+    vetoedSince: number;
+    latestDeadlineMs: number | undefined;
+  } {
+    return {
+      vetoedSince: session.expiresAt + suspectGraceMsFor(session),
+      latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
+    };
   }
 
   /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
@@ -6641,8 +6663,8 @@ export class SessionManager {
       if (this.activeSessionExecutionChecker(sessionId)) {
         logger.warn(
           `Session ${sessionId} was kept past its idle deadline by executions that never ` +
-            `settled; releasing it anyway past the ${UNSETTLED_EXECUTION_VETO_CEILING_MS}ms ` +
-            `unsettled-execution ceiling`,
+            `settled; releasing it anyway past their request deadline plus grace, or the ` +
+            `unsettled-execution ceiling when a call has no deadline`,
         );
       }
       const release = this.releaseSession(

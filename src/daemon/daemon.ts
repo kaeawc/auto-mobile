@@ -793,6 +793,9 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
+    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
+      this.latestSessionExecutionDeadlineMs(sessionId),
+    );
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(

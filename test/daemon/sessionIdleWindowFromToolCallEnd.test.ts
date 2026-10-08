@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
-  SessionHeartbeatMonitor,
+  UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
-} from "../../src/daemon/SessionHeartbeatMonitor";
+} from "../../src/daemon/unsettledExecutionVeto";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
@@ -134,7 +135,7 @@ describe("the idle window counts from the end of the last tool call", () => {
     expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
   });
 
-  it("releases a session whose call never settles once the veto outlives the ceiling (#10713)", async () => {
+  it("releases a session whose deadline-less call never settles once the veto outlives the ceiling (#10713)", async () => {
     await manager.getOrCreateSession(SESSION);
     inFlight = true;
     const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
@@ -143,6 +144,54 @@ describe("the idle window counts from the end of the last tool call", () => {
     await sweep();
     expect(manager.hasSession(SESSION)).toBe(true);
     expect(releases).toEqual([]);
+
+    timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS);
+    await sweep();
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
+  });
+
+  it("bounds a never-settling call's veto by its request deadline plus grace (#10712, #10713)", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+    const requestDeadline = idleDeadline + 60_000;
+    manager.setSessionExecutionDeadlineLookup(() => requestDeadline);
+
+    timer.setCurrentTime(requestDeadline + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1);
+    await sweep();
+    expect(manager.hasSession(SESSION)).toBe(true);
+    expect(releases).toEqual([]);
+
+    timer.setCurrentTime(requestDeadline + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+    await sweep();
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
+  });
+
+  it("a request deadline that passed before the idle deadline releases at the idle deadline", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+    const requestDeadline = timer.now() + 1_000;
+    manager.setSessionExecutionDeadlineLookup(() => requestDeadline);
+
+    timer.setCurrentTime(idleDeadline);
+    await sweep();
+    expect(manager.hasSession(SESSION)).toBe(true);
+
+    timer.setCurrentTime(idleDeadline + 1);
+    await sweep();
+    expect(releases.map((release) => release.reason)).toEqual(["cleanup-expired"]);
+  });
+
+  it("a call with no deadline keeps the ceiling fallback even when a lookup is wired", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    const idleDeadline = manager.getAllSessions()[0]!.expiresAt;
+    manager.setSessionExecutionDeadlineLookup(() => Number.POSITIVE_INFINITY);
+
+    timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS - 1);
+    await sweep();
+    expect(manager.hasSession(SESSION)).toBe(true);
 
     timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS);
     await sweep();

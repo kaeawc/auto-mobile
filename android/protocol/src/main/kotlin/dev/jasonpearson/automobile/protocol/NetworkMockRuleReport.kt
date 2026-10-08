@@ -25,16 +25,12 @@ object NetworkMockRuleReportContract {
   /** [previousJson] is the result data an earlier receiver left, or null for the first one. */
   fun append(previousJson: String?, rejected: List<RejectedNetworkMockRule>): String {
     val previous = decode(previousJson)?.rejected.orEmpty()
-    return json.encodeToString(
-      NetworkMockRuleReport.serializer(),
-      NetworkMockRuleReport(previous + rejected),
-    )
+    return json.encodeToString(NetworkMockRuleReport(previous + rejected))
   }
 
   /** Null when no receiver answered or the data is not a report. */
   fun decode(resultData: String?): NetworkMockRuleReport? {
     if (resultData.isNullOrEmpty()) return null
-    return runCatching { json.decodeFromString(NetworkMockRuleReport.serializer(), resultData) }
-      .getOrNull()
+    return runCatching { json.decodeFromString<NetworkMockRuleReport>(resultData) }.getOrNull()
   }
 }

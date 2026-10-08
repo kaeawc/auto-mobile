@@ -66,6 +66,7 @@ class RotationAdb extends FakeAdbExecutor {
   lock: string | null = null;
   lockBaseline: string | null = null;
   lockedLock = "0:1:1:1:2:0";
+  failLockWrite = false;
   override async executeCommand(command: string): Promise<ExecResult> {
     await super.executeCommand(command);
     if (command === "shell cmd device_state print-states") {
@@ -77,6 +78,9 @@ class RotationAdb extends FakeAdbExecutor {
       return output(this.lock ?? "null");
     }
     if (command.startsWith("shell settings put secure device_state_rotation_lock")) {
+      if (this.failLockWrite) {
+        throw new Error("secure settings write refused");
+      }
       this.lock = words[5];
       return output("");
     }
@@ -964,6 +968,78 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     ]);
     expect(adb.auto).toBe(1);
     expect(adb.lock).toBe("0:1:1:2:2:0");
+  });
+
+  test("a failed device_state_rotation_lock write still restores user_rotation and accelerometer_rotation", async () => {
+    const adb = new StatesAdb();
+    adb.auto = 0;
+    adb.user = 1;
+    // Lock already at its baseline, so only the failed write itself is under test.
+    adb.lock = "0:1:1:2:2:0";
+    adb.lockBaseline = "0:1:1:2:2:0";
+    adb.failLockWrite = true;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+        userRotation: 0,
+        accelerometerRotation: 1,
+        deviceStateRotationLock: "0:1:1:2:2:0",
+      });
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter((c) => c.includes("settings put") || c.includes("settings get system")),
+      ).toEqual([
+        // Compare-and-skip read: user_rotation differs.
+        "shell settings get system user_rotation",
+        "shell settings put secure device_state_rotation_lock 0:1:1:2:2:0",
+        "shell settings put system user_rotation 0",
+        "shell settings put system accelerometer_rotation 1",
+        "shell settings get system user_rotation",
+        "shell settings get system accelerometer_rotation",
+      ]);
+      expect(adb.user).toBe(0);
+      expect(adb.auto).toBe(1);
+      expect(
+        warn.mock.calls.some((call) =>
+          String(call[0]).includes(
+            "Failed to restore device_state_rotation_lock=0:1:1:2:2:0; restoring the rotation settings anyway: secure settings write refused",
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failed lock write leaves the accelerometer_rotation read-back to report a revert", async () => {
+    const adb = new StatesAdb();
+    adb.states = FOLD_STATES;
+    adb.auto = 0;
+    adb.user = 1;
+    adb.lock = "0:1:1:1:2:0";
+    adb.lockBaseline = "0:1:1:2:2:0";
+    adb.failLockWrite = true;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const error = await new Rotate(device, adb, new FakeTimer())
+        .restoreRotationSettings({
+          userRotation: 0,
+          accelerometerRotation: 1,
+          deviceStateRotationLock: "0:1:1:2:2:0",
+        })
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(RotationSettingManagedError);
+      expect(adb.user).toBe(0);
+      expect(
+        adb.getExecutedCommands().filter((c) => c.startsWith("shell settings put system")),
+      ).toEqual([
+        "shell settings put system user_rotation 0",
+        "shell settings put system accelerometer_rotation 1",
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("a matching lock is part of compare-and-skip; a differing lock alone is rewritten", async () => {

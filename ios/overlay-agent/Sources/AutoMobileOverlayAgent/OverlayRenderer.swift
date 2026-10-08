@@ -76,7 +76,12 @@ struct NodeView: View {
 
     private var isVisible: Bool {
         guard let condition = node.visibleWhen else { return true }
-        return model.state[condition.key] == condition.equals
+        return model.holds(condition)
+    }
+
+    /// Controls that run `onTap` from their own action, so the generic tap gesture stays off them.
+    private var handlesOwnTap: Bool {
+        ["switch", "checkbox", "button"].contains(node.type)
     }
 
     private var style: Style? { node.style }
@@ -104,6 +109,12 @@ struct NodeView: View {
         case "textField":
             TextField(node.placeholder ?? "", text: model.binding(forStateKey: node.stateKey ?? ""))
                 .textFieldStyle(.roundedBorder)
+        case "switch":
+            switchView
+        case "checkbox":
+            checkboxView
+        case "button":
+            buttonView
         case "scroll":
             ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
                 if let child = node.child { NodeView(node: child, model: model) }
@@ -197,6 +208,51 @@ struct NodeView: View {
         }
     }
 
+    // MARK: Controls
+
+    private var isOn: Bool {
+        model.state[node.stateKey ?? ""]?.boolValue ?? false
+    }
+
+    private func toggleBound() {
+        guard let key = node.stateKey else { return }
+        model.toggle(key, then: node.onTap ?? [])
+    }
+
+    @ViewBuilder private var switchView: some View {
+        let binding = Binding(get: { isOn }, set: { _ in toggleBound() })
+        if let label = node.label {
+            Toggle(label, isOn: binding)
+        } else {
+            Toggle("", isOn: binding).labelsHidden()
+        }
+    }
+
+    /// iOS has no checkbox control: a button whose checked square reads as selected.
+    private var checkboxView: some View {
+        Button(action: toggleBound) {
+            HStack(spacing: 8) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .accessibilityHidden(true)
+                if let label = node.label { Text(label) }
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(isOn ? "checked" : "unchecked")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    @ViewBuilder private var buttonView: some View {
+        let button = Button(node.label ?? "") { model.run(node.onTap ?? []) }
+        switch node.variant {
+        case "outlined": button.buttonStyle(.bordered)
+        case "text": button.buttonStyle(.borderless)
+        default: button.buttonStyle(.borderedProminent)
+        }
+    }
+
     private var navSelection: Int {
         if let pagerId = node.pager { return model.pages[pagerId] ?? 0 }
         if let key = node.stateKey { return model.state[key]?.intValue ?? 0 }
@@ -208,8 +264,7 @@ struct NodeView: View {
         return HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 Button {
-                    if let pagerId = node.pager { model.setPage(pagerId, index) }
-                    if let key = node.stateKey { model.state[key] = .number(Double(index)) }
+                    model.select(index: index, pager: node.pager, key: node.stateKey)
                 } label: {
                     VStack(spacing: 2) {
                         if let icon = item.icon {
@@ -225,19 +280,26 @@ struct NodeView: View {
         }
     }
 
+    /// Opens at its first detent. Dragging between detents and swipe-to-dismiss are not
+    /// prototyped on iOS yet.
     @ViewBuilder private var sheet: some View {
-        let open = node.openWhen.map { model.state[$0.key] == $0.equals } ?? false
+        let open = node.openWhen.map(model.holds) ?? false
         if open, let child = node.child {
-            VStack(spacing: 8) {
-                if node.dragHandle ?? true {
-                    Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5).padding(.top, 6)
+            GeometryReader { proxy in
+                VStack(spacing: 8) {
+                    if node.dragHandle ?? true {
+                        Capsule().fill(Color.secondary.opacity(0.5)).frame(width: 36, height: 5).padding(.top, 6)
+                    }
+                    NodeView(node: child, model: model)
                 }
-                NodeView(node: child, model: model)
+                .frame(maxWidth: .infinity)
+                .frame(height: node.detents?.first.map { detent in
+                    CGFloat(detent.height(in: Double(proxy.size.height)))
+                })
+                .background(Color(UIColor.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .frame(maxHeight: .infinity, alignment: .bottom)
             }
-            .frame(maxWidth: .infinity)
-            .background(Color(UIColor.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .frame(maxHeight: .infinity, alignment: .bottom)
         }
     }
 
@@ -267,7 +329,7 @@ struct NodeView: View {
                     .stroke(Color(hex: style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
             )
             .opacity(style?.alpha ?? 1)
-            .modifier(TapModifier(actions: node.onTap, model: model))
+            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model))
             .modifier(IdentifierModifier(
                 identifier: node.testTag ?? node.id,
                 grouping: grouping

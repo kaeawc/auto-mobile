@@ -48,8 +48,14 @@ enum JSONValue: Codable, Equatable {
         }
     }
 
+    /// Nil, rather than a trap, for a value outside `Int`'s range.
     var intValue: Int? {
-        if case let .number(value) = self { return Int(value) }
+        if case let .number(value) = self { return Int(exactly: value.rounded(.towardZero)) }
+        return nil
+    }
+
+    var numberValue: Double? {
+        if case let .number(value) = self { return value }
         return nil
     }
 
@@ -141,11 +147,93 @@ struct OverlayAction: Decodable {
     let page: JSONValue?
     let key: String?
     let value: JSONValue?
+    /// `increment` step; 1 when omitted.
+    let by: Double?
 }
 
-struct Condition: Decodable {
-    let key: String
-    let equals: JSONValue
+/// The shared validator's condition vocabulary (`visibleWhen`, `openWhen`): exactly one form per
+/// object, recursive through `all`/`any`/`not`. Mirrors Android's `OverlayCondition.holds`.
+indirect enum Condition: Decodable, Equatable {
+    case equals(key: String, value: JSONValue)
+    case notEquals(key: String, value: JSONValue)
+    case greaterThan(key: String, value: Double)
+    case lessThan(key: String, value: Double)
+    case all([Condition])
+    case any([Condition])
+    case not(Condition)
+
+    private enum CodingKeys: String, CodingKey {
+        case key, equals, notEquals, gt, lt, all, any, not
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let all = try container.decodeIfPresent([Condition].self, forKey: .all) {
+            self = .all(all)
+        } else if let any = try container.decodeIfPresent([Condition].self, forKey: .any) {
+            self = .any(any)
+        } else if let not = try container.decodeIfPresent(Condition.self, forKey: .not) {
+            self = .not(not)
+        } else {
+            let key = try container.decode(String.self, forKey: .key)
+            if let value = try container.decodeIfPresent(JSONValue.self, forKey: .equals) {
+                self = .equals(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(JSONValue.self, forKey: .notEquals) {
+                self = .notEquals(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .gt) {
+                self = .greaterThan(key: key, value: value)
+            } else if let value = try container.decodeIfPresent(Double.self, forKey: .lt) {
+                self = .lessThan(key: key, value: value)
+            } else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .key,
+                    in: container,
+                    debugDescription: "Condition needs one of equals, notEquals, gt or lt"
+                )
+            }
+        }
+    }
+
+    /// A missing key fails `equals`, `gt` and `lt` and satisfies `notEquals`; a non-numeric value
+    /// fails the numeric comparisons instead of throwing.
+    func holds(_ state: [String: JSONValue]) -> Bool {
+        switch self {
+        case let .equals(key, value): state[key] == value
+        case let .notEquals(key, value): state[key] != value
+        case let .greaterThan(key, value): state[key]?.numberValue.map { $0 > value } ?? false
+        case let .lessThan(key, value): state[key]?.numberValue.map { $0 < value } ?? false
+        case let .all(conditions): conditions.allSatisfy { $0.holds(state) }
+        case let .any(conditions): conditions.contains { $0.holds(state) }
+        case let .not(condition): !condition.holds(state)
+        }
+    }
+}
+
+/// A `bottomSheet` height stop: half or all of the sheet's container, or a fixed size in points.
+enum Detent: Decodable, Equatable {
+    case half
+    case full
+    case points(Double)
+
+    private struct Fixed: Decodable { let dp: Double }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let keyword = try? container.decode(String.self) {
+            self = keyword == "full" ? .full : .half
+        } else {
+            self = try .points(container.decode(Fixed.self).dp)
+        }
+    }
+
+    /// Android's `overlaySheetHeights`: a fixed detent never exceeds its container.
+    func height(in container: Double) -> Double {
+        switch self {
+        case .half: container / 2
+        case .full: container
+        case let .points(value): min(value, container)
+        }
+    }
 }
 
 struct SafeAreaPadding: Decodable {
@@ -174,6 +262,10 @@ final class OverlayNode: Decodable {
     let asset: String?
     let contentScale: String?
     let name: String?
+    /// `button` text, and the optional `switch`/`checkbox` label.
+    let label: String?
+    /// `button` style: filled (default), outlined or text.
+    let variant: String?
     let stateKey: String?
     let placeholder: String?
     let axis: String?
@@ -181,6 +273,7 @@ final class OverlayNode: Decodable {
     let pager: String?
     let scrollable: Bool?
     let openWhen: Condition?
+    let detents: [Detent]?
     let scrim: String?
     let dragHandle: Bool?
 

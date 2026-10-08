@@ -2,51 +2,40 @@ import Combine
 import SwiftUI
 import UIKit
 
-/// Overlay state owned by the main thread: the shown spec, authored state, pager selection and assets.
+/// Overlay state owned by the main thread. Transitions and event sequencing live in the
+/// device-free `OverlaySession`; this adds SwiftUI publishing, assets and window geometry.
 final class OverlayModel: ObservableObject {
-    @Published private(set) var spec: OverlaySpec?
-    @Published var state: [String: JSONValue] = [:]
-    @Published var pages: [String: Int] = [:]
+    @Published private(set) var session = OverlaySession()
     @Published var safeInsets = UIEdgeInsets.zero
-    private(set) var pageCounts: [String: Int] = [:]
     var assets: [String: UIImage] = [:]
 
     /// Window-space rects that accept touches; everything else passes through to the app.
     var hitRects: [String: CGRect] = [:]
 
-    /// Per overlay id, monotonic from 1 (the Android emitter contract).
-    private var sequences: [String: Int] = [:]
     var onEvent: (([String: Any]) -> Void)?
     var onVisibilityChange: ((Bool) -> Void)?
 
+    var spec: OverlaySpec? {
+        session.spec
+    }
+
+    var state: [String: JSONValue] {
+        session.state
+    }
+
+    var pages: [String: Int] {
+        session.pages
+    }
+
     func show(_ spec: OverlaySpec) {
-        var counts: [String: Int] = [:]
-        spec.root.collectPagers(into: &counts)
-        pageCounts = counts
-        pages = counts.mapValues { _ in 0 }
-        state = spec.state ?? [:]
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the overlay passing every touch through.
-        if self.spec?.id != spec.id {
-            sequences[spec.id] = 0
-        }
-        self.spec = spec
+        session.show(spec)
         onVisibilityChange?(true)
     }
 
     func replace(_ spec: OverlaySpec) {
-        var counts: [String: Int] = [:]
-        spec.root.collectPagers(into: &counts)
-        pageCounts = counts
-        // Like the Android runtime: a replacement brings its own state, and a pager that survives
-        // keeps its position clamped to the new page count.
-        let previous = pages
-        pages = counts.mapValues { _ in 0 }
-        for (pager, pageCount) in counts {
-            pages[pager] = min(max(previous[pager] ?? 0, 0), max(pageCount - 1, 0))
-        }
-        state = spec.state ?? [:]
-        self.spec = spec
+        session.replace(spec)
     }
 
     /// Asset changes must redraw: `assets` is not published, so notify observers explicitly.
@@ -62,102 +51,69 @@ final class OverlayModel: ObservableObject {
     }
 
     func mergeState(_ values: [String: JSONValue]) {
-        state.merge(values) { _, new in new }
+        session.mergeState(values)
     }
 
-    func dismiss(reportEvent: Bool) {
-        guard spec != nil else { return }
-        if reportEvent {
-            emit(kind: "dismissed", name: nil, payload: .null)
-        }
-        spec = nil
-        hitRects = [:]
-        onVisibilityChange?(false)
+    func holds(_ condition: Condition) -> Bool {
+        session.holds(condition)
     }
 
     func missingAssets() -> [String] {
-        guard let spec else { return [] }
-        var ids = Set<String>()
-        spec.root.collectAssets(into: &ids)
-        return ids.filter { assets[$0] == nil }.sorted()
+        session.missingAssets(available: Set(assets.keys))
     }
 
-    // MARK: Actions
+    // MARK: Interactions
 
     func run(_ actions: [OverlayAction]) {
-        for action in actions {
-            switch action.type {
-            case "emit":
-                emit(kind: "emit", name: action.name, payload: action.payload ?? .null)
-            case "setPage":
-                guard let pager = action.pager else { continue }
-                let current = pages[pager] ?? 0
-                let target: Int
-                switch action.page {
-                case .string("next"): target = current + 1
-                case .string("prev"): target = current - 1
-                default: target = action.page?.intValue ?? current
-                }
-                setPage(pager, target)
-            case "setState":
-                if let key = action.key, let value = action.value {
-                    state[key] = value
-                }
-            case "dismiss":
-                dismiss(reportEvent: true)
-                return
-            default:
-                continue
-            }
-        }
+        apply { $0.run(actions) }
     }
 
     func setPage(_ pager: String, _ target: Int) {
-        guard let pageCount = pageCounts[pager], pageCount >= 1 else { return }
-        let clamped = min(max(target, 0), pageCount - 1)
-        guard pages[pager] != clamped else { return }
-        pages[pager] = clamped
-        emit(kind: "page_changed", name: pager, payload: .number(Double(clamped)))
+        apply { $0.setPage(pager, target) }
     }
 
-    func emit(kind: String, name: String?, payload: JSONValue) {
-        guard let id = spec?.id else { return }
-        let sequence = (sequences[id] ?? 0) + 1
-        sequences[id] = sequence
-        let encoder = JSONEncoder()
-        let stateObject = (try? JSONSerialization.jsonObject(with: encoder.encode(state))) ?? [:]
-        let payloadObject = (try? JSONSerialization.jsonObject(
-            with: encoder.encode(payload),
-            options: .fragmentsAllowed
-        )) ?? NSNull()
-        onEvent?([
-            "type": "overlay_event",
-            "timestamp": Int(Date().timeIntervalSince1970 * 1000),
-            "id": id,
-            "sequence": sequence,
-            "kind": kind,
-            "name": name as Any? ?? NSNull(),
-            "payload": payloadObject,
-            "state": stateObject,
-            "pages": pages,
-        ])
+    func toggle(_ key: String, then actions: [OverlayAction]) {
+        apply { $0.toggle(key: key, then: actions) }
+    }
+
+    func select(index: Int, pager: String?, key: String?) {
+        apply { $0.select(index: index, pager: pager, key: key) }
+    }
+
+    func dismiss(reason: OverlayDismissReason) {
+        apply { $0.dismiss(reason: reason) }
+    }
+
+    /// Runs one session transition, pushes its events, and tears the window down when the
+    /// transition ended the overlay.
+    private func apply(_ transition: (inout OverlaySession) -> [OverlayEvent]) {
+        let wasShown = session.isShown
+        let events = transition(&session)
+        let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+        for event in events {
+            onEvent?(event.wireObject(timestamp: timestamp))
+        }
+        if wasShown, !session.isShown {
+            hitRects = [:]
+            onVisibilityChange?(false)
+        }
     }
 
     func status() -> [String: Any] {
-        let stateObject = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(state))) ?? [:]
-        return [
-            "shown": spec != nil,
+        [
+            "shown": session.isShown,
             "id": spec?.id as Any? ?? NSNull(),
             "pages": pages,
-            "state": stateObject,
+            "state": JSONValue.object(state).foundationObject,
             "assets": assets.keys.sorted(),
         ]
     }
 
+    /// Typing goes through `change`, so every edit both updates state and emits `change`.
     func binding(forStateKey key: String) -> Binding<String> {
         Binding(
             get: { self.state[key]?.displayString ?? "" },
-            set: { self.state[key] = .string($0) }
+            set: { value in self.apply { $0.change(key: key, value: .string(value)) } }
         )
     }
 }

@@ -12,9 +12,9 @@ import { compareSelectionRank, selectableCandidates } from "../../utility/select
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
 import {
   isFullyCoveredByApplicationWindow,
-  isFullyCoveredByOwnOverlay,
   ownOverlayNodeSources,
 } from "../ApplicationWindowCover";
+import { visibleTapBounds } from "../../utility/ElementGeometry";
 import { OVERLAY_LAYOUT_KINDS } from "../ownOverlayFocus";
 import type { Element } from "../../../models/Element";
 import { isFalsy, isTruthy } from "../../../models/Element";
@@ -1463,14 +1463,17 @@ function markAppRowsCoveredByIme(
 
 /**
  * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
- * row's window covers it, using the same hit test as the tap path (issue #10481). AutoMobile's own
- * overlay windows that hide the app join those covers (#10715), so a row an opaque overlay and a
- * dialog cover between them is refused by tapOn and marked here alike; a translucent or partial
- * overlay keeps the `isFullyCoveredByOwnOverlay` rule.
+ * row's window covers it, using the same hit test as the tap path (issue #10481). Every
+ * node-hosting AutoMobile overlay window above the row joins those covers, opaque, translucent,
+ * sheet or floating alike (owner decision 2026-10-08, #10715): the overlay is touchable within its
+ * bounds, so a tap there lands in the overlay, and default-layer tapOn refuses the row. A row with
+ * an exposed part stays actionable, as tapOn taps that part. Like tapOn, the test runs on the
+ * row's bounds clipped to the screen, so an off-screen remainder never counts as exposed.
  */
 function markAppRowsCoveredByApplicationWindow(
   kept: SkeletonAccumulator[],
   hierarchy: ViewHierarchyResult | undefined,
+  viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
 ): void {
   if (!hierarchy?.windows?.length) {
     return;
@@ -1480,11 +1483,8 @@ function markAppRowsCoveredByApplicationWindow(
       continue;
     }
     const [left, top, right, bottom] = acc.bounds;
-    const bounds = { left, top, right, bottom };
-    if (
-      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "hiding") ||
-      isFullyCoveredByOwnOverlay(hierarchy, acc.target, bounds)
-    ) {
+    const bounds = visibleTapBounds({ left, top, right, bottom }, viewport);
+    if (bounds && isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "touch")) {
       acc.affordances.clear();
       acc.occluded = true;
     }
@@ -1521,7 +1521,7 @@ export function projectSkeleton(
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme));
-  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy);
+  markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);
   const nonActionable = kept.filter((acc) => acc.affordances.size === 0);
 

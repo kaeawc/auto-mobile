@@ -64,7 +64,8 @@ class OverlayStateLogicTest {
 
   @Test
   fun `styleWhen merges matching entries over the base in authored order`() {
-    val base = OverlayStyle(background = "#111111", alpha = 1.0, cornerRadius = OverlayCornerRadius.Dp(4.0))
+    val base =
+      OverlayStyle(background = "#111111", alpha = 1.0, cornerRadius = OverlayCornerRadius.Dp(4.0))
     val entries =
       listOf(
         OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5)),

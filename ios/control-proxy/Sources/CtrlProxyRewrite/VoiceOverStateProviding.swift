@@ -6,5 +6,6 @@ import Foundation
 /// `com.apple.VoiceOverTouch` has started, so it is not sufficient for confirming a
 /// simulator toggle. `Sendable` so the (`Sendable`) command handler can store one.
 protocol VoiceOverStateProviding: Sendable {
-    func isVoiceOverRunning() -> Bool
+    /// `nil` when the state cannot be read; callers must not report that as "off".
+    func isVoiceOverRunning() -> Bool?
 }

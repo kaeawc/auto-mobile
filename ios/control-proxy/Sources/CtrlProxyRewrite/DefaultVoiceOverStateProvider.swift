@@ -13,7 +13,7 @@ struct DefaultVoiceOverStateProvider: VoiceOverStateProviding {
         self.defaultsReader = defaultsReader
     }
 
-    func isVoiceOverRunning() -> Bool {
+    func isVoiceOverRunning() -> Bool? {
         defaultsReader.bool(forKey: Self.runningKey, inDomain: Self.accessibilityDomain)
     }
 }

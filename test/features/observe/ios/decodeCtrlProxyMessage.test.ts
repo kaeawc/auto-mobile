@@ -337,6 +337,21 @@ describe("decodeCtrlProxyMessage", () => {
     expect((decoded?.result as { enabled: boolean }).enabled).toBe(false);
   });
 
+  test("voiceover_state_result keeps an unreadable-state failure instead of reporting off", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "voiceover_state_result",
+        success: false,
+        enabled: false,
+        error: "VoiceOver state is unreadable",
+      } as never),
+    );
+    expect(decoded?.result).toMatchObject({
+      success: false,
+      error: "VoiceOver state is unreadable",
+    });
+  });
+
   test("voiceover_set_result resolves a runner failure as a typed result (not a rejection)", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({

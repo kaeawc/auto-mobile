@@ -136,7 +136,12 @@ extension CommandHandler {
     )
         async -> VoiceOverStateResponse
     {
-        let enabled = voiceOverStateProvider.isVoiceOverRunning()
+        guard let enabled = voiceOverStateProvider.isVoiceOverRunning() else {
+            return VoiceOverStateResponse(
+                requestId: request.requestId,
+                unreadableWithTotalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
 
         return VoiceOverStateResponse(
             requestId: request.requestId,

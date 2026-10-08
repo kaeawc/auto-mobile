@@ -2,7 +2,7 @@
 import XCTest
 
 private struct ContradictingVoiceOverStateProvider: VoiceOverStateProviding {
-    func isVoiceOverRunning() -> Bool { false }
+    func isVoiceOverRunning() -> Bool? { false }
 }
 
 @MainActor

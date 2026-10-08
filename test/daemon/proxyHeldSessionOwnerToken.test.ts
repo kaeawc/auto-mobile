@@ -63,13 +63,20 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
   let sessionManager: SessionManager;
   let replies: HeartbeatReply[];
   let mintedBy: Record<string, string>;
+  let clients: FakeDaemonClient[];
+  let toolRefusal: Error | undefined;
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let warnSpy: ReturnType<typeof spyOn>;
   const proxies: DaemonMcpProxy[] = [];
 
   function daemonBackedClient(): FakeDaemonClient {
-    return new FakeDaemonClient({
+    const client = new FakeDaemonClient({
       toolResultFor: (name) => (mintedBy[name] ? deviceStartResult(mintedBy[name]) : undefined),
+      onCallTool: () => {
+        if (toolRefusal) {
+          throw toolRefusal;
+        }
+      },
       onCallDaemonMethod: async (method, params) => {
         if (method !== "daemon/heartbeat") {
           return;
@@ -90,6 +97,8 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
         }
       },
     });
+    clients.push(client);
+    return client;
   }
 
   function createProxy(options: {
@@ -140,6 +149,8 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     replies = [];
     mintedBy = {};
+    clients = [];
+    toolRefusal = undefined;
     for (const [sessionId, device] of [
       ["android-session", "emulator-5554"],
       ["ios-session", "sim-1"],
@@ -358,5 +369,124 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     );
     expect(ownerOf("android-session")).toBe("other-harness");
     expect(ownerOf("ios-session")).toBe("harness-token");
+  });
+
+  /** Heartbeat `sessionId` as another owner, straight to the daemon handler. */
+  async function foreignHeartbeat(
+    sessionId: string,
+    token: string,
+    claimLivenessOwnership: boolean,
+  ): Promise<void> {
+    await handleDaemonRequest(
+      {
+        id: "foreign",
+        type: "daemon_request",
+        method: "daemon/heartbeat",
+        params: {
+          sessionId,
+          livenessPolicy: "heartbeat",
+          livenessOwnerToken: token,
+          ...(claimLivenessOwnership ? { claimLivenessOwnership: true } : {}),
+        },
+      },
+      daemonStateFor(sessionManager),
+    );
+  }
+
+  function forwardedTools(): Array<{ toolName: string; params: Record<string, unknown> }> {
+    return clients.flatMap((client) => client.callToolCalls);
+  }
+
+  describe("only minted or startup sessions are claimed (#10664)", () => {
+    test("a session only named in args is forwarded but never claimed or heartbeated", async () => {
+      await foreignHeartbeat("android-session", "other-harness", true);
+      const proxy = createProxy({ token: "harness-token" });
+
+      await proxy.callTool("tapOn", { sessionUuid: "android-session", x: 1, y: 2 });
+      await tickSessions();
+      await tickSessions();
+
+      expect(forwardedTools()).toEqual([
+        { toolName: "tapOn", params: { sessionUuid: "android-session", x: 1, y: 2 } },
+      ]);
+      expect(replies).toEqual([]);
+      expect(ownerOf("android-session")).toBe("other-harness");
+      // The binding still routes a later sessionless call to the named session.
+      await proxy.callTool("observe", {});
+      expect(forwardedTools().at(-1)).toEqual({
+        toolName: "observe",
+        params: { sessionUuid: "android-session" },
+      });
+      expect(replies).toEqual([]);
+    });
+
+    test("a minted session is claimed and heartbeated", async () => {
+      const proxy = createProxy({ token: "harness-token" });
+      await acquire(proxy, "getAndroid", "android-session");
+
+      expect(replies[0]).toMatchObject({
+        sessionId: "android-session",
+        claim: true,
+        success: true,
+      });
+      expect(await tickSessions()).toEqual(["android-session"]);
+      expect(ownerOf("android-session")).toBe("harness-token");
+    });
+
+    test("a startup session is claimed and heartbeated", async () => {
+      const proxy = createProxy({ token: "harness-token", initialSessionUuid: "android-session" });
+      await proxy.ensureConnected();
+
+      expect(replies[0]).toMatchObject({
+        sessionId: "android-session",
+        claim: true,
+        success: true,
+      });
+      expect(await tickSessions()).toEqual(["android-session"]);
+      expect(ownerOf("android-session")).toBe("harness-token");
+    });
+
+    test("naming a minted session in args keeps it claimed, and naming a foreign one never drops it (#9335)", async () => {
+      await foreignHeartbeat("ios-session", "other-harness", true);
+      const proxy = createProxy({ token: "harness-token" });
+      await acquire(proxy, "getAndroid", "android-session");
+
+      await proxy.callTool("tapOn", { sessionUuid: "ios-session" });
+      // The minted session stays held while the args-named one is the latest binding.
+      expect(await tickSessions()).toEqual(["android-session"]);
+      await proxy.callTool("tapOn", { sessionUuid: "android-session" });
+      expect(await tickSessions()).toEqual(["android-session"]);
+
+      expect(replies.filter((reply) => reply.sessionId === "ios-session")).toEqual([]);
+      expect(ownerOf("android-session")).toBe("harness-token");
+      expect(ownerOf("ios-session")).toBe("other-harness");
+    });
+
+    test("a second proxy naming another owner's session cannot inherit it after that lease lapses", async () => {
+      // The first owner claims the session, then goes silent without releasing it.
+      await foreignHeartbeat("android-session", "first-proxy", true);
+      const second = createProxy({ token: "second-proxy" });
+      await second.callTool("tapOn", { sessionUuid: "android-session" });
+
+      // Well past the first owner's lease plus its suspect grace window (#10051).
+      await timer.advanceTimeAsync(LEASE_MS + SUSPECT_GRACE_MS + INTERVAL_MS * 4);
+
+      expect(replies).toEqual([]);
+      expect(ownerOf("android-session")).not.toBe("second-proxy");
+    });
+
+    test("a daemon refusal of an args-named call is surfaced and claims nothing", async () => {
+      await foreignHeartbeat("android-session", "other-harness", true);
+      toolRefusal = new Error("Session android-session is owned by another liveness owner");
+      const proxy = createProxy({ token: "harness-token" });
+
+      await expect(proxy.callTool("tapOn", { sessionUuid: "android-session" })).rejects.toThrow(
+        "owned by another liveness owner",
+      );
+      await tickSessions();
+
+      expect(replies).toEqual([]);
+      expect(ownerOf("android-session")).toBe("other-harness");
+    });
   });
 });

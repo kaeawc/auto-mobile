@@ -134,6 +134,7 @@ object OverlaySpecValidator {
     val context = Context()
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+        ?: OverlayRepeatValidator.validate(value)
         ?: pagerErrors(context)
         ?: bindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
         ?: listItemBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
@@ -647,6 +648,11 @@ object OverlaySpecValidator {
               }
           "increment" ->
             "Increment requires a numeric state key"
+              .takeIf {
+                stored == null || stored.isString || stored.doubleOrNull?.isFinite() != true
+              }
+          "decrement" ->
+            "Decrement requires a numeric state key"
               .takeIf {
                 stored == null || stored.isString || stored.doubleOrNull?.isFinite() != true
               }

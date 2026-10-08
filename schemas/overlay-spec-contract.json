@@ -1027,6 +1027,31 @@
               "optional": false
             }
           }
+        },
+        "decrement": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["decrement"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "by": {
+              "rule": {
+                "kind": "number",
+                "integer": false
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -1127,6 +1152,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -1224,6 +1256,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -1321,6 +1360,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -5639,6 +5685,32 @@
               "optional": false
             }
           }
+        }
+      }
+    },
+    "repeat": {
+      "kind": "object",
+      "fields": {
+        "items": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "map",
+              "item": {
+                "kind": "scalar"
+              }
+            },
+            "min": 1,
+            "max": 32,
+            "unique": false
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
         }
       }
     }

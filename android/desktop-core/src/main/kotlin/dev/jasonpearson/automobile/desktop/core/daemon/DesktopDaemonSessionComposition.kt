@@ -33,6 +33,15 @@ data class DesktopDaemonSessionState(
   val session: DesktopDaemonSession?,
   val boundDeviceId: String?,
   val isRegistered: Boolean = false,
+  /**
+   * The picked device the daemon refused to bind because another session holds it (#10660). The
+   * pane only views it (observer registration, no allocation) until the user calls
+   * [requestControl]; the loop never re-sends the bind on its own, not even after the holder
+   * releases the device.
+   */
+  val viewingDeviceId: String? = null,
+  /** Explicit "Take control": exactly one bind attempt for the current binding (#10660). */
+  val requestControl: () -> Unit = {},
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -91,6 +100,11 @@ fun rememberDesktopDaemonSession(
       }
     }
   var boundDeviceId by remember(session) { mutableStateOf<String?>(null) }
+  var viewingDeviceId by remember(session) { mutableStateOf<String?>(null) }
+  // Bumped only by an explicit "Take control" (#10660). It keys the binding effect, so each click
+  // restarts it and makes exactly one fresh bind attempt.
+  var controlRequests by remember(session) { mutableStateOf(0) }
+  val requestControl: () -> Unit = remember(session) { { controlRequests++ } }
   val bindingMutex = remember(session) { Mutex() }
   val bindingGeneration = remember(session) { AtomicLong(0L) }
 
@@ -111,10 +125,11 @@ fun rememberDesktopDaemonSession(
     }
   }
 
-  LaunchedEffect(session, binding.value) {
+  LaunchedEffect(session, binding.value, controlRequests) {
     val generation = bindingGeneration.incrementAndGet()
     val target = binding.value
     boundDeviceId = null
+    viewingDeviceId = null
     if (session == null) {
       boundDeviceId = target?.deviceId
       return@LaunchedEffect
@@ -133,17 +148,33 @@ fun rememberDesktopDaemonSession(
     // `daemon/heartbeat`; the binding is re-sent when a send failed or the heartbeat lapsed (a
     // daemon restart loses it). A changed binding restarts this effect, so it starts unbound.
     var bindingAcknowledged = false
+    // The daemon answered this effect's bind with a refusal (#10660): another session holds the
+    // device. The owner decision is non-exclusive viewing: register as an observer, keep
+    // heartbeating, and never re-send the bind -- not on later ticks, not after a heartbeat lapse,
+    // and not when the holder releases the device. Only a new binding or [requestControl] (both
+    // restart this effect) tries again. A transport failure (thrown) is not a refusal and retries.
+    var refused = false
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
           if (bindingGeneration.get() != generation) return@LaunchedEffect
           withContext(ioDispatcher) {
-            if (target == null) {
+            if (target == null || refused) {
               session.ensureRegistered()
             } else if (!bindingAcknowledged) {
-              bindingAcknowledged =
-                session.client.setActiveDevice(target.deviceId, target.platform).success
-              session.deviceBound(held = bindingAcknowledged)
+              val result = session.client.setActiveDevice(target.deviceId, target.platform)
+              if (result.success) {
+                bindingAcknowledged = true
+                session.deviceBound(held = true)
+              } else {
+                refused = true
+                viewingDeviceId = target.deviceId
+                LOG.info(
+                  "Device ${target.deviceId} is held by another session; viewing only: " +
+                    "${result.message}"
+                )
+                session.ensureRegistered()
+              }
             }
           }
         }
@@ -163,7 +194,7 @@ fun rememberDesktopDaemonSession(
       }
 
       failureLogged = false
-      boundDeviceId = target?.deviceId
+      boundDeviceId = target?.deviceId?.takeUnless { refused }
       if (refreshAfterRecovery) {
         refreshAfterRecovery =
           !runCatching { onDaemonRecovered() }
@@ -194,5 +225,7 @@ fun rememberDesktopDaemonSession(
     session = session,
     boundDeviceId = boundDeviceId,
     isRegistered = registered,
+    viewingDeviceId = viewingDeviceId,
+    requestControl = requestControl,
   )
 }

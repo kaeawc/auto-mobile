@@ -460,4 +460,12 @@ class OverlayRuntimeTest {
       )
       assertEquals(runtime.current.state, event.state)
     }
+
+  @Test
+  fun `decrement steps a numeric key down and reports one net change`() = runTest {
+    val runtime = runtime(spec(state = mapOf("count" to OverlayScalar.Numeric(5.0))))
+    runtime.handle(tap(OverlayDecrementAction("count"), OverlayDecrementAction("count", by = 2.5)))
+    assertEquals(OverlayScalar.Numeric(1.5), runtime.current.state["count"])
+    assertEquals(1, events.size)
+  }
 }

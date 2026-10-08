@@ -71,11 +71,9 @@ const STEADY_WITH_OWNER_EXIT: ScheduleProfile = {
   allowLongGaps: false,
   ownerExitChance: 0.02,
   allowIdleGaps: true,
-  // Autolock sessions keep the 60 s lease today (AUTOLOCK_OWNER_EXIT below tracks that bug).
-  idleWindowsMs: DEFAULT_IDLE_WINDOWS_MS,
 };
 
-/** The same exiting owner on the autolock (60 s) acquisition path. */
+/** The same exiting owner on the autolock (60 s) acquisition path only (#10729). */
 const AUTOLOCK_OWNER_EXIT: ScheduleProfile = {
   ...STEADY_WITH_OWNER_EXIT,
   idleWindowsMs: [AUTOLOCK_IDLE_WINDOW_MS],
@@ -472,9 +470,8 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     10,
   );
 
-  knownFailure(
-    "(autolock lease, untracked)",
-    "an autolock session's exited owner is freed within lease + grace + one scan, not after the 60 s autolock window",
+  propertyTests(
+    "#10729: an autolock session's exited owner is freed within lease + grace + one scan, not after the 60 s autolock window",
     9_000,
     AUTOLOCK_OWNER_EXIT,
     exitedOwnerReleased,

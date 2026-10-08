@@ -6661,8 +6661,8 @@ export class SessionManager {
    *
    * Runs on the periodic cleanup timer, but is also invoked by the heartbeat
    * monitor on its (much shorter) interval so that idle sessions — including
-   * autolocked devices, whose idle timeout equals their heartbeat timeout — are
-   * released promptly instead of waiting for the next 5-minute sweep.
+   * autolocked devices past their 60 s idle window — are released promptly
+   * instead of waiting for the next 5-minute sweep.
    */
   cleanupExpiredSessions(): void {
     this.stallProbe?.();

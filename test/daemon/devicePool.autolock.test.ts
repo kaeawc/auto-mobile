@@ -722,132 +722,19 @@ describe("DevicePool autolock", () => {
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
     });
 
-    it("aligns the session heartbeat timeout with the idle timeout", async () => {
-      // The daemon heartbeat watchdog reaps sessions whose heartbeat is stale.
-      // Autolock clients do not send heartbeats, so the heartbeat timeout must
-      // match the idle timeout or the device would be released far too early.
-      await initializeLiveAndroidDevice();
-
-      const sessionId = await pool.autolockDevice("emulator-5554", "android");
-      const session = sessionManager.getSession(sessionId!);
-
-      expect(session!.heartbeatTimeoutMs).toBe(60_000);
-      // Not the default 10s heartbeat window that would reap a non-heartbeating client.
-      expect(session!.heartbeatTimeoutMs).not.toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
-    });
-
-    it("survives the daemon heartbeat watchdog until the idle timeout", async () => {
-      // Mirrors SessionHeartbeatMonitor: default-heartbeat sessions that never
-      // heartbeat are reaped quickly, while custom-heartbeat sessions use the
-      // normal heartbeat timeout after the initial grace.
-      const PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
-      const CUSTOM_HEARTBEAT_INITIAL_GRACE_MS = 20_000;
-      const wouldReap = (
-        createdAt: number,
-        lastHeartbeat: number,
-        heartbeatTimeoutMs: number,
-        heartbeatTimeoutSource: "default" | "custom",
-        now: number,
-        hasReceivedHeartbeat: boolean,
-      ): boolean => {
-        if (!hasReceivedHeartbeat) {
-          if (heartbeatTimeoutSource === "default") {
-            return now - createdAt > PRE_FIRST_HEARTBEAT_GRACE_MS;
-          }
-          if (now - createdAt < CUSTOM_HEARTBEAT_INITIAL_GRACE_MS) {
-            return false;
-          }
-        }
-        return now - lastHeartbeat > heartbeatTimeoutMs;
-      };
-
+    it("uses the default owner lease for liveness and the autolock window only for idle release (#10729)", async () => {
+      // The owner's proxy binds and heartbeats the session getAndroid/startDevice minted, so a
+      // dead owner must be judged on the ~10 s owner lease like any bound session. The 60 s
+      // autolock window bounds only the idle release.
       await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
       const session = sessionManager.getSession(sessionId!)!;
 
-      // With the OLD 10s heartbeat timeout the watchdog would have reaped this at ~20s.
-      expect(
-        wouldReap(
-          session.createdAt,
-          session.lastHeartbeat,
-          SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
-          "default",
-          20_000,
-          false,
-        ),
-      ).toBe(true);
-
-      // With the aligned timeout it survives the grace + well past the old window...
-      expect(
-        wouldReap(
-          session.createdAt,
-          session.lastHeartbeat,
-          session.heartbeatTimeoutMs,
-          session.heartbeatTimeoutSource,
-          30_000,
-          false,
-        ),
-      ).toBe(false);
-
-      // ...and is only reaped once the idle timeout elapses with no activity.
-      expect(
-        wouldReap(
-          session.createdAt,
-          session.lastHeartbeat,
-          session.heartbeatTimeoutMs,
-          session.heartbeatTimeoutSource,
-          60_001,
-          false,
-        ),
-      ).toBe(true);
-    });
-
-    it("ongoing interaction keeps an autolocked device alive past the heartbeat window", async () => {
-      // Integration: a locked device driven through repeated session resolutions
-      // (createToolExecutionContext -> getOrCreateSession on every tool call)
-      // must not be reaped by the heartbeat watchdog, because each interaction
-      // bumps lastHeartbeat. Mirrors SessionHeartbeatMonitor for a custom
-      // heartbeat timeout.
-      const CUSTOM_HEARTBEAT_INITIAL_GRACE_MS = 20_000;
-      const reapableAt = (
-        session: {
-          createdAt: number;
-          lastHeartbeat: number;
-          heartbeatTimeoutMs: number;
-          hasReceivedHeartbeat: boolean;
-        },
-        now: number,
-      ): boolean => {
-        if (
-          !session.hasReceivedHeartbeat &&
-          now - session.createdAt < CUSTOM_HEARTBEAT_INITIAL_GRACE_MS
-        ) {
-          return false;
-        }
-        return now - session.lastHeartbeat > session.heartbeatTimeoutMs;
-      };
-
-      await initializeLiveAndroidDevice();
-
-      const sessionId = await pool.autolockDevice("emulator-5554", "android");
-
-      // Simulate a client interacting every 40s for 200s — each call exceeds the
-      // old 10s heartbeat window but is well within the 60s idle window.
-      for (let elapsed = 40_000; elapsed <= 200_000; elapsed += 40_000) {
-        timer.advanceTime(40_000);
-        await sessionManager.getOrCreateSession(sessionId!);
-        const live = sessionManager.getSession(sessionId!)!;
-        expect(reapableAt(live, timer.now())).toBe(false);
-      }
-
-      // Device is still locked after 200s of active use.
-      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
-
-      // Snapshot the live session, then stop interacting: once the heartbeat window
-      // elapses with no further activity, the watchdog predicate would reap it.
-      const snapshot = { ...sessionManager.getSession(sessionId!)! };
-      expect(reapableAt(snapshot, timer.now() + 61_000)).toBe(true);
+      expect(session.heartbeatTimeoutMs).toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+      expect(session.heartbeatTimeoutSource).toBe("default");
+      expect(session.sessionTimeoutMs).toBe(60_000);
+      expect(session.expiresAt).toBe(session.lastUsedAt + 60_000);
     });
 
     it("auto-releases the device after the idle timeout (periodic cleanup)", async () => {

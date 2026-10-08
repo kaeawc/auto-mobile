@@ -9,6 +9,8 @@ interface Rule {
   empty?: boolean;
   nonblank?: boolean;
   exclusive?: string[];
+  exactlyOne?: string[];
+  dependents?: Record<string, string[]>;
   integer?: boolean;
   min?: number;
   max?: number;
@@ -39,6 +41,7 @@ interface Context {
   actions: Located[];
   images: number;
   selectorDepth: number;
+  conditionDepth: number;
 }
 const definitions: Record<string, Rule> = contract.definitions;
 const fail = (path: string, message: string): OverlayValidationError => ({
@@ -72,6 +75,16 @@ function refRule(rule: Rule): Rule {
   return definitions[rule.name ?? ""] ?? rule;
 }
 
+/** References whose nesting is bounded by their own contract limit. */
+const nestedReferences: Record<string, typeof visitReference | undefined> = Object.assign(
+  Object.create(null) as Record<string, typeof visitReference | undefined>,
+  { container: visitContainer, condition: visitCondition },
+);
+
+function nestedReference(rule: Rule): typeof visitReference | undefined {
+  return nestedReferences[rule.name ?? ""];
+}
+
 function visitReference(
   value: unknown,
   rule: Rule,
@@ -79,8 +92,9 @@ function visitReference(
   context: Context,
   depth: number,
 ): OverlayValidationError | undefined {
-  if (rule.name === "container") {
-    return visitContainer(value, rule, path, context, depth);
+  const nested = nestedReference(rule);
+  if (nested) {
+    return nested(value, rule, path, context, depth);
   }
   if (rule.name === "item" && typeof object(value)?.image === "string") {
     context.images++;
@@ -123,6 +137,21 @@ function visitContainer(
   }
   const error = walk(value, refRule(rule), path, context, depth);
   context.selectorDepth--;
+  return error;
+}
+function visitCondition(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): OverlayValidationError | undefined {
+  context.conditionDepth++;
+  if (context.conditionDepth > contract.limits.MAX_OVERLAY_CONDITION_DEPTH) {
+    return fail(path, "Condition depth limit exceeded");
+  }
+  const error = walk(value, refRule(rule), path, context, depth);
+  context.conditionDepth--;
   return error;
 }
 function visitTagged(
@@ -191,8 +220,37 @@ function objectConstraint(
   if (rule.exclusive && rule.exclusive.filter((key) => Object.hasOwn(data, key)).length !== 1) {
     return fail(keyPath(path, rule.exclusive[0]), "Exactly one container selector is required");
   }
+  const formError = formConstraint(data, rule, path);
+  if (formError) {
+    return formError;
+  }
   if (rule.atLeastOne && Object.keys(data).length === 0) {
     return fail(path, "At least one selector field is required");
+  }
+  return undefined;
+}
+/** `exactlyOne` picks one form of a union-like object; `dependents` ties optional fields to a trigger. */
+function formConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): OverlayValidationError | undefined {
+  if (rule.exactlyOne && rule.exactlyOne.filter((key) => Object.hasOwn(data, key)).length !== 1) {
+    return fail(
+      keyPath(path, rule.exactlyOne[0]),
+      `Exactly one of ${rule.exactlyOne.join(", ")} is required`,
+    );
+  }
+  for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
+    const present = dependents.filter((key) => Object.hasOwn(data, key));
+    if (!Object.hasOwn(data, trigger)) {
+      if (present.length > 0) {
+        return fail(keyPath(path, present[0]), `Requires ${trigger}`);
+      }
+    } else if (present.length !== 1) {
+      const target = present[1] ?? dependents[0];
+      return fail(keyPath(path, target), `Exactly one of ${dependents.join(", ")} is required`);
+    }
   }
   return undefined;
 }
@@ -404,13 +462,46 @@ function sheetBindingErrors(
   }
   return undefined;
 }
+const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; message: string }> = {
+  toggle: {
+    check: (stored) => typeof stored === "boolean",
+    message: "Toggle requires a boolean state key",
+  },
+  increment: {
+    check: (stored) => typeof stored === "number" && Number.isFinite(stored),
+    message: "Increment requires a numeric state key",
+  },
+};
+function stateActionErrors(
+  context: Context,
+  data: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const state = object(data.state) ?? {};
+  for (const { value, path } of context.actions) {
+    const rule =
+      typeof value.type === "string" && Object.hasOwn(stateActionTypes, value.type)
+        ? stateActionTypes[value.type]
+        : undefined;
+    if (rule && typeof value.key === "string" && !rule.check(state[value.key])) {
+      return fail(`${path}.key`, rule.message);
+    }
+  }
+  return undefined;
+}
 function validateValue(value: unknown): OverlayValidationResult {
-  const context: Context = { nodes: [], actions: [], images: 0, selectorDepth: 0 };
+  const context: Context = {
+    nodes: [],
+    actions: [],
+    images: 0,
+    selectorDepth: 0,
+    conditionDepth: 0,
+  };
   const error =
     walk(value, definitions.spec, "", context, 0) ??
     pagerErrors(context) ??
     bindingErrors(context, object(value) ?? {}) ??
-    sheetBindingErrors(context, object(value) ?? {});
+    sheetBindingErrors(context, object(value) ?? {}) ??
+    stateActionErrors(context, object(value) ?? {});
   if (error) {
     return { success: false, error };
   }

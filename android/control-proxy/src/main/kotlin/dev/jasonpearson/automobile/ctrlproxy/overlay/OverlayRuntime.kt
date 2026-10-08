@@ -121,6 +121,9 @@ class OverlayRuntime(
       when (action) {
         is OverlayEmitAction -> emit(OverlayEventKind.EMIT, action.name, action.payload)
         is OverlaySetStateAction -> setState(action.key, action.value)
+        is OverlayToggleAction -> action.nextValue(current.state)?.let { setState(action.key, it) }
+        is OverlayIncrementAction ->
+          action.nextValue(current.state)?.let { setState(action.key, it) }
         is OverlaySetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(

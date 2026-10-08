@@ -2786,6 +2786,29 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
             }
           },
           "required": ["supported"],
@@ -27745,6 +27768,29 @@
             },
             "rawStatus": {
               "type": "string"
+            },
+            "backend": {
+              "type": "string",
+              "const": "network-extension"
+            },
+            "controller": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string"
+                },
+                "contractVersion": {
+                  "type": "number"
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "nextStep": {
+                  "type": "string"
+                }
+              },
+              "required": ["state", "detail", "nextStep"],
+              "additionalProperties": {}
             }
           },
           "required": ["supported"],

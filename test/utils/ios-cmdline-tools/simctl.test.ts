@@ -631,7 +631,8 @@ describe("Simctl", function () {
             id: "ios.simulator.networkCondition",
             state: "unsupported",
             source: "platform",
-            reason: "Network-condition simulation is unavailable on iOS Simulator.",
+            reason:
+              "Network conditions on iOS Simulator need the opt-in network-extension backend, which cannot apply them yet (#10264); getDeviceState networkCondition reports its install and approval state.",
           },
           {
             id: "ios.simulator.connectivity",

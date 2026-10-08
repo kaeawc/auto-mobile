@@ -50,6 +50,13 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { shellQuote } from "../../utils/shellQuote";
 import { z } from "zod/v4";
 import {
+  ExecNetworkFilterBridge,
+  networkFilterNextStep,
+  type NetworkFilterBridge,
+  type NetworkFilterState,
+  type NetworkFilterStatus,
+} from "../network-filter/NetworkFilterBridge";
+import {
   consolePortFromSerial,
   type EmulatorConsoleClient,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
@@ -251,10 +258,28 @@ export const NETWORK_CONDITION_PROFILES: Record<NetworkConditionProfile, Network
  */
 export const MAX_NETWORK_CONDITION_TTL_SECONDS = Math.floor(2_147_483_647 / 1000);
 
+/**
+ * State of the iOS Simulator network-extension backend (#10590). Reported for
+ * availability only: the backend applies nothing until offline/reset (#10264).
+ */
+export interface NetworkConditionBackendState {
+  state: NetworkFilterState;
+  /** Controller JSON contract version, when the controller gave a valid answer. */
+  contractVersion?: number;
+  /** The controller's detail, or why the bridge could not get an answer. */
+  detail: string;
+  /** What the caller does next from this state. */
+  nextStep: string;
+}
+
 export interface NetworkConditionState {
   supported: boolean;
   capability?: NetworkConditionCapability;
   method?: "android_emulator_console";
+  /** iOS Simulator only: the host backend that will shape traffic. */
+  backend?: "network-extension";
+  /** iOS Simulator only: the backend's install/approval state and next step. */
+  controller?: NetworkConditionBackendState;
   /** The profile the platform actually applied (writes) or the baseline (reads). */
   profile?: NetworkConditionProfile;
   requestedProfile?: NetworkConditionProfile;
@@ -489,6 +514,8 @@ export interface DeviceStateDependencies {
   clockMutation?: (
     mutation: (slot?: DeviceClockRestoreSlot) => Promise<RequestedDeviceStates>,
   ) => Promise<RequestedDeviceStates>;
+  /** iOS Simulator network-extension controller; defaults to the installed controller. */
+  networkFilterBridge?: NetworkFilterBridge;
 }
 
 type RequestedDeviceStates = Pick<
@@ -541,15 +568,27 @@ const IOS_SIM_DND_UNSUPPORTED_ERROR =
   "Disturb. Set it manually in the simulator, or via a Shortcuts automation.";
 
 /**
- * Network-condition simulation is unavailable on every iOS target. simctl
- * exposes no network verb, and the only host mechanism — Network Link
- * Conditioner — is a system-wide, sudo-gated setting rather than a per-simulator
- * or per-device control, so it cannot be driven per device from automation.
+ * Physical iOS devices expose no host-driven network shaping: Apple's device
+ * tooling has no network verb, and the on-device Network Link Conditioner is a
+ * manual Developer setting.
  */
-const IOS_NETWORK_CONDITION_UNSUPPORTED_ERROR =
-  "Network-condition simulation is unavailable on iOS: simctl exposes no network verb, and the " +
-  "only host mechanism (Network Link Conditioner) is a system-wide, sudo-gated setting rather " +
-  "than a per-simulator or per-device control. Shape traffic with a host-side proxy instead.";
+const IOS_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR =
+  "Network-condition simulation is unavailable on a physical iOS device: Apple's device tooling " +
+  "exposes no network-shaping verb, and the on-device Network Link Conditioner " +
+  "(Settings > Developer) can only be set by hand.";
+
+/**
+ * iOS Simulator network conditions run through the opt-in macOS Network
+ * Extension backend (#6298). It reports availability today but applies nothing
+ * until offline/reset ships (#10264), so every simulator read and write stays
+ * unsupported with a message for the backend's current state.
+ */
+function iosSimulatorNetworkConditionError(state: NetworkFilterState): string {
+  const prefix =
+    "Network-condition simulation on iOS Simulator uses AutoMobile's macOS network-extension " +
+    "backend, which cannot apply conditions yet.";
+  return `${prefix} ${networkFilterNextStep(state)}`;
+}
 
 /**
  * Physical Android devices expose no unprivileged, OS-wide traffic shaper. The
@@ -1330,6 +1369,7 @@ export class DeviceState {
   private readonly clockSignal: AbortSignal;
   private readonly clockMutation: NonNullable<DeviceStateDependencies["clockMutation"]>;
   private readonly invalidateClockCaches: (deviceId: string) => void;
+  private injectedNetworkFilterBridge?: NetworkFilterBridge;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
@@ -1358,6 +1398,13 @@ export class DeviceState {
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
     this.onLocationApplied = dependencies.onLocationApplied;
+    this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
+  }
+
+  /** Created on first iOS Simulator network read so other paths never touch it. */
+  private get networkFilterBridge(): NetworkFilterBridge {
+    this.injectedNetworkFilterBridge ??= new ExecNetworkFilterBridge();
+    return this.injectedNetworkFilterBridge;
   }
 
   async getState(
@@ -2322,12 +2369,39 @@ export class DeviceState {
     }
   }
 
-  private getIosNetworkCondition(): NetworkConditionState {
+  private async getIosNetworkCondition(): Promise<NetworkConditionState> {
+    if (!isIosSimulatorDevice(this.device)) {
+      return {
+        supported: false,
+        capability: "unsupported",
+        error: IOS_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR,
+      };
+    }
+    const status = await this.readNetworkFilterStatus();
     return {
       supported: false,
       capability: "unsupported",
-      error: IOS_NETWORK_CONDITION_UNSUPPORTED_ERROR,
+      backend: "network-extension",
+      controller: {
+        state: status.state,
+        ...(status.contractVersion !== undefined
+          ? { contractVersion: status.contractVersion }
+          : {}),
+        detail: status.detail,
+        nextStep: networkFilterNextStep(status.state),
+      },
+      error: iosSimulatorNetworkConditionError(status.state),
     };
+  }
+
+  /** The bridge resolves every failure to a state; this guards the read path regardless. */
+  private async readNetworkFilterStatus(): Promise<NetworkFilterStatus> {
+    try {
+      return await this.networkFilterBridge.status();
+    } catch (error) {
+      logger.warn(`[DeviceState] network filter status failed: ${errorMessage(error)}`, error);
+      return { state: "unavailable", detail: errorMessage(error) };
+    }
   }
 
   private async setAndroidNetworkCondition(
@@ -2577,15 +2651,17 @@ export class DeviceState {
     }
   }
 
-  private setIosNetworkCondition(input: SetNetworkConditionInput): NetworkConditionState {
+  private async setIosNetworkCondition(
+    input: SetNetworkConditionInput,
+  ): Promise<NetworkConditionState> {
     const profile = resolveNetworkProfile(input);
+    // Nothing is applied on any iOS target; the backend state only picks the message.
+    const backend = await this.getIosNetworkCondition();
     return {
-      supported: false,
-      capability: "unsupported",
+      ...backend,
       requestedProfile: profile,
       values: resolveNetworkValues(profile, input),
       verified: false,
-      error: IOS_NETWORK_CONDITION_UNSUPPORTED_ERROR,
     };
   }
 }

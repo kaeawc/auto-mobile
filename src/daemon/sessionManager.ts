@@ -364,6 +364,11 @@ export interface Session {
   preCliLiveness?: PreCliLivenessSnapshot;
   /** Recovery-only metadata that must survive the active-row upsert. */
   persistenceMetadata?: SessionPersistenceMetadata;
+  /**
+   * The name the holding client registered with `daemon/registerSession`, for diagnostics only
+   * (`holderKind`, #10671). Not persisted and never used for admission or ownership.
+   */
+  clientName?: string;
 }
 
 interface SessionPersistenceMetadata {
@@ -1134,11 +1139,25 @@ export class SessionManager {
   private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
   private readonly screenReaderRemovalGenerations = new Map<string, number>();
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
-  private observerSessions?: Pick<ObserverSessionStore, "release">;
+  private observerSessions?: Pick<ObserverSessionStore, "release"> &
+    Partial<Pick<ObserverSessionStore, "list">>;
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
-  setObserverSessionRegistry(registry: Pick<ObserverSessionStore, "release">): void {
+  setObserverSessionRegistry(
+    registry: Pick<ObserverSessionStore, "release"> & Partial<Pick<ObserverSessionStore, "list">>,
+  ): void {
     this.observerSessions = registry;
+  }
+
+  /**
+   * Record the name a client registered for an existing device session (#10671). Diagnostic
+   * only: it feeds `holderKind` and never changes ownership, liveness or deadlines.
+   */
+  recordSessionClientName(sessionId: string, clientName: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.clientName = clientName;
+    }
   }
 
   private deviceHealth?: {
@@ -1645,6 +1664,13 @@ export class SessionManager {
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
     this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
+    // A client that registered as an observer before acquiring a device keeps its name (#10671).
+    const observerClientName = this.observerSessions
+      ?.list?.()
+      .find((observer) => observer.sessionId === session.sessionId)?.clientName;
+    if (observerClientName !== undefined && session.clientName === undefined) {
+      session.clientName = observerClientName;
+    }
     this.observerSessions?.release(session.sessionId, "promotion");
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);

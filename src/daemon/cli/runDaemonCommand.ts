@@ -476,6 +476,34 @@ async function querySessionInfo(args: string[], manager: DaemonManager): Promise
   }
 }
 
+/**
+ * Print `daemon/activeSessions`: every held session with its device, tool activity, owner
+ * heartbeat, idle-release deadline, holder kind and in-flight executions (#10671). Always asks
+ * the daemon over its socket, so the answer is the daemon's own view.
+ */
+async function queryActiveSessions(manager: DaemonManager): Promise<void> {
+  try {
+    const client = manager.createClient();
+    try {
+      await client.connect();
+      const result = await client.callDaemonMethod("daemon/activeSessions", {
+        includeSessions: true,
+      });
+      console.log(JSON.stringify(result));
+      await client.close();
+    } catch (error) {
+      throw new ActionableError(`Failed to query active sessions: ${errorMessage(error)}`);
+    }
+  } catch (error) {
+    if (error instanceof ActionableError) {
+      console.error(`Error: ${error.message}`);
+    } else {
+      console.error(`Unexpected error: ${errorMessage(error)}`);
+    }
+    process.exit(1);
+  }
+}
+
 async function releaseDaemonSession(args: string[], manager: DaemonManager): Promise<void> {
   try {
     if (args.length === 0) {
@@ -673,6 +701,7 @@ const NO_POSITIONAL_DAEMON_COMMANDS = new Set([
   "health",
   "diagnose",
   "available-devices",
+  "active-sessions",
 ]);
 
 /**
@@ -701,6 +730,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  health                Check daemon health");
     console.log("  diagnose              Run full diagnostics");
     console.log("  available-devices     Query device pool status");
+    console.log("  active-sessions       List held sessions and why each holds its device");
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
     console.log(
@@ -739,6 +769,7 @@ export async function runDaemonCommand(
     health: () => runDaemonDiagnosticsCommand(command, manager),
     diagnose: () => runDaemonDiagnosticsCommand(command, manager),
     "available-devices": () => queryAvailableDevices(manager),
+    "active-sessions": () => queryActiveSessions(manager),
     "session-info": () => querySessionInfo(args, manager),
     "release-session": () => releaseDaemonSession(args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),

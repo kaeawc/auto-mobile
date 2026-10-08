@@ -48,6 +48,7 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  health                Check daemon health"],
           ["stdout", "  diagnose              Run full diagnostics"],
           ["stdout", "  available-devices     Query device pool status"],
+          ["stdout", "  active-sessions       List held sessions and why each holds its device"],
           ["stdout", "  session-info <id>     Get information about a session"],
           ["stdout", "  release-session <id>  Release a session and free its device"],
           [
@@ -497,6 +498,45 @@ describe("daemon command characterization with fake I/O", () => {
       }
     },
   );
+
+  test("active-sessions asks the daemon for per-session hold diagnostics (#10671)", async () => {
+    const events: unknown[] = [];
+    class Client extends FakeDaemonClient {
+      override async connect() {
+        events.push("connect");
+      }
+      override async callDaemonMethod(method: string, params: Record<string, unknown>) {
+        events.push([method, params]);
+        return { activeSessions: 0, activeExecutions: 0, sessions: [] };
+      }
+      override async close() {
+        events.push("close");
+      }
+    }
+    const client = new Client();
+    class Manager extends SafeDaemonManager {
+      override getDaemonState() {
+        return remoteState;
+      }
+      override createClient() {
+        return client;
+      }
+    }
+    const log = spyOn(console, "log").mockImplementation((text) => {
+      events.push(text);
+    });
+    try {
+      await runDaemonCommand("active-sessions", [], {}, Manager);
+      expect(events).toEqual([
+        "connect",
+        ["daemon/activeSessions", { includeSessions: true }],
+        '{"activeSessions":0,"activeExecutions":0,"sessions":[]}',
+        "close",
+      ]);
+    } finally {
+      log.mockRestore();
+    }
+  });
 
   test.each(["session-info", "heartbeat"])(
     "%s keeps remote call/close/output order",

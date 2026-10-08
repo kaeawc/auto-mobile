@@ -359,6 +359,19 @@ export class ExecutionTracker {
   }
 
   /**
+   * Number of in-flight executions on one device session, counted the same way
+   * {@link hasActiveDeviceSessionExecutions} judges activity: explicit session UUID,
+   * resolved autolock, and still-unresolved autolock executions (#10671).
+   */
+  getActiveDeviceSessionExecutionCount(sessionUuid: string): number {
+    return new Set([
+      ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
+      ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
+      ...this.unresolvedAutolockExecutionIds(sessionUuid),
+    ]).size;
+  }
+
+  /**
    * @param reason Why the Streamable HTTP session (or equivalent) ended — logged for diagnostics.
    */
   async cancelSessionExecutions(

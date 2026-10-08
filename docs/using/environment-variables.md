@@ -331,6 +331,28 @@ survived; it must not heartbeat the session itself to find out. It also prints
 `liveness`: `{ state: "live" | "suspect" | "lapsed", remainingMs }`, the time
 left on the lease or grace window, or zero once lapsed.
 
+To tell an idle holder from an active one, `session-info` also prints:
+
+| Field                  | Meaning                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `lastToolActivityAt`   | Start or end of the session's last tool call; heartbeats never move it.        |
+| `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                        |
+| `idleReleaseAt`        | When idle release is due; the next monitor scan after it releases the session. |
+| `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                  |
+| `activeExecutions`     | Tool calls in flight on the session. Idle release waits for them to finish.    |
+
+`holderKind` comes from the session's liveness policy (`cli` for a one-shot
+`--cli` owner), the client name a client sent to `daemon/registerSession`, and
+the owner token (a token-claimed heartbeat session is a `stdio-proxy`). The
+desktop app and the IDE plugin register under the same name today, so both
+report `desktop`.
+
+`--daemon active-sessions` prints every held session with the same fields plus
+`sessionId`, `assignedDevice` and `platform`, so one command answers which
+client holds which device and when it will be released.
+`scripts/live-idle-release-check.sh` uses it to check idle release against a real
+emulator with a private daemon.
+
 ### Stalled liveness: `daemon_stalled` and `proxy_stalled`
 
 When a lease expires the daemon does not release the session at once: it holds

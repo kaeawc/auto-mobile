@@ -18026,7 +18026,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\"), optional state, root. window.opacity is 0-100, default 100.",
           "type": "object",
           "properties": {
             "id": {
@@ -18121,6 +18121,32 @@
               },
               "required": ["placement"],
               "additionalProperties": false
+            },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["light", "dark", "system"]
+                },
+                "colors": {
+                  "type": "object",
+                  "properties": {
+                    "seed": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": ["device"]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "minProperties": 1
+                }
+              },
+              "additionalProperties": false,
+              "minProperties": 1
             },
             "state": {},
             "motion": {
@@ -18290,6 +18316,26 @@
                         "height": {
                           "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/width"
                         },
+                        "weight": {
+                          "type": "number",
+                          "minimum": 0.000001
+                        },
+                        "minWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "minHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
                         "padding": {
                           "type": "object",
                           "properties": {
@@ -18398,112 +18444,130 @@
                       },
                       "additionalProperties": false
                     },
+                    "styleWhen": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "when": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                  },
+                                  "equals": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["key", "equals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "notEquals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                  }
+                                },
+                                "required": ["key", "notEquals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "gt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["key", "gt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "lt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["key", "lt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "all": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 16
+                                  }
+                                },
+                                "required": ["all"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "any": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 16
+                                  }
+                                },
+                                "required": ["any"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "not": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                  }
+                                },
+                                "required": ["not"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "style": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                          }
+                        },
+                        "required": ["when", "style"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
                     "visibleWhen": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                            },
-                            "equals": {
-                              "anyOf": [
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            }
-                          },
-                          "required": ["key", "equals"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "notEquals": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
-                            }
-                          },
-                          "required": ["key", "notEquals"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "gt": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["key", "gt"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "lt": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["key", "lt"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "all": {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                              },
-                              "minItems": 1,
-                              "maxItems": 16
-                            }
-                          },
-                          "required": ["all"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "any": {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                              },
-                              "minItems": 1,
-                              "maxItems": 16
-                            }
-                          },
-                          "required": ["any"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "not": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                            }
-                          },
-                          "required": ["not"],
-                          "additionalProperties": false
-                        }
-                      ]
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
                     },
                     "anchor": {
                       "anyOf": [
@@ -18657,6 +18721,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18695,6 +18762,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18735,6 +18805,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18769,6 +18842,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18809,6 +18885,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18883,6 +18962,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18914,6 +18996,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18953,6 +19038,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18994,6 +19082,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19034,6 +19125,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19073,6 +19167,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -19115,6 +19212,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19153,6 +19253,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -19258,6 +19361,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19305,6 +19411,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -19577,6 +19686,26 @@
                           "height": {
                             "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/width"
                           },
+                          "weight": {
+                            "type": "number",
+                            "minimum": 0.000001
+                          },
+                          "minWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "minHeight": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxHeight": {
+                            "type": "number",
+                            "minimum": 0
+                          },
                           "padding": {
                             "type": "object",
                             "properties": {
@@ -19685,112 +19814,130 @@
                         },
                         "additionalProperties": false
                       },
+                      "styleWhen": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "when": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                    },
+                                    "equals": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["key", "equals"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "notEquals": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                    }
+                                  },
+                                  "required": ["key", "notEquals"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "gt": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["key", "gt"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "lt": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["key", "lt"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "all": {
+                                      "type": "array",
+                                      "items": {
+                                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                      },
+                                      "minItems": 1,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["all"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "any": {
+                                      "type": "array",
+                                      "items": {
+                                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                      },
+                                      "minItems": 1,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["any"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "not": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                    }
+                                  },
+                                  "required": ["not"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "style": {
+                              "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                            }
+                          },
+                          "required": ["when", "style"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      },
                       "visibleWhen": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                              },
-                              "equals": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "boolean"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["key", "equals"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "notEquals": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
-                              }
-                            },
-                            "required": ["key", "notEquals"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "gt": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["key", "gt"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "lt": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["key", "lt"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "all": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                                },
-                                "minItems": 1,
-                                "maxItems": 16
-                              }
-                            },
-                            "required": ["all"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "any": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                                },
-                                "minItems": 1,
-                                "maxItems": 16
-                              }
-                            },
-                            "required": ["any"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "not": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                              }
-                            },
-                            "required": ["not"],
-                            "additionalProperties": false
-                          }
-                        ]
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
                       },
                       "anchor": {
                         "anyOf": [
@@ -19954,6 +20101,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -19992,6 +20142,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20032,6 +20185,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20066,6 +20222,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20106,6 +20265,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20180,6 +20342,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20211,6 +20376,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20250,6 +20418,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20291,6 +20462,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20331,6 +20505,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20370,6 +20547,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20412,6 +20592,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20450,6 +20633,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20555,6 +20741,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20602,6 +20791,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"

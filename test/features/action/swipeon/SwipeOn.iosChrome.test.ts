@@ -58,7 +58,7 @@ function harness() {
         new FakeFeatureFlagRepository(),
         new FakeFeatureFlagApplier(),
       ),
-      finder,
+      scrollables: finder,
       timer,
       voiceOverExecutor,
       accessibilityDetector: new FakeAccessibilityDetector(),

@@ -1,0 +1,78 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "background": "#112233",
+      "padding": {
+        "top": 4
+      }
+    },
+    "styleWhen": [
+      {
+        "when": {
+          "key": "selected",
+          "equals": true
+        },
+        "style": {
+          "background": "#2255CC",
+          "cornerRadius": 8
+        }
+      },
+      {
+        "when": {
+          "all": [
+            {
+              "key": "count",
+              "gt": 2
+            },
+            {
+              "not": {
+                "key": "count",
+                "gt": 10
+              }
+            }
+          ]
+        },
+        "style": {
+          "alpha": 0.5,
+          "border": {
+            "width": 1,
+            "color": "#FFFFFF"
+          }
+        }
+      }
+    ],
+    "children": [
+      {
+        "type": "text",
+        "text": "Count {count}",
+        "style": {
+          "color": "#FFFFFF",
+          "textSize": 14
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "key": "count",
+              "lt": 1
+            },
+            "style": {
+              "color": "#FF0000",
+              "fontWeight": 700
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "state": {
+    "selected": true,
+    "count": 3
+  }
+}

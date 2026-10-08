@@ -11,6 +11,9 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     private let retries = ProbeStartupRetryCoordinator(scheduler: DispatchProbeRetryScheduler())
     private let stateLock = NSLock()
     private var connectionGeneration: UInt64 = 0
+    /// Simulators the host manages; only these can be attributed. `activate`
+    /// reads back with none, so every flow is reported unattributed.
+    private var managedSimulators: [ManagedSimulator] = []
 
     func run() {
         DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
@@ -37,11 +40,21 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             request.delegate = self
             OSSystemExtensionManager.shared.submitRequest(request)
         case "status", "snapshot":
+            do {
+                managedSimulators = try ManagedSimulatorArguments.parse(
+                    Array(CommandLine.arguments.dropFirst(2)),
+                    canonicalize: canonicalDeviceSetPath
+                )
+            } catch {
+                finish(.unavailable, "\(error)", code: 2)
+                return
+            }
             readSnapshot()
         default:
             finish(
                 .unavailable,
-                "Usage: network-filter-controller \(ControllerContract.commands.joined(separator: "|"))",
+                "Usage: network-filter-controller \(ControllerContract.commands.joined(separator: "|"))"
+                    + " [--managed <device-set-path> <udid>]...",
                 code: 2
             )
         }
@@ -135,7 +148,13 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             finish(.unavailable, "Provider bridge is unavailable", code: 1)
             return
         }
-        service.snapshot(version: IdentityProbe.version) { [self] data, error in
+        guard let managed = try? JSONEncoder().encode(managedSimulators) else {
+            guard claimOutcome(generation) else { return }
+            connection.invalidate()
+            finish(.unavailable, "Unable to encode managed simulators", code: 1)
+            return
+        }
+        service.snapshot(version: IdentityProbe.version, managedSimulators: managed) { [self] data, error in
             guard claimOutcome(generation) else { return }
             guard error == nil, let data,
                   let snapshot = try? JSONDecoder().decode(ProbeSnapshot.self, from: data),
@@ -199,6 +218,15 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         }
         exit(code)
     }
+}
+
+/// Executable paths come from the kernel with symlinks resolved (`/tmp` is
+/// `/private/tmp`), so device-set paths are compared in the same form. A path
+/// that cannot be resolved is kept as given and simply never matches.
+private func canonicalDeviceSetPath(_ path: String) -> String {
+    guard let resolved = realpath(path, nil) else { return path }
+    defer { free(resolved) }
+    return String(cString: resolved)
 }
 
 private let controller = Controller()

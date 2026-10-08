@@ -8,6 +8,7 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -40,9 +42,9 @@ class McpHttpClient(
   private val testRecordingClient = TestRecordingSocketClient()
 
   private val httpClient = HttpClient.newBuilder().build()
-  private var sessionId: String? = null
-  private var protocolVersion: String? = null
-  private var initialized = false
+  @Volatile private var sessionId: String? = null
+  @Volatile private var protocolVersion: String? = null
+  @Volatile private var initialized = false
 
   override fun ping() {
     ensureInitialized()
@@ -430,12 +432,15 @@ class McpHttpClient(
           put("name", JsonPrimitive(name))
           put("arguments", arguments)
         },
-        timeoutMs = deadline?.remainingTimeoutMs(),
+        deadline = deadline,
       )
     return response.result ?: JsonObject(emptyMap())
   }
 
-  private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
+  private fun ensureInitialized(
+    deadline: StatusRequestDeadline? = null,
+    recoverLostSession: Boolean = true,
+  ) {
     if (initialized) {
       return
     }
@@ -445,7 +450,7 @@ class McpHttpClient(
         "initialize",
         buildInitializeParams(),
         includeSession = false,
-        timeoutMs = deadline?.remainingTimeoutMs(),
+        deadline = deadline,
       )
 
     val result =
@@ -454,13 +459,18 @@ class McpHttpClient(
     protocolVersion = negotiateProtocolVersion(result)
     initialized = true
 
-    sendNotification("notifications/initialized", deadline = deadline)
+    sendNotification(
+      "notifications/initialized",
+      deadline = deadline,
+      recoverLostSession = recoverLostSession,
+    )
   }
 
   private fun sendNotification(
     method: String,
     params: JsonElement? = null,
     deadline: StatusRequestDeadline? = null,
+    recoverLostSession: Boolean = true,
   ) {
     val request =
       JsonRpcRequest(
@@ -472,7 +482,8 @@ class McpHttpClient(
       request,
       includeSession = true,
       expectResponse = false,
-      timeoutMs = deadline?.remainingTimeoutMs(),
+      deadline = deadline,
+      recoverLostSession = recoverLostSession,
     )
   }
 
@@ -480,7 +491,7 @@ class McpHttpClient(
     method: String,
     params: JsonElement? = null,
     includeSession: Boolean = true,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
   ): JsonRpcResponse {
     val requestId = JsonPrimitive(UUID.randomUUID().toString())
     val request =
@@ -493,7 +504,7 @@ class McpHttpClient(
       request,
       includeSession = includeSession,
       expectResponse = true,
-      timeoutMs = timeoutMs,
+      deadline = deadline,
     )
   }
 
@@ -501,16 +512,65 @@ class McpHttpClient(
     request: JsonRpcRequest,
     includeSession: Boolean,
     expectResponse: Boolean,
-    timeoutMs: Long? = null,
+    deadline: StatusRequestDeadline? = null,
+    recoverLostSession: Boolean = true,
   ): JsonRpcResponse {
+    val sentSessionId = if (includeSession) sessionId else null
+    var response = exchange(request, includeSession, deadline)
+    if (recoverLostSession && sentSessionId != null && isSessionLost(response)) {
+      response = replayAfterSessionLoss(request, sentSessionId, deadline)
+    }
+
+    val statusCode = response.statusCode()
+    if (statusCode >= 500) {
+      throw McpConnectionException("MCP HTTP server error $statusCode")
+    }
+
+    if (!expectResponse) {
+      return JsonRpcResponse(jsonrpc = "2.0")
+    }
+
+    val body = response.body().trim()
+    if (statusCode !in 200..299) {
+      throw httpFailure(statusCode, body)
+    }
+    if (body.isEmpty()) {
+      throw McpConnectionException("MCP HTTP response was empty")
+    }
+
+    val rpcResponse =
+      if (isEventStream(response)) {
+        responseFromEventStream(request, body)
+      } else {
+        decodeJsonRpcResponse(body)
+      }
+    if (rpcResponse.error != null) {
+      throw McpConnectionException(
+        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+      )
+    }
+    rpcResponse.resultFor(request.method)
+    return rpcResponse
+  }
+
+  /** Sends one POST and records the session id the server hands back. */
+  private fun exchange(
+    request: JsonRpcRequest,
+    includeSession: Boolean,
+    deadline: StatusRequestDeadline?,
+  ): HttpResponse<String> {
     val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
+    // The MCP streamable-HTTP transport answers 406 unless Accept lists both forms.
     val builder =
-      HttpRequest.newBuilder(URI.create(endpoint)).header("Content-Type", "application/json")
+      HttpRequest.newBuilder(URI.create(endpoint))
+        .header("Content-Type", "application/json")
+        .header("Accept", MCP_ACCEPT_HEADER)
 
     if (includeSession) {
-      sessionId?.let { builder.header("mcp-session-id", it) }
+      sessionId?.let { builder.header(SESSION_HEADER, it) }
     }
     protocolVersion?.let { builder.header("mcp-protocol-version", it) }
+    val timeoutMs = deadline?.remainingTimeoutMs()
     timeoutMs?.let { builder.timeout(Duration.ofMillis(it)) }
 
     val httpRequest = builder.POST(HttpRequest.BodyPublishers.ofString(requestBody)).build()
@@ -525,40 +585,116 @@ class McpHttpClient(
         sendHttpRequest(httpRequest)
       }
 
-    response.headers().firstValue("mcp-session-id").ifPresent { header ->
+    response.headers().firstValue(SESSION_HEADER).ifPresent { header ->
       if (header.isNotBlank()) {
         sessionId = header
       }
     }
+    return response
+  }
 
-    val statusCode = response.statusCode()
-    if (statusCode >= 500) {
-      throw McpConnectionException("MCP HTTP server error $statusCode")
+  /**
+   * The daemon answers 404 before it dispatches anything when the session id is unknown (for
+   * example after a daemon restart), so the rejected request never ran and is safe to replay once
+   * on a fresh session. Re-initialising is attempted exactly once per request: a daemon that keeps
+   * answering 404 fails with a clear error instead of looping.
+   */
+  private fun replayAfterSessionLoss(
+    request: JsonRpcRequest,
+    lostSessionId: String,
+    deadline: StatusRequestDeadline?,
+  ): HttpResponse<String> {
+    // Only drop the session this request used: another thread may already have replaced it.
+    if (sessionId == lostSessionId) {
+      resetSession()
     }
-
-    if (!expectResponse) {
-      return JsonRpcResponse(jsonrpc = "2.0")
-    }
-
-    val body = response.body().trim()
-    if (body.isEmpty()) {
-      throw McpConnectionException("MCP HTTP response was empty")
-    }
-
-    val rpcResponse = json.decodeFromString(serializer<JsonRpcResponse>(), body)
-    if (rpcResponse.error != null) {
+    ensureInitialized(deadline, recoverLostSession = false)
+    val replayed = exchange(request, includeSession = true, deadline = deadline)
+    if (isSessionLost(replayed)) {
+      resetSession()
       throw McpConnectionException(
-        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+        "MCP session lost: $endpoint answered 404 Session not found again after re-initializing; " +
+          "the daemon is not keeping the new session"
       )
     }
-    rpcResponse.resultFor(request.method)
-    return rpcResponse
+    return replayed
   }
+
+  private fun resetSession() {
+    sessionId = null
+    protocolVersion = null
+    initialized = false
+  }
+
+  /** True for the daemon's `{"error":"Session not found"}` and the SDK's JSON-RPC -32001 form. */
+  private fun isSessionLost(response: HttpResponse<String>): Boolean {
+    if (response.statusCode() != 404) {
+      return false
+    }
+    val envelope = runCatching { json.parseToJsonElement(response.body()) }.getOrNull()
+    val error = (envelope as? JsonObject)?.get("error") ?: return false
+    val message =
+      when (error) {
+        is JsonPrimitive -> error.contentOrNull
+        is JsonObject -> (error["message"] as? JsonPrimitive)?.contentOrNull
+        else -> null
+      }
+    return message?.contains(SESSION_NOT_FOUND, ignoreCase = true) == true
+  }
+
+  private fun isEventStream(response: HttpResponse<String>): Boolean =
+    response.headers().firstValue("content-type").orElse("").trimStart().startsWith(EVENT_STREAM)
+
+  /** Picks the JSON-RPC reply to [request] out of the stream, skipping everything else. */
+  private fun responseFromEventStream(request: JsonRpcRequest, body: String): JsonRpcResponse {
+    for (event in SseEventParser.parse(body)) {
+      if (event.data.isBlank()) {
+        continue
+      }
+      val message = runCatching { json.parseToJsonElement(event.data) }.getOrNull() as? JsonObject
+      val isReply = message != null && ("result" in message || "error" in message)
+      if (message != null && isReply && message["id"] == request.id) {
+        return decodeJsonRpcResponse(event.data)
+      }
+    }
+    throw McpConnectionException(
+      "MCP HTTP event stream ended without a reply to ${request.method} (id ${request.id})"
+    )
+  }
+
+  private fun decodeJsonRpcResponse(body: String): JsonRpcResponse =
+    try {
+      json.decodeFromString(serializer<JsonRpcResponse>(), body)
+    } catch (e: SerializationException) {
+      throw McpConnectionException(
+        "MCP HTTP response was not a JSON-RPC message: ${excerpt(body)}",
+        e,
+      )
+    }
+
+  /** A non-2xx reply: a JSON-RPC error envelope when there is one, otherwise status plus body. */
+  private fun httpFailure(statusCode: Int, body: String): McpConnectionException {
+    val error = runCatching { json.decodeFromString<JsonRpcResponse>(body) }.getOrNull()?.error
+    return if (error != null) {
+      McpConnectionException("MCP HTTP error ${error.code}: ${error.message} (HTTP $statusCode)")
+    } else {
+      McpConnectionException("MCP HTTP $statusCode: ${excerpt(body)}")
+    }
+  }
+
+  private fun excerpt(body: String): String =
+    if (body.length <= MAX_ERROR_BODY_CHARS) body else body.take(MAX_ERROR_BODY_CHARS) + "..."
 
   private fun sendHttpRequest(request: HttpRequest): HttpResponse<String> =
     requestSender?.send(request) ?: httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
   companion object {
+    private const val SESSION_HEADER = "mcp-session-id"
+    private const val MCP_ACCEPT_HEADER = "application/json, text/event-stream"
+    private const val EVENT_STREAM = "text/event-stream"
+    private const val SESSION_NOT_FOUND = "Session not found"
+    private const val MAX_ERROR_BODY_CHARS = 200
+
     internal fun isRetryableError(e: Exception): Boolean =
       e is ConnectException ||
         e is java.net.http.HttpTimeoutException ||

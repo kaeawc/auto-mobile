@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -67,6 +67,7 @@ describe("session release windows (owner decision 2026-10-08)", () => {
 describe("the idle window counts from the end of the last tool call", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
+  let persistence: FakeDeviceSessionPersistence;
   let inFlight: boolean;
   let releases: { at: number; reason: string }[];
   const savedEnv = process.env[SESSION_IDLE_TIMEOUT_ENV];
@@ -74,7 +75,8 @@ describe("the idle window counts from the end of the last tool call", () => {
   beforeEach(async () => {
     delete process.env[SESSION_IDLE_TIMEOUT_ENV];
     timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    persistence = new FakeDeviceSessionPersistence();
+    manager = new SessionManager(timer, persistence);
     inFlight = false;
     releases = [];
     manager.setActiveSessionExecutionChecker(() => inFlight);
@@ -136,6 +138,33 @@ describe("the idle window counts from the end of the last tool call", () => {
     timer.setCurrentTime(5_000);
     manager.recordToolCallEnded(SESSION);
     expect(manager.getAllSessions()[0]!.expiresAt).toBe(deadline);
+  });
+
+  it("keeps the call-end refresh when persisting it fails", async () => {
+    await manager.getOrCreateSession(SESSION);
+    inFlight = true;
+    timer.setCurrentTime(3 * DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+    inFlight = false;
+    const write = spyOn(persistence, "recordActivity").mockRejectedValueOnce(
+      new Error("database is locked"),
+    );
+    try {
+      const endedAt = timer.now();
+      manager.recordToolCallEnded(SESSION);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(write).toHaveBeenCalled();
+      expect(manager.getAllSessions()[0]!.expiresAt).toBe(
+        endedAt + DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+      );
+      timer.setCurrentTime(endedAt + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+      await sweep();
+      expect(manager.hasSession(SESSION)).toBe(true);
+      expect(releases).toEqual([]);
+    } finally {
+      write.mockRestore();
+    }
   });
 
   it("ignores an unknown session", () => {

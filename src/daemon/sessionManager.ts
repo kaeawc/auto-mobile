@@ -5848,20 +5848,16 @@ export class SessionManager {
       return;
     }
     const now = this.timer.now();
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
-      lastHeartbeat: session.lastHeartbeat,
-      expiresAt: session.expiresAt,
-    };
     session.lastUsedAt = Math.max(session.lastUsedAt, now);
     session.lastHeartbeat = Math.max(session.lastHeartbeat, now);
     session.expiresAt = Math.max(session.expiresAt, now + session.sessionTimeoutMs);
     session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
       .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
+        // Unlike a call's start, nobody awaits this write, so the in-memory refresh stands: the
+        // call really did just end, and rolling back to its start would release a session that
+        // outlived the idle window the moment it finished. The next activity write persists it.
         logger.warn(
           `[SessionManager] Failed to record tool-call end activity: ${errorMessage(error)}`,
         );

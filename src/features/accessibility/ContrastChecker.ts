@@ -38,6 +38,12 @@ const INK_MIN_DISTANCE = 40;
 const STROKE_MAX_DISTANCE = 10;
 /** Grid probes spent locating the ink extent of an element. */
 const INK_SCAN_MAX_PROBES = 16384;
+/**
+ * Grid probes spent looking for a solid stroke of one colour. Every pixel is probed in a
+ * box up to this area (a 1000x256 box uses a stride of 2), keeping a failing colour's cost
+ * per element bounded.
+ */
+const STROKE_SCAN_MAX_PROBES = 65536;
 /** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
 const GLYPH_PIXEL_MAX_DISTANCE = 30;
 /** How far from a sample point to look for the colour a stroke away. */
@@ -943,31 +949,46 @@ export class ContrastChecker {
 
   /**
    * Whether `color` fills a stroke at least two pixels wide in both directions somewhere
-   * in `bounds`: a sampled pixel of that colour whose horizontal and vertical neighbours
-   * include the same colour. The anti-aliasing band around a glyph edge is one pixel
-   * across, so its levels never qualify, while a glyph or icon of their own colour does.
+   * in `bounds`: a pixel of that colour whose horizontal and vertical neighbours include
+   * the same colour. The anti-aliasing band around a glyph edge is one pixel across, so
+   * its levels never qualify, while a glyph or icon of their own colour does.
    */
   private hasSolidStroke(image: RawImage, bounds: Element["bounds"], color: RGB): boolean {
+    return !this.solidStrokeSeeds(image, bounds, color).next().done;
+  }
+
+  /**
+   * Pixels of `color` that sit in a stroke at least two pixels wide on both axes, scanned
+   * on a 2-D grid whose row and column stride stay equal and small (every pixel up to
+   * STROKE_SCAN_MAX_PROBES, then the smallest stride that fits). A stride of `s` finds any
+   * stroke at least `s` px wide on both axes; a lattice of evenly spaced offsets instead
+   * visits only a few columns of a wide box (16 columns, 62px apart, in a 1000x256 box),
+   * so small glyphs between them were never found.
+   */
+  private *solidStrokeSeeds(
+    image: RawImage,
+    bounds: Element["bounds"],
+    color: RGB,
+  ): Generator<{ x: number; y: number }> {
     const left = Math.ceil(bounds.left);
     const top = Math.ceil(bounds.top);
     const right = Math.ceil(bounds.right) - 1;
     const bottom = Math.ceil(bounds.bottom) - 1;
-    const width = right - left + 1;
-    const area = width * (bottom - top + 1);
-    const count = Math.min(area, 4096);
+    const area = (right - left + 1) * (bottom - top + 1);
+    const stride = Math.max(1, Math.ceil(Math.sqrt(area / STROKE_SCAN_MAX_PROBES)));
     const stroke = (x: number, y: number): boolean =>
       this.colorDistance(this.resolvePixelColor(image, x, y), color) <= STROKE_MAX_DISTANCE;
-    return Array.from({ length: count }, (_, i) => Math.floor((i * area) / count)).some(
-      (offset) => {
-        const x = left + (offset % width);
-        const y = top + Math.floor(offset / width);
-        return (
-          stroke(x, y) &&
-          ((x > left && stroke(x - 1, y)) || (x < right && stroke(x + 1, y))) &&
-          ((y > top && stroke(x, y - 1)) || (y < bottom && stroke(x, y + 1)))
-        );
-      },
-    );
+    const solid = (x: number, y: number): boolean =>
+      stroke(x, y) &&
+      ((x > left && stroke(x - 1, y)) || (x < right && stroke(x + 1, y))) &&
+      ((y > top && stroke(x, y - 1)) || (y < bottom && stroke(x, y + 1)));
+    for (let y = top; y <= bottom; y += stride) {
+      for (let x = left; x <= right; x += stride) {
+        if (solid(x, y)) {
+          yield { x, y };
+        }
+      }
+    }
   }
 
   private sampleElementColors(

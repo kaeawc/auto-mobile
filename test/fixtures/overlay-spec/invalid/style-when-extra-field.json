@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "styleWhen": [
+        {
+          "when": {
+            "key": "selected",
+            "equals": true
+          },
+          "style": {
+            "alpha": 0.5
+          },
+          "priority": 1
+        }
+      ]
+    },
+    "state": {
+      "selected": true,
+      "count": 3
+    }
+  },
+  "expectedPath": "root.styleWhen[0].priority"
+}

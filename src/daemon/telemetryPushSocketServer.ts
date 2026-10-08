@@ -6,6 +6,7 @@ import {
 } from "./streamSocketAuth";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
+import { ActionableError } from "../models/ActionableError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import type { TelemetryEvent } from "../features/telemetry/TelemetryRecorder";
@@ -192,7 +193,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   protected parseSubscriptionFilter(request: Record<string, unknown>): TelemetryFilter {
     // Validated, not cast: a blank/non-string key would otherwise become a filter that
     // matches nothing while the subscribe call still acks success (#6676).
-    const deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    const deviceSessionUuid =
+      this.parseDeviceSessionUuid(request.deviceSessionUuid) ??
+      this.resolveDeviceIdKey(request.deviceId);
     return {
       category: (request.category as string) ?? null,
       deviceSessionUuid,
@@ -203,6 +206,31 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
         : null,
       sessionId: (request.sessionId as string) ?? null,
     };
+  }
+
+  /**
+   * A subscribe that names only a serial (`deviceId`, as the desktop's per-device
+   * panes send) is resolved to that device's live `deviceSessionUuid`, since events
+   * are routed by uuid. Silently ignoring the key would ack the subscribe and then
+   * deliver every device's events (#10143), so an unresolvable serial is refused.
+   * An absent `deviceId` stays an all-devices subscription.
+   */
+  private resolveDeviceIdKey(value: unknown): string | null {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new ActionableError("deviceId must be a non-blank string or null");
+    }
+    const deviceId = value.trim();
+    const uuid = this.deviceSessionResolver.resolveUuid(deviceId);
+    if (uuid === null) {
+      throw new ActionableError(
+        `deviceId '${deviceId}' does not identify a live device session; ` +
+          "subscribe with a current deviceSessionUuid or omit deviceId for an all-devices subscription",
+      );
+    }
+    return uuid;
   }
 
   protected matchesFilter(filter: TelemetryFilter, data: TelemetryEvent): boolean {

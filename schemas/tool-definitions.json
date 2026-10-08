@@ -18003,7 +18003,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional state, root. window.opacity is 0-100, default 100. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge), optional state, root. window.opacity is 0-100, default 100. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
           "type": "object",
           "properties": {
             "id": {
@@ -18108,6 +18108,57 @@
               },
               "required": ["placement"],
               "additionalProperties": false
+            },
+            "theme": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["light", "dark", "system"]
+                },
+                "colors": {
+                  "type": "object",
+                  "properties": {
+                    "seed": {
+                      "type": "string",
+                      "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": ["device"]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "minProperties": 1
+                },
+                "typography": {
+                  "type": "object",
+                  "properties": {
+                    "scale": {
+                      "type": "number",
+                      "minimum": 0.75,
+                      "maximum": 1.5
+                    },
+                    "fontFamily": {
+                      "type": "string",
+                      "enum": ["sans", "serif", "mono"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "shapes": {
+                  "type": "object",
+                  "properties": {
+                    "corner": {
+                      "type": "string",
+                      "enum": ["none", "small", "medium", "large", "full"]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false,
+              "minProperties": 1
             },
             "state": {},
             "motion": {
@@ -18277,6 +18328,26 @@
                         "height": {
                           "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/width"
                         },
+                        "weight": {
+                          "type": "number",
+                          "minimum": 0.000001
+                        },
+                        "minWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxWidth": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "minHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "maxHeight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
                         "padding": {
                           "type": "object",
                           "properties": {
@@ -18381,116 +18452,154 @@
                         "fontFamily": {
                           "type": "string",
                           "enum": ["default", "sansSerif", "serif", "monospace"]
+                        },
+                        "textStyle": {
+                          "type": "string",
+                          "enum": [
+                            "displayLarge",
+                            "displayMedium",
+                            "displaySmall",
+                            "headlineLarge",
+                            "headlineMedium",
+                            "headlineSmall",
+                            "titleLarge",
+                            "titleMedium",
+                            "titleSmall",
+                            "bodyLarge",
+                            "bodyMedium",
+                            "bodySmall",
+                            "labelLarge",
+                            "labelMedium",
+                            "labelSmall"
+                          ]
                         }
                       },
                       "additionalProperties": false
                     },
+                    "styleWhen": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "when": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                  },
+                                  "equals": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "number"
+                                      },
+                                      {
+                                        "type": "boolean"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": ["key", "equals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "notEquals": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                  }
+                                },
+                                "required": ["key", "notEquals"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "gt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["key", "gt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                  },
+                                  "lt": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["key", "lt"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "all": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 16
+                                  }
+                                },
+                                "required": ["all"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "any": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 16
+                                  }
+                                },
+                                "required": ["any"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "not": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                                  }
+                                },
+                                "required": ["not"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "style": {
+                            "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                          }
+                        },
+                        "required": ["when", "style"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
+                    },
                     "visibleWhen": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "type": "string",
-                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                            },
-                            "equals": {
-                              "anyOf": [
-                                {
-                                  "type": "string"
-                                },
-                                {
-                                  "type": "number"
-                                },
-                                {
-                                  "type": "boolean"
-                                }
-                              ]
-                            }
-                          },
-                          "required": ["key", "equals"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "notEquals": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
-                            }
-                          },
-                          "required": ["key", "notEquals"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "gt": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["key", "gt"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "key": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                            },
-                            "lt": {
-                              "type": "number"
-                            }
-                          },
-                          "required": ["key", "lt"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "all": {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                              },
-                              "minItems": 1,
-                              "maxItems": 16
-                            }
-                          },
-                          "required": ["all"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "any": {
-                              "type": "array",
-                              "items": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                              },
-                              "minItems": 1,
-                              "maxItems": 16
-                            }
-                          },
-                          "required": ["any"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "not": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
-                            }
-                          },
-                          "required": ["not"],
-                          "additionalProperties": false
-                        }
-                      ]
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
                     },
                     "anchor": {
                       "anyOf": [
@@ -18644,6 +18753,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18682,6 +18794,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18722,6 +18837,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18756,6 +18874,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18797,6 +18918,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -18811,45 +18935,11 @@
                       "enum": ["icon"]
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "variant": {
                       "type": "string",
-                      "enum": [
-                        "home",
-                        "search",
-                        "settings",
-                        "person",
-                        "favorite",
-                        "add",
-                        "close",
-                        "check",
-                        "arrow_back",
-                        "arrow_forward",
-                        "chevron_left",
-                        "chevron_right",
-                        "menu",
-                        "more_vert",
-                        "share",
-                        "edit",
-                        "delete",
-                        "info",
-                        "warning",
-                        "notifications",
-                        "star",
-                        "shopping_cart",
-                        "help",
-                        "refresh",
-                        "done",
-                        "cancel",
-                        "play_arrow",
-                        "pause",
-                        "stop",
-                        "mail",
-                        "phone",
-                        "location_on",
-                        "calendar_today",
-                        "visibility",
-                        "lock",
-                        "logout"
-                      ]
+                      "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                     }
                   },
                   "required": ["type", "name"],
@@ -18869,6 +18959,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18901,6 +18994,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18940,6 +19036,138 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["switch"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["type", "stateKey"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["checkbox"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": ["type", "stateKey"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["button"]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["filled", "outlined", "text"]
+                    }
+                  },
+                  "required": ["type", "label"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -18982,6 +19210,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19021,6 +19252,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19044,45 +19278,7 @@
                             "minLength": 1
                           },
                           "icon": {
-                            "type": "string",
-                            "enum": [
-                              "home",
-                              "search",
-                              "settings",
-                              "person",
-                              "favorite",
-                              "add",
-                              "close",
-                              "check",
-                              "arrow_back",
-                              "arrow_forward",
-                              "chevron_left",
-                              "chevron_right",
-                              "menu",
-                              "more_vert",
-                              "share",
-                              "edit",
-                              "delete",
-                              "info",
-                              "warning",
-                              "notifications",
-                              "star",
-                              "shopping_cart",
-                              "help",
-                              "refresh",
-                              "done",
-                              "cancel",
-                              "play_arrow",
-                              "pause",
-                              "stop",
-                              "mail",
-                              "phone",
-                              "location_on",
-                              "calendar_today",
-                              "visibility",
-                              "lock",
-                              "logout"
-                            ]
+                            "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                           },
                           "image": {
                             "type": "string",
@@ -19125,6 +19321,9 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
@@ -19141,7 +19340,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/10/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/13/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -19172,6 +19371,9 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -19444,6 +19646,26 @@
                           "height": {
                             "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/width"
                           },
+                          "weight": {
+                            "type": "number",
+                            "minimum": 0.000001
+                          },
+                          "minWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxWidth": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "minHeight": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "maxHeight": {
+                            "type": "number",
+                            "minimum": 0
+                          },
                           "padding": {
                             "type": "object",
                             "properties": {
@@ -19548,116 +19770,154 @@
                           "fontFamily": {
                             "type": "string",
                             "enum": ["default", "sansSerif", "serif", "monospace"]
+                          },
+                          "textStyle": {
+                            "type": "string",
+                            "enum": [
+                              "displayLarge",
+                              "displayMedium",
+                              "displaySmall",
+                              "headlineLarge",
+                              "headlineMedium",
+                              "headlineSmall",
+                              "titleLarge",
+                              "titleMedium",
+                              "titleSmall",
+                              "bodyLarge",
+                              "bodyMedium",
+                              "bodySmall",
+                              "labelLarge",
+                              "labelMedium",
+                              "labelSmall"
+                            ]
                           }
                         },
                         "additionalProperties": false
                       },
+                      "styleWhen": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "when": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string",
+                                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                    },
+                                    "equals": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["key", "equals"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "notEquals": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
+                                    }
+                                  },
+                                  "required": ["key", "notEquals"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "gt": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["key", "gt"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/key"
+                                    },
+                                    "lt": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["key", "lt"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "all": {
+                                      "type": "array",
+                                      "items": {
+                                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                      },
+                                      "minItems": 1,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["all"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "any": {
+                                      "type": "array",
+                                      "items": {
+                                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                      },
+                                      "minItems": 1,
+                                      "maxItems": 16
+                                    }
+                                  },
+                                  "required": ["any"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "not": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                                    }
+                                  },
+                                  "required": ["not"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "style": {
+                              "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                            }
+                          },
+                          "required": ["when", "style"],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1,
+                        "maxItems": 8
+                      },
                       "visibleWhen": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "type": "string",
-                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
-                              },
-                              "equals": {
-                                "anyOf": [
-                                  {
-                                    "type": "string"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "boolean"
-                                  }
-                                ]
-                              }
-                            },
-                            "required": ["key", "equals"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "notEquals": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/equals"
-                              }
-                            },
-                            "required": ["key", "notEquals"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "gt": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["key", "gt"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "key": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen/anyOf/0/properties/key"
-                              },
-                              "lt": {
-                                "type": "number"
-                              }
-                            },
-                            "required": ["key", "lt"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "all": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                                },
-                                "minItems": 1,
-                                "maxItems": 16
-                              }
-                            },
-                            "required": ["all"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "any": {
-                                "type": "array",
-                                "items": {
-                                  "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                                },
-                                "minItems": 1,
-                                "maxItems": 16
-                              }
-                            },
-                            "required": ["any"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "not": {
-                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
-                              }
-                            },
-                            "required": ["not"],
-                            "additionalProperties": false
-                          }
-                        ]
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
                       },
                       "anchor": {
                         "anyOf": [
@@ -19821,6 +20081,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -19859,6 +20122,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -19899,6 +20165,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -19933,6 +20202,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -19974,6 +20246,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -19988,45 +20263,11 @@
                         "enum": ["icon"]
                       },
                       "name": {
+                        "type": "string"
+                      },
+                      "variant": {
                         "type": "string",
-                        "enum": [
-                          "home",
-                          "search",
-                          "settings",
-                          "person",
-                          "favorite",
-                          "add",
-                          "close",
-                          "check",
-                          "arrow_back",
-                          "arrow_forward",
-                          "chevron_left",
-                          "chevron_right",
-                          "menu",
-                          "more_vert",
-                          "share",
-                          "edit",
-                          "delete",
-                          "info",
-                          "warning",
-                          "notifications",
-                          "star",
-                          "shopping_cart",
-                          "help",
-                          "refresh",
-                          "done",
-                          "cancel",
-                          "play_arrow",
-                          "pause",
-                          "stop",
-                          "mail",
-                          "phone",
-                          "location_on",
-                          "calendar_today",
-                          "visibility",
-                          "lock",
-                          "logout"
-                        ]
+                        "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                       }
                     },
                     "required": ["type", "name"],
@@ -20046,6 +20287,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20078,6 +20322,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20117,6 +20364,138 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["switch"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["type", "stateKey"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["checkbox"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["type", "stateKey"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["button"]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": ["filled", "outlined", "text"]
+                      }
+                    },
+                    "required": ["type", "label"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20159,6 +20538,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20198,6 +20580,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20221,45 +20606,7 @@
                               "minLength": 1
                             },
                             "icon": {
-                              "type": "string",
-                              "enum": [
-                                "home",
-                                "search",
-                                "settings",
-                                "person",
-                                "favorite",
-                                "add",
-                                "close",
-                                "check",
-                                "arrow_back",
-                                "arrow_forward",
-                                "chevron_left",
-                                "chevron_right",
-                                "menu",
-                                "more_vert",
-                                "share",
-                                "edit",
-                                "delete",
-                                "info",
-                                "warning",
-                                "notifications",
-                                "star",
-                                "shopping_cart",
-                                "help",
-                                "refresh",
-                                "done",
-                                "cancel",
-                                "play_arrow",
-                                "pause",
-                                "stop",
-                                "mail",
-                                "phone",
-                                "location_on",
-                                "calendar_today",
-                                "visibility",
-                                "lock",
-                                "logout"
-                              ]
+                              "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                             },
                             "image": {
                               "type": "string",
@@ -20302,6 +20649,9 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
@@ -20318,7 +20668,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/10/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/13/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5
@@ -20349,6 +20699,9 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"

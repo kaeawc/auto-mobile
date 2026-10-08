@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import { readFileSync } from "node:fs";
-import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { DefaultScrollableElementsQuery } from "../../../../src/features/utility/InteractiveElementQueries";
 import type { ViewHierarchyResult } from "../../../../src/models";
 import type { Element, ElementBounds } from "../../../../src/models";
 
@@ -295,7 +295,7 @@ describe("AutoTargetSelector batch-15 captures", () => {
   let portrait: Element;
 
   beforeAll(() => {
-    const finder = new DefaultElementFinder();
+    const query = new DefaultScrollableElementsQuery();
     for (const name of ["foldable", "landscape"]) {
       const hierarchy: ViewHierarchyResult = JSON.parse(
         readFileSync(
@@ -304,7 +304,7 @@ describe("AutoTargetSelector batch-15 captures", () => {
         ),
       );
       captures.set(name, {
-        scrollables: finder.findScrollableElements(hierarchy),
+        scrollables: query.findScrollableElements(hierarchy),
         screen: { left: 0, top: 0, right: hierarchy.screenWidth!, bottom: hierarchy.screenHeight! },
       });
     }

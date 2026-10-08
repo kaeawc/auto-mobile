@@ -506,19 +506,36 @@ describe("device clock", () => {
       "wait-for-device",
     ]);
   });
-  test("already-root adbd skips root/restart, and unroot returned errors are surfaced to best-effort logging", async () => {
+  test("already-root adbd skips root/restart", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("shell id", response("uid=0(root)"));
     const adapter = new AndroidDeviceClockAdapter(adb);
     expect(await adapter.ensureRoot()).toEqual({ success: true, rootedByUs: false });
     expect(adb.getExecutedCommands()).toEqual(["shell id"]);
+  });
+  test("unroot error caused by the adbd restart is judged by the read-back after reconnect (#10771)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("unroot", {
+      ...response(""),
+      stderr: "error: device offline",
+      error: new Error("device offline"),
+    });
+    adb.setCommandResponse("shell id", response("uid=2000(shell)"));
+    await new AndroidDeviceClockAdapter(adb).unroot();
+    expect(adb.getExecutedCommands()).toEqual(["unroot", "wait-for-device", "shell id"]);
+  });
+  test("unroot error is surfaced when the device is still root after reconnect", async () => {
+    const adb = new FakeAdbExecutor();
     adb.setCommandResponse("unroot", {
       ...response(""),
       stderr: "unroot failed",
       error: new Error("unroot failed"),
     });
-    await expect(adapter.unroot()).rejects.toBeInstanceOf(ActionableError);
-    expect(adb.getExecutedCommands()).not.toContain("wait-for-device");
+    adb.setCommandResponse("shell id", response("uid=0(root)"));
+    await expect(new AndroidDeviceClockAdapter(adb).unroot()).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+    expect(adb.getExecutedCommands()).toEqual(["unroot", "wait-for-device", "shell id"]);
   });
   test("invalid device epoch is a typed field failure with no clock mutation", async () => {
     const adb = new FakeAdbExecutor();

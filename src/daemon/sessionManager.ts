@@ -802,6 +802,12 @@ const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
 const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 /**
+ * Clock restore ends with `adb unroot`, which restarts adbd: the device goes offline and the
+ * restore only finishes once it reconnects (a few seconds on an emulator). The network path's
+ * 1 s deadline fired on every successful restore and quarantined it for nothing (#10771).
+ */
+export const CLOCK_RESTORE_TIMEOUT_MS = 15_000;
+/**
  * A failed network restore leaves the emulator holding session-modified shaping,
  * so — like the biometric restorer — the device must not return to the idle pool
  * on one attempt. Retries run inside the pending-cleanup promise, keeping the
@@ -4233,7 +4239,7 @@ export class SessionManager {
     const timeout = new Error("Clock restoration timed out");
     const result = await raceWithDeadline(restoration, {
       timer: this.timer,
-      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
       label: "Clock restoration",
       timeoutError: () => timeout,
     }).catch((error: unknown) => {

@@ -260,8 +260,22 @@ export class AndroidDeviceClockAdapter implements DeviceClockAdapter {
     return result.success ? { success: true, rootedByUs: true } : result;
   }
   async unroot(): Promise<void> {
-    await this.command("unroot");
+    // `adb unroot` restarts adbd, so the transport can drop mid-command and report an error
+    // although adbd came back unrooted. Wait for the device and judge by the read-back (#10771).
+    let unrootError: unknown;
+    try {
+      await this.command("unroot");
+    } catch (error) {
+      this.signal?.throwIfAborted();
+      unrootError = error;
+    }
     await this.command("wait-for-device", 60_000);
+    if (unrootError === undefined) {
+      return;
+    }
+    if ((await this.command("shell id")).includes("uid=0(root)")) {
+      throw unrootError;
+    }
   }
   private async command(command: string, timeoutMs = 30_000): Promise<string> {
     this.signal?.throwIfAborted();

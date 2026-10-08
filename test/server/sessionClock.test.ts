@@ -4,7 +4,11 @@ import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  PLAN_AUTO_RELEASE_REASON,
+  CLOCK_RESTORE_TIMEOUT_MS,
+} from "../../src/daemon/sessionManager";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import {
   restoreDeviceClock,
@@ -687,6 +691,36 @@ describe("session clock restoration", () => {
       h.manager.stopCleanupTimer();
     }
   });
+  test("restore that waits for adbd to reconnect after unroot is not timed out or quarantined (#10771)", async () => {
+    const reconnect = Promise.withResolvers<void>();
+    class OfflineAfterUnroot extends FakeDeviceClockAdapter {
+      override async unroot() {
+        await super.unroot();
+        await reconnect.promise;
+      }
+    }
+    const h = harness(new OfflineAfterUnroot());
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      await h.state.setState({ clock: set });
+      let released = false;
+      const releasing = h.manager.releaseSession("clock-session").then(() => {
+        released = true;
+      });
+      await flush();
+      // Past the old 1s network deadline while the device is still offline.
+      h.timer.advanceTime(5000);
+      await flush();
+      expect(released).toBe(false);
+      reconnect.resolve();
+      await releasing;
+      expect(h.adapter.calls).toContain("unroot");
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+    } finally {
+      reconnect.resolve();
+      h.manager.stopCleanupTimer();
+    }
+  });
   test("slow restore failure remains quarantined and retries after its deadline", async () => {
     const start = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<void>();
@@ -706,7 +740,7 @@ describe("session clock restoration", () => {
       h.adapter.writeError = new Error("slow failure");
       const releasing = h.manager.releaseSession("clock-session");
       await start.promise;
-      h.timer.advanceTime(1000);
+      h.timer.advanceTime(CLOCK_RESTORE_TIMEOUT_MS);
       await flush();
       await releasing;
       const pending = h.manager.getPendingDeviceCleanup(device.deviceId);

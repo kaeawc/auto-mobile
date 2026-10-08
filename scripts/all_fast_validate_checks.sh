@@ -36,6 +36,7 @@ add_check() {
 
 add_check "ktfmt" "ONLY_TOUCHED_FILES=${KTFMT_ONLY_TOUCHED_FILES:-true} \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "element-resolution-ratchet" "bash \"$PROJECT_ROOT/scripts/check-element-resolution-ratchet.sh\"" "lint,typescript" "Forbid growth of finding-keyed element-resolution exceptions"
+add_check "shared-process-allowlist" "bun \"$PROJECT_ROOT/scripts/test/classify-shared-safe.ts\" --check" "lint,conventions,typescript" "Keep unit files that share Bun processes free of shared-state signals (#10583)"
 add_check "test-as-any-ratchet" "bash \"$PROJECT_ROOT/scripts/test-as-any-baseline.sh\"" "lint,conventions,typescript" "Forbid growth of test as-any assertions"
 add_check "node-format" "bun --cwd \"$PROJECT_ROOT\" run format:check" "format,typescript" "Check Node TypeScript formatting"
 add_check "yaml" "bun \"$PROJECT_ROOT/scripts/validate-yaml.ts\"" "config,yaml" "Validate test plan YAML files"

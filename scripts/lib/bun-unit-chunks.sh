@@ -7,7 +7,10 @@
 # no process lives long enough for its isolate overhead and RSS to grow (#10213).
 #
 # Unit lane (default): CMD is the canonical unit command and JUnit reports go to
-# REPORT_DIR/shard-SHARD-chunk-N.xml, N from 0.
+# REPORT_DIR/shard-SHARD-chunk-N.xml, N from 0. The first
+# AUTOMOBILE_UNIT_SHARED_FILE_COUNT files are on test/shared-process-allowlist.txt
+# (#10583): they are chunked on their own and run without --isolate, and the
+# rest are chunked after them with the isolated command. No chunk mixes the two.
 #
 # Coverage mode: when CMD words precede a literal `--` and
 # AUTOMOBILE_CHUNK_COVERAGE_ROOT is set, CMD is the `bun test ...` command with
@@ -30,6 +33,8 @@ for arg in "$@"; do
   fi
 done
 command_words=()
+shared_command_words=()
+shared_count=0
 if [[ "$has_separator" -eq 1 ]]; then
   while [[ "$1" != -- ]]; do
     command_words+=("$1")
@@ -39,10 +44,30 @@ if [[ "$has_separator" -eq 1 ]]; then
 else
   configure_bun_unit_test "$root" "$runner_os"
   command_words=("${BUN_UNIT_TEST_COMMAND[@]}")
+  shared_command_words=("${BUN_UNIT_SHARED_TEST_COMMAND[@]}")
+  shared_count="${AUTOMOBILE_UNIT_SHARED_FILE_COUNT:-0}"
+  if ! [[ "$shared_count" =~ ^[0-9]+$ ]] || [[ "$shared_count" -gt "$#" ]]; then
+    echo "AUTOMOBILE_UNIT_SHARED_FILE_COUNT must be 0..$#, got: ${shared_count}" >&2
+    exit 2
+  fi
 fi
 files=("$@")
 coverage_root="${AUTOMOBILE_CHUNK_COVERAGE_ROOT:-}"
-total=$(((${#files[@]} + chunk_files - 1) / chunk_files))
+# Chunk boundaries never cross from the shared group into the isolated one.
+chunk_offsets=()
+chunk_sizes=()
+chunk_shared=()
+add_group_chunks() {
+  local start="$1" end="$2" shared="$3" offset
+  for ((offset = start; offset < end; offset += chunk_files)); do
+    chunk_offsets+=("$offset")
+    chunk_sizes+=("$((end - offset < chunk_files ? end - offset : chunk_files))")
+    chunk_shared+=("$shared")
+  done
+}
+add_group_chunks 0 "$shared_count" 1
+add_group_chunks "$shared_count" "${#files[@]}" 0
+total="${#chunk_offsets[@]}"
 if [[ -n "$coverage_root" ]]; then
   mkdir -p "$coverage_root"
   printf '%s\n' "$total" > "$coverage_root/shard-${shard}.chunks"
@@ -61,10 +86,17 @@ interrupted() {
 if [[ -n "$coverage_root" ]]; then trap interrupted TERM; fi
 
 status=0
-chunk=0
-for ((offset = 0; offset < ${#files[@]}; offset += chunk_files)); do
-  args=(${command_words[@]+"${command_words[@]}"})
-  chunk_slice=("${files[@]:offset:chunk_files}")
+for ((chunk = 0; chunk < total; chunk += 1)); do
+  chunk_offset="${chunk_offsets[$chunk]}"
+  chunk_size="${chunk_sizes[$chunk]}"
+  chunk_slice=("${files[@]:chunk_offset:chunk_size}")
+  if [[ "${chunk_shared[$chunk]}" -eq 1 ]]; then
+    # Preloads run once per shared process, so the timing probe logs the chunk.
+    args=(env "AUTOMOBILE_TEST_TIMING_GROUP_LABEL=unit shard ${shard} shared chunk ${chunk} (${chunk_size} files)"
+      ${shared_command_words[@]+"${shared_command_words[@]}"})
+  else
+    args=(${command_words[@]+"${command_words[@]}"})
+  fi
   if [[ -n "$coverage_root" ]]; then
     chunk_id="shard-${shard}-chunk-$((chunk + 1))"
     chunk_base="$coverage_root/$chunk_id"
@@ -98,6 +130,5 @@ for ((offset = 0; offset < ${#files[@]}; offset += chunk_files)); do
   if [[ "$status" -eq 0 && "$chunk_status" -ne 0 ]]; then
     status="$chunk_status"
   fi
-  chunk=$((chunk + 1))
 done
 exit "$status"

@@ -34,6 +34,8 @@ const LARGE_TEXT_MIN_BOX_HEIGHT_DP = 32;
 const LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP = 40;
 /** A pixel this far from the background counts as ink. */
 const INK_MIN_DISTANCE = 40;
+/** A sampled pixel this close to a cluster colour belongs to that cluster's stroke. */
+const STROKE_MAX_DISTANCE = 10;
 /** Grid probes spent locating the ink extent of an element. */
 const INK_SCAN_MAX_PROBES = 16384;
 /** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
@@ -939,6 +941,35 @@ export class ContrastChecker {
     return smaller && inked.right - inked.left >= 2 && inked.bottom - inked.top >= 2 ? inked : null;
   }
 
+  /**
+   * Whether `color` fills a stroke at least two pixels wide in both directions somewhere
+   * in `bounds`: a sampled pixel of that colour whose horizontal and vertical neighbours
+   * include the same colour. The anti-aliasing band around a glyph edge is one pixel
+   * across, so its levels never qualify, while a glyph or icon of their own colour does.
+   */
+  private hasSolidStroke(image: RawImage, bounds: Element["bounds"], color: RGB): boolean {
+    const left = Math.ceil(bounds.left);
+    const top = Math.ceil(bounds.top);
+    const right = Math.ceil(bounds.right) - 1;
+    const bottom = Math.ceil(bounds.bottom) - 1;
+    const width = right - left + 1;
+    const area = width * (bottom - top + 1);
+    const count = Math.min(area, 4096);
+    const stroke = (x: number, y: number): boolean =>
+      this.colorDistance(this.resolvePixelColor(image, x, y), color) <= STROKE_MAX_DISTANCE;
+    return Array.from({ length: count }, (_, i) => Math.floor((i * area) / count)).some(
+      (offset) => {
+        const x = left + (offset % width);
+        const y = top + Math.floor(offset / width);
+        return (
+          stroke(x, y) &&
+          ((x > left && stroke(x - 1, y)) || (x < right && stroke(x + 1, y))) &&
+          ((y > top && stroke(x, y - 1)) || (y < bottom && stroke(x, y + 1)))
+        );
+      },
+    );
+  }
+
   private sampleElementColors(
     image: RawImage,
     bounds: Element["bounds"],
@@ -984,7 +1015,30 @@ export class ContrastChecker {
         // JPEG ringing around glyphs sits just outside the similarity radius; it is not ink.
         (!ink || this.colorDistance(cluster.color, backgroundColor) > INK_MIN_DISTANCE),
     );
-    const textColor = this.selectTextColor(supported, backgroundColor, perimeter);
+    const isSolidStroke = (color: RGB): boolean =>
+      this.hasSolidStroke(image, ink ?? interior, color);
+    const inkText = this.selectTextColor(supported, backgroundColor, perimeter, isSolidStroke);
+    // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
+    // alone can set the extent and leave a faint label beside it unmeasured. Judge faint
+    // solid strokes anywhere inside the box as text too, keeping the lower contrast.
+    const faintText = ink
+      ? clusters.filter(
+          (cluster) =>
+            cluster.count >= Math.max(2, pixels.length * 0.0025) &&
+            !this.isSimilarColor(cluster.color, backgroundColor) &&
+            this.colorDistance(cluster.color, backgroundColor) <= INK_MIN_DISTANCE &&
+            !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
+            this.hasSolidStroke(image, interior, cluster.color),
+        )
+      : [];
+    const textColor = faintText.reduce(
+      (selected, cluster) =>
+        this.getCachedContrast(cluster.color, backgroundColor) <
+        this.getCachedContrast(selected, backgroundColor)
+          ? cluster.color
+          : selected,
+      inkText,
+    );
     return { textColor, backgroundColor };
   }
 
@@ -993,18 +1047,22 @@ export class ContrastChecker {
    * Keep bins with >=25% of the largest foreground population; smaller bins
    * must have >=80% identical pixels and be absent from the background perimeter.
    * This retains small flat glyphs beside a large icon without retaining fringes.
+   * A lossless capture repeats each anti-aliasing level exactly, so a small bin must
+   * also form a solid stroke (#10290).
    */
   private selectTextColor(
     clusters: ColorCluster[],
     background: RGB,
     perimeter: ColorCluster[],
+    isSolidStroke: (color: RGB) => boolean,
   ): RGB {
     const largest = clusters[0]?.count ?? 0;
     const candidates = clusters.filter(
       (cluster) =>
         cluster.count >= largest * 0.25 ||
         (cluster.coreCount >= cluster.count * 0.8 &&
-          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color))),
+          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
+          isSolidStroke(cluster.color)),
     );
     return candidates.reduce((selected, candidate) => {
       const ratio = this.getCachedContrast(candidate.color, background);

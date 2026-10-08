@@ -30,7 +30,7 @@ jobs:
   detect-changes:
     timeout-minutes: 10
     name: "Detect Documentation-Only or SHA256-Only Changes"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     outputs:
       docs_only: ${{ steps.filter.outputs.docs_only }}
       sha256_only: ${{ steps.check-sha256.outputs.sha256_only }}
@@ -1022,7 +1022,7 @@ jobs:
     # reruns against a boundary it now straddles.
     timeout-minutes: 10
     name: "BATS Shell Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: detect-changes
     if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     strategy:
@@ -1101,7 +1101,7 @@ jobs:
   bats-integration-tests:
     timeout-minutes: 10
     name: "BATS Integration Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || matrix.os }}
     needs: detect-changes
     if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     strategy:
@@ -1150,7 +1150,7 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || (matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile-small' || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
@@ -1345,7 +1345,7 @@ jobs:
     # scripts/test-ts.sh) + setup, cold-import probe and upload < 1920s.
     timeout-minutes: 32
     name: "Node Unit Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
@@ -1453,7 +1453,7 @@ jobs:
   node-host-integration-tests:
     timeout-minutes: 20
     name: "Node Host Integration Tests (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || matrix.os }}
     # Do not consume real-I/O runner capacity after the cheap required gate has
     # already established that this revision cannot pass.
     needs: [detect-changes, fast-validation]
@@ -3025,7 +3025,7 @@ jobs:
   benchmarks:
     timeout-minutes: 20
     name: "MCP Benchmarks"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     steps:
@@ -3841,7 +3841,7 @@ jobs:
       - ios-build-gate
       - ios-playground-tests
       - ios-spm-root-package-build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       # HARD dependencies below fail this roll-up. The ~10-30 minute,
       # simulator-flaky macOS XCTestRunner Simulator Tests lane is intentionally
@@ -3895,7 +3895,7 @@ jobs:
       - junit-runner-emulator-wtf-tests
       - playground-automobile-emulator-tests
       - kotlin-code-coverage
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       # HARD dependencies below fail this roll-up. ADVISORY live emulator lanes
       # only warn; add new needs as HARD unless they are non-required device/
@@ -3949,7 +3949,7 @@ jobs:
       - detect-changes
       - build-ide-plugin
       - ide-plugin-unit-tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       - name: "Check results"
         run: |
@@ -3981,7 +3981,7 @@ jobs:
       - ios-xcode-build
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       - name: "Check results"
         run: |
@@ -4016,7 +4016,7 @@ jobs:
       - codeql-node
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       - name: "Check results"
         run: |
@@ -4051,7 +4051,7 @@ jobs:
       - bats-integration-tests
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       - name: "Check results"
         run: |
@@ -4084,7 +4084,7 @@ jobs:
       - node-unit-timing-budget
       - node-host-integration-tests
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       # HARD dependencies below fail this roll-up. The ADVISORY timing budget
       # only warns; add new needs as HARD unless they are an excluded
@@ -4138,7 +4138,7 @@ jobs:
       - ios-device-webrtc
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       # detect-changes remains HARD. Every WebRTC input is currently live
       # device/hardware coverage and non-required, so this intentionally always
@@ -4195,7 +4195,7 @@ jobs:
       - runtime-graph-verification
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     steps:
       - name: "Check results"
         run: |

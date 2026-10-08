@@ -1516,9 +1516,14 @@ jobs:
       # Disjoint cache paths, so the two restores overlap each other. The
       # barrier must precede "Setup Auto Mobile": that composite runs
       # `turbo run build` against the same .turbo directory being restored.
+      # Restore-only: prime-bun-cache.yml saves this key on main (on bun.lock
+      # changes and daily, since repo-wide LRU eviction drops it), and every PR
+      # can read a main-ref cache. A PR-side save only produced a ~100 MB
+      # PR-scoped entry no other PR could read, plus a post-job upload, and
+      # churned the 10 GB repo cache that also holds the Gradle caches.
       - name: "Cache Bun dependencies"
         if: env.RUN_MCP_BUILD_TEST == 'true'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         background: true
         id: cache-bun
         with:
@@ -1650,21 +1655,12 @@ jobs:
           # default one-commit shallow clone.
           fetch-depth: 0
 
-      # Disjoint cache paths, so the two restores overlap each other. The
-      # barrier must precede "Setup Auto Mobile": that composite runs
+      # No Bun dependency cache here: a frozen install takes ~1 s on Linux
+      # runners, while the ~130 MB PR-scoped cache it replaced was never
+      # restored by another PR (nothing saves it on main) and its post-job
+      # upload churned the 10 GB repo cache that also holds the Gradle caches.
+      # The barrier must precede "Setup Auto Mobile": that composite runs
       # `turbo run build` against the same .turbo directory being restored.
-      - name: "Cache Bun dependencies"
-        uses: actions/cache@v5
-        background: true
-        id: cache-bun
-        with:
-          path: |
-            ~/.bun/install/cache
-            node_modules
-          key: bun-ubuntu-latest-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            bun-ubuntu-latest-
-
       - name: "Cache Turborepo"
         uses: actions/cache@v5
         background: true
@@ -1676,7 +1672,7 @@ jobs:
             turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
             turbo-ubuntu-latest-
 
-      - wait: [cache-bun, cache-turbo]
+      - wait: cache-turbo
 
       - name: "Setup Auto Mobile"
         uses: ./.github/actions/setup-auto-mobile-npm-package

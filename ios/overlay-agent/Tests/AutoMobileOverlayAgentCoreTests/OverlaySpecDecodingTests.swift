@@ -57,7 +57,8 @@ final class OverlaySpecDecodingTests: XCTestCase {
             Style.self,
             from: Data(#"{"cornerRadius":"large","fontFamily":"serif"}"#.utf8)
         )
-        XCTAssertEqual(token.cornerRadius, .uniform(16))
+        XCTAssertEqual(token.cornerRadius, .token("large"))
+        XCTAssertEqual(OverlayShapes.standard.resolve(.token("large")), .uniform(16))
         XCTAssertEqual(token.fontFamily, .keyword("serif"))
     }
 

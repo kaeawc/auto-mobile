@@ -112,4 +112,85 @@ final class OverlayThemeTests: XCTestCase {
         try session.show(fixture("color-role-and-corner-tokens.json"))
         XCTAssertEqual(session.fontAssets(), [])
     }
+
+    // MARK: Typography and shapes
+
+    func testTypographyShapesFixtureDecodes() throws {
+        let theme = try XCTUnwrap(fixture("theme-typography-shapes.json").theme)
+        XCTAssertEqual(theme.typography, OverlayThemeTypography(scale: 1.25, fontFamily: "serif"))
+        XCTAssertEqual(theme.shapes, OverlayThemeShapes(corner: "large"))
+        let typography = OverlayTypography(theme: theme.typography)
+        XCTAssertEqual(typography.design, .serif)
+        XCTAssertEqual(OverlayShapes(theme: theme.shapes).steps, [8, 12, 20, 28, 40])
+    }
+
+    func testTextStyleFixtureScalesSizeAndLineHeightButNotTracking() throws {
+        let spec = try fixture("text-style-role.json")
+        let typography = OverlayTypography(theme: spec.theme?.typography)
+        let resolved = typography.resolve(spec.root.style)
+        XCTAssertEqual(resolved.size, 22 * 0.75, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(resolved.lineHeight), 28 * 0.75, accuracy: 1e-9)
+        XCTAssertEqual(resolved.weight, 400)
+        XCTAssertEqual(resolved.letterSpacing, 0)
+        XCTAssertEqual(resolved.design, .standard)
+    }
+
+    func testEveryMaterialRoleIsInTheScale() {
+        XCTAssertEqual(OverlayTypography.roleNames.count, 15)
+        let medium = OverlayTypography.standard.role("titleMedium")
+        XCTAssertEqual(medium, OverlayTextRole(size: 16, weight: 500, lineHeight: 24, letterSpacing: 0.15))
+        XCTAssertEqual(OverlayTypography.standard.role("labelSmall")?.size, 11)
+        XCTAssertEqual(OverlayTypography.standard.role("displayLarge")?.letterSpacing, -0.25)
+        XCTAssertNil(OverlayTypography.standard.role("bogus"))
+        XCTAssertNil(OverlayTypography.standard.role(nil))
+    }
+
+    func testExplicitStyleFieldsBeatTheRoleAndNoRoleIsUnscaled() throws {
+        let scaled = OverlayTypography(scale: 1.5, design: .monospaced)
+        let style = try JSONDecoder().decode(
+            Style.self,
+            from: Data(#"{"textStyle":"bodyLarge","textSize":20,"fontWeight":700,"fontFamily":"serif"}"#.utf8)
+        )
+        let resolved = scaled.resolve(style)
+        XCTAssertEqual(resolved.size, 20)
+        XCTAssertEqual(resolved.weight, 700)
+        XCTAssertEqual(resolved.design, .serif)
+        XCTAssertEqual(resolved.lineHeight, 24 * 1.5)
+        let plain = scaled.resolve(nil)
+        XCTAssertEqual(plain.size, 14, "plain text keeps its authored default, unscaled")
+        XCTAssertEqual(plain.design, .monospaced, "plain text takes the theme family")
+        XCTAssertNil(plain.lineHeight)
+    }
+
+    func testThemeFamilyKeywords() {
+        XCTAssertEqual(OverlayTypography(theme: .init(scale: nil, fontFamily: "mono")).design, .monospaced)
+        XCTAssertEqual(OverlayTypography(theme: .init(scale: nil, fontFamily: "sans")).design, .standard)
+        XCTAssertEqual(OverlayTypography(theme: nil), .standard)
+    }
+
+    func testShapeStepsPerCornerChoice() {
+        let expected: [(String?, [Double])] = [
+            (nil, [4, 8, 12, 16, 28]), ("medium", [4, 8, 12, 16, 28]), ("none", [0, 0, 0, 0, 0]),
+            ("small", [2, 4, 6, 8, 12]), ("large", [8, 12, 20, 28, 40]),
+        ]
+        for (corner, steps) in expected {
+            XCTAssertEqual(OverlayShapes(theme: .init(corner: corner)).steps, steps, corner ?? "nil")
+        }
+        XCTAssertEqual(OverlayShapes(theme: .init(corner: "full")).steps, Array(repeating: 9999, count: 5))
+    }
+
+    func testCornerTokensResolveThroughTheTheme() {
+        let large = OverlayShapes(theme: .init(corner: "large"))
+        XCTAssertEqual(large.resolve(.token("extraSmall")), .uniform(8))
+        XCTAssertEqual(large.resolve(.token("extraLarge")), .uniform(40))
+        XCTAssertEqual(OverlayShapes(theme: .init(corner: "none")).resolve(.token("large")), .uniform(0))
+        XCTAssertEqual(OverlayShapes(theme: .init(corner: "small")).resolve(.token("full")), .uniform(9999))
+        XCTAssertEqual(large.resolve(.uniform(5)), .uniform(5), "dp radii are not themed")
+    }
+
+    func testCornerTokenFixtureStaysATokenUntilResolved() throws {
+        let spec = try fixture("color-role-and-corner-tokens.json")
+        let radius = try XCTUnwrap(spec.root.style?.cornerRadius)
+        guard case .token = radius else { return XCTFail("expected a token, got \(radius)") }
+    }
 }

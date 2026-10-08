@@ -100,10 +100,165 @@ struct OverlayThemeColors: Decodable, Equatable {
     }
 }
 
-/// The spec's `theme`. `typography` and `shapes` are not applied on iOS yet.
+struct OverlayThemeTypography: Decodable, Equatable {
+    let scale: Double?
+    let fontFamily: String?
+}
+
+struct OverlayThemeShapes: Decodable, Equatable {
+    let corner: String?
+}
+
+/// The spec's `theme`: colours via `OverlayPalette`, type scale via `OverlayTypography`, corner
+/// scale via `OverlayShapes`.
 struct OverlayTheme: Decodable, Equatable {
     let mode: String?
     let colors: OverlayThemeColors?
+    let typography: OverlayThemeTypography?
+    let shapes: OverlayThemeShapes?
+
+    init(
+        mode: String? = nil,
+        colors: OverlayThemeColors? = nil,
+        typography: OverlayThemeTypography? = nil,
+        shapes: OverlayThemeShapes? = nil
+    ) {
+        self.mode = mode
+        self.colors = colors
+        self.typography = typography
+        self.shapes = shapes
+    }
+}
+
+/// SwiftUI-free mirror of `Font.Design`.
+enum OverlayFontDesign: Equatable {
+    case standard, serif, monospaced
+}
+
+/// A resolved text role: points, CSS-style weight, and line height / tracking in points.
+struct OverlayTextRole: Equatable {
+    var size: Double
+    var weight: Int
+    var lineHeight: Double
+    var letterSpacing: Double
+}
+
+/// The Material 3 type scale, hard-coded from Compose's `Typography()` defaults, with the theme's
+/// `scale` (size and line height, not tracking, as Android's `overlayTypography`) and family.
+struct OverlayTypography: Equatable {
+    let scale: Double
+    /// The theme family; it only applies when a node names no family of its own.
+    let design: OverlayFontDesign
+
+    static let standard = OverlayTypography(scale: 1, design: .standard)
+
+    init(scale: Double, design: OverlayFontDesign) {
+        self.scale = scale
+        self.design = design
+    }
+
+    init(theme: OverlayThemeTypography?) {
+        scale = theme?.scale ?? 1
+        design = switch theme?.fontFamily {
+        case "serif": .serif
+        case "mono": .monospaced
+        default: .standard
+        }
+    }
+
+    static let roleNames: Set<String> = Set(table.keys)
+
+    /// The scaled role a `textStyle` token names; nil for no or an unknown token.
+    func role(_ token: String?) -> OverlayTextRole? {
+        guard let token, let base = Self.table[token] else { return nil }
+        return OverlayTextRole(
+            size: base.size * scale,
+            weight: base.weight,
+            lineHeight: base.lineHeight * scale,
+            letterSpacing: base.letterSpacing
+        )
+    }
+
+    /// Compose Material 3 `Typography()` defaults: size, weight, line height, letter spacing.
+    static let table: [String: OverlayTextRole] = [
+        "displayLarge": OverlayTextRole(size: 57, weight: 400, lineHeight: 64, letterSpacing: -0.25),
+        "displayMedium": OverlayTextRole(size: 45, weight: 400, lineHeight: 52, letterSpacing: 0),
+        "displaySmall": OverlayTextRole(size: 36, weight: 400, lineHeight: 44, letterSpacing: 0),
+        "headlineLarge": OverlayTextRole(size: 32, weight: 400, lineHeight: 40, letterSpacing: 0),
+        "headlineMedium": OverlayTextRole(size: 28, weight: 400, lineHeight: 36, letterSpacing: 0),
+        "headlineSmall": OverlayTextRole(size: 24, weight: 400, lineHeight: 32, letterSpacing: 0),
+        "titleLarge": OverlayTextRole(size: 22, weight: 400, lineHeight: 28, letterSpacing: 0),
+        "titleMedium": OverlayTextRole(size: 16, weight: 500, lineHeight: 24, letterSpacing: 0.15),
+        "titleSmall": OverlayTextRole(size: 14, weight: 500, lineHeight: 20, letterSpacing: 0.1),
+        "bodyLarge": OverlayTextRole(size: 16, weight: 400, lineHeight: 24, letterSpacing: 0.5),
+        "bodyMedium": OverlayTextRole(size: 14, weight: 400, lineHeight: 20, letterSpacing: 0.25),
+        "bodySmall": OverlayTextRole(size: 12, weight: 400, lineHeight: 16, letterSpacing: 0.4),
+        "labelLarge": OverlayTextRole(size: 14, weight: 500, lineHeight: 20, letterSpacing: 0.1),
+        "labelMedium": OverlayTextRole(size: 12, weight: 500, lineHeight: 16, letterSpacing: 0.5),
+        "labelSmall": OverlayTextRole(size: 11, weight: 500, lineHeight: 16, letterSpacing: 0.5),
+    ]
+
+    /// What a text node draws: a `textStyle` role supplies size, weight, line height and tracking;
+    /// explicit style fields win. Without a role, the authored 14 pt default is not scaled.
+    struct Resolved: Equatable {
+        let size: Double
+        let weight: Int
+        /// nil when neither the node nor a role names a line height.
+        let lineHeight: Double?
+        let letterSpacing: Double
+        let design: OverlayFontDesign
+    }
+
+    func resolve(_ style: Style?) -> Resolved {
+        let role = role(style?.textStyle)
+        let design: OverlayFontDesign = switch style?.fontFamily {
+        case .keyword("serif")?: .serif
+        case .keyword("monospace")?: .monospaced
+        // An uploaded font asset is not delivered to the agent, so it uses the system font.
+        case .some: .standard
+        case nil: self.design
+        }
+        return Resolved(
+            size: style?.textSize ?? role?.size ?? 14,
+            weight: style?.fontWeight ?? role?.weight ?? 400,
+            lineHeight: style?.lineHeight ?? role?.lineHeight,
+            letterSpacing: style?.letterSpacing ?? role?.letterSpacing ?? 0,
+            design: design
+        )
+    }
+}
+
+/// The Material 3 corner scale. `medium` is the stock one; `shapes.corner` shifts every step, and
+/// `full` makes every step a pill. A `cornerRadius` token resolves through it.
+struct OverlayShapes: Equatable {
+    static let stepNames = ["extraSmall", "small", "medium", "large", "extraLarge", "full"]
+    /// Radius large enough that any side length is fully rounded.
+    static let pill = 9999.0
+
+    /// extraSmall, small, medium, large, extraLarge radii in points.
+    let steps: [Double]
+
+    static let standard = OverlayShapes(steps: [4, 8, 12, 16, 28])
+
+    init(steps: [Double]) { self.steps = steps }
+
+    init(theme: OverlayThemeShapes?) {
+        steps = switch theme?.corner {
+        case "none": [0, 0, 0, 0, 0]
+        case "small": [2, 4, 6, 8, 12]
+        case "large": [8, 12, 20, 28, 40]
+        case "full": Array(repeating: Self.pill, count: 5)
+        default: Self.standard.steps
+        }
+    }
+
+    /// Tokens become the theme's radius; numbers and per-corner radii are unchanged.
+    func resolve(_ radius: CornerRadius) -> CornerRadius {
+        guard case let .token(name) = radius else { return radius }
+        if name == "full" { return .uniform(Self.pill) }
+        guard let index = Self.stepNames.firstIndex(of: name), index < steps.count else { return .uniform(0) }
+        return .uniform(steps[index])
+    }
 }
 
 /// The Material 3 colour roles a spec can name, resolved for one light or dark scheme. Mirrors

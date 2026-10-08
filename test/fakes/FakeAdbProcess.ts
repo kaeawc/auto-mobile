@@ -8,8 +8,10 @@ import type { AdbProcess } from "../../src/utils/android-cmdline-tools/interface
  * kill, and the `once`/`on`/`off`/`removeListener` event methods) without spawning
  * a real process. Tests configure how the process terminates and the fake emits
  * the corresponding `exit` / `error` event after the caller has attached its
- * listeners (via `process.nextTick`, so a `once("exit")` registered right after the
- * spawn resolves is guaranteed to observe the event).
+ * listeners: delivery is a `process.nextTick` armed from a microtask, so it runs
+ * only once the microtask queue drains, after the `await spawn()` continuation has
+ * attached a `once("exit")`. A bare nextTick armed from a real event-loop turn
+ * would run before that continuation and the event would be lost.
  */
 export class FakeAdbProcess extends EventEmitter implements AdbProcess {
   readonly stdin: Writable | null;
@@ -34,7 +36,7 @@ export class FakeAdbProcess extends EventEmitter implements AdbProcess {
 
   /** Schedule a clean/failed exit that fires once the caller's listeners attach. */
   scheduleExit(code: number | null, signal: NodeJS.Signals | null = null, stderr?: string): void {
-    process.nextTick(() => {
+    afterListenersAttach(() => {
       if (stderr) {
         this.stderr.push(stderr);
       }
@@ -48,6 +50,10 @@ export class FakeAdbProcess extends EventEmitter implements AdbProcess {
 
   /** Schedule an error event (e.g. adb binary missing) after listeners attach. */
   scheduleError(error: Error): void {
-    process.nextTick(() => this.emit("error", error));
+    afterListenersAttach(() => this.emit("error", error));
   }
+}
+
+function afterListenersAttach(deliver: () => void): void {
+  queueMicrotask(() => process.nextTick(deliver));
 }

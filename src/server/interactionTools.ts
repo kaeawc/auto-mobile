@@ -3722,7 +3722,7 @@ export function registerInteractionTools() {
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
     hitTestHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, deviceReadOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(

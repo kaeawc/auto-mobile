@@ -2336,6 +2336,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     observeHandler,
     {
       defaultEnabled: true,
+      // Watching is allowed on any device, whichever session holds it (#10730).
+      deviceReadOnly: true,
       transportRecovery: "replay",
       outputSchema: observeToolResultSchema,
       appUiResourceUri: OBSERVE_APP_RESOURCE_URI,
@@ -2353,7 +2355,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     "Suggest likely interactions",
     identifyInteractionsSchema,
     identifyInteractionsHandler,
-    { defaultEnabled: true, debugOnly: true },
+    { defaultEnabled: true, debugOnly: true, deviceReadOnly: true },
   );
 }
 

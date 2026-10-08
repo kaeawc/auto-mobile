@@ -43,6 +43,7 @@ import { logger, type Logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { PLAN_AUTO_RELEASE_REASON } from "../daemon/sessionManager";
 import { DaemonState } from "../daemon/daemonState";
+import { assertInputRequesterHoldsDevice, TOOL_CALL_REMEDY } from "../daemon/inputDeviceOwnership";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "./formTools";
 import {
@@ -362,6 +363,12 @@ interface ToolRegistrationOptions {
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   shouldEnsureDevice?: (args: T) => boolean;
+  /**
+   * The tool only watches the device (#10730: watching is allowed on any device and is not use),
+   * so a caller that does not hold a device another session holds may still run it. Every other
+   * device-aware tool is refused on such a device (`device_owned_by_other_session`).
+   */
+  deviceReadOnly?: boolean;
   /** Read an explicit device id without acquiring or changing a device session. */
   sessionlessDeviceRead?: {
     resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
@@ -813,6 +820,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       });
     }
 
+    // An explicit target held by another session is refused before admission or any device work,
+    // so a non-holder (including an observer-only or sessionless caller) gets the typed code.
+    assertToolCallerHoldsDevice(name, options, providedDeviceId, sessionUuid, autolockEnabled);
+
     logger.info(
       `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`,
     );
@@ -968,6 +979,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         .getDevicePool()
         .assertAutolockAccess(device.deviceId, sessionUuid, autolockEnabled);
     }
+
+    // The resolved target too: a call without a deviceId can land on a held device.
+    assertToolCallerHoldsDevice(name, options, device?.deviceId, sessionUuid, autolockEnabled);
 
     // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
     if (device && sessionUuid) {
@@ -1874,6 +1888,41 @@ function assertSessionDeviceRouting(
       `${toolName} deviceId '${providedDeviceId}' does not match session '${sessionUuid}' device '${sessionDeviceId}'.`,
     );
   }
+}
+
+/**
+ * Device ownership for tool calls (#10698, #10730), matching `input/*`: a device another live
+ * session holds runs device-aware tools only for its holder (a derived `${base}:${label}` session
+ * counts as its base). Sessionless calls are refused on a held device; unheld devices stay open.
+ * Tools flagged `deviceReadOnly` only watch, which is allowed on any device.
+ */
+function assertToolCallerHoldsDevice(
+  toolName: string,
+  options: DeviceAwareToolOptions,
+  deviceId: string | undefined,
+  sessionUuid: string | undefined,
+  autolockEnabled: boolean,
+): void {
+  if (!deviceId || !DaemonState.getInstance().isInitialized()) {
+    return;
+  }
+  // An autolocked device is governed by autolock's own check and remedies, after resolution.
+  if (
+    options.deviceReadOnly ||
+    (autolockEnabled &&
+      DaemonState.getInstance().getDevicePool().getDevice(deviceId)?.autolockSessionId)
+  ) {
+    return;
+  }
+  const sessionManager = DaemonState.getInstance().getSessionManager();
+  assertInputRequesterHoldsDevice({
+    action: toolName,
+    deviceId,
+    ownerSessionUuid: sessionManager.getSessionForDevice(deviceId) ?? undefined,
+    requesterSessionUuid: sessionUuid,
+    sessionManager,
+    remedy: TOOL_CALL_REMEDY,
+  });
 }
 
 function assertDeviceReadRouting(

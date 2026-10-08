@@ -141,6 +141,12 @@ The observation and push sockets keep unowned-device-only scope
 (`observerMaySeeDeviceOwner`). `input/*` follows ownership instead: a held device
 takes input only from a frame whose `sessionUuid` names its holder (typed code
 `device_owned_by_other_session`); an unowned device takes input from anyone.
+Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
+`src/server/toolRegistry.ts`): on a held device, a call from another session or
+with no session is refused with the same code before admission or device work,
+unless the tool is registered `deviceReadOnly` (watching: `observe`,
+`identifyInteractions`, `hitTest`). An autolocked device keeps autolock's own
+refusal.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.

@@ -487,6 +487,19 @@ class DatabaseInspectorProviderTest {
     assertTrue(error.getString("error").startsWith("SQL error:"))
   }
 
+  @Test
+  fun `disabled inspection tells the caller to launch the app first`() {
+    DatabaseInspector.initialize(context)
+    DatabaseInspector.setEnabled(false)
+
+    val result = provider.call("executeSQL", null, executeSqlExtras("SELECT 1"))
+
+    assertTrue(!result.getBoolean("success"))
+    val error = JSONObject(result.getString("result") ?: throw AssertionError("no result JSON"))
+    assertEquals("DISABLED", error.getString("errorType"))
+    assertTrue(error.getString("error").contains("launch it first"))
+  }
+
   private fun mutationCapabilities(allowMutations: Boolean) =
     SdkCapabilityDocument(
       capabilities =

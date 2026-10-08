@@ -32,6 +32,34 @@ class McpDaemonClientSetActiveDeviceTest {
   }
 
   @Test
+  fun `the autolock and pool sibling wordings are held by another session`() {
+    listOf(
+        "Error: Device 'emulator-5554' is already assigned to another session. " +
+          "Release it first or pick another device.",
+        "Error: Device 'emulator-5554' is locked to another session.\nAutolock is enabled",
+      )
+      .forEach { text ->
+        assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION, bind(errorText(text)).refusal)
+      }
+  }
+
+  @Test
+  fun `a device id containing a quote is still held by another session`() {
+    val result =
+      bind(errorText("Error: Device 'Bob's iPhone' is already assigned to session abc-123"))
+    assertEquals(SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION, result.refusal)
+  }
+
+  @Test
+  fun `a session already assigned to a device is not an ownership refusal`() {
+    listOf(
+        "Error: Session 's1' is already assigned to device 'emulator-5554'.",
+        "Error: System UI recovery replacement 'emulator-5556' is already assigned to a session.",
+      )
+      .forEach { text -> assertEquals(null, bind(errorText(text)).refusal, text) }
+  }
+
+  @Test
   fun `session ownership lost is a released session`() {
     val payload = buildJsonObject {
       put(

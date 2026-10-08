@@ -31,9 +31,18 @@ enum class SetActiveDeviceRefusal {
 
 private const val SESSION_OWNERSHIP_LOST_CODE = "session_ownership_lost"
 
-// `Device '<id>' is already assigned to session <uuid>` — both daemon ownership checks.
+// The daemon has no structured code for an ownership refusal (only `session_ownership_lost` for a
+// terminal session), so its wordings are matched:
+//  - `Device '<id>' is already assigned to session <uuid>` (src/server/setActiveDevice.ts,
+//    src/daemon/devicePool.ts)
+//  - `Device '<id>' is already assigned to another session.` (devicePool.ts,
+//    deviceAutolockManager.ts)
+//  - `Device '<id>' is locked to another session.` (deviceAutolockManager.ts)
+// The id is matched with `.+` because a device id may itself contain a quote.
 private val HELD_BY_ANOTHER_SESSION_MESSAGE =
-  Regex("""Device '[^']+' is already assigned to session """)
+  Regex(
+    """Device '.+' is (?:already assigned to (?:session |another session)|locked to another session)"""
+  )
 
 // `TerminalSessionError`, which `toActionableError` may wrap into a plain text error.
 private val TERMINAL_SESSION_MESSAGE =

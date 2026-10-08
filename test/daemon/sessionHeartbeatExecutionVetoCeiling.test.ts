@@ -3,6 +3,7 @@ import {
   SessionHeartbeatMonitor,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
 } from "../../src/daemon/SessionHeartbeatMonitor";
+import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeout";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -41,7 +42,11 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
     reaped = [];
     monitor = new SessionHeartbeatMonitor(
       sessionManager,
-      hasActiveExecutions,
+      {
+        hasActiveExecutions,
+        latestExecutionDeadlineMs: (sessionId) =>
+          tracker.getLatestSessionExecutionDeadlineMs(sessionId),
+      },
       async (sessionId, reason) => {
         reaped.push(reason);
         await sessionManager.releaseSession(sessionId, reason);
@@ -116,5 +121,33 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
     timer.setCurrentTime(returnedAt + STALE_AFTER_MS + UNSETTLED_EXECUTION_VETO_CEILING_MS);
     await monitor.tick();
     expect(reaped).toEqual(["heartbeat-timeout"]);
+  });
+
+  test("a call with a request deadline holds the stale session only until that deadline plus grace (#10712)", async () => {
+    const execution = tracker.startExecution("tapOn", undefined, SESSION);
+    const deadlineMs = STALE_AFTER_MS + 60_000;
+    tracker.setExecutionDeadline(execution.id, () => deadlineMs);
+    timer.setCurrentTime(STALE_AFTER_MS);
+    await monitor.tick();
+
+    timer.setCurrentTime(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1);
+    await monitor.tick();
+    expect(reaped).toEqual([]);
+
+    timer.setCurrentTime(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+    await monitor.tick();
+    expect(reaped).toEqual(["heartbeat-timeout"]);
+  });
+
+  test("a call without a deadline beside one with a deadline keeps the fallback ceiling (#10712)", async () => {
+    const bounded = tracker.startExecution("tapOn", undefined, SESSION);
+    tracker.setExecutionDeadline(bounded.id, () => STALE_AFTER_MS + 60_000);
+    tracker.startExecution("observe", undefined, SESSION);
+    timer.setCurrentTime(STALE_AFTER_MS);
+    await monitor.tick();
+
+    timer.setCurrentTime(STALE_AFTER_MS + UNSETTLED_EXECUTION_VETO_CEILING_MS - 1);
+    await monitor.tick();
+    expect(reaped).toEqual([]);
   });
 });

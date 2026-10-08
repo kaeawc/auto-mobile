@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
   UnsettledExecutionVeto,
   isReleaseVetoedByExecutions,
@@ -14,7 +15,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 describe("unsettled-execution veto policy (#10712)", () => {
   test("falls back to the caller timeout cap", () => {
     expect(UNSETTLED_EXECUTION_VETO_CEILING_MS).toBe(MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
-    expect(unsettledExecutionVetoExpiresAt(1_000)).toBe(1_000 + MAX_CALLER_MCP_REQUEST_TIMEOUT_MS);
+    expect(unsettledExecutionVetoExpiresAt({ vetoedSince: 1_000 })).toBe(
+      1_000 + MAX_CALLER_MCP_REQUEST_TIMEOUT_MS,
+    );
   });
 
   test("never vetoes once nothing is in flight", () => {
@@ -41,12 +44,44 @@ describe("unsettled-execution veto policy (#10712)", () => {
     // A re-created session object is a new incarnation with its own window.
     expect(veto.judge({ sessionId: "s" })).toMatchObject({ kind: "kept", until: 1_999 });
     timer.advanceTime(1);
-    expect(veto.judge(session)).toEqual({ kind: "expired", vetoedMs: 1_000, boundMs: 1_000 });
+    expect(veto.judge(session)).toEqual({ kind: "expired", vetoedMs: 1_000, bound: "ceiling" });
 
     veto.forget(session);
     expect(veto.judge(session)).toMatchObject({ kind: "kept", until: 2_000, firstKept: true });
 
     active = false;
     expect(veto.judge(session)).toEqual({ kind: "clear" });
+  });
+
+  test("is bounded by the vetoing executions' request deadline plus grace", () => {
+    expect(unsettledExecutionVetoExpiresAt({ vetoedSince: 0, latestDeadlineMs: 60_000 })).toBe(
+      60_000 + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
+    );
+    // An execution without a deadline keeps the fallback ceiling.
+    expect(
+      unsettledExecutionVetoExpiresAt({
+        vetoedSince: 0,
+        latestDeadlineMs: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe(UNSETTLED_EXECUTION_VETO_CEILING_MS);
+  });
+
+  test("follows a deadline that progress extends", () => {
+    const timer = new FakeTimer();
+    let deadlineMs = 30_000;
+    const veto = new UnsettledExecutionVeto(
+      { hasActiveExecutions: () => true, latestExecutionDeadlineMs: () => deadlineMs },
+      timer,
+    );
+    const session = { sessionId: "s" };
+    const releaseAt = deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS;
+
+    timer.setCurrentTime(releaseAt - 1);
+    expect(veto.judge(session)).toMatchObject({ kind: "kept", until: releaseAt });
+    deadlineMs = 90_000;
+    timer.setCurrentTime(releaseAt);
+    expect(veto.judge(session)).toMatchObject({ kind: "kept" });
+    timer.setCurrentTime(deadlineMs + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+    expect(veto.judge(session)).toMatchObject({ kind: "expired", bound: "request-deadline" });
   });
 });

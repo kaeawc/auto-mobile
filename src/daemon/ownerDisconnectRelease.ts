@@ -160,8 +160,8 @@ export class OwnerDisconnectExecutionVeto {
       this.veto.forget(session);
       logger.warn(
         `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${verdict.vetoedMs}ms after its ` +
-          `owner disconnected by executions that never settled; releasing it anyway past the ` +
-          `${verdict.boundMs}ms unsettled-execution bound`,
+          `owner disconnected by executions that never settled; releasing it anyway past their ` +
+          `${verdict.bound} bound`,
       );
     }
     return false;

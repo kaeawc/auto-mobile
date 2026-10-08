@@ -1295,6 +1295,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const getRequestDeadlineMs = () =>
       (requestLiveDeadlineKey ? getLiveDeadlineMs(requestLiveDeadlineKey) : undefined) ??
       requestDeadlineMs;
+    // A release vetoed by this call is bounded by the call's own deadline (#10712).
+    executionTracker.setExecutionDeadline(execution.id, getRequestDeadlineMs);
     let executionEnded = false;
     const endExecutionOnce = (): void => {
       if (!executionEnded) {

@@ -348,8 +348,8 @@ export class SessionHeartbeatMonitor {
     }
     logger.warn(
       `Session ${session.sessionId} (${STALE_REASON_DESCRIPTION[reason]}) was kept for ${verdict.vetoedMs}ms ` +
-        `by executions that never settled; releasing it anyway past the ` +
-        `${verdict.boundMs}ms unsettled-execution bound (reason=${reason})`,
+        `by executions that never settled; releasing it anyway past their ${verdict.bound} ` +
+        `bound (reason=${reason})`,
     );
     return false;
   }

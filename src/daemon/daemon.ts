@@ -42,6 +42,7 @@ import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { OwnerDisconnectExecutionVeto } from "./ownerDisconnectRelease";
+import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
@@ -677,7 +678,7 @@ export class Daemon {
     recoveryPolicyEnvironment: NodeJS.ProcessEnv,
   ): DevicePool {
     const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
-      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.sessionExecutionProbe(),
       this.timer,
     );
     return DevicePool.create({
@@ -2512,7 +2513,7 @@ export class Daemon {
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
-      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.sessionExecutionProbe(),
       async (sessionId, reason) => {
         await this.cancelAndReleaseSession(sessionId, reason);
       },
@@ -2594,6 +2595,30 @@ export class Daemon {
         (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
           executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
     );
+  }
+
+  /**
+   * How the unsettled-execution veto sees a session's in-flight work: whether any runs, and the
+   * latest request deadline among them, which bounds the veto (#10712).
+   */
+  private sessionExecutionProbe(): SessionExecutionProbe {
+    return {
+      hasActiveExecutions: (sessionId) => this.hasActiveSessionExecution(sessionId),
+      latestExecutionDeadlineMs: (sessionId) => this.latestSessionExecutionDeadlineMs(sessionId),
+    };
+  }
+
+  /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
+  private latestSessionExecutionDeadlineMs(sessionId: string): number | undefined {
+    if (this.devicePool.isSessionRecoveryInFlight(sessionId)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const executionSessionId =
+      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
+    const deadlines = [...new Set([sessionId, executionSessionId])]
+      .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id))
+      .filter((deadline): deadline is number => deadline !== undefined);
+    return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }
 
   private async tryRecoverCapturedDisconnectTarget(

@@ -13,15 +13,28 @@ import type { Timer } from "../utils/SystemTimer";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
 
 /**
- * Longest an execution may veto a release once the veto started. No request's deadline can
- * exceed the caller timeout cap, so an execution still tracked this long has outlived any
- * deadline it could have had, and nobody is left to consume its result.
+ * Fallback bound on an execution's veto, from when the veto started, used when some vetoing
+ * execution carries no request deadline. No request's deadline can exceed the caller timeout cap,
+ * so an execution still tracked this long has outlived any deadline it could have had.
  */
 export const UNSETTLED_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+
+/**
+ * How long past its request's deadline an execution may still veto a release: the time a call
+ * aborted at its deadline needs to unwind and end its execution. Past it the call's result has
+ * no consumer.
+ */
+export const UNSETTLED_EXECUTION_DEADLINE_GRACE_MS = 10_000;
 
 /** What the veto needs to know about a session's in-flight work. */
 export interface SessionExecutionProbe {
   hasActiveExecutions(sessionId: string): boolean;
+  /**
+   * The latest request deadline among the session's in-flight executions, on the veto's clock.
+   * `Number.POSITIVE_INFINITY` (or no method) when any of them carries no deadline, and
+   * undefined when nothing is in flight.
+   */
+  latestExecutionDeadlineMs?(sessionId: string): number | undefined;
 }
 
 /** Accept the bare predicate older call sites pass, or a full probe. */
@@ -31,25 +44,35 @@ export function toSessionExecutionProbe(input: SessionExecutionProbeInput): Sess
   return typeof input === "function" ? { hasActiveExecutions: input } : input;
 }
 
-/** The facts the policy judges, all on one clock. */
-export interface UnsettledExecutionVetoInput {
-  /** Whether the session still has an execution in flight. */
-  hasActiveExecutions: boolean;
+/** When a veto stops holding: the facts the bound is derived from, all on one clock. */
+export interface UnsettledExecutionVetoBoundInput {
   /** When active executions first kept this session from its release. */
   vetoedSince: number;
-  now: number;
+  /** See {@link SessionExecutionProbe.latestExecutionDeadlineMs}. */
+  latestDeadlineMs?: number;
   ceilingMs?: number;
+  deadlineGraceMs?: number;
+}
+
+/** The facts the policy judges, all on one clock. */
+export interface UnsettledExecutionVetoInput extends UnsettledExecutionVetoBoundInput {
+  /** Whether the session still has an execution in flight. */
+  hasActiveExecutions: boolean;
+  now: number;
 }
 
 /**
- * When an active-execution veto that started at `vetoedSince` stops holding. Exported so every
- * release path (including session expiry) can adopt the same bound.
+ * When an active-execution veto stops holding: the vetoing executions' own request deadline plus
+ * {@link UNSETTLED_EXECUTION_DEADLINE_GRACE_MS} when every one of them has a deadline, otherwise
+ * {@link UNSETTLED_EXECUTION_VETO_CEILING_MS} after the veto started. Exported so every release
+ * path (including session expiry) can adopt the same bound.
  */
-export function unsettledExecutionVetoExpiresAt(
-  vetoedSince: number,
-  ceilingMs: number = UNSETTLED_EXECUTION_VETO_CEILING_MS,
-): number {
-  return vetoedSince + ceilingMs;
+export function unsettledExecutionVetoExpiresAt(input: UnsettledExecutionVetoBoundInput): number {
+  const { latestDeadlineMs } = input;
+  if (hasDeadline(latestDeadlineMs)) {
+    return latestDeadlineMs + (input.deadlineGraceMs ?? UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+  }
+  return input.vetoedSince + (input.ceilingMs ?? UNSETTLED_EXECUTION_VETO_CEILING_MS);
 }
 
 /**
@@ -57,10 +80,7 @@ export function unsettledExecutionVetoExpiresAt(
  * is in flight, and false once the veto has outlived its bound.
  */
 export function isReleaseVetoedByExecutions(input: UnsettledExecutionVetoInput): boolean {
-  return (
-    input.hasActiveExecutions &&
-    input.now < unsettledExecutionVetoExpiresAt(input.vetoedSince, input.ceilingMs)
-  );
+  return input.hasActiveExecutions && input.now < unsettledExecutionVetoExpiresAt(input);
 }
 
 export type UnsettledExecutionVetoVerdict =
@@ -68,8 +88,18 @@ export type UnsettledExecutionVetoVerdict =
   | { kind: "clear" }
   /** In-flight work keeps the session until `until`; `firstKept` on the first such verdict. */
   | { kind: "kept"; until: number; firstKept: boolean }
-  /** In-flight work outlived its bound after `vetoedMs`: release anyway. */
-  | { kind: "expired"; vetoedMs: number; boundMs: number };
+  /**
+   * In-flight work outlived its bound (the request deadline plus grace, or the fallback ceiling)
+   * after vetoing for `vetoedMs`: release anyway.
+   */
+  | { kind: "expired"; vetoedMs: number; bound: UnsettledExecutionVetoBound };
+
+/** Which bound ended a veto. */
+export type UnsettledExecutionVetoBound = "request-deadline" | "ceiling";
+
+function hasDeadline(latestDeadlineMs: number | undefined): latestDeadlineMs is number {
+  return latestDeadlineMs !== undefined && Number.isFinite(latestDeadlineMs);
+}
 
 /**
  * Stateful form of the policy: remembers when the veto started for each session incarnation
@@ -98,18 +128,20 @@ export class UnsettledExecutionVeto {
     if (recorded === undefined) {
       this.vetoedSince.set(session, vetoedSince);
     }
-    const until = unsettledExecutionVetoExpiresAt(vetoedSince, this.ceilingMs);
-    if (
-      isReleaseVetoedByExecutions({
-        hasActiveExecutions: true,
-        vetoedSince,
-        now,
-        ceilingMs: this.ceilingMs,
-      })
-    ) {
+    const latestDeadlineMs = this.probe.latestExecutionDeadlineMs?.(session.sessionId);
+    const until = unsettledExecutionVetoExpiresAt({
+      vetoedSince,
+      latestDeadlineMs,
+      ceilingMs: this.ceilingMs,
+    });
+    if (now < until) {
       return { kind: "kept", until, firstKept: recorded === undefined };
     }
-    return { kind: "expired", vetoedMs: now - vetoedSince, boundMs: until - vetoedSince };
+    return {
+      kind: "expired",
+      vetoedMs: now - vetoedSince,
+      bound: hasDeadline(latestDeadlineMs) ? "request-deadline" : "ceiling",
+    };
   }
 
   /** The session is no longer a release candidate: a later veto starts a fresh window. */

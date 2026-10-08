@@ -97,30 +97,6 @@ function hasOverlayMetadata(
 }
 
 /**
- * Whether one of CtrlProxy's own overlay windows hides the app behind it, from the metadata the
- * APK reports for it (`overlay_window_metadata_v1`): true only for a fullscreen overlay whose
- * rendered surface is fully opaque. A sheet, a floating panel or a translucent fullscreen overlay
- * leaves app pixels visible. When the APK did not report both fields (older APK, or opacity
- * unknown) the window says nothing about opacity, so the caller's bounds-based answer
- * (`coversByBounds`: the window spans the target) decides. When the APK advertises
- * `overlay_window_metadata_v1` (`apkReportsMetadata`), a window without the pair is not the
- * interactive overlay (CtrlProxy's highlight window is also an own accessibility-overlay window and
- * is full-screen while an overlay is attached) or its metadata was unavailable, so it is never
- * taken as hiding the app.
- *
- * `isFullyCoveredByOwnOverlay` calls this in place of a bare bounds test.
- */
-export function ownOverlayHidesApp(
-  window: Pick<ViewHierarchyWindowInfo, "overlayPlacement" | "overlayOpaque">,
-  coversByBounds: boolean,
-  apkReportsMetadata = false,
-): boolean {
-  if (window.overlayPlacement === undefined || window.overlayOpaque === undefined) {
-    return apkReportsMetadata ? false : coversByBounds;
-  }
-  return window.overlayPlacement === "fullscreen" && window.overlayOpaque;
-}
-/**
  * Node kinds the overlay renderer used to report as a node's `contentDescription` when it had no
  * text (`OverlaySpecContent.kt`'s `SEMANTICS_FREE_CONTAINERS`). A tappable container still reads as
  * its kind, so observe treats these as "no real label" when an icon names the control.

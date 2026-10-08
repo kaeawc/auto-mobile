@@ -1,6 +1,5 @@
 import type { Element, ElementBounds, ViewHierarchyResult } from "../../models";
-import type { ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
-import { hostsNodes, ownOverlayHidesApp, ownOverlayWindows } from "./ownOverlayFocus";
+import { hostsNodes, ownOverlayWindows } from "./ownOverlayFocus";
 import { boundsArea } from "../../utils/bounds";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -55,15 +54,13 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
 
 /**
  * Which of AutoMobile's own overlay windows count as covers besides application windows:
- * - `"none"`: none (observe's application-window check, layer-scoped taps);
- * - `"touch"`: every node-hosting overlay window, because a coordinate gesture inside one reaches
- *   the overlay whatever it paints (the default-layer tap path);
- * - `"hiding"`: only overlay windows `ownOverlayHidesApp` says hide the app (opaque fullscreen
- *   with `overlay_window_metadata_v1`, any node-hosting overlay on older APKs). Observe uses it so
- *   a row it keeps actionable is one the tap path can reach under every overlay it treats as
- *   covering, while a translucent or partial overlay keeps observe's existing rule.
+ * - `"none"`: none (layer-scoped taps, which resolve the overlay layer separately);
+ * - `"touch"`: every node-hosting overlay window, opaque, translucent, sheet or floating, because
+ *   the overlay is touchable within its bounds (FLAG_NOT_TOUCH_MODAL), so a coordinate gesture
+ *   inside one reaches the overlay whatever it paints. The default-layer tap path and observe both
+ *   use it (owner decision 2026-10-08, #10715), so observe never offers a row tapOn refuses.
  */
-export type OwnOverlayCoverRule = "none" | "touch" | "hiding";
+export type OwnOverlayCoverRule = "none" | "touch";
 
 /**
  * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
@@ -180,9 +177,9 @@ function coveringLabel(first: SearchableEntry, target: Element): string {
 }
 
 /**
- * Bounds of AutoMobile's own overlay windows that host nodes and rank above `owner`'s window,
- * narrowed by `rule` (see `OwnOverlayCoverRule`). The node-free highlight window passes touches
- * through, so it never covers; nor does an overlay window that owns the target.
+ * Bounds of AutoMobile's own overlay windows that host nodes and rank above `owner`'s window
+ * (none for the `"none"` rule). The node-free highlight window is FLAG_NOT_TOUCHABLE and passes
+ * touches through, so it never covers; nor does an overlay window that owns the target.
  */
 function ownOverlayCoversAbove(
   hierarchy: ViewHierarchyResult,
@@ -194,11 +191,8 @@ function ownOverlayCoversAbove(
     return [];
   }
   const parser = new DefaultElementParser();
-  const windows = ownOverlayWindows(hierarchy);
-  const apkReportsMetadata = reportsOverlayMetadata(windows);
-  return windows
+  return ownOverlayWindows(hierarchy)
     .filter((window) => window.bounds !== undefined && window.hierarchy && hostsNodes(window))
-    .filter((window) => rule === "touch" || ownOverlayHidesApp(window, true, apkReportsMetadata))
     .filter((window) => {
       const sources = new Set<SearchableEntry["source"]>();
       parser.traverseNode(window.hierarchy!, (node) => sources.add(node));
@@ -216,7 +210,8 @@ function ownOverlayCoversAbove(
  * Whether tapOn would find no exposed tap point on `target` because application windows ranked
  * above its window, plus the own overlay windows `ownOverlays` selects, cover all of `bounds`.
  * Observe uses this to mark skeleton rows `occluded` under exactly the condition
- * `applicationWindowSafeTapPoint` fails the tap path with.
+ * `applicationWindowSafeTapPoint` fails the tap path with; pass the same screen-clipped bounds the
+ * tap path tests (`visibleTapBounds`).
  */
 export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
@@ -276,67 +271,4 @@ export function ownOverlayNodeSources(
     }
   }
   return sources;
-}
-
-/** Whether any own overlay window carries `overlay_window_metadata_v1` fields. */
-function reportsOverlayMetadata(windows: readonly ViewHierarchyWindowInfo[]): boolean {
-  return windows.some(
-    (window) => window.overlayPlacement !== undefined || window.overlayOpaque !== undefined,
-  );
-}
-
-function windowContains(window: ViewHierarchyWindowInfo, bounds: ElementBounds): boolean {
-  const frame = window.bounds;
-  return (
-    frame !== undefined &&
-    frame.left <= bounds.left &&
-    frame.top <= bounds.top &&
-    frame.right >= bounds.right &&
-    frame.bottom >= bounds.bottom
-  );
-}
-
-/**
- * Whether one of AutoMobile's own overlay windows, ranked above the target's window, spans all of
- * `bounds` (a fullscreen prototype overlay over the app). The capture does not say whether the
- * overlay paints an opaque surface, so this reports what a coordinate gesture would hit: the
- * overlay window, not the app row behind it. Overlay rows are never covered by their own window,
- * and `layer: "app"` scoping removes the window first, so the app rows come back untouched.
- *
- * When the APK reports `overlay_window_metadata_v1` (`apkReportsMetadata`, inferred from any own
- * overlay window carrying the fields unless the caller passes it), `ownOverlayHidesApp` lets that
- * explicit placement/opacity decide; otherwise the node-rendering bounds rule above is the fallback.
- */
-export function isFullyCoveredByOwnOverlay(
-  hierarchy: ViewHierarchyResult,
-  target: Element,
-  bounds: ElementBounds,
-  apkReportsMetadata = reportsOverlayMetadata(ownOverlayWindows(hierarchy)),
-): boolean {
-  // The highlight overlay is a full-screen, FLAG_NOT_TOUCHABLE canvas that exposes no nodes, so
-  // coordinate gestures pass through it; only an overlay window that renders nodes can intercept.
-  const overlays = ownOverlayWindows(hierarchy).filter((window) =>
-    ownOverlayHidesApp(
-      window,
-      hostsNodes(window) && windowContains(window, bounds),
-      apkReportsMetadata,
-    ),
-  );
-  if (overlays.length === 0) {
-    return false;
-  }
-  const entries = uniqueBySource(new SearchableHierarchy().project(hierarchy));
-  const source = getHierarchyNodeSource(target);
-  const owner = entries.find((entry) => entry.source === source);
-  // Same guard as applicationWindowSafeTapPoint: a merged-tree copy is not an owning window.
-  if (!owner || !windowTypesBySource(hierarchy).has(owner.source)) {
-    return false;
-  }
-  const overlaySources = ownOverlayNodeSources(hierarchy);
-  if (overlaySources.has(owner.source)) {
-    return false;
-  }
-  return entries.some(
-    (entry) => overlaySources.has(entry.source) && entry.windowRank < owner.windowRank,
-  );
 }

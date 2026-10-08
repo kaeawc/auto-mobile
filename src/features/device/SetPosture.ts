@@ -33,6 +33,13 @@ import {
 } from "../../utils/deviceReadinessLock";
 
 import {
+  defaultPostureKeyguardDismisserFactory,
+  readLockBeforePostureChange,
+  restoreSwipeKeyguardAfterPostureChange,
+  type PostureKeyguardDismisserFactory,
+} from "./PostureKeyguardRestore";
+import type { DeviceLockState } from "../../models/DeviceLockState";
+import {
   AdbAndroidHingeAngleConsole,
   type AndroidHingeAngleConsole,
   type AndroidHingeAngleReadbackResult,
@@ -47,6 +54,8 @@ export type DisplayPreset = "phone" | "unfolded" | "tablet";
 interface SetPostureResultBase {
   display: DisplayRef;
   locked?: boolean;
+  /** Android: the posture change raised a swipe keyguard on an unlocked device and it was dismissed. */
+  keyguardDismissed?: true;
   warnings?: string[];
 }
 
@@ -92,6 +101,7 @@ export interface SetPostureDependencies {
   simctl?: Pick<SimCtl, "getDeviceInfo">;
   timer?: Timer;
   transitionSink?: DisplayTransitionSink;
+  keyguardDismisserFactory?: PostureKeyguardDismisserFactory;
 }
 
 const IOS_POSTURE_POLL_INTERVAL_MS = 250;
@@ -573,6 +583,7 @@ export class SetPosture {
   private readonly simctl?: Pick<SimCtl, "getDeviceInfo">;
   private readonly timer: Timer;
   private readonly transitionSink: DisplayTransitionSink;
+  private readonly keyguardDismisserFactory: PostureKeyguardDismisserFactory;
 
   constructor(
     private readonly device: BootedDevice,
@@ -588,6 +599,8 @@ export class SetPosture {
     this.simctl = dependencies.simctl;
     this.timer = dependencies.timer ?? defaultTimer;
     this.transitionSink = dependencies.transitionSink ?? displayTransitions;
+    this.keyguardDismisserFactory =
+      dependencies.keyguardDismisserFactory ?? defaultPostureKeyguardDismisserFactory;
   }
 
   async execute(
@@ -738,6 +751,8 @@ export class SetPosture {
     const { signal, assertCurrent } = operation;
     assertCurrent();
     const adb = this.adbFactory.create(this.device);
+    const lockBefore = await readLockBeforePostureChange(adb, signal);
+    assertCurrent();
     const consoleResult = await awaitWhileRequestIsLive(
       this.androidHingeAngleConsole.setHingeAngle(adb, angle, { signal }),
       signal,
@@ -765,25 +780,26 @@ export class SetPosture {
       ObservedAndroidDisplayCache.clear(this.device.deviceId);
       return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
     };
-    const settled = await this.observeFinalPosture(
-      {
-        hingeAngle: angle,
-        resolvePosture: (observation) => {
-          const observed = observation.display.posture;
-          if (
-            readBack.posture !== "unknown" &&
-            observed !== "unknown" &&
-            readBack.posture !== observed
-          ) {
-            throw new ActionableError(
-              `Hinge angle command returned OK, but committed device posture '${readBack.posture}' disagrees with final observed posture '${observed}'. Re-observe the device before acting.`,
-            );
-          }
-          return readBack;
-        },
+    const finalPosture: FinalPostureRequest = {
+      hingeAngle: angle,
+      resolvePosture: (observation) => {
+        const observed = observation.display.posture;
+        if (
+          readBack.posture !== "unknown" &&
+          observed !== "unknown" &&
+          readBack.posture !== observed
+        ) {
+          throw new ActionableError(
+            `Hinge angle command returned OK, but committed device posture '${readBack.posture}' disagrees with final observed posture '${observed}'. Re-observe the device before acting.`,
+          );
+        }
+        return readBack;
       },
-      observe,
-      observe,
+    };
+    const settled = await this.settleAndroidKeyguard(
+      adb,
+      lockBefore,
+      () => this.observeFinalPosture(finalPosture, observe, observe, operation),
       operation,
     );
     assertCurrent();
@@ -1001,6 +1017,9 @@ export class SetPosture {
     );
     operation.assertCurrent();
 
+    const lockBefore = await readLockBeforePostureChange(adb, signal);
+    operation.assertCurrent();
+
     if (requested === "rear_display") {
       await setPhysicalPosture(adb, requested, states, supportsOpenedReset, operation);
     } else if (emulator) {
@@ -1035,21 +1054,58 @@ export class SetPosture {
     // A posture-only change need not produce a display push or new geometry.
     operation.assertCurrent();
     ObservedAndroidDisplayCache.clear(this.device.deviceId);
-    const result = await this.observeFinalPosture(
-      requested,
-      // Clearing panel/posture metadata does not clear CtrlProxy's hierarchy cache.
-      () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
-      () => {
-        operation.assertCurrent();
-        ObservedAndroidDisplayCache.clear(this.device.deviceId);
-        return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
-      },
+    const result = await this.settleAndroidKeyguard(
+      adb,
+      lockBefore,
+      () =>
+        this.observeFinalPosture(
+          requested,
+          // Clearing panel/posture metadata does not clear CtrlProxy's hierarchy cache.
+          () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+          () => {
+            operation.assertCurrent();
+            ObservedAndroidDisplayCache.clear(this.device.deviceId);
+            return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+          },
+          operation,
+        ),
       operation,
     );
     operation.assertCurrent();
     return withWarnings(result, [
       activePanelWarning(requested, result.display.role, this.device.displays?.panels),
     ]);
+  }
+
+  /**
+   * Runs the final observation and, when the change raised a swipe keyguard on a device that was
+   * unlocked, dismisses it and observes again so the result reports the restored state.
+   */
+  private async settleAndroidKeyguard(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    lockBefore: DeviceLockState | null,
+    finalize: () => Promise<SetPostureResult>,
+    operation: PostureOperation,
+  ): Promise<SetPostureResult> {
+    const result = await finalize();
+    operation.assertCurrent();
+    const outcome = await restoreSwipeKeyguardAfterPostureChange({
+      before: lockBefore,
+      lockedAfter: result.locked,
+      adb,
+      dismisser: this.keyguardDismisserFactory(this.device, adb, this.timer),
+      signal: operation.signal,
+    });
+    operation.assertCurrent();
+    if (outcome.kind === "unchanged") {
+      return result;
+    }
+    if (outcome.kind === "failed") {
+      return withWarnings(result, [outcome.warning]);
+    }
+    const restored = await finalize();
+    operation.assertCurrent();
+    return { ...restored, keyguardDismissed: true };
   }
 
   private async observeFinalPosture(

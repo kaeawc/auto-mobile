@@ -1749,6 +1749,7 @@ export const setPostureResultSchema = z
     postureReason: z.string().optional(),
     display: observationDisplaySchema,
     locked: z.boolean().optional(),
+    keyguardDismissed: z.literal(true).optional(),
     warnings: z.array(z.string()).optional(),
   })
   .passthrough()

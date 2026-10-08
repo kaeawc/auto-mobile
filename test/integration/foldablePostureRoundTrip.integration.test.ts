@@ -39,6 +39,11 @@ interface ActionResult {
   error?: string;
 }
 
+interface PostureResult {
+  locked?: boolean;
+  keyguardDismissed?: boolean;
+}
+
 interface RecordingResult {
   recordings: Array<{
     recordingId: string;
@@ -163,8 +168,8 @@ async function setPosture(
   sessionUuid: string,
   posture: "opened" | "closed" | "rear_display",
   displayPreset?: "phone" | "unfolded",
-): Promise<void> {
-  await tool(sessionUuid, "setPosture", [
+): Promise<PostureResult> {
+  return tool<PostureResult>(sessionUuid, "setPosture", [
     "--posture",
     posture,
     ...(displayPreset ? ["--displayPreset", displayPreset] : []),
@@ -232,25 +237,29 @@ describeLane("foldable posture round trips through the daemon", () => {
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       const opened = await expectPanel(sessionUuid, inner, isFold ? "inner" : undefined, "opened");
-      await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
-      await assertStaleTap(sessionUuid, opened);
-      const closed = await expectPanel(sessionUuid, cover, isFold ? "cover" : undefined, "closed");
-      if (!isFold) {
-        expect(closed.screenSize).not.toEqual(opened.screenSize);
+      const fold = await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
+      // Folding raises the "Swipe up to continue" keyguard on a device with no lock credential, and
+      // reopening keeps it up. setPosture dismisses it because the device was unlocked before.
+      if (isFold) {
+        expect(fold.keyguardDismissed).toBe(true);
       }
-      expect(closed.deviceLock?.locked).toBe(true);
-      const wake = await tool<ActionResult>(sessionUuid, "wakeAndUnlock");
-      expect(wake.success).toBe(true);
+      expect(fold.locked).toBe(false);
+      await assertStaleTap(sessionUuid, opened);
       const unlocked = await expectPanel(
         sessionUuid,
         cover,
         isFold ? "cover" : undefined,
         "closed",
       );
+      if (!isFold) {
+        expect(unlocked.screenSize).not.toEqual(opened.screenSize);
+      }
       expect(unlocked.deviceLock?.locked).toBe(false);
       await assertFreshTap(sessionUuid, unlocked);
 
-      await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
+      expect(
+        (await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded")).locked,
+      ).toBe(false);
       await assertStaleTap(sessionUuid, unlocked);
       const reopened = await expectPanel(
         sessionUuid,
@@ -258,6 +267,7 @@ describeLane("foldable posture round trips through the daemon", () => {
         isFold ? "inner" : undefined,
         "opened",
       );
+      expect(reopened.deviceLock?.locked).toBe(false);
       await assertFreshTap(sessionUuid, reopened);
 
       if (isFold) {
@@ -331,6 +341,8 @@ describeLane("foldable posture round trips through the daemon", () => {
         isFold ? "inner" : undefined,
         "opened",
       );
+      // The fold's swipe keyguard must not survive the round trip onto the inner panel.
+      expect(reopened.deviceLock?.locked).toBe(false);
     } catch (error) {
       primary = { error };
     } finally {

@@ -1,0 +1,152 @@
+{
+  "type": "hierarchy_update",
+  "timestamp": 1791498414375,
+  "data": {
+    "updatedAt": 1791498414361,
+    "packageName": "com.android.settings",
+    "userId": 0,
+    "displayId": 0,
+    "windowInfo": null,
+    "windows": [
+      {
+        "id": 9,
+        "displayId": 0,
+        "type": 3,
+        "windowLayer": 1,
+        "isActive": false,
+        "isFocused": false,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 2076,
+          "bottom": 136
+        },
+        "packageName": "com.android.systemui"
+      },
+      {
+        "id": 19,
+        "displayId": 0,
+        "type": 1,
+        "windowLayer": 0,
+        "isActive": false,
+        "isFocused": false,
+        "bounds": {
+          "left": 0,
+          "top": 0,
+          "right": 2076,
+          "bottom": 2152
+        },
+        "packageName": "com.android.settings"
+      }
+    ],
+    "contentHiddenRegions": null,
+    "intentChooserDetected": false,
+    "notificationPermissionDetected": false,
+    "accessibility-focused-element": null,
+    "ctrlProxyIncomplete": null,
+    "error": null,
+    "screenWidth": 2076,
+    "screenHeight": 2152,
+    "rotation": 0,
+    "systemInsets": {
+      "top": 165,
+      "bottom": 78,
+      "left": 73,
+      "right": 73
+    },
+    "insets": {
+      "available": true,
+      "source": "android-window-metrics",
+      "units": "physical-pixels",
+      "systemBars": {
+        "visible": {
+          "top": 136,
+          "bottom": 78,
+          "left": 0,
+          "right": 0
+        },
+        "stable": {
+          "top": 136,
+          "bottom": 78,
+          "left": 0,
+          "right": 0
+        }
+      },
+      "displayCutout": {
+        "top": 136,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "displayCutoutInfo": {
+        "classification": "unknown",
+        "bounds": [
+          {
+            "left": 1940,
+            "top": 0,
+            "right": 2076,
+            "bottom": 136
+          }
+        ]
+      },
+      "systemGestures": {
+        "top": 165,
+        "bottom": 78,
+        "left": 73,
+        "right": 73
+      },
+      "mandatorySystemGestures": {
+        "top": 165,
+        "bottom": 78,
+        "left": 0,
+        "right": 0
+      },
+      "tappableElement": {
+        "top": 136,
+        "bottom": 0,
+        "left": 0,
+        "right": 0
+      },
+      "systemChrome": {
+        "visibility": "visible",
+        "statusBar": "visible",
+        "navigationBar": "visible",
+        "homeIndicatorAutoHideRequested": null,
+        "source": "android-window-insets"
+      }
+    },
+    "wakefulness": "Awake",
+    "foregroundActivity": null,
+    "density": 390,
+    "sdkInt": 36,
+    "deviceModel": "sdk_gphone64_arm64",
+    "isEmulator": true,
+    "accessibilityTool": true,
+    "nativeScale": 1,
+    "pixelWidth": 2076,
+    "pixelHeight": 2152,
+    "truncationReasons": null
+  },
+  "requestId": "fold-overlay-cover-focus-d0",
+  "frameContext": "9678cc6b-d45e-4a1e-8564-e4dc924cf830:98",
+  "perfTiming": [
+    {
+      "name": "hierarchyDebouncer",
+      "durationMs": 94,
+      "children": [
+        {
+          "name": "extractHierarchy",
+          "durationMs": 94
+        },
+        {
+          "name": "computeHash",
+          "durationMs": 0
+        }
+      ]
+    },
+    {
+      "name": "serializeHierarchy",
+      "durationMs": 9
+    }
+  ]
+}

@@ -225,6 +225,7 @@ const styleSchema = z
     textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();
+const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
 const itemSchema = z
   .object({
     label: z.string().min(1),
@@ -359,6 +360,7 @@ const commonNodeShape = {
   testTag: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
+  styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.OverlayDimension
 import dev.jasonpearson.automobile.protocol.OverlayImageNode
 import dev.jasonpearson.automobile.protocol.OverlayItem
+import dev.jasonpearson.automobile.protocol.OverlayStyle
 
 /** Supplied by [OverlayRuntimeContent]; null (previews, tests) draws every image as missing. */
 internal val LocalOverlayImageCache = compositionLocalOf<OverlayImageCache?> { null }
@@ -139,11 +140,11 @@ internal fun OverlayImageContent(node: OverlayRenderNode, modifier: Modifier) {
       Image(
         image.bitmap.asImageBitmap(),
         contentDescription = null,
-        modifier = fillAuthoredAxes(source),
+        modifier = fillAuthoredAxes(node.style.source),
         contentScale = overlayContentScale(source.contentScale),
       )
     } else {
-      Box(fillAuthoredAxes(source).background(background), Alignment.Center) {
+      Box(fillAuthoredAxes(node.style.source).background(background), Alignment.Center) {
         if (state != OverlayImageState.Loading)
           Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color.DarkGray)
       }
@@ -155,10 +156,10 @@ internal fun OverlayImageContent(node: OverlayRenderNode, modifier: Modifier) {
  * Crop and fill need the image to take the node's whole box; an axis the author left to wrap
  * content keeps the image's natural size on that axis.
  */
-private fun fillAuthoredAxes(source: OverlayImageNode): Modifier {
+private fun fillAuthoredAxes(style: OverlayStyle): Modifier {
   var modifier: Modifier = Modifier
-  if (source.style?.width.isSized()) modifier = modifier.fillMaxWidth()
-  if (source.style?.height.isSized()) modifier = modifier.fillMaxHeight()
+  if (style.width.isSized()) modifier = modifier.fillMaxWidth()
+  if (style.height.isSized()) modifier = modifier.fillMaxHeight()
   return modifier
 }
 

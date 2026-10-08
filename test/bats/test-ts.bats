@@ -113,6 +113,12 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+# Per-shard behaviour for parallel shard tests (#10644): the hook reads
+# AUTOMOBILE_WATCHDOG_LABEL and may exit; otherwise the stub continues.
+if [[ "$1" == test && -n "${STUB_SHARD_HOOK:-}" ]]; then
+  # shellcheck source=/dev/null
+  source "$STUB_SHARD_HOOK"
+fi
 # Per-invocation exit codes for `bun test` (shard retry tests run one worker,
 # so invocations are sequential): "124 0" times out once, then passes.
 if [[ "$1" == test && -n "${STUB_BUN_EXITS:-}" ]]; then
@@ -745,6 +751,155 @@ bun_test_invocations() {
   run_retry_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=soon
   [ "$status" -eq 2 ]
   [[ "$output" == *"AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS must be a positive integer"* ]]
+}
+
+# Completion-order reaping (#10644). Three parallel shards: shard 0 is slow
+# (it waits on a file another shard writes, bounded so a regression fails
+# instead of hanging) and shard 2's first attempt exits fast.
+write_completion_order_hook() {
+  cat > "$1" <<'EOF'
+stub_mark="$STUB_HOOK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+echo x >> "$stub_mark.attempts"
+stub_attempt="$(wc -l < "$stub_mark.attempts" | tr -d ' ')"
+stub_wait_for() {
+  local tries=0
+  while [[ ! -e "$1" ]]; do
+    tries=$((tries + 1))
+    if [[ "$tries" -gt 150 ]]; then return 1; fi
+    sleep 0.02
+  done
+}
+case "$AUTOMOBILE_WATCHDOG_LABEL" in
+  "unit shard 0")
+    if stub_wait_for "$STUB_HOOK_DIR/${STUB_SLOW_WAITS_FOR:-shard2-retry-started}"; then
+      echo saw-gate > "$STUB_HOOK_DIR/shard0-result"
+    else
+      echo gate-missing > "$STUB_HOOK_DIR/shard0-result"
+    fi
+    exit "${STUB_SLOW_EXIT:-0}"
+    ;;
+  "unit shard 2")
+    if [[ "$stub_attempt" -eq 1 ]]; then
+      if [[ -n "${STUB_FAST_CLOCK:-}" ]]; then
+        printf '%s\n' "$STUB_FAST_CLOCK" > "$STUB_HOOK_DIR/clock"
+      fi
+      echo "(fail) stub suite > slow test [5001.00ms]"
+      touch "$STUB_HOOK_DIR/shard2-attempt1-done"
+      exit "${STUB_FAST_EXIT:-124}"
+    fi
+    touch "$STUB_HOOK_DIR/shard2-retry-started"
+    exit 0
+    ;;
+esac
+EOF
+}
+
+# Usage: run_completion_order_lane [ENV=VALUE]...; uses $hook and $hook_dir.
+run_completion_order_lane() {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=3 \
+    AUTOMOBILE_UNIT_SHARD_POLL_SECONDS=0.02 \
+    STUB_SHARD_HOOK="$hook" STUB_HOOK_DIR="$hook_dir" "$@" bash "$SCRIPT" unit
+}
+
+reset_completion_order_hook() {
+  hook_dir="$BATS_TEST_TMPDIR/hook"
+  hook="$BATS_TEST_TMPDIR/hook.sh"
+  rm -rf "$hook_dir"
+  mkdir -p "$hook_dir"
+  write_completion_order_hook "$hook"
+  : > "$BUN_ARGS_FILE"
+}
+
+@test "a fast-failing later shard is retried before a slow earlier shard finishes (#10644)" {
+  reset_completion_order_hook
+  run_completion_order_lane
+  [ "$status" -eq 0 ]
+  # Shard 0 was still running when shard 2's retry started; index-order
+  # reaping would leave shard 0 waiting until its bounded wait gave up.
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [ "$(wc -l < "$hook_dir/unit_shard_2.attempts" | tr -d ' ')" -eq 2 ]
+  [ "$(wc -l < "$hook_dir/unit_shard_0.attempts" | tr -d ' ')" -eq 1 ]
+  [[ "$output" == *"RETRY: unit shard 2 hit its 180s wall-clock budget (exit 124)"* ]]
+  [[ "$output" == *"test-ts: unit shard 2 passed on its retry"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=0 attempts=2"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
+  [ -f scratch/test-ts-unit-shards/shard-2.attempt-1.log ]
+  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
+  [ -s scratch/test-ts-unit-shards/shard-2.wall ]
+}
+
+@test "completion-order reaping judges the lane cap at each shard's own reap time (#10644)" {
+  reset_completion_order_hook
+  # Fake lane clock: base 1000 plus whatever the hook last wrote to `clock`.
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+offset=0
+if [[ -f "$STUB_HOOK_DIR/clock" ]]; then offset="$(cat "$STUB_HOOK_DIR/clock")"; fi
+printf '%s\n' "$((1000 + offset))"
+EOF
+  chmod +x "$STUB_BIN/date"
+
+  # A retry needs 180s budget + 60s overhead; at 0s elapsed it fits a 245s cap.
+  run_completion_order_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=245
+  [ "$status" -eq 0 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"test-ts: unit shard 2 passed on its retry"* ]]
+
+  # Shard 2 ends at 10s elapsed: 10 + 180 + 60 > 245, so no retry, and the
+  # slow shard 0 is still reaped and reported.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=245 \
+    STUB_FAST_CLOCK=10 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"test-ts: not retrying unit shard 2 (status 124): a 180s retry at 10s elapsed would pass the 245s lane cap"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+  [ "$(wc -l < "$hook_dir/unit_shard_2.attempts" | tr -d ' ')" -eq 1 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=124"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=124 retried=0"* ]]
+}
+
+@test "completion-order reaping keeps the lane exit status independent of finish order (#10644)" {
+  # A fast ordinary failure, then a slow timeout: 124 wins and both are named.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
+    STUB_FAST_EXIT=7 STUB_SLOW_EXIT=124 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"FAIL: unit shard 2 exited with status 7"* ]]
+  [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=124 retried=0"* ]]
+
+  # A fast timeout, then a slow ordinary failure: still 124.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
+    STUB_FAST_EXIT=124 STUB_SLOW_EXIT=7 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"TIMEOUT: unit shard 2 exceeded its wall-clock budget"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+
+  # Only ordinary failures: 1, and neither is retried.
+  reset_completion_order_hook
+  run_completion_order_lane STUB_FAST_EXIT=7 STUB_SLOW_EXIT=3 \
+    STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: unit shard 2 exited with status 7"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 3"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+}
+
+@test "the shard reap poll interval rejects non-positive values" {
+  for interval in 0 0.0 soon; do
+    : > "$BUN_ARGS_FILE"
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+      AUTOMOBILE_UNIT_SHARD_POLL_SECONDS="$interval" bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_SHARD_POLL_SECONDS must be a positive number of seconds, got: $interval"* ]]
+    [ "$(bun_test_invocations)" -eq 0 ]
+  done
 }
 
 @test "unit shards run the calibration probe at start and end of every attempt next to the JUnit reports" {

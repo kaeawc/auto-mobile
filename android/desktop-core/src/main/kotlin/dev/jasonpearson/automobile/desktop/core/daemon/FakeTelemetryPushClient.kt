@@ -28,12 +28,17 @@ class FakeTelemetryPushClient : TelemetryPushClient {
   private var disconnectCallCount = 0
   private var lastDeviceId: String? = null
 
-  override fun connect(deviceId: String?) {
+  private var lastDeviceSessionUuid: String? = null
+
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     connectCallCount++
     lastDeviceId = deviceId
+    lastDeviceSessionUuid = deviceSessionUuid
     connected = true
     _connectionState.tryEmit(ConnectionState.Connected())
   }
+
+  override fun reconnect() = connect(lastDeviceId, lastDeviceSessionUuid)
 
   override fun disconnect() {
     disconnectCallCount++
@@ -66,4 +71,7 @@ class FakeTelemetryPushClient : TelemetryPushClient {
 
   /** Get the deviceId from the last [connect] call. */
   fun getLastDeviceId(): String? = lastDeviceId
+
+  /** Get the deviceSessionUuid from the last [connect] call. */
+  fun getLastDeviceSessionUuid(): String? = lastDeviceSessionUuid
 }

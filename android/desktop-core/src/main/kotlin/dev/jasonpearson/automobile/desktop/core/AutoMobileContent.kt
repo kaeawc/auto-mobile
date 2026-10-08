@@ -1453,7 +1453,7 @@ fun AutoMobileContent(
           LOG.info("Telemetry push socket missing, daemon appears down - skipping reconnect")
         } else {
           LOG.info("Telemetry push disconnected, attempting reconnect")
-          client.connect()
+          client.reconnect()
         }
       }
     }

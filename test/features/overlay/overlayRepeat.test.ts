@@ -82,7 +82,7 @@ test("the documented repeat snippet is a valid spec root", () => {
   const document = readFileSync(
     join(import.meta.dir, "../../../docs/design-docs/plat/android/overlay-ux.md"),
     "utf8",
-  );
+  ).replace(/\r\n/g, "\n"); // Windows checkouts may convert the doc to CRLF
   const section = document.split("### List templates: repeat")[1];
   const snippet = section.split("```json\n")[1].split("```")[0];
   const result = validateOverlaySpec({ ...spec(JSON.parse(snippet)), state: { picked: "a" } });

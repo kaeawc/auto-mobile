@@ -3,7 +3,7 @@ import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
-import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
+import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -28,7 +28,7 @@ function harness() {
   const voiceOverExecutor = new FakeTalkBackSwipeExecutor();
   const action = new SwipeOn({ name: "iOS fake", deviceId: "ios-9972", platform: "ios" }, null, {
     observeScreen,
-    finder: new FakeElementFinder(),
+    finder: new FakeScrollableElementsQuery(),
     timer,
     voiceOverExecutor,
     accessibilityDetector: new FakeAccessibilityDetector(),

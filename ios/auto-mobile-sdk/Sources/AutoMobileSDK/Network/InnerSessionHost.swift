@@ -13,7 +13,7 @@ import os
 /// The session is never invalidated: each task's owner is held only until that task completes
 /// (a cancelled task still completes), so nothing accumulates and nothing is torn down mid-request.
 final class InnerSessionHost: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    private struct State {
+    private struct State: Sendable {
         var session: URLSession?
         var owners: [Int: AutoMobileURLProtocol] = [:]
         var configurationsBuilt = 0
@@ -107,7 +107,7 @@ final class InnerSessionHost: NSObject, URLSessionDataDelegate, @unchecked Senda
         _: URLSession,
         task: URLSessionTask,
         didReceive challenge: URLAuthenticationChallenge,
-        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         guard let owner = owner(for: task) else {
             completionHandler(.performDefaultHandling, nil)
@@ -146,7 +146,7 @@ enum InnerSessionPolicy {
 /// Completes an inner-session authentication challenge with the answer the app gave through the
 /// URL loading system. The first resolution wins; later ones are ignored.
 final class InnerChallengeSender: NSObject, URLAuthenticationChallengeSender, @unchecked Sendable {
-    typealias Completion = (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    typealias Completion = @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
 
     private let completion: OSAllocatedUnfairLock<Completion?>
 

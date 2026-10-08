@@ -74,7 +74,9 @@ private let hookingSigInfoHandler: SignalInfoHandler = { sig, info, context in
 }
 
 /// Nesting store with controllable thread identity: each fake thread has its own marker.
-private final class FakeThreads: SignalNestingStore {
+/// `@unchecked Sendable`: the "threads" are simulated; every access runs synchronously on the
+/// test thread, including from the predecessor hook.
+private final class FakeThreads: SignalNestingStore, @unchecked Sendable {
     var currentThread = 1
     var markers: [Int: UInt] = [:]
 
@@ -82,8 +84,21 @@ private final class FakeThreads: SignalNestingStore {
     func store(_ frame: UInt) { markers[currentThread] = frame }
 }
 
+/// Runs the signal handler body against fake threads, logging any terminate decision. A free
+/// function so the `@Sendable` predecessor hooks can call it without capturing the test case.
+private func runHandler(
+    _ sig: Int32 = SIGUSR1,
+    info: UnsafeMutablePointer<siginfo_t>? = nil,
+    threads: FakeThreads,
+    frame: UInt,
+    log: TerminationLog
+) {
+    processSignal(sig, info, nil, nesting: threads, frame: frame, terminate: { log.signals.append($0) })
+}
+
 /// Collects the signals the handler decided to terminate the process with.
-private final class TerminationLog {
+/// `@unchecked Sendable`: only touched synchronously on the test thread.
+private final class TerminationLog: @unchecked Sendable {
     var signals: [Int32] = []
 }
 
@@ -423,16 +438,6 @@ final class SignalChainingTests: XCTestCase {
 
     // MARK: - Re-entrancy is per thread (#10158 review)
 
-    private func run(
-        _ sig: Int32 = SIGUSR1,
-        info: UnsafeMutablePointer<siginfo_t>? = nil,
-        threads: FakeThreads,
-        frame: UInt,
-        log: TerminationLog
-    ) {
-        processSignal(sig, info, nil, nesting: threads, frame: frame, terminate: { log.signals.append($0) })
-    }
-
     private func setPredecessorHook(
         _ hook: @escaping @Sendable (Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void
     ) {
@@ -444,17 +449,17 @@ final class SignalChainingTests: XCTestCase {
         makeCrashes().installSignalHandlers()
         let threads = FakeThreads()
         let log = TerminationLog()
-        setPredecessorHook { [self] _, _, _ in
+        setPredecessorHook { _, _, _ in
             // Thread 2 takes a monitored signal while thread 1 is still inside the reporter.
             if threads.currentThread == 1 {
                 threads.currentThread = 2
-                run(threads: threads, frame: 9000, log: log)
+                runHandler(threads: threads, frame: 9000, log: log)
                 threads.currentThread = 1
             }
         }
         defer { predecessorHook.withLock { $0 = nil } }
 
-        run(threads: threads, frame: 5000, log: log)
+        runHandler(threads: threads, frame: 5000, log: log)
 
         XCTAssertEqual(log.signals, [], "a different thread is not nested: it chains instead of re-raising")
         XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 2, "the reporter ran for both threads")
@@ -465,14 +470,14 @@ final class SignalChainingTests: XCTestCase {
         makeCrashes().installSignalHandlers()
         let threads = FakeThreads()
         let log = TerminationLog()
-        setPredecessorHook { [self] _, _, _ in
+        setPredecessorHook { _, _, _ in
             if recordedSigInfoCalls.withLock({ $0.count }) == 1 {
-                run(threads: threads, frame: 4000, log: log) // deeper on the same stack
+                runHandler(threads: threads, frame: 4000, log: log) // deeper on the same stack
             }
         }
         defer { predecessorHook.withLock { $0 = nil } }
 
-        run(threads: threads, frame: 5000, log: log)
+        runHandler(threads: threads, frame: 5000, log: log)
 
         XCTAssertEqual(log.signals, [SIGUSR1], "nested on one thread: die by the signal, never re-enter the reporter")
         XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 1)
@@ -488,8 +493,8 @@ final class SignalChainingTests: XCTestCase {
         // `defer` never ran, so that thread's marker is still set.
         threads.markers[1] = 5000
 
-        run(threads: threads, frame: 5000, log: log) // same stack position: a fresh invocation
-        run(threads: threads, frame: 8000, log: log) // shallower: the old frame is gone
+        runHandler(threads: threads, frame: 5000, log: log) // same stack position: a fresh invocation
+        runHandler(threads: threads, frame: 8000, log: log) // shallower: the old frame is gone
 
         XCTAssertEqual(log.signals, [])
         XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 2, "both crashes still chain")
@@ -511,7 +516,7 @@ final class SignalChainingTests: XCTestCase {
         recordedSigInfoCalls.withLock { $0.removeAll() }
 
         let log = TerminationLog()
-        run(threads: FakeThreads(), frame: 5000, log: log)
+        runHandler(threads: FakeThreads(), frame: 5000, log: log)
 
         XCTAssertEqual(log.signals, [], "the next real crash must not be treated as nested")
         XCTAssertEqual(recordedSigInfoCalls.withLock { $0.count }, 1)
@@ -530,7 +535,7 @@ final class SignalChainingTests: XCTestCase {
         var info = makeInfo(code: 0) // sent by kill/raise, not a hardware fault
 
         for _ in 0 ..< 3 {
-            run(info: &info, threads: threads, frame: 5000, log: log)
+            runHandler(info: &info, threads: threads, frame: 5000, log: log)
         }
 
         XCTAssertEqual(log.signals, [], "the kernel would have ignored every one of these deliveries")
@@ -546,9 +551,9 @@ final class SignalChainingTests: XCTestCase {
         let log = TerminationLog()
         var info = makeInfo(code: 2, signal: SIGSEGV) // SEGV_ACCERR
 
-        run(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
+        runHandler(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
         XCTAssertEqual(log.signals, [], "the first delivery honours SIG_IGN")
-        run(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
+        runHandler(SIGSEGV, info: &info, threads: threads, frame: 5000, log: log)
         XCTAssertEqual(log.signals, [SIGSEGV], "the re-executed faulting instruction must not loop forever")
     }
 
@@ -559,8 +564,8 @@ final class SignalChainingTests: XCTestCase {
         crashes.installSignalHandlers()
         let log = TerminationLog()
 
-        run(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
-        run(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
+        runHandler(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
+        runHandler(SIGSEGV, info: nil, threads: FakeThreads(), frame: 5000, log: log)
 
         XCTAssertEqual(log.signals, [SIGSEGV])
     }
@@ -574,7 +579,7 @@ final class SignalChainingTests: XCTestCase {
         var info = makeInfo(code: SI_USER, signal: SIGSEGV)
 
         for _ in 0 ..< 3 {
-            run(SIGSEGV, info: &info, threads: FakeThreads(), frame: 5000, log: log)
+            runHandler(SIGSEGV, info: &info, threads: FakeThreads(), frame: 5000, log: log)
         }
 
         XCTAssertEqual(log.signals, [], "SI_USER marks a kill()/sigqueue() delivery, not a hardware fault")

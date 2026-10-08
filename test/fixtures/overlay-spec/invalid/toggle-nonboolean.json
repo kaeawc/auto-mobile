@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onTap": [
+        {
+          "type": "toggle",
+          "key": "a"
+        }
+      ]
+    },
+    "state": {
+      "a": 1
+    }
+  },
+  "expectedPath": "root.onTap[0].key"
+}

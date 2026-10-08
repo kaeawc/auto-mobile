@@ -230,6 +230,7 @@ describe("skeleton occlusion by application windows", () => {
 // one app row between them (#10715).
 describe("AutoMobile overlay covers (#10715)", () => {
   const row = { "resource-id": "list_row", clickable: "true", bounds: rect(0, 400) };
+  const dialog = { "resource-id": "dialog_btn", clickable: "true", bounds: rect(0, 200) };
   function rect(left: number, right: number): ElementBounds {
     return { left, top: 0, right, bottom: 100 };
   }
@@ -259,6 +260,15 @@ describe("AutoMobile overlay covers (#10715)", () => {
   }
   const target = (hierarchy: ViewHierarchyResult) =>
     new DefaultElementParser().parseNodeBounds(hierarchy.windows![0].hierarchy!)!;
+  const rowState = (hierarchy: ViewHierarchyResult) => {
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "android")!;
+    const { skeleton, context = [] } = projectSkeleton(
+      elements,
+      { width: 400, height: 400 },
+      hierarchy,
+    );
+    return [...skeleton, ...context].find((entry) => entry.elementId === "list_row");
+  };
 
   test("gesture point moves off a partial overlay and is refused under a full one", () => {
     const partial = hierarchyWith([overlayWindow(rect(100, 300))]);
@@ -272,5 +282,31 @@ describe("AutoMobile overlay covers (#10715)", () => {
     expect(
       ownOverlaySafeGesturePoint(full, target(full), row.bounds, { x: 200, y: 50 }),
     ).toBeNull();
+  });
+
+  test("observe marks a row an overlay and a dialog cover between them, as tapOn refuses it", () => {
+    const hierarchy = hierarchyWith([
+      { type: 1, windowLayer: 1, hierarchy: dialog },
+      overlayWindow(rect(200, 400)),
+    ]);
+    expect(
+      applicationWindowSafeTapPoint(
+        hierarchy,
+        target(hierarchy),
+        row.bounds,
+        { x: 200, y: 50 },
+        undefined,
+        "touch",
+      ).point,
+    ).toBeNull();
+    expect(rowState(hierarchy)).toMatchObject({ occluded: true, affordances: [] });
+  });
+
+  test("observe keeps a row actionable under a translucent overlay the APK reports", () => {
+    const hierarchy = hierarchyWith([
+      { type: 1, windowLayer: 1, hierarchy: dialog },
+      overlayWindow(rect(200, 400), { overlayPlacement: "fullscreen", overlayOpaque: false }),
+    ]);
+    expect(rowState(hierarchy)?.occluded).toBeUndefined();
   });
 });

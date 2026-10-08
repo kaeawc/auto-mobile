@@ -57,12 +57,13 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
  * Which of AutoMobile's own overlay windows count as covers besides application windows:
  * - `"none"`: none (observe's application-window check, layer-scoped taps);
  * - `"touch"`: every node-hosting overlay window, because a coordinate gesture inside one reaches
- *   the overlay whatever it paints (the default-layer tap path).
- *
- * Observe marks overlay-covered rows through `isFullyCoveredByOwnOverlay`, which also weighs
- * overlay opacity.
+ *   the overlay whatever it paints (the default-layer tap path);
+ * - `"hiding"`: only overlay windows `ownOverlayHidesApp` says hide the app (opaque fullscreen
+ *   with `overlay_window_metadata_v1`, any node-hosting overlay on older APKs). Observe uses it so
+ *   a row it keeps actionable is one the tap path can reach under every overlay it treats as
+ *   covering, while a translucent or partial overlay keeps observe's existing rule.
  */
-export type OwnOverlayCoverRule = "none" | "touch";
+export type OwnOverlayCoverRule = "none" | "touch" | "hiding";
 
 /**
  * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
@@ -193,8 +194,11 @@ function ownOverlayCoversAbove(
     return [];
   }
   const parser = new DefaultElementParser();
-  return ownOverlayWindows(hierarchy)
+  const windows = ownOverlayWindows(hierarchy);
+  const apkReportsMetadata = reportsOverlayMetadata(windows);
+  return windows
     .filter((window) => window.bounds !== undefined && window.hierarchy && hostsNodes(window))
+    .filter((window) => rule === "touch" || ownOverlayHidesApp(window, true, apkReportsMetadata))
     .filter((window) => {
       const sources = new Set<SearchableEntry["source"]>();
       parser.traverseNode(window.hierarchy!, (node) => sources.add(node));
@@ -210,19 +214,24 @@ function ownOverlayCoversAbove(
 
 /**
  * Whether tapOn would find no exposed tap point on `target` because application windows ranked
- * above its window cover all of `bounds`. Observe uses this to mark skeleton rows `occluded` under
- * exactly the condition `applicationWindowSafeTapPoint` fails the tap path with.
+ * above its window, plus the own overlay windows `ownOverlays` selects, cover all of `bounds`.
+ * Observe uses this to mark skeleton rows `occluded` under exactly the condition
+ * `applicationWindowSafeTapPoint` fails the tap path with.
  */
 export function isFullyCoveredByApplicationWindow(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
+  ownOverlays: OwnOverlayCoverRule = "none",
 ): boolean {
   const center = {
     x: Math.floor((bounds.left + bounds.right) / 2),
     y: Math.floor((bounds.top + bounds.bottom) / 2),
   };
-  return applicationWindowSafeTapPoint(hierarchy, target, bounds, center).point === null;
+  return (
+    applicationWindowSafeTapPoint(hierarchy, target, bounds, center, undefined, ownOverlays)
+      .point === null
+  );
 }
 
 function subtractCover(bounds: ElementBounds, cover: ElementBounds): ElementBounds[] {
@@ -269,6 +278,13 @@ export function ownOverlayNodeSources(
   return sources;
 }
 
+/** Whether any own overlay window carries `overlay_window_metadata_v1` fields. */
+function reportsOverlayMetadata(windows: readonly ViewHierarchyWindowInfo[]): boolean {
+  return windows.some(
+    (window) => window.overlayPlacement !== undefined || window.overlayOpaque !== undefined,
+  );
+}
+
 function windowContains(window: ViewHierarchyWindowInfo, bounds: ElementBounds): boolean {
   const frame = window.bounds;
   return (
@@ -295,9 +311,7 @@ export function isFullyCoveredByOwnOverlay(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
-  apkReportsMetadata = ownOverlayWindows(hierarchy).some(
-    (window) => window.overlayPlacement !== undefined || window.overlayOpaque !== undefined,
-  ),
+  apkReportsMetadata = reportsOverlayMetadata(ownOverlayWindows(hierarchy)),
 ): boolean {
   // The highlight overlay is a full-screen, FLAG_NOT_TOUCHABLE canvas that exposes no nodes, so
   // coordinate gestures pass through it; only an overlay window that renders nodes can intercept.

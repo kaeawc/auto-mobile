@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayWindowMetadata
+import dev.jasonpearson.automobile.ctrlproxy.overlay.hasInteractiveOverlayTitle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -32,8 +33,9 @@ internal constructor(
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   internal val logOptimizationDecisions: Boolean = false,
   /**
-   * Metadata for CtrlProxy's own interactive overlay window, asked per captured overlay-type window
-   * with the window's root package and title; null for any other window or when none is showing.
+   * Metadata for CtrlProxy's own interactive overlay window, asked per captured window that carries
+   * the interactive overlay's type and title (either layer) with the window's root package and
+   * title; null for any other window or when none is showing.
    */
   private val ownOverlayMetadata:
     (windowPackage: String?, title: CharSequence?) -> OverlayWindowMetadata? =
@@ -722,8 +724,10 @@ internal constructor(
     panelUniqueId: String?,
     packageName: String?,
   ): WindowInfo {
+    // Both layers' windows (the app layer reports as TYPE_SYSTEM) carry the metadata; the title
+    // keeps SystemUI's type-3 windows and the highlight overlay out (#10544).
     val overlay =
-      if (window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+      if (hasInteractiveOverlayTitle(window.type, window.title))
         ownOverlayMetadata(packageName, window.title)
       else null
     return WindowInfo(

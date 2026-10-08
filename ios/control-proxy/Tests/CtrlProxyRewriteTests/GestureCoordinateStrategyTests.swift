@@ -604,3 +604,51 @@ extension GestureCoordinateStrategyTests {
         }
     }
 }
+
+@MainActor
+extension GestureCoordinateStrategyTests {
+    // Issue #9207 capture, 2026-10-08, origin/main 90a8017815. A temporary XCUITest in the runner read
+    // XCUIApplication(com.apple.springboard).frame and the Playground app frame (pt):
+    //   iPhone 17 sim, iOS 26.5:       springboard 402x874, app 402x874, window 402x874.
+    //   iPhone Duo sim, iOS 27.1, folded (cover): springboard 466x678, app 466x678, window 466x678.
+    //   iPhone Duo sim, iOS 27.1, unfolded (opened, 180 deg): springboard 466x678 (the cover panel,
+    //     not the inner screen), app 669x951 (inner 2007x2853 px at 3x), window 951x669.
+    // So SpringBoard's frame equals the real screen on an iPhone and on a folded Duo, but NOT on an
+    // unfolded Duo, where it stays at the cover size and the mismatch check is what reports the panel.
+    private func capturedGeometry(app: GestureSize, springboard: GestureSize) -> GestureCoordinateGeometry {
+        GestureCoordinateGeometry(app: app, screen: springboard, observation: app, rotation: 0)
+    }
+
+    func testCapturedSpringBoardFramesReportNoMismatchOnHealthyDevices() {
+        let iPhone = GestureSize(width: 402, height: 874)
+        let foldedDuo = GestureSize(width: 466, height: 678)
+        XCTAssertFalse(hasMultiPanelMismatch(app: iPhone, screen: iPhone))
+        XCTAssertFalse(hasMultiPanelMismatch(app: foldedDuo, screen: foldedDuo))
+        for size in [iPhone, foldedDuo] {
+            let selection = GestureCoordinateSelection.choose(
+                point: GesturePoint(x: 10, y: 20), geometry: capturedGeometry(app: size, springboard: size)
+            )
+            XCTAssertEqual(selection.strategy, .legacy)
+            XCTAssertEqual(selection.reason, "singlePanel")
+        }
+    }
+
+    func testCapturedUnfoldedDuoSpringBoardFrameStillReportsTheMismatch() {
+        let geometry = capturedGeometry(
+            app: GestureSize(width: 669, height: 951), springboard: GestureSize(width: 466, height: 678)
+        )
+        XCTAssertTrue(hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen))
+        // The SpringBoard reference is the cover panel, so it cannot "resolve" the mismatch away.
+        XCTAssertNil(geometry.resolvingSinglePanel(reference: GestureSize(width: 466, height: 678)))
+        let selection = GestureCoordinateSelection.choose(point: GesturePoint(x: 100, y: 200), geometry: geometry)
+        // Never the silent "singlePanel" path; an observation-less rotation 0 map is undefined here.
+        XCTAssertNotEqual(selection.reason, "singlePanel")
+    }
+
+    func testCapturedUnfoldedDuoWindowIsTransposedFromTheAppFrameSoItIsNotAMismatchByItself() {
+        // The app window reads 951x669 beside the 669x951 app frame; the check treats a transpose as rotation.
+        XCTAssertFalse(
+            hasMultiPanelMismatch(app: GestureSize(width: 669, height: 951), screen: GestureSize(width: 951, height: 669))
+        )
+    }
+}

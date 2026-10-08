@@ -20,7 +20,11 @@ import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
-import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
+import {
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+  UnsettledExecutionVeto,
+  type SessionExecutionProbeInput,
+} from "./unsettledExecutionVeto";
 import type { Session } from "./sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
 
@@ -35,12 +39,10 @@ export const OWNER_DISCONNECTED_RELEASE_REASON = "owner-disconnected";
 export const OWNER_DISCONNECT_GRACE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
 
 /**
- * Longest an active execution may keep a session whose owner disconnected (#10663). No request's
- * deadline can exceed the caller timeout cap, so an execution still tracked this long after the
- * release was first deferred has outlived any deadline it could have had, and nobody is left to
- * consume its result.
+ * Longest an active execution may keep a session whose owner disconnected (#10663): the same
+ * bound the heartbeat monitor applies, from the shared policy in `./unsettledExecutionVeto`.
  */
-export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = UNSETTLED_EXECUTION_VETO_CEILING_MS;
 
 /** Longest wait between retries of a deferred release. */
 export const OWNER_DISCONNECT_RETRY_MAX_DELAY_MS = 5_000;
@@ -128,46 +130,40 @@ function ownerHeartbeatSince(session: OwnerSession): number {
 
 /**
  * Bounds how long active executions may veto the owner-disconnect release of a session
- * (#10663). The #5343 "never reap mid-call" rule holds while the call can still finish inside
- * any request deadline; past {@link OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS} the session is
- * released anyway.
+ * (#10663). The #5343 "never reap mid-call" rule holds while the shared unsettled-execution veto
+ * policy allows; past its bound the session is released anyway.
  */
 export class OwnerDisconnectExecutionVeto {
-  /** When active executions first kept each session incarnation. */
-  private readonly vetoedSince = new WeakMap<Session, number>();
+  private readonly veto: UnsettledExecutionVeto;
 
   constructor(
-    private readonly hasActiveExecutions: (sessionId: string) => boolean,
-    private readonly timer: Timer,
-    private readonly ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-  ) {}
+    executions: SessionExecutionProbeInput,
+    timer: Timer,
+    ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
+  ) {
+    this.veto = new UnsettledExecutionVeto(executions, timer, ceilingMs);
+  }
 
   /** Whether active executions still keep this session from its owner-disconnect release. */
   keeps(session: Session): boolean {
-    if (!this.hasActiveExecutions(session.sessionId)) {
-      this.vetoedSince.delete(session);
-      return false;
+    const verdict = this.veto.judge(session);
+    if (verdict.kind === "kept") {
+      if (verdict.firstKept) {
+        logger.info(
+          `[OwnerDisconnectRelease] Kept session ${session.sessionId} after its owner disconnected: ` +
+            `executions are still active; retrying the release once they settle`,
+        );
+      }
+      return true;
     }
-    const now = this.timer.now();
-    const vetoedSince = this.vetoedSince.get(session);
-    if (vetoedSince === undefined) {
-      this.vetoedSince.set(session, now);
-      logger.info(
-        `[OwnerDisconnectRelease] Kept session ${session.sessionId} after its owner disconnected: ` +
-          `executions are still active; retrying the release once they settle`,
+    if (verdict.kind === "expired") {
+      this.veto.forget(session);
+      logger.warn(
+        `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${verdict.vetoedMs}ms after its ` +
+          `owner disconnected by executions that never settled; releasing it anyway past the ` +
+          `${verdict.boundMs}ms unsettled-execution bound`,
       );
-      return true;
     }
-    const vetoedMs = now - vetoedSince;
-    if (vetoedMs < this.ceilingMs) {
-      return true;
-    }
-    this.vetoedSince.delete(session);
-    logger.warn(
-      `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${vetoedMs}ms after its ` +
-        `owner disconnected by executions that never settled; releasing it anyway past the ` +
-        `${this.ceilingMs}ms unsettled-execution ceiling`,
-    );
     return false;
   }
 }

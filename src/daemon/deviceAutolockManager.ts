@@ -253,9 +253,12 @@ export class DeviceAutolockManager {
     // extend `expiresAt`. A heartbeat (a stdio proxy ticks one every few seconds
     // for as long as it is connected) proves the owner is alive, not that the
     // device is in use, so it must not extend the idle deadline (#10656, #10658).
-    // The heartbeat timeout is aligned with the idle timeout so a client that
-    // never heartbeats (CLI) is not reaped by the daemon's 10s heartbeat watchdog
-    // before the configured idle timeout.
+    // Liveness uses the default owner lease (`sessionLivenessWindows.ts`), the
+    // same as a bound session: an owner that stops heartbeating without closing
+    // its connection frees the device within lease + grace + one scan (~10 s),
+    // not after the idle window (#10729). A `--cli` owner never heartbeats; it
+    // declares the CLI liveness policy, which moves the session onto wall-clock
+    // idleness instead.
     const session = await this.pool.createSessionOrRestore(device, assignmentSnapshot, () =>
       this.pool
         .getSessionManager()
@@ -264,7 +267,7 @@ export class DeviceAutolockManager {
           deviceId,
           platform,
           timeoutMs,
-          timeoutMs,
+          undefined,
           this.pool.stableDeviceIdFor(device),
         ),
     );

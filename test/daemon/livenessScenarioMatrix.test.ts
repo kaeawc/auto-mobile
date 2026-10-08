@@ -163,6 +163,21 @@ describe("autolock with a live proxy", () => {
     expect(IDLE_REASONS).toContain(scenario.releaseOf(session)?.reason!);
     expectFreed();
   });
+
+  test("a silent owner (proxy dead, connection never closed) is freed in about 10 s, not after the 60 s window (#10729)", async () => {
+    scenario = await LivenessScenario.start({ autolock: true });
+    const session = await scenario.acquire();
+    await scenario.idle(20_000);
+    await scenario.toolCall(session);
+    expectHeld(session);
+
+    const silentSince = scenario.timer.now();
+    scenario.dropHeartbeats = true;
+    const releasedAt = await scenario.idleUntilReleased(session, 2 * NO_HEARTBEAT_BUDGET_MS);
+    expect(releasedAt).toBeLessThanOrEqual(silentSince + NO_HEARTBEAT_BUDGET_MS);
+    expect(scenario.releaseOf(session)?.reason).toBe("heartbeat-timeout");
+    expectFreed();
+  });
 });
 
 describe("owner exits or goes silent", () => {

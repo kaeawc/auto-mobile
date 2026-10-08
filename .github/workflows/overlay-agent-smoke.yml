@@ -3,7 +3,7 @@ name: "Overlay Agent Simulator Smoke"
 # Advisory per-runtime smoke test for the iOS overlay agent (#10569). Injection depends on
 # simulator dyld behaviour and each runtime's Swift runtime, so a new Xcode or runtime can break
 # it silently. Each matrix leg boots ONE fresh simulator used serially and reports pass or fail
-# separately. Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
+# separately (iOS 26 and 18; 17 is intentionally uncovered, see the matrix). Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
 on:
   pull_request:
     paths:
@@ -28,25 +28,31 @@ permissions:
 jobs:
   overlay-agent-smoke:
     name: "Overlay agent smoke (iOS ${{ matrix.runtime }})"
-    runs-on: macos-26
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     # Advisory until it has a stable history; never gates a merge.
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        # "26" is the runtime Xcode 26.5 ships; older runtimes run only where the image has them.
-        runtime: ["26", "18", "17"]
+        # Each leg runs on the runner image that ships its simulator runtime (per
+        # actions/runner-images): macos-26 has iOS 26.2/26.4/26.5, macos-15 has iOS 18.5/18.6
+        # alongside Xcode 26.x. iOS 17 is not covered: only the macos-14 image has it, that image is
+        # deprecated (fully unsupported 2026-11-02) and tops out at Xcode 16.2, below the Xcode 26
+        # toolchain the rest of this repo's iOS CI uses (#10627).
+        include:
+          - { runtime: "26", runner: "macos-26", xcode: "26.5" }
+          - { runtime: "18", runner: "macos-15", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
-      - name: "Select Xcode 26.5"
+      - name: "Select Xcode ${{ matrix.xcode }}"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.5"
+          xcode-version: ${{ matrix.xcode }}
 
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
@@ -58,14 +64,9 @@ jobs:
       - name: "Run overlay agent smoke test"
         id: smoke
         shell: bash
-        run: |
-          status=0
-          bash scripts/ios/overlay-agent-smoke.sh "${{ matrix.runtime }}" || status=$?
-          if [[ "${status}" -eq 3 ]]; then
-            echo "::notice::iOS ${{ matrix.runtime }} runtime is not installed on this runner; skipped."
-            exit 0
-          fi
-          exit "${status}"
+        # Exit 3 (runtime missing) fails the leg: every leg's runner image is expected to ship its
+        # runtime, so a vanished runtime is a runner-image change worth seeing, not a silent skip.
+        run: bash scripts/ios/overlay-agent-smoke.sh "${{ matrix.runtime }}"
 
       - name: "Upload smoke artifacts"
         if: always()

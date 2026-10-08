@@ -703,7 +703,11 @@ data class OverlayDialogNode(
   val child: OverlayNode? = null,
 ) : OverlayNode()
 
-/** A Material snackbar at the bottom of the window, shown while [openWhen] holds. */
+/**
+ * A Material snackbar at the bottom of the window, shown while [openWhen] holds. Without
+ * [durationMs] it stays until its action closes it or the state changes; with it, it closes itself
+ * by writing the opposite boolean once it has been open that long (a wall-clock timer).
+ */
 @SerialName("snackbar")
 @Serializable
 data class OverlaySnackbarNode(
@@ -720,6 +724,7 @@ data class OverlaySnackbarNode(
   val openWhen: OverlaySheetCondition,
   val text: String,
   val action: OverlayDialogButton? = null,
+  val durationMs: Int? = null,
 ) : OverlayNode()
 
 /** A Material time picker bound to integer hour (0..23) and minute (0..59) state keys. */

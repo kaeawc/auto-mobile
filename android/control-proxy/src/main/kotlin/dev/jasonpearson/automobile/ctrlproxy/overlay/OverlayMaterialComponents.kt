@@ -76,6 +76,7 @@ import dev.jasonpearson.automobile.protocol.OverlayTopAppBarNode
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -368,6 +369,12 @@ internal fun RenderOverlaySnackbar(
 ) {
   val source = node.source as? OverlaySnackbarNode ?: return
   if (!node.sheetOpen) return
+  // Leaving composition (the snackbar closed by any route) cancels the pending timeout.
+  LaunchedEffect(source.openWhen, source.durationMs) {
+    awaitSnackbarTimeout(source.durationMs) {
+      interact(OverlayInteraction.CloseModal(source.openWhen))
+    }
+  }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
     Snackbar(
       modifier.padding(12.dp),
@@ -383,6 +390,21 @@ internal fun RenderOverlaySnackbar(
       Text(node.text, Modifier.clearAndSetSemantics {})
     }
   }
+}
+
+/**
+ * Waits [durationMs] with [pause], then runs [close]; without a duration it returns at once and the
+ * snackbar stays. It is a plain timer: the animator duration scale does not stretch or skip it.
+ * [pause] is injectable so tests drive it without real time.
+ */
+internal suspend fun awaitSnackbarTimeout(
+  durationMs: Int?,
+  pause: suspend (Long) -> Unit = { delay(it) },
+  close: () -> Unit,
+) {
+  if (durationMs == null) return
+  pause(durationMs.toLong())
+  close()
 }
 
 @Composable

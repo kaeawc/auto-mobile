@@ -95,14 +95,35 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest("text_style_role", validOverlayFixture("text-style-role"))
 
   /** Conditional styles resolved against the initial state. */
+  @Test fun styleWhen() = overlayScreenshotTest("style_when", validOverlayFixture("style-when"))
+
+  /**
+   * Top app bar, icon button, FAB, segmented button, badge, progress, dialog, snackbar and pickers.
+   */
   @Test
-  fun styleWhen() =
-    overlayScreenshotTest("style_when", validOverlayFixture("style-when"))
+  fun materialAppBarDialogPickers() =
+    overlayScreenshotTest(
+      "material_app_bar_dialog_pickers",
+      validOverlayFixture("material-app-bar-dialog-pickers"),
+      pending = true,
+    )
+
+  /** Shadow colour, offset, per-corner radii and the text polish styles (#10441). */
+  @Test
+  fun stylePolish() =
+    overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"), pending = true)
+
+  /** Component labels, titles and button actions bound from repeat items. */
+  @Test
+  fun repeatComponentLabels() =
+    overlayScreenshotTest(
+      "repeat_component_labels",
+      validOverlayFixture("repeat-component-labels"),
+      pending = true,
+    )
 
   /** A list template expanded with repeat. */
-  @Test
-  fun repeatTemplate() =
-    overlayScreenshotTest("repeat", validOverlayFixture("repeat"))
+  @Test fun repeatTemplate() = overlayScreenshotTest("repeat", validOverlayFixture("repeat"))
 
   /** Row weights and size bounds. */
   @Test
@@ -113,9 +134,7 @@ class OverlaySpecContentScreenshotTest {
     )
 
   /** Dark mode with a seed colour scheme. */
-  @Test
-  fun themeSeed() =
-    overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"))
+  @Test fun themeSeed() = overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"))
 
   /** Light mode with scaled serif typography and custom shapes. */
   @Test

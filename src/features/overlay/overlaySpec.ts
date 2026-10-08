@@ -612,6 +612,7 @@ const snackbarBaseSchema = z
     openWhen: sheetConditionSchema,
     text: z.string().min(1),
     action: dialogButtonSchema.optional(),
+    durationMs: z.number().int().min(1).max(600000).optional(),
   })
   .strict();
 const timePickerBaseSchema = z

@@ -68,6 +68,75 @@ describe("repeatErrors", () => {
     expect(repeatErrors(spec(list([emit("row-{item.id}")], items)))).toBeUndefined();
     expect(repeatErrors(spec(list([emit("{index}")], items)))).toBeUndefined();
   });
+  test("component labels, titles and button actions bind and are checked per field", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../fixtures/overlay-spec/valid/repeat-component-labels.json"),
+        "utf8",
+      ),
+    );
+    expect(validateOverlaySpec(fixture).success).toBe(true);
+    const cases: [Record<string, unknown>, string][] = [
+      [{ type: "button", label: "{item.zz}" }, "root.children[0].label"],
+      [{ type: "fab", icon: "add", label: "{item.zz}" }, "root.children[0].label"],
+      [
+        {
+          type: "segmentedButton",
+          stateKey: "k",
+          options: [
+            { value: "a", label: "ok" },
+            { value: "b", label: "{item.zz}" },
+          ],
+        },
+        "root.children[0].options[1].label",
+      ],
+      [{ type: "topAppBar", title: "{item.zz}" }, "root.children[0].title"],
+      [
+        { type: "topAppBar", title: "t", actions: [{ icon: "add", label: "{item.zz}" }] },
+        "root.children[0].actions[0].label",
+      ],
+      [
+        {
+          type: "topAppBar",
+          title: "t",
+          navigationIcon: {
+            icon: "add",
+            label: "x",
+            onTap: [{ type: "setState", key: "k", value: "{item.zz}" }],
+          },
+        },
+        "root.children[0].navigationIcon.onTap[0].value",
+      ],
+      [
+        {
+          type: "dialog",
+          openWhen: { key: "k", equals: true },
+          confirm: { label: "x" },
+          dismiss: { label: "{item.zz}" },
+        },
+        "root.children[0].dismiss.label",
+      ],
+      [
+        { type: "snackbar", openWhen: { key: "k", equals: true }, text: "{item.zz}" },
+        "root.children[0].text",
+      ],
+      [
+        {
+          type: "snackbar",
+          openWhen: { key: "k", equals: true },
+          text: "t",
+          action: { label: "{item.zz}" },
+        },
+        "root.children[0].action.label",
+      ],
+    ];
+    for (const [node, path] of cases) {
+      expect(repeatErrors(spec(list([node])))).toEqual({
+        path,
+        message: 'Unknown repeat field "zz"',
+      });
+    }
+  });
   test("tab item images in a template count once per instance", () => {
     const nav = { type: "tabBar", stateKey: "t", items: [{ label: "a", image: "x" }] };
     const items = Array.from({ length: 33 }, (_, n) => ({ n }));

@@ -212,7 +212,7 @@ layout room.
 | `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                  |
 | `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                          |
 | `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                       |
-| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}`.                                                                                                                                                        |
+| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                           |
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
 | `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
 | `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
@@ -312,7 +312,10 @@ closes it, and so does either button. Closing writes `!equals` to the key and
 emits `change`; a button then runs its own `onTap`. Its title is its text, its
 `text` is a separate text node, `child` sits between the text and the buttons,
 and the buttons are tagged `<testTag>.confirm` and `<testTag>.dismiss`. A snackbar
-sits at the bottom of the window, is not modal and never times out; its `action`
+sits at the bottom of the window and is not modal. It stays until closed unless it
+sets `durationMs` (an integer, 1 to 600000): it then closes itself that long after it
+opens, by writing `!equals` to its `openWhen` key like any other close. The timer is
+wall-clock time, not scaled by the animator duration. Its `action`
 (tagged `<testTag>.action`) closes it, then runs `onTap`. Title, text and
 snackbar text resolve state placeholders, so `Alarm set for {hour}:{minute}`
 reads the bound time.
@@ -607,7 +610,11 @@ list is a `column` with `repeat` whose single child is the row template).
   values are scalar, so a state key cannot hold a list; per-state-key lists are not
   supported.
 - Placeholders are `{index}` (the zero-based position) and `{<as>.<field>}`. They
-  are bound in a template child's `text`, in condition operands (`equals` and
+  are bound in a template child's `text`; in the component fields `button.label`,
+  `fab.label`, `segmentedButton.options[].label`, `topAppBar.title`,
+  `topAppBar.navigationIcon`/`actions[]` (`label` and their `onTap`), `dialog.title`,
+  `dialog.text`, `dialog.confirm`/`dismiss` (`label` and `onTap`), `snackbar.text` and
+  `snackbar.action` (`label` and `onTap`); in condition operands (`equals` and
   `notEquals` strings in `visibleWhen`, `styleWhen[].when` and nested `all`/`any`/
   `not`), in `setState.value` and in `emit.name`. Anything else, including a
   `{key}` state placeholder, other braces, and the container's own fields, is not a

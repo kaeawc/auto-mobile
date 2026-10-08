@@ -1261,6 +1261,28 @@ export class DaemonMcpProxy {
     }
   }
 
+  /**
+   * Adopt the `--initial-session-uuid` session at proxy startup instead of on the first tool call.
+   * Connection establishment sends the claiming heartbeat and starts the keeper, so a handoff
+   * proxy that has only initialized already owns the session and keeps it alive if the previous
+   * owner stops first. A no-op without an initial session binding.
+   */
+  async claimInitialSession(): Promise<void> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!this.initialSessionBindingConfigured || !sessionUuid || this.closing) {
+      return;
+    }
+    try {
+      await this.ensureConnected();
+    } catch (error) {
+      // Best-effort: the first tool call retries the connection and its claim.
+      logger.warn(
+        `[DaemonMcpProxy] Startup claim of initial session ${sessionUuid} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
   private connectSingleFlight(allowsLifecycle: boolean): Promise<void> {
     this.assertConnectionPlanCompatible(allowsLifecycle);
     // Serialize socket publication, but never let observation-only work ride a lifecycle attempt.

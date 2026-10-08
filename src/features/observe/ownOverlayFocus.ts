@@ -56,3 +56,17 @@ export function ownOverlayWindows(
       (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE,
   );
 }
+
+/**
+ * Node kinds the overlay renderer used to report as a node's `contentDescription` when it had no
+ * text (`OverlaySpecContent.kt`'s `SEMANTICS_FREE_CONTAINERS`). A tappable container still reads as
+ * its kind, so observe treats these as "no real label" when an icon names the control.
+ */
+export const OVERLAY_LAYOUT_KINDS: ReadonlySet<string> = new Set([
+  "box",
+  "row",
+  "column",
+  "scroll",
+  "pager",
+  "spacer",
+]);

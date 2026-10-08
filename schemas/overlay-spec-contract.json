@@ -1080,6 +1080,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -1179,6 +1185,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -1288,6 +1300,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -1392,6 +1410,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -1479,6 +1503,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -1577,6 +1607,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -1681,6 +1717,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -1761,6 +1803,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -1864,6 +1912,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -1961,6 +2015,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -2053,6 +2113,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -2163,6 +2229,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -2262,6 +2334,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -2373,6 +2451,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -2496,6 +2580,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -2595,6 +2685,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -2704,6 +2800,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -2803,6 +2905,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -2895,6 +3003,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },
@@ -3017,6 +3131,12 @@
               },
               "optional": true
             },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
             "onTap": {
               "rule": {
                 "kind": "array",
@@ -3123,6 +3243,12 @@
               "optional": true
             },
             "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
               "rule": {
                 "kind": "string"
               },

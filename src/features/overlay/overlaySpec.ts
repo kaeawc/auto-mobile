@@ -361,6 +361,8 @@ export const actionSchema = z.discriminatedUnion("type", [
 const commonNodeShape = {
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
+  // The node's accessible label, read by observe and screen readers in place of its text (#10446).
+  contentDescription: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
   styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),

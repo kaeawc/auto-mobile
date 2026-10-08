@@ -47,6 +47,8 @@ data class OverlayRenderNode(
   val selectedValue: String? = null,
   /** The bound number of a `slider`; 0 for every other role. */
   val sliderValue: Double = 0.0,
+  /** The authored `contentDescription`, state placeholders resolved; null when not authored. */
+  val contentDescription: String? = null,
 )
 
 data class OverlayRenderModel(
@@ -207,6 +209,8 @@ private fun mapOverlayNode(
     sliderValue =
       (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
         ?: 0.0,
+    contentDescription =
+      node.contentDescription?.let { interpolateOverlayText(it, localState, context != null) },
   )
 }
 

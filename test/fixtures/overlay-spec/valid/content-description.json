@@ -1,0 +1,18 @@
+{
+  "id": "content-description",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "count": 2 },
+  "root": {
+    "type": "column",
+    "contentDescription": "Drafts panel",
+    "children": [
+      { "type": "icon", "name": "close", "contentDescription": "Close drafts" },
+      {
+        "type": "button",
+        "label": "Send",
+        "contentDescription": "Send {count} drafts",
+        "onTap": [{ "type": "emit", "name": "send" }]
+      }
+    ]
+  }
+}

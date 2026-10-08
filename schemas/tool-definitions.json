@@ -18312,6 +18312,10 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "contentDescription": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "onTap": {
                       "type": "array",
                       "items": {
@@ -19078,6 +19082,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19125,6 +19132,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19174,6 +19184,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19214,6 +19227,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19261,6 +19277,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19306,6 +19325,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19343,6 +19365,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19388,6 +19413,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19435,6 +19463,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19480,6 +19511,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19529,6 +19563,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19591,6 +19628,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -19689,6 +19729,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19744,6 +19787,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19794,6 +19840,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19843,6 +19892,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19890,6 +19942,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -19934,6 +19989,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
@@ -20007,6 +20065,9 @@
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
                     },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
                     },
@@ -20060,6 +20121,9 @@
                     },
                     "testTag": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
                     },
                     "onTap": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"

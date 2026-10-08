@@ -30,6 +30,7 @@ function zodNodeShapes(): Map<string, string[]> {
 const COMMON_NODE_FIELDS = [
   "id",
   "testTag",
+  "contentDescription",
   "onTap",
   "style",
   "styleWhen",

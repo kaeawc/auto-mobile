@@ -6,6 +6,12 @@ const DIRECTORY_OVERRIDES = [
   ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR", "data"],
   ["AUTOMOBILE_LOG_DIR", "AUTO_MOBILE_LOG_DIR", "logs"],
   ["AUTOMOBILE_COORDINATION_DIR", "AUTO_MOBILE_COORDINATION_DIR", "coord"],
+  // Device allocation claims ignore the coordination dir (#10708); keep them off the real home.
+  [
+    "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
+    "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
+    "adb-servers",
+  ],
 ] as const;
 
 /** Pure env transformation: each directory is independent; explicit values survive unchanged. */

@@ -60,6 +60,11 @@ export interface DeviceOwnershipFileSource {
   leasePath(deviceId: string): string;
   /** The allocation claim file for the device; creating its directory is left to `tryAcquire`. */
   claimPath(deviceId: string): string;
+  /**
+   * The coordination-directory claim file 0.0.84 daemons write (#10707). Read-only: a newer
+   * daemon still honours it so it does not take a device an older daemon claimed (#10708).
+   */
+  legacyClaimPath(deviceId: string): string;
   read(path: string): LockContent | undefined;
   isProcessRunning(pid: number): boolean;
   tryAcquire(path: string, owner: { pid: number; ownerToken: string; metadata?: string }): boolean;
@@ -120,7 +125,12 @@ export function deviceAllocationClaimPath(
   homeDir?: string,
 ): string {
   return join(
-    getAdbServerScopedAutoMobileDir(adbServerScope(env), DEVICE_ALLOCATION_CLAIM_SUBDIR, homeDir),
+    getAdbServerScopedAutoMobileDir(
+      adbServerScope(env),
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
     ctrlProxyForwardLeaseFileName(deviceId),
   );
 }
@@ -133,6 +143,11 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
       ctrlProxyForwardLeaseFileName(deviceId),
     ),
   claimPath: (deviceId) => deviceAllocationClaimPath(deviceId),
+  legacyClaimPath: (deviceId) =>
+    join(
+      getSharedAutoMobileDir(DEVICE_ALLOCATION_CLAIM_SUBDIR),
+      ctrlProxyForwardLeaseFileName(deviceId),
+    ),
   read: (path) => readExclusiveLockContent(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
   tryAcquire: (path, owner) => {
@@ -148,7 +163,8 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
  * daemon takes when multi-device allocation assigns it the device. The claim lives in a directory
  * scoped to the ADB server rather than to the coordination directory, so daemons with different
  * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
- * Both use the forwarding lease's lock format, including the owner's control socket, whose
+ * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
+ * All use the forwarding lease's lock format, including the owner's control socket, whose
  * absolute path any daemon on the host can probe.
  *
  * A live PID alone is not trusted: after a crash or reboot the PID can name an unrelated process.
@@ -195,6 +211,10 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       // No claim can be published; allocation proceeds as it did before claims existed.
       return true;
     }
+    if ((await this.legacyClaimOwner(deviceId)) !== undefined) {
+      // A 0.0.84 daemon claimed the device in its coordination directory and still uses it.
+      return false;
+    }
     const owner = this.claimOwner();
     let acquired: boolean;
     try {
@@ -238,11 +258,18 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [leaseOwner, claimOwner] = await Promise.all([
+    const [leaseOwner, claimOwner, legacyOwner] = await Promise.all([
       leasePath === undefined ? undefined : this.evaluateOwner(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
+      this.legacyClaimOwner(deviceId),
     ]);
-    return leaseOwner ?? claimOwner;
+    return leaseOwner ?? claimOwner ?? legacyOwner;
+  }
+
+  /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
+  private async legacyClaimOwner(deviceId: string): Promise<number | undefined> {
+    const path = this.resolvePath(() => this.source.legacyClaimPath(deviceId), deviceId);
+    return path === undefined ? undefined : this.evaluateOwner(path, deviceId, "claim");
   }
 
   private resolvePath(resolve: () => string, deviceId: string): string | undefined {

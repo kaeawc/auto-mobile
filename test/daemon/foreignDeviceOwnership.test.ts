@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import {
   adbServerScope,
@@ -37,6 +37,9 @@ class FakeOwnershipFiles implements DeviceOwnershipFileSource {
   }
   claimPath(deviceId: string): string {
     return `/claims/${deviceId}.lock`;
+  }
+  legacyClaimPath(deviceId: string): string {
+    return `/coord/device-allocations/${deviceId}.lock`;
   }
   read(path: string): LockContent | undefined {
     return this.files.get(path);
@@ -230,6 +233,40 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
   });
 });
 
+describe("legacy 0.0.84 coordination-directory claims (#10708)", () => {
+  test("a live legacy claim is a foreign owner while its owner uses the device", async () => {
+    const { files, probe, ownerOf } = harness();
+    files.files.set("/coord/device-allocations/d.lock", {
+      pid: FOREIGN_PID,
+      token: "t",
+      metadata: metadata("/old"),
+    });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+
+    probe.reports.set("/old", status(FOREIGN_PID, null));
+    expect(await ownerOf("d")).toBeUndefined();
+  });
+
+  test("claim loses to a live legacy claim and never writes the legacy location", async () => {
+    const { files, probe, ownership } = harness();
+    files.files.set("/coord/device-allocations/d.lock", {
+      pid: FOREIGN_PID,
+      token: "t",
+      metadata: metadata("/old"),
+    });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+    expect(await ownership.claim("d")).toBe(false);
+    expect(files.files.has("/claims/d.lock")).toBe(false);
+
+    // Once the older daemon lets the device go, the claim goes to the new location only.
+    probe.reports.set("/old", status(FOREIGN_PID, null));
+    expect(await ownership.claim("d")).toBe(true);
+    expect(files.files.get("/claims/d.lock")?.pid).toBe(SELF_PID);
+    expect(files.files.get("/coord/device-allocations/d.lock")?.pid).toBe(FOREIGN_PID);
+  });
+});
+
 describe("adbServerScope", () => {
   test.each([
     ["no adb variables", {}],
@@ -279,6 +316,23 @@ describe("deviceAllocationClaimPath", () => {
       deviceAllocationClaimPath("emulator-5554", { ANDROID_ADB_SERVER_PORT: "5038" }, "/h"),
     ).not.toBe(a);
   });
+
+  test("an explicit ADB-server coordination root replaces the account home", () => {
+    const path = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims" },
+      "/h",
+    );
+    expect(
+      path.startsWith(join("/shared/claims", "tcp-localhost-5037", "device-allocations")),
+    ).toBe(true);
+  });
+
+  test("the test preload keeps the default claim path off the real home", () => {
+    expect(process.env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR?.trim()).toBeTruthy();
+    const real = join(userInfo().homedir, ".auto-mobile");
+    expect(deviceAllocationClaimPath("emulator-5554").startsWith(real)).toBe(false);
+  });
 });
 
 describe("daemons in different coordination directories on one adb server (#10708)", () => {
@@ -296,6 +350,8 @@ describe("daemons in different coordination directories on one adb server (#1070
     const source: DeviceOwnershipFileSource = {
       leasePath: (deviceId) => join(coordinationDir, "ctrl-proxy-forwards", `${deviceId}.lock`),
       claimPath: (deviceId) => deviceAllocationClaimPath(deviceId, env, home),
+      legacyClaimPath: (deviceId) =>
+        join(coordinationDir, "device-allocations", `${deviceId}.lock`),
       read: (path) => readExclusiveLockContent(path),
       isProcessRunning,
       tryAcquire: (path, owner) => {

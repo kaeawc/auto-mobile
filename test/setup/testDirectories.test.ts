@@ -5,6 +5,7 @@ import path from "node:path";
 import { isolatedTestDirectoryEnv, testDirectoryRoot } from "./testDirectories";
 import {
   assertUnitTestLogsDirIsolated,
+  getAdbServerScopedAutoMobileDir,
   getSharedAutoMobileDir,
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -15,6 +16,11 @@ const directories = [
   ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR", "data"],
   ["AUTOMOBILE_LOG_DIR", "AUTO_MOBILE_LOG_DIR", "logs"],
   ["AUTOMOBILE_COORDINATION_DIR", "AUTO_MOBILE_COORDINATION_DIR", "coord"],
+  [
+    "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
+    "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
+    "adb-servers",
+  ],
 ] as const;
 
 test("unset directory overrides get independent temp children without mutating input", () => {
@@ -55,12 +61,13 @@ test.each(directories)("%s respects an explicit %s, even with a blank primary", 
   }
 });
 
-test("preload isolates data, logs and coordination before production imports", () => {
+test("preload isolates data, logs, coordination and adb-server claims before production imports", () => {
   const realDefault = path.join(os.userInfo().homedir, ".auto-mobile");
   for (const directory of [
     resolveAutoMobileBaseDir(),
     resolveAutoMobileLogsDir(),
     getSharedAutoMobileDir("x"),
+    getAdbServerScopedAutoMobileDir("tcp-localhost-5037", "x"),
   ]) {
     const relative = path.relative(realDefault, directory);
     expect(relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))).toBe(
@@ -68,7 +75,7 @@ test("preload isolates data, logs and coordination before production imports", (
     );
   }
   expect(() => assertUnitTestLogsDirIsolated()).not.toThrow();
-  for (const child of ["data", "logs", "coord"]) {
+  for (const child of ["data", "logs", "coord", "adb-servers"]) {
     expect(existsSync(path.join(testDirectoryRoot, child))).toBe(true);
   }
 });

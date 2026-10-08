@@ -601,10 +601,19 @@ nobody may be connected to remove it, sheet and floating windows also carry an
 opaque “Close” control drawn above the authored content, and spec opacity fades
 only the content. It ends through that control or the fullscreen dismiss row
 (`user`), `dismiss_overlay` (`agent`), a replacing show, or service
-unbind/destroy (`teardown`). Keyguard hiding is unchanged. Events emitted while
-no client is connected are sent to nobody, and the host clears its status and
-buffers on session release; reconnect inspection of a persisted overlay is not
-implemented yet.
+unbind/destroy (`teardown`). Keyguard hiding is unchanged.
+
+Events a persisted overlay emits while no client is connected (checked per event
+against the live client count) go to a bounded ring in `OverlayController`
+(`OverlayOfflineEventBuffer`, 200 events, oldest dropped and counted). The ring
+is flushed under the controller mutex, so order is preserved: when a client
+connects (`onClientConnected`), before the next live event, and before an
+`inspect_overlays` reply. Session-scoped overlays never use it. `inspect_overlays`
+returns one `overlay_result` with `overlays` (`id`, `persistent`, `state`,
+`pages`, `lastSequence`) and `droppedEvents`, the cumulative count dropped from
+the ring. The host adopts the report into its status store and event buffers,
+because the host clears both on session release. Both behaviours are advertised
+as `overlay_persistence_replay_v1`; a host refuses `inspect` without it.
 
 Every dismissal emits one `overlay_event` with `kind: "dismissed"`, null `name`,
 and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).

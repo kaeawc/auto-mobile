@@ -134,6 +134,7 @@ import {
   ANDROID_REQUEST_ID_RESPONSE_TYPES,
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -1320,6 +1321,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult>;
+  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult>;
   requestPutOverlayAsset(
     asset: OverlayAssetUpload,
     options?: OverlayAssetRequestOptions,
@@ -3611,6 +3613,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<OverlayResult> {
     return this.overlays.requestDismissOverlay(target, timeoutMs, perf);
   }
+  requestInspectOverlays(timeoutMs?: number, perf?: PerformanceTracker): Promise<OverlayResult> {
+    return this.overlays.requestInspectOverlays(timeoutMs, perf);
+  }
   requestPutOverlayAsset(
     asset: OverlayAssetUpload,
     options?: OverlayAssetRequestOptions,
@@ -5757,6 +5762,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
           : {}),
+        ...(Array.isArray(message.overlays) ? { overlays: message.overlays } : {}),
+        ...(typeof message.droppedEvents === "number"
+          ? { droppedEvents: message.droppedEvents }
+          : {}),
       })),
 
     highlight_response: (message) =>
@@ -6843,7 +6852,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       messageType === "gesture_display_id_v1" ||
       messageType === "tap_double_v1" ||
       messageType === OVERLAY_DISPLAY_CAPABILITY ||
-      messageType === OVERLAY_WINDOW_OPTIONS_CAPABILITY
+      messageType === OVERLAY_WINDOW_OPTIONS_CAPABILITY ||
+      messageType === OVERLAY_PERSISTENCE_REPLAY_CAPABILITY
     ) {
       return this.supportedCommands?.has(messageType) === true;
     }

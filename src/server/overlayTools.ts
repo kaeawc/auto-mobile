@@ -36,14 +36,20 @@ import {
   type OverlayAgentConnections,
 } from "../features/overlay/ios/iosOverlayTransport";
 import type { OverlayAgentClient } from "../features/overlay/ios/overlayAgentClient";
-import { overlayDisplayUnsupportedMessage } from "../features/observe/android/CtrlProxyOverlays";
+import {
+  overlayDisplayUnsupportedMessage,
+  overlayInspectUnsupportedMessage,
+} from "../features/observe/android/CtrlProxyOverlays";
 import {
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
 } from "../features/observe/android/ctrlProxyProtocol";
 import type {
   OverlayDismiss,
+  OverlayEvent,
   OverlayResult,
+  OverlayStatusEntry,
   OverlayUpdate,
 } from "../features/observe/android/ctrlProxyProtocol";
 import {
@@ -227,7 +233,15 @@ const assetsInput = z
 export const overlaySchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]),
+      action: z.enum([
+        "show",
+        "update",
+        "dismiss",
+        "status",
+        "inspect",
+        "awaitEvent",
+        "showVariants",
+      ]),
       spec: specInput
         .optional()
         .describe(
@@ -358,6 +372,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
     update: ["id", "spec", "state", "assets"],
     dismiss: ["id", "all"],
     status: [],
+    inspect: [],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
   };
   for (const field of fields) {
@@ -466,6 +481,16 @@ const lastResultSchema = z.object({
   id: z.string().optional(),
   all: z.literal(true).optional(),
   lastAction: z.enum(["show", "update", "dismiss"]),
+  adopted: z
+    .literal(true)
+    .optional()
+    .describe("The device reported this overlay through inspect; this host did not show it"),
+  persistent: z
+    .boolean()
+    .optional()
+    .describe(
+      "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+    ),
   displayId: z
     .number()
     .int()
@@ -563,6 +588,14 @@ export const overlayOutputSchema = z.object({
     .string()
     .optional()
     .describe("show/update succeeded but needs attention; names what to do about missingAssets"),
+  deviceDroppedEvents: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
+    ),
   ...eventCountsSchema.shape,
 });
 
@@ -575,7 +608,7 @@ export interface OverlayEventLifecycle {
   subscribeDeviceUnbound(listener: (deviceId: string) => void): () => void;
 }
 type OverlayClient = AndroidOverlayClient;
-/** The transport for one call; `android` carries the CtrlProxy-only update and display gate. */
+/** The transport for one call; `android` carries the CtrlProxy-only display gate and inspect. */
 interface OverlayTarget {
   transport: OverlayTransport;
   android?: AndroidOverlayTransport;
@@ -985,6 +1018,158 @@ function missingAssetsOutput(
   };
 }
 
+const deviceOverlayEntrySchema = z.object({
+  id: z.string().min(1),
+  persistent: z.boolean(),
+  state: stateInput,
+  pages: z.record(z.string(), z.number().int().nonnegative()).default({}),
+  lastSequence: z.number().int().nonnegative(),
+});
+
+function parseReportedOverlays(overlays: readonly unknown[] | undefined): OverlayStatusEntry[] {
+  return (overlays ?? []).flatMap((entry) => {
+    const parsed = deviceOverlayEntrySchema.safeParse(entry);
+    if (!parsed.success) {
+      logger.warn("[overlay] Ignoring malformed overlay in inspect reply", parsed.error);
+      return [];
+    }
+    return [parsed.data];
+  });
+}
+
+/** Events the device replayed before its reply, grouped by overlay id in wire order. */
+function groupByOverlay(events: readonly OverlayEvent[]): Map<string, OverlayEvent[]> {
+  const grouped = new Map<string, OverlayEvent[]>();
+  for (const event of events) {
+    grouped.set(event.id, [...(grouped.get(event.id) ?? []), event]);
+  }
+  return grouped;
+}
+
+/**
+ * The report is authoritative for what the device shows: an overlay this host still lists that the
+ * device neither reports nor ended with a replayed terminal event is gone (for example CtrlProxy
+ * restarted), including when the report is empty.
+ */
+function dropUnreportedOverlays(
+  store: OverlayStatusStore,
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  reportedIds: ReadonlySet<string>,
+): void {
+  // The device holds one overlay for every session, so stale ids are enumerated device-wide: a
+  // session that tracked the vanished overlay is not necessarily the one inspecting.
+  for (const id of store.shownIds(scope.deviceId)) {
+    if (!reportedIds.has(id)) {
+      events.dismiss(scope.deviceId, id);
+      store.dismissed(scope, id);
+    }
+  }
+}
+
+/** Hands the device's report and the events it replayed to the event buffers and status store. */
+function adoptReportedOverlays(
+  store: OverlayStatusStore,
+  events: OverlayEventCoordinator,
+  source: OverlayEventSource,
+  scope: OverlayScope,
+  overlays: readonly unknown[] | undefined,
+  replayed: readonly OverlayEvent[],
+): void {
+  const reported = parseReportedOverlays(overlays);
+  const reportedIds = new Set(reported.map((entry) => entry.id));
+  const history = groupByOverlay(replayed);
+  for (const [id, grouped] of history) {
+    // An overlay that ended while no host was connected is not reported, but its terminal event
+    // still belongs to whoever awaits it.
+    if (reportedIds.has(id) || grouped.some((event) => event.kind === "dismissed")) {
+      const entry = reported.find((known) => known.id === id);
+      events.adopt(scope, id, source, grouped, entry?.lastSequence ?? 0);
+    }
+  }
+  dropUnreportedOverlays(store, events, scope, reportedIds);
+  for (const entry of reported) {
+    if (!history.has(entry.id)) {
+      events.adopt(scope, entry.id, source, [], entry.lastSequence);
+    }
+    if (!events.isDismissed(scope, entry.id)) {
+      store.adopt(scope, entry);
+      events.replaceShown(scope.deviceId, entry.id);
+    }
+  }
+}
+
+/**
+ * Asks the device which overlays it is showing and adopts them into host status and event
+ * buffers, so `status` and `awaitEvent` work after a session release or a daemon restart. The
+ * device replays events it buffered while no host was connected before it answers, so the capture
+ * starts before the request. Refused, before anything is sent, on a CtrlProxy without
+ * overlay_persistence_replay_v1.
+ */
+async function inspectDevice(
+  dependencies: Pick<OverlayHandlerDependencies, "store" | "events">,
+  target: OverlayTarget,
+  scope: OverlayScope,
+  timeoutMs: number | undefined,
+): Promise<OverlayOutput> {
+  const { store, events } = dependencies;
+  // overlayPlatformError refuses inspect off Android, so only Android reaches here.
+  const client = target.android;
+  if (!client) {
+    throw new ActionableError("inspect is Android only.");
+  }
+  // The device drains its offline ring from onClientConnected, which the capability probe below can
+  // trigger by connecting, so the capture must be listening before the first operation.
+  const replayed: OverlayEvent[] = [];
+  const stopCapture = client.onEvent((event) => replayed.push(event));
+  let result: OverlayResult;
+  try {
+    if (!(await client.supportsCommand(OVERLAY_PERSISTENCE_REPLAY_CAPABILITY))) {
+      return {
+        success: false,
+        error: new ActionableError(overlayInspectUnsupportedMessage()).message,
+      };
+    }
+    result = await client.inspect(timeoutMs);
+  } catch (error) {
+    logger.warn("[overlay] Inspect request failed", error);
+    return { success: false, error: toActionableError(error, "Overlay inspect failed").message };
+  } finally {
+    stopCapture();
+  }
+  if (!result.success) {
+    return { success: false, error: result.error ?? "Overlay inspect failed" };
+  }
+  adoptReportedOverlays(
+    store,
+    events,
+    overlayEventSource(target.transport),
+    scope,
+    result.overlays,
+    replayed,
+  );
+  return {
+    success: true,
+    ...statusOutput(store, events, scope),
+    deviceDroppedEvents: result.droppedEvents ?? 0,
+  };
+}
+
+function statusOutput(
+  store: OverlayStatusStore,
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+): Pick<OverlayOutput, "overlays" | "lastResult"> {
+  const status = store.status(scope);
+  return {
+    ...status,
+    overlays: status.overlays.map((entry) => {
+      const counts = entry.id ? events.counts(scope, entry.id) : undefined;
+      return counts?.lastSequence === undefined ? entry : { ...entry, ...counts };
+    }),
+  };
+}
+
 function notifyOverlayWaitProgress(
   progress: ProgressCallback | undefined,
   completed: boolean,
@@ -1114,6 +1299,9 @@ function overlayPlatformError(
   if (args.action === "update") {
     return new ActionableError(UPDATE_UNSUPPORTED_MESSAGE);
   }
+  if (args.action === "inspect") {
+    return new ActionableError("inspect is Android only; omit it on iOS.");
+  }
   if (args.action === "showVariants") {
     return new ActionableError(
       "showVariants is Android only. On iOS, show a spec that lays out the alternatives instead.",
@@ -1237,20 +1425,15 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     }
     const scope = overlayScope(device, args);
     if (args.action === "status") {
-      const status = store.status(scope);
-      return responseFor({
-        success: true,
-        ...status,
-        overlays: status.overlays.map((entry) => {
-          const counts = entry.id ? events.counts(scope, entry.id) : undefined;
-          return counts?.lastSequence === undefined ? entry : { ...entry, ...counts };
-        }),
-      });
+      return responseFor({ success: true, ...statusOutput(store, events, scope) });
     }
     const target = device.platform === "android" ? androidTarget(device) : iosTarget(device);
     if (!target) {
       const error = new ActionableError(overlayAgentNotConnectedMessage(device.deviceId));
       return responseFor({ success: false, error: error.message });
+    }
+    if (args.action === "inspect") {
+      return responseFor(await inspectDevice({ store, events }, target, scope, args.timeoutMs));
     }
     if (args.action === "awaitEvent") {
       const source = overlayEventSource(target.transport);
@@ -1282,7 +1465,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; a same-id show replaces the overlay; no update, showVariants or display; sizes are points). awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1.',
+    'Show, showVariants (1-12 image or spec alternatives composed into one swipeable carousel, fullscreen or floating; accepts display and assets like show, so image variants may reference ids uploaded in the same call; optional waitForSelection returns the picked selection {index, label?}), update (spec or flat state), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; a same-id show replaces the overlay; no update, showVariants or display; sizes are points). awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show/showVariants/update(spec) also accept assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidator
+import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,6 +30,13 @@ fun interface OverlayResultSink {
     error: String?,
     missingAssets: List<String>,
   ) = send(requestId, success, error)
+
+  /** The reply to `inspect_overlays`. Sinks that predate it answer a bare success. */
+  suspend fun sendOverlayStatus(
+    requestId: String?,
+    overlays: List<OverlayStatusEntry>,
+    droppedEvents: Long,
+  ) = send(requestId, true, null)
 }
 
 /**
@@ -63,6 +71,8 @@ class OverlayController(
    */
   private val appLayerPermitted: () -> Boolean = { true },
   private val packageName: String = DEFAULT_CTRL_PROXY_PACKAGE,
+  /** Events a device-persistent overlay produced while no host was connected. */
+  private val offlineEvents: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer(),
   /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
   private val fonts: OverlayFontCache? = null,
 ) {
@@ -185,7 +195,7 @@ class OverlayController(
     val runtime =
       OverlayRuntime(
         validated,
-        eventSink,
+        if (isDevicePersistent(validated)) offlineAwareSink else eventSink,
         clock,
         nextSequence = {
           val next = (sequences[validated.id] ?: 0L) + 1
@@ -228,6 +238,42 @@ class OverlayController(
 
   private val OverlayRuntime.persistent: Boolean
     get() = isDevicePersistent(current.spec)
+
+  /**
+   * A device-persistent overlay keeps emitting with no host attached. Those events wait in
+   * [offlineEvents] and go out, oldest first, ahead of the next live event. Runs under [mutex].
+   */
+  private val offlineAwareSink = OverlayEventSink { event ->
+    // A live event never overtakes an older held one: the host ignores lower sequences.
+    if (lifecycle.clientCount() == 0 || !replayOfflineEvents()) offlineEvents.add(event)
+    else eventSink.send(event)
+  }
+
+  /**
+   * Delivers what was buffered while no host was connected. An event leaves the buffer only once it
+   * is handed to the sink: when delivery fails, or the host goes away mid-replay, that event and
+   * the rest are put back for the next connect or inspect. Returns whether everything went out.
+   */
+  private suspend fun replayOfflineEvents(): Boolean {
+    val pending = offlineEvents.drain()
+    for ((index, event) in pending.withIndex()) {
+      if (lifecycle.clientCount() == 0) {
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
+      }
+      try {
+        eventSink.send(event)
+      } catch (error: CancellationException) {
+        offlineEvents.restore(pending.subList(index, pending.size))
+        throw error
+      } catch (error: Exception) {
+        Log.w("OverlayController", "Buffered overlay event delivery failed", error)
+        offlineEvents.restore(pending.subList(index, pending.size))
+        return false
+      }
+    }
+    return true
+  }
 
   private fun requireLayerPermitted(layer: OverlayWindowLayer) =
     require(layer != OverlayWindowLayer.APP || appLayerPermitted()) {
@@ -344,6 +390,48 @@ class OverlayController(
       Log.w("OverlayController", "Overlay disconnect dismissal failed", error)
     }
   }
+
+  /**
+   * Answers `inspect_overlays`: delivers any buffered events first, then reports the overlay the
+   * device is showing, so a host that lost its status (a released session, a new daemon) can adopt
+   * it again. The wire order is the events, then the single `overlay_result`.
+   */
+  suspend fun inspect(requestId: String?) = mutex.withLock {
+    try {
+      check(!destroyed) { "Overlay host destroyed" }
+      // Reporting lastSequence while events are still held would make the host skip them as
+      // duplicates on the next inspect, so an incomplete replay fails this inspect instead.
+      check(replayOfflineEvents()) {
+        "Buffered overlay events could not be delivered; the device kept them, retry inspect"
+      }
+      val overlays = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
+      sink.sendOverlayStatus(requestId, overlays, offlineEvents.dropped)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("OverlayController", "Overlay inspect failed", error)
+      sink.send(requestId, false, error.message ?: "Overlay inspect failed")
+    }
+  }
+
+  private fun statusOf(runtime: OverlayRuntime): OverlayStatusEntry {
+    val id = runtime.current.spec.id
+    return OverlayStatusEntry(
+      id = id,
+      persistent = runtime.persistent,
+      state = runtime.current.state.toMap(),
+      pages = runtime.current.pages.toMap(),
+      lastSequence = sequences[id] ?: 0L,
+    )
+  }
+
+  /**
+   * A host connected: hand it the events a device-persistent overlay buffered while it was away.
+   */
+  suspend fun onClientConnected() =
+    signal(retryDisconnect = false) {
+      replayOfflineEvents()
+    }
 
   /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
   suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {

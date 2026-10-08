@@ -96,6 +96,17 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
+      // Device-reported overlay entries parsed from an inspect reply are not tool
+      // arguments, so there is no transport metadata to strip.
+      if (
+        file === "overlayTools.ts" &&
+        receiver.type === "Identifier" &&
+        receiver.name === "deviceOverlayEntrySchema" &&
+        first?.type === "Identifier" &&
+        first.name === "entry"
+      ) {
+        return;
+      }
       if (!first || first.type === "SpreadElement" || !isClean(first)) {
         offenders.push(`${file}:${source.slice(0, node.start).split("\n").length}`);
       }

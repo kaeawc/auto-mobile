@@ -99,6 +99,7 @@ import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -1076,6 +1077,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
         }
       }
+
+      override suspend fun sendOverlayStatus(
+        requestId: String?,
+        overlays: List<OverlayStatusEntry>,
+        droppedEvents: Long,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "overlay_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              overlayStatusFrame(requestId, overlays, droppedEvents)
+            }
+          }
+        }
+      }
     }
   // Asset bytes live in the cache directory, never in the heap; cleared with the overlay session.
   // Assets are owned by the observer session that uploaded them, and file deletion runs on IO so a
@@ -2015,6 +2030,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientCountChanged = { count, session ->
               serviceScope.launch { overlays.onClientCountChanged(count, session) }
             },
+            onClientConnected = { serviceScope.launch { overlays.onClientConnected() } },
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -3159,6 +3175,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {
     launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
+  }
+
+  override fun inspectOverlays(requestId: String?) {
+    launchRequestScope(requestId) { overlayController.inspect(requestId) }
   }
 
   override fun putOverlayAsset(

@@ -61,6 +61,10 @@ class WebSocketServer(
   private val onClientDisconnected: (ConnectedClient) -> Unit = {},
   /** Removal-time snapshot; a reconnect must not erase the zero-client edge before delivery. */
   private val onClientCountChanged: (Int, Int) -> Unit = { _, _ -> },
+  /**
+   * Called once a client is registered, so state held back while no host was attached can go out.
+   */
+  private val onClientConnected: () -> Unit = {},
   /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
   private val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
 ) {
@@ -129,7 +133,8 @@ class WebSocketServer(
 
     /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
     private val overlayRequestTypes =
-      setOf("show_overlay", "update_overlay", "dismiss_overlay") + overlayAssetRequestTypes
+      setOf("show_overlay", "update_overlay", "dismiss_overlay", "inspect_overlays") +
+        overlayAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
     private val textInputRequestTypes =
@@ -333,6 +338,9 @@ class WebSocketServer(
     // Overlay specs honour window.layer and window.persistence. The request decoder ignores unknown
     // spec fields, so an older device would silently show a session-scoped system-layer overlay.
     add("overlay_window_options_v1")
+    // A device-persistent overlay buffers its events while no host is connected and replays them,
+    // and inspect_overlays reports what it is showing. Older hosts never send inspect_overlays.
+    add("overlay_persistence_replay_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.
@@ -461,6 +469,7 @@ class WebSocketServer(
     }
     firstClientConnection.complete(Unit)
     client.sender.start()
+    onClientConnected()
     return client
   }
 

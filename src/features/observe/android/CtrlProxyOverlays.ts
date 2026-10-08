@@ -17,6 +17,8 @@ import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
   OVERLAY_DISPLAY_CAPABILITY,
+  OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
+  type InspectOverlaysMessage,
   type ShowOverlayMessage,
   type UpdateOverlayMessage,
   type DismissOverlayMessage,
@@ -34,6 +36,11 @@ export function overlayDisplayUnsupportedMessage(displayId: number): string {
   return `show_overlay: the connected CtrlProxy does not advertise ${OVERLAY_DISPLAY_CAPABILITY}, so it cannot show an overlay on display ${displayId} and would place it on the default display; update the connected CtrlProxy or omit display.`;
 }
 
+/** Shared by the client transport guard and the tool-level refusal. */
+export function overlayInspectUnsupportedMessage(): string {
+  return `inspect_overlays: the connected CtrlProxy does not advertise ${OVERLAY_PERSISTENCE_REPLAY_CAPABILITY}, so it cannot report the overlays it is showing or replay events buffered while no host was connected; update the connected CtrlProxy.`;
+}
+
 /** Transport controls shared by asset upload and removal. */
 export interface OverlayAssetRequestOptions {
   timeoutMs?: number;
@@ -43,6 +50,9 @@ export interface OverlayAssetRequestOptions {
   /** Called synchronously once the frame is written to the socket. */
   onDispatch?: () => void;
 }
+
+/** Matches the device's offline ring (OVERLAY_OFFLINE_EVENT_CAPACITY in CtrlProxy). */
+const STAGED_OVERLAY_EVENT_CAPACITY = 200;
 
 /** Decodes one `overlay_event` push; shared by CtrlProxy and the iOS overlay agent transport. */
 export const overlayEventSchema = z.object({
@@ -59,6 +69,8 @@ export const overlayEventSchema = z.object({
 
 export class CtrlProxyOverlays {
   private readonly listeners = new Set<(event: OverlayEvent) => void>();
+  /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
+  private readonly staged: OverlayEvent[] = [];
 
   constructor(private readonly context: DelegateContext) {}
 
@@ -114,6 +126,15 @@ export class CtrlProxyOverlays {
       timeoutMs,
       perf,
     );
+  }
+
+  /**
+   * Asks the device which overlays it is showing. The device first delivers any events it buffered
+   * while no host was connected (through [onOverlayEvent]), then answers with `overlays`. Throws
+   * before sending when the device does not advertise `overlay_persistence_replay_v1`.
+   */
+  requestInspectOverlays(timeoutMs = 5000, perf?: PerformanceTracker): Promise<OverlayResult> {
+    return this.request(ctrlProxyRequests.inspectOverlays({ requestId: "" }), timeoutMs, perf);
   }
 
   /**
@@ -264,7 +285,11 @@ export class CtrlProxyOverlays {
   }
 
   private async request(
-    message: ShowOverlayMessage | UpdateOverlayMessage | DismissOverlayMessage,
+    message:
+      | ShowOverlayMessage
+      | UpdateOverlayMessage
+      | DismissOverlayMessage
+      | InspectOverlaysMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
   ): Promise<OverlayResult> {
@@ -279,6 +304,12 @@ export class CtrlProxyOverlays {
       throw new ActionableError(
         `${type}: this CtrlProxy build does not support overlays; update the connected CtrlProxy.`,
       );
+    }
+    if (
+      message.type === "inspect_overlays" &&
+      this.context.isCommandSupported?.(OVERLAY_PERSISTENCE_REPLAY_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(overlayInspectUnsupportedMessage());
     }
     if (
       message.type === "show_overlay" &&
@@ -304,6 +335,11 @@ export class CtrlProxyOverlays {
 
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
     this.listeners.add(listener);
+    // The device drains its offline ring on any connect, not only for inspect. Events that arrived
+    // with nobody listening go to the first subscriber, in wire order, instead of being lost.
+    for (const event of this.staged.splice(0)) {
+      this.deliver(listener, event);
+    }
     return () => {
       this.listeners.delete(listener);
     };
@@ -321,16 +357,24 @@ export class CtrlProxyOverlays {
       return;
     }
     if (this.listeners.size === 0) {
-      logger.debug("[CTRL_PROXY] overlay_event has no subscribers");
+      // Not a drop: the next subscriber (an inspect or a shown overlay) receives it.
+      this.staged.push(decoded.data);
+      if (this.staged.length > STAGED_OVERLAY_EVENT_CAPACITY) {
+        this.staged.shift();
+      }
       return;
     }
     for (const listener of this.listeners) {
-      try {
-        listener(decoded.data);
-      } catch (error) {
-        // One failed consumer must not interrupt delivery to the remaining subscribers.
-        logger.warn("[CTRL_PROXY] Overlay event listener failed", error);
-      }
+      this.deliver(listener, decoded.data);
+    }
+  }
+
+  private deliver(listener: (event: OverlayEvent) => void, event: OverlayEvent): void {
+    try {
+      listener(event);
+    } catch (error) {
+      // One failed consumer must not interrupt delivery to the remaining subscribers.
+      logger.warn("[CTRL_PROXY] Overlay event listener failed", error);
     }
   }
 }

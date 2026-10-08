@@ -346,8 +346,9 @@ and JVM validators. The renderer already ships that library, so the full set add
 size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
 `filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
 filled. Material Symbols names with no `material-icons-extended` counterpart are not
-available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
-assets, which would need a bundled variable font or an asset-transport extension.
+available, and neither are symbol `weight` or `fill` axes, which would need a bundled
+variable font. Custom text fonts do ship, as host-uploaded assets (see "Custom fonts"
+below).
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items

@@ -982,6 +982,12 @@ export class DaemonMcpProxy {
     string,
     {
       claimSent: boolean;
+      /**
+       * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
+       * has named for {@link DAEMON_BOUND_SESSION_REPLAY_TTL_MS} is abandoned and evicted, so a
+       * conversation that moved to another device stops pinning the old one.
+       */
+      lastUsedAt: number;
       /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
       conflictSince?: number;
     }
@@ -4463,7 +4469,21 @@ export class DaemonMcpProxy {
       : undefined;
   }
 
+  /** Stop heartbeating held sessions no tool call has named within the idle window (#10657). */
+  private evictAbandonedHeldSessions(): void {
+    const now = this.timer.now();
+    for (const [sessionUuid, held] of [...this.otherHeldSessions]) {
+      if (now - held.lastUsedAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS) {
+        logger.info(
+          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${DAEMON_BOUND_SESSION_REPLAY_TTL_MS}ms; no longer heartbeating it`,
+        );
+        this.dropHeldSession(sessionUuid);
+      }
+    }
+  }
+
   private async heartbeatOtherHeldSessions(): Promise<void> {
+    this.evictAbandonedHeldSessions();
     await Promise.all(
       [...this.otherHeldSessions.keys()].map((sessionUuid) =>
         this.heartbeatHeldSession(sessionUuid),
@@ -4708,7 +4728,10 @@ export class DaemonMcpProxy {
     const previous = this.boundSessionUuid;
     this.otherHeldSessions.delete(nextSessionUuid);
     if (previous && previous !== nextSessionUuid) {
-      this.otherHeldSessions.set(previous, { claimSent: this.livenessOwnershipClaimSent });
+      this.otherHeldSessions.set(previous, {
+        claimSent: this.livenessOwnershipClaimSent,
+        lastUsedAt: this.boundSessionUuidAt ?? this.timer.now(),
+      });
     }
   }
 

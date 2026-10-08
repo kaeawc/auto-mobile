@@ -40,7 +40,11 @@ class OverlayAssetStoreTest {
     assertEquals(32, defaults.maxCount)
     assertEquals(16 * 1024 * 1024, defaults.maxTotalBytes)
     assertEquals(256, defaults.maxIdLength)
-    assertEquals(setOf("image/png", "image/jpeg", "image/webp"), defaults.mimeTypes)
+    assertEquals(2 * 1024 * 1024, defaults.maxFontBytes)
+    assertEquals(
+      setOf("image/png", "image/jpeg", "image/webp", "font/ttf", "font/otf"),
+      defaults.mimeTypes,
+    )
     assertEquals(OverlayAssetContract.MAX_OVERLAY_ASSET_BYTES, defaults.maxAssetBytes)
   }
 

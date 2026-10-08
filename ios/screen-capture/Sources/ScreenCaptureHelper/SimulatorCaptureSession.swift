@@ -139,7 +139,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
             SCStream(filter: filter, configuration: config, delegate: delegate)
         },
         diagnosticSink: @escaping (String) -> Void = { line in
-            FileHandle.standardError.write(Data(line.utf8))
+            DescriptorWrite.writeDiagnostic(line)
         },
         uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         encode: CommandLineOptions.EncodeSettings? = nil,

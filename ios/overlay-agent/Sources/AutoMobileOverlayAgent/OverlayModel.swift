@@ -27,15 +27,11 @@ final class OverlayModel: ObservableObject {
         session.pages
     }
 
-    func show(_ spec: OverlaySpec) {
+    func show(_ spec: OverlaySpec, reset: Bool = false) {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the overlay passing every touch through.
-        session.show(spec)
+        session.show(spec, reset: reset)
         onVisibilityChange?(true)
-    }
-
-    func replace(_ spec: OverlaySpec) {
-        session.replace(spec)
     }
 
     /// Asset changes must redraw: `assets` is not published, so notify observers explicitly.
@@ -48,10 +44,6 @@ final class OverlayModel: ObservableObject {
         guard assets[id] != nil else { return }
         objectWillChange.send()
         assets[id] = nil
-    }
-
-    func mergeState(_ values: [String: JSONValue]) {
-        session.mergeState(values)
     }
 
     func holds(_ condition: Condition) -> Bool {

@@ -110,6 +110,33 @@ After placing the signed app in `/Applications`, invoke its executable:
 "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" snapshot
 ```
 
+### Controller JSON contract (version 2)
+
+Every command prints exactly one line of JSON on stdout, then exits. The daemon
+runs the installed controller as a subprocess and parses this line
+(`src/features/network-filter/NetworkFilterBridge.ts`); it never talks XPC to
+the provider, which only accepts peers signed by its own team. The types live in
+`Sources/NetworkFilterCore/ControllerContract.swift`.
+
+```json
+{"detail":"…","snapshot":{…},"state":"ready","version":2}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `version` | integer | `ControllerContract.version`, currently `2` (the first published contract; there is no version 1 fallback). Bump it whenever a field changes meaning or a required field is added or removed; the daemon reports any other version as `unavailable`. It is independent of the snapshot's own `version`. |
+| `state` | string | `installation_required`, `approval_required`, `unavailable`, or `ready`. |
+| `detail` | string | Human-readable reason or next step. |
+| `snapshot` | object, optional | Present only for `ready`: the provider's diagnostic snapshot, with its own `version`. |
+
+Commands: `activate`, `status`, `snapshot` (`status` and `snapshot` are
+read-only and take repeatable `--managed <device-set-path> <udid>` pairs naming
+the host's booted simulators; the daemon passes them). The exit code is `0` for `ready` and the pending-approval states and
+non-zero otherwise, but the JSON line is printed either way, so callers read
+stdout rather than the exit code. The controller abandons its work after 8
+seconds and prints `unavailable`. Byte-for-byte fixtures for each state live in
+`test/fixtures/network-filter-controller/`.
+
 For shell callers, `bash scripts/ios/build-network-filter-probe.sh activate
 [app-path]` wraps the controller's `activate` and maps its JSON `state` to a
 distinct exit code: `0` ready, `3` approval required in System Settings, `4`
@@ -136,7 +163,9 @@ one with `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`) before it copies the app to
 signed `.app` to skip the download. The exit codes match the `activate` wrapper
 above. `auto-mobile --cli doctor` reports the same states.
 
-Initial extension and filter approval require macOS interaction. A timeout is an
+Initial extension and filter approval require macOS interaction, unless the Mac
+is MDM-enrolled and has the committed profile from
+[Managed Macs and CI runners](../../docs/using/managed-macs.md) installed (#10595). A timeout is an
 uncertain installation result: inspect `status` and System Settings before
 retrying. Filter configuration acknowledgement alone never reports readiness:
 the controller only reports `ready` after an authenticated read-back. Because

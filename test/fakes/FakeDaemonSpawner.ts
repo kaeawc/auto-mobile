@@ -24,7 +24,10 @@ export class FakeDaemonSpawner implements DaemonProcessSpawner {
       writeSync(logFd, this.logText);
     }
     if (this.onSpawn) {
-      setImmediate(() => this.onSpawn!(this.process));
+      // After the caller wires its listeners, but before an auto-advanced FakeTimer
+      // fires its next deadline: the pump lets nextTicks land first, while a
+      // setImmediate would always lose to a pending startup timeout.
+      queueMicrotask(() => process.nextTick(() => this.onSpawn?.(this.process)));
     }
     return this.process;
   }

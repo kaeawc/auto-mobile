@@ -1,4 +1,5 @@
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import type { NetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
 import { createSetActiveDeviceHandler } from "./setActiveDevice";
 export type { SetActiveDeviceArgs } from "./setActiveDevice";
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
@@ -773,19 +774,25 @@ const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArg
   return result.success ? response : { ...response, isError: true as const };
 };
 
-const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
-  const deviceState = new DeviceState(device);
-  const result = await deviceState.getState(args.include);
+const createGetDeviceStateHandler =
+  (networkFilterBridge?: NetworkFilterBridge) =>
+  async (device: BootedDevice, args: GetDeviceStateArgs) => {
+    const deviceState = new DeviceState(device, { networkFilterBridge });
+    const result = await deviceState.getState(args.include);
 
-  return createStructuredToolResponse({
-    message: deviceStateMessage(result),
-    ...result,
-  });
-};
+    return createStructuredToolResponse({
+      message: deviceStateMessage(result),
+      ...result,
+    });
+  };
 
 // Register tools
 export function registerUtilityTools(
-  options: { displayInventory?: DisplayInventoryProvider } = {},
+  options: {
+    displayInventory?: DisplayInventoryProvider;
+    /** iOS Simulator network-extension controller; defaults to the installed one. */
+    networkFilterBridge?: NetworkFilterBridge;
+  } = {},
 ) {
   const setActiveDeviceHandler = createSetActiveDeviceHandler({
     displayInventory: options.displayInventory,
@@ -801,6 +808,7 @@ export function registerUtilityTools(
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
     const deviceState = new DeviceState(device, {
+      networkFilterBridge: options.networkFilterBridge,
       clockMutation: (mutation) =>
         runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, mutation),
       canWriteLocation: createSessionLocationWriteAdmission({
@@ -941,7 +949,7 @@ export function registerUtilityTools(
     "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack." +
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
-    getDeviceStateHandler,
+    createGetDeviceStateHandler(options.networkFilterBridge),
     { defaultEnabled: false, outputSchema: getDeviceStateResultSchema },
   );
 

@@ -669,8 +669,9 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    // Schedule exit event after waitForEmulatorReady registers its handlers
-    setImmediate(() => {
+    // Schedule exit event after waitForEmulatorReady registers its handlers. A tick,
+    // not a real turn: auto-advance would otherwise run out the 60 s readiness wait.
+    process.nextTick(() => {
       fakeChild.stderr!.emit(
         "data",
         Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"),
@@ -699,7 +700,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
     skipEmulatorPathDetection(client);
 
-    setImmediate(() => {
+    process.nextTick(() => {
       fakeChild.stderr!.emit("data", Buffer.from("unknown error\n"));
       fakeChild.emit("exit", 1);
     });

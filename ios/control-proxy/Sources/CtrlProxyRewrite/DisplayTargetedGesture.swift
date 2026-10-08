@@ -88,7 +88,7 @@ struct DisplayGestureFactory<Provider: DisplayGestureProviding> {
             else { return GestureCoordinateSelection.choose(point: point, geometry: geometry) }
             return GestureCoordinateSelection(
                 strategy: selected.strategy, reason: forced == nil ? "multiPanelMismatch" : "forced",
-                normalized: selected.normalized, offset: selected.offset
+                normalized: selected.normalized, offset: selected.offset, isForced: forced != nil
             )
         }
         // An undefined display mapping retains the old automatic mapping/reasons.

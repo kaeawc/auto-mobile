@@ -79,12 +79,11 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.change(key: "name", value: .string("Al")), [])
     }
 
-    func testSetStateAndWirePatchesStaySilent() throws {
+    func testSetStateStaysSilent() throws {
         var session = OverlaySession()
         try session.show(textSpec(id: "a", state: #"{"n":1}"#))
         XCTAssertEqual(try session.run([action(#"{"type":"setState","key":"n","value":2}"#)]), [])
-        session.mergeState(["n": .number(3)])
-        XCTAssertEqual(session.state["n"], .number(3))
+        XCTAssertEqual(session.state["n"], .number(2))
     }
 
     func testToggleControlFlipsTheBoundBooleanThenRunsItsActions() throws {
@@ -136,19 +135,81 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.pages["p"], 1)
     }
 
-    func testReplaceKeepsSurvivingPagerPositionsClamped() throws {
+    private func pagerSpec(id: String = "a", pages count: Int, state: String = "{}") throws -> OverlaySpec {
+        let pages = Array(repeating: #"{"type":"spacer"}"#, count: count).joined(separator: ",")
+        return try spec("""
+        {"id":"\(id)","window":{"placement":{"type":"fullscreen"}},"state":\(state),
+         "root":{"type":"pager","id":"p","children":[\(pages)]}}
+        """)
+    }
+
+    func testSameIdShowKeepsPagerPosition() throws {
         var session = OverlaySession()
-        let pager = { (count: Int) in
-            let pages = Array(repeating: #"{"type":"spacer"}"#, count: count).joined(separator: ",")
-            return """
-            {"id":"a","window":{"placement":{"type":"fullscreen"}},
-             "root":{"type":"pager","id":"p","children":[\(pages)]}}
-            """
-        }
-        try session.show(spec(pager(3)))
+        try session.show(pagerSpec(pages: 3))
         _ = session.setPage("p", 2)
-        try session.replace(spec(pager(2)))
+        try session.show(pagerSpec(pages: 3))
+        XCTAssertEqual(session.pages["p"], 2)
+    }
+
+    func testSameIdShowClampsPagerPositionToTheNewPageCount() throws {
+        var session = OverlaySession()
+        try session.show(pagerSpec(pages: 3))
+        _ = session.setPage("p", 2)
+        try session.show(pagerSpec(pages: 2))
         XCTAssertEqual(session.pages["p"], 1)
+        XCTAssertEqual(session.setPage("p", 5), [])
+    }
+
+    func testSameIdShowStartsNewPagersOnTheFirstPage() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a"))
+        try session.show(pagerSpec(pages: 3))
+        XCTAssertEqual(session.pages, ["p": 0])
+    }
+
+    func testSameIdShowStateIsAuthoritative() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"n":1,"gone":true}"#))
+        _ = try session.run([action(#"{"type":"setState","key":"n","value":9}"#)])
+        try session.show(textSpec(id: "a", state: #"{"n":2}"#))
+        XCTAssertEqual(session.state, ["n": .number(2)])
+    }
+
+    func testResetStartsFreshOnTheSameId() throws {
+        var session = OverlaySession()
+        try session.show(pagerSpec(pages: 3, state: #"{"n":1}"#))
+        _ = session.setPage("p", 2)
+        try session.show(pagerSpec(pages: 3, state: #"{"n":5}"#), reset: true)
+        XCTAssertEqual(session.pages["p"], 0)
+        XCTAssertEqual(session.state, ["n": .number(5)])
+    }
+
+    func testDifferentIdShowNeverKeepsPages() throws {
+        var session = OverlaySession()
+        try session.show(pagerSpec(id: "a", pages: 3))
+        _ = session.setPage("p", 2)
+        try session.show(pagerSpec(id: "b", pages: 3))
+        XCTAssertEqual(session.pages["p"], 0)
+    }
+
+    func testReshowAfterDismissalStartsFresh() throws {
+        var session = OverlaySession()
+        try session.show(pagerSpec(pages: 3))
+        _ = session.setPage("p", 2)
+        _ = session.dismiss(reason: .agent)
+        try session.show(pagerSpec(pages: 3))
+        XCTAssertEqual(session.pages["p"], 0)
+    }
+
+    func testSameIdShowAndResetContinueEventSequences() throws {
+        var session = OverlaySession()
+        let emit = try action(#"{"type":"emit","name":"tap"}"#)
+        try session.show(textSpec(id: "a"))
+        XCTAssertEqual(session.run([emit]).map(\.sequence), [1])
+        try session.show(textSpec(id: "a"))
+        XCTAssertEqual(session.run([emit]).map(\.sequence), [2])
+        try session.show(textSpec(id: "a"), reset: true)
+        XCTAssertEqual(session.run([emit]).map(\.sequence), [3])
     }
 
     // MARK: Wire shape

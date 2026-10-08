@@ -3,6 +3,7 @@ import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 
 /**
@@ -210,12 +211,15 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     expect(await client.ensureConnected()).toBe(true);
     // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
     const request = client.requestDrag(0, 0, 10, 10, 0, 300, 0, 60_000);
-    await flushSetImmediate();
     const requestManager = (
       client as unknown as {
         requestManager: { getPendingCount(): number };
       }
     ).requestManager;
+    // Microtasks only: a real turn would let auto-advance expire the request first.
+    await drainUntil(() => requestManager.getPendingCount() === 1, {
+      description: "the drag request to register",
+    });
     expect(requestManager.getPendingCount()).toBe(1);
 
     socket!.emit("close");

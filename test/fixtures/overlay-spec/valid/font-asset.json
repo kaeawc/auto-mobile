@@ -1,0 +1,11 @@
+{
+  "id": "font-asset",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "big": true },
+  "root": {
+    "type": "text",
+    "text": "x",
+    "style": { "fontFamily": { "asset": "brand-font" } },
+    "styleWhen": [{ "when": { "key": "big", "equals": true }, "style": { "fontFamily": "serif" } }]
+  }
+}

@@ -1,3 +1,4 @@
+import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   CtrlProxyStaleRunnerCacheError,
@@ -1447,6 +1448,92 @@ describe("IosCtrlProxyBuilder", function () {
       await expect(builder.verifyRunnerBinaryBeforeLaunch("simulator")).rejects.toThrow(
         "runner binary SHA256 mismatch (pre-launch)",
       );
+    });
+
+    describe("corrupted cached bundle repair (#10650)", function () {
+      async function builtBuilder(): Promise<{
+        builder: IosCtrlProxyBuilder;
+        downloader: FakeIOSCtrlProxyBundleDownloader;
+        derivedDataPath: string;
+        cacheDir: string;
+      }> {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const cacheDir = path.join(tempDir, "cache");
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.checksum = "expected-checksum";
+        downloader.runnerChecksum = "xctest-checksum";
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("xctest-checksum", "xctest");
+        const builder = IosCtrlProxyBuilder.getInstance(
+          { derivedDataPath, bundleCacheDir: cacheDir },
+          { downloader },
+        );
+        expect((await builder.build("simulator")).success).toBe(true);
+        return { builder, downloader, derivedDataPath, cacheDir };
+      }
+
+      test("a corrupted cached runner is invalidated, re-downloaded once and launches", async function () {
+        const { builder, downloader } = await builtBuilder();
+        const downloadsBefore = downloader.downloadedUrls.length;
+        let corrupted = true;
+        const original = downloader.computeFileSha256.bind(downloader);
+        downloader.computeFileSha256 = async (filePath: string) => {
+          if (corrupted && path.basename(filePath) === "CtrlProxyUITests") {
+            // Corruption is cleared once the extracted tree is replaced.
+            corrupted = downloader.downloadedUrls.length === downloadsBefore;
+            if (corrupted) {
+              return { checksum: "corrupted", source: downloader.checksumSource };
+            }
+          }
+          return original(filePath);
+        };
+
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator");
+        expect(downloader.downloadedUrls.length).toBe(downloadsBefore + 1);
+      });
+
+      test("a second mismatch fails with the cache directories to delete and does not loop", async function () {
+        const { builder, downloader, derivedDataPath, cacheDir } = await builtBuilder();
+        const downloadsBefore = downloader.downloadedUrls.length;
+        downloader.runnerChecksum = "still-corrupted";
+
+        const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error.message).toContain("runner binary SHA256 mismatch (pre-launch)");
+        expect(error.message).toContain(derivedDataPath);
+        expect(error.message).toContain(cacheDir);
+        expect(downloader.downloadedUrls.length).toBe(downloadsBefore + 1);
+
+        // A later launch must not trigger another download.
+        await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch(() => {});
+        expect(downloader.downloadedUrls.length).toBe(downloadsBefore + 1);
+      });
+
+      test("a vendored bundle override is never re-downloaded and the error names the override", async function () {
+        const { builder, downloader, cacheDir } = await builtBuilder();
+        const downloadsBefore = downloader.downloadedUrls.length;
+        process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = path.join(tempDir, "vendored.ipa");
+        downloader.runnerChecksum = "swapped";
+
+        const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error.message).toContain("AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH");
+        expect(error.message).toContain(cacheDir);
+        expect(downloader.downloadedUrls.length).toBe(downloadsBefore);
+      });
+
+      test("an explicit runner SHA override mismatch names the env and skips download", async function () {
+        const { builder, downloader } = await builtBuilder();
+        const downloadsBefore = downloader.downloadedUrls.length;
+        process.env[IOS_CTRL_PROXY_RUNNER_SHA256_ENV] = "a".repeat(64);
+        IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+        downloader.runnerChecksum = "b".repeat(64);
+
+        const error = await builder.verifyRunnerBinaryBeforeLaunch("simulator").catch((e) => e);
+        expect(error).toBeInstanceOf(ActionableError);
+        expect(error.message).toContain(IOS_CTRL_PROXY_RUNNER_SHA256_ENV);
+        expect(downloader.downloadedUrls.length).toBe(downloadsBefore);
+      });
     });
 
     test("local-build mode trusts the freshly built runner even when its SHA differs from the release-pinned checksum (#5561)", async function () {

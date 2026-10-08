@@ -838,6 +838,12 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches get_sdk_capabilities`() = runTest {
+    dispatch("""{"type":"get_sdk_capabilities","requestId":"sc1","packageName":"com.example"}""")
+    assertEquals("getSdkCapabilities" to listOf<Any?>("sc1", "com.example"), lastCall)
+  }
+
+  @Test
   fun `dispatches list_data_stores`() = runTest {
     dispatch(
       """{"type":"list_data_stores","requestId":"lds1","packageName":"com.example","adapterName":"settings"}"""

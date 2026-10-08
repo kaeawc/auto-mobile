@@ -55,6 +55,13 @@ sealed interface OverlayInteraction {
   /** A `switch` or `checkbox` tap: flips the bound boolean, then runs the node's own actions. */
   data class Toggle(val key: String, val actions: List<OverlayAction> = emptyList()) :
     OverlayInteraction
+
+  /** A `slider` drag or accessibility set-progress: stores the (already snapped) number. */
+  data class Slide(
+    val key: String,
+    val value: Double,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
 }
 
 /**
@@ -120,6 +127,12 @@ class OverlayRuntime(
         // The validator keeps the bound key boolean; anything else leaves the control inert.
         val stored = current.state[interaction.key] as? OverlayScalar.BooleanValue ?: return
         change(interaction.key, OverlayScalar.BooleanValue(!stored.value))
+        tap(interaction.actions)
+      }
+      is OverlayInteraction.Slide -> {
+        val stored = current.state[interaction.key] as? OverlayScalar.Numeric ?: return
+        if (stored.value == interaction.value) return
+        change(interaction.key, OverlayScalar.Numeric(interaction.value))
         tap(interaction.actions)
       }
     }
@@ -251,6 +264,7 @@ internal fun overlayDescendants(node: OverlayNode): List<OverlayNode> =
     is OverlayRowNode -> node.children
     is OverlayColumnNode -> node.children
     is OverlayPagerNode -> node.children
+    is OverlayCardNode -> node.children
     is OverlayScrollNode -> listOf(node.child)
     is OverlayBottomSheetNode -> listOf(node.child)
     else -> emptyList()

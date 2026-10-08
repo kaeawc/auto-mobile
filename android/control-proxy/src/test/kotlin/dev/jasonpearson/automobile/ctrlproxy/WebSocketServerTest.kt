@@ -128,6 +128,7 @@ class WebSocketServerTest {
       )
       assertTrue(commands.contains("request_insert_text"))
       assertTrue(commands.contains("discover_keystore"))
+      assertTrue(commands.contains("get_sdk_capabilities"))
       assertFalse(commands.contains("request_press_key"))
     }
   }

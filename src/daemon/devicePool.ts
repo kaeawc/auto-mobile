@@ -5817,6 +5817,16 @@ export class DevicePool {
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     device.errorCount = 0;
+    // Idempotent and keyed on the released session id: every path that ends ownership
+    // (including a late chained cleanup) clears a stale autolock here, and a newer
+    // autolock or replacement owner is left alone by the manager's guards (#10665).
+    if (sessionId) {
+      this.autolockManager.clearExpiredAutolockStateWhenIdle(
+        sessionId,
+        device,
+        expectedAssignmentCount,
+      );
+    }
     this.lastReleasedDeviceId = deviceId;
     this.notifyMultiDeviceAllocationWaiters();
 
@@ -7234,35 +7244,15 @@ export class DevicePool {
     }
 
     const assignmentCount = device.assignmentCount;
-    const cleanup = this.sessionManager.getPendingDeviceCleanup(deviceId);
-    const release = this.releaseCapturedDevice(device, sessionId, assignmentCount);
-    void release
+    // The autolock clear happens inside releaseCapturedDevice when the device is
+    // actually returned to idle, including after a late chained cleanup.
+    void this.releaseCapturedDevice(device, sessionId, assignmentCount)
       .then(() => {
-        if (!cleanup) {
-          this.autolockManager.clearExpiredAutolockStateWhenIdle(
-            sessionId,
-            device,
-            assignmentCount,
-          );
-        }
         logger.info(`Released device ${deviceId} from session ${sessionId}`);
       })
       .catch((error) => {
         logger.warn(`Failed to release expired-session device ${deviceId}: ${error}`, error);
       });
-    if (cleanup) {
-      void cleanup
-        .then(() =>
-          this.autolockManager.clearExpiredAutolockStateWhenIdle(
-            sessionId,
-            device,
-            assignmentCount,
-          ),
-        )
-        .catch((error) => {
-          logger.warn(`Failed to finish expired-session cleanup for ${deviceId}: ${error}`, error);
-        });
-    }
   }
 
   private clearMcpSessionOwnership(sessionId: string): void {

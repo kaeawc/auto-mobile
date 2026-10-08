@@ -9,7 +9,7 @@ import {
 import { logger } from "../../utils/logger";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultDeviceSetRoot } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 
 /**
  * Host bridge to the macOS Network Extension controller (#10590, plan #6298).
@@ -201,7 +201,9 @@ export function createManagedSimulatorLister(
       (dependencies.homeDirectory ?? homedir)(),
       dependencies.environment ?? process.env,
     );
-    const udids = [...new Set(booted.map((device) => device.deviceId))].filter(isIosSimulatorUdid);
+    const udids = [...new Set(booted.map((device) => device.deviceId))].filter(
+      (deviceId) => resolveIosDeviceKind({ deviceId }) === "simulator",
+    );
     return udids
       .slice(0, NETWORK_FILTER_MAX_MANAGED_SIMULATORS)
       .map((udid) => ({ deviceSet, udid }));

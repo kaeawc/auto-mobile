@@ -109,6 +109,9 @@ runs:
     - name: Install Android SDK
       if: steps.android-sdk.outputs.present != 'true'
       uses: android-actions/setup-android@v3
+      with:
+        # The action's legacy default requests the removed `tools` package.
+        packages: platform-tools
 
     - name: Record Android SDK root
       shell: ${{ inputs.shell }}
@@ -120,6 +123,13 @@ runs:
     - name: Enable KVM group perms
       shell: ${{ inputs.shell }}
       run: |
+        ls -l /dev/kvm || true
+        # Namespace runners are containers without udev and already expose a
+        # user-accessible /dev/kvm; only GitHub-hosted VMs need the udev rule.
+        if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+          echo "/dev/kvm is already accessible; skipping udev rule."
+          exit 0
+        fi
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm

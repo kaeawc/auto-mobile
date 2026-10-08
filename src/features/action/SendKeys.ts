@@ -12,7 +12,8 @@ import {
 } from "../../utils/AbortContext";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
-import { selectablePanels } from "../../models/DisplayPanel";
+import { selectablePanels, type DisplayPanel } from "../../models/DisplayPanel";
+import { parseTopFocusedDisplayId } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
@@ -3579,9 +3580,39 @@ export class SendKeys {
     if (focusedPanel?.key === observation.display.key) {
       return;
     }
+    // CtrlProxy only returns the pinned display's windows, so an unfocused pin cannot see which
+    // display holds focus. Ask the system, on this refusal path only.
+    const namedPanel = focusedPanel ?? (await this.topFocusedPanel(signal));
+    const retarget = namedPanel
+      ? ` Target it with setActiveDevice {display: "${namedPanel.key}"}, or use`
+      : " Use";
     throw new ActionableError(
-      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${focusedPanel ? `"${focusedPanel.key}"` : "unknown"}. Use tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
+      `sendKeys on display "${observation.display.key}" requires a selector for text, clear, or IME keys because the focused panel is ${namedPanel ? `"${namedPanel.key}"` : "unknown"}.${retarget} tapOn to focus a field on display "${observation.display.key}", or clear the pin with setActiveDevice {display: null}.`,
     );
+  }
+
+  private async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
+    try {
+      const adb = this.adbFactory.create(this.device);
+      const result = await adb.executeCommand(
+        "shell dumpsys window | grep mTopFocusedDisplayId",
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+      const displayId = parseTopFocusedDisplayId(result.stdout);
+      return await new ObservedAndroidDisplayCache(this.timer).panelForLogicalId(
+        this.device,
+        adb,
+        displayId,
+        signal,
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(`sendKeys top focused display lookup failed: ${errorMessage(error)}`, error);
+      return undefined;
+    }
   }
 
   private async executeBoundedIosIme(

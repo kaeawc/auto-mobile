@@ -98,6 +98,35 @@ extension ElementLocator {
         )
     }
 
+    /// Offset that moves SpringBoard alert frames into the observed app's coordinate space (#6635).
+    ///
+    /// SpringBoard reports alert frames in screen space, while an iPadOS windowed app's
+    /// snapshot is relative to its window. Observe merges both into one hierarchy, and the
+    /// gesture path adds `windowedAppTranslation` to every automatic point offset when the app
+    /// frame is not screen-sized. Subtracting that same translation here keeps observe output in
+    /// one space, so the gesture rule lands SpringBoard alert taps back on their screen points.
+    /// `windowFrame` is a live query and only runs when the app frame is not screen-sized, using
+    /// the same mismatch test the gesture path uses before it reads the window.
+    nonisolated static func springboardAlertOffset(
+        appFrame: CGRect,
+        springboardFrame: CGRect,
+        windowFrame: () -> CGRect?
+    )
+        -> CGPoint
+    {
+        let appSize = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
+        let screenSize = GestureSize(width: Double(springboardFrame.width), height: Double(springboardFrame.height))
+        guard hasMultiPanelMismatch(app: appSize, screen: screenSize),
+              let window = windowFrame(),
+              let translation = windowedAppTranslation(
+                  appOrigin: GesturePoint(x: Double(appFrame.minX), y: Double(appFrame.minY)),
+                  appSize: appSize,
+                  windowOrigin: GesturePoint(x: Double(window.minX), y: Double(window.minY)),
+                  windowSize: GestureSize(width: Double(window.width), height: Double(window.height))
+              ) else { return .zero }
+        return CGPoint(x: -translation.x, y: -translation.y)
+    }
+
     /// Treat invalid snapshot frames as zero-area so only usable descendants keep their wrappers.
     nonisolated static func hasZeroArea(_ frame: CGRect) -> Bool {
         frame.width <= 0 || frame.height <= 0 || frame.isInfinite

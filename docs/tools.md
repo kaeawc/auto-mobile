@@ -253,6 +253,8 @@ origin is the top-left of the complete current screen, including system UI:
   reports the window's size as `screenSize` and window-relative bounds. `tapAt`,
   `tapOn`, `swipeOn`, and `dragAndDrop` take points in that window space, and the
   iOS runner adds the window's on-screen origin before it delivers the gesture.
+  SpringBoard system alerts shown over the app are reported in the same window
+  space, so their bounds can be negative or extend past the window.
   Points outside the window (other apps, the Dock) are not addressable while a
   windowed app is observed. A full-screen screenshot is not offset by the window
   origin; subtract it to compare screenshot pixels with observed bounds.

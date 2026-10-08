@@ -115,6 +115,12 @@ import os
         }
 
         /// Only runs on the mismatch path: an app frame smaller than the screen. One extra query.
+        ///
+        /// Not bounded against a suspended app: like the `target.frame` read just before it, a
+        /// query to an app that has just been backgrounded can stall for ~90 s (#10624), and
+        /// `XCUIApplication.state` keeps reporting foreground for seconds after Home, so a state
+        /// guard would not prevent it. This read adds no new precondition, since `target.frame`
+        /// would already have stalled; bounding live app queries needs a deadline on the request.
         private func readWindowTranslation(_ target: XCUIApplication, appFrame: CGRect) -> GesturePoint? {
             do {
                 return try catchingObjCException {

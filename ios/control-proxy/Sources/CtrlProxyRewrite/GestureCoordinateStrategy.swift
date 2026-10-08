@@ -149,6 +149,19 @@ struct GestureCoordinateSelection: Equatable, Sendable {
     let reason: String
     let normalized: GesturePoint
     let offset: GesturePoint?
+    /// The caller forced the strategy. Typed so behaviour never depends on the `reason` text.
+    let isForced: Bool
+
+    init(
+        strategy: TapCoordinateStrategy, reason: String, normalized: GesturePoint, offset: GesturePoint?,
+        isForced: Bool = false
+    ) {
+        self.strategy = strategy
+        self.reason = reason
+        self.normalized = normalized
+        self.offset = offset
+        self.isForced = isForced
+    }
 
     var anchor: GestureCoordinateAnchor {
         strategy == .legacy ? .legacyApplication : .observedApplication
@@ -157,7 +170,7 @@ struct GestureCoordinateSelection: Equatable, Sendable {
     /// Only an automatic point-offset selection is window-relative. Normalized selections map
     /// onto the app frame (multi-panel devices), and a forced legacy tap stays exactly as supplied.
     nonisolated func windowTranslation(_ translation: GesturePoint?) -> GesturePoint? {
-        guard strategy == .legacy, reason != "forced", offset != nil else { return nil }
+        guard strategy == .legacy, !isForced, offset != nil else { return nil }
         return translation
     }
 
@@ -223,10 +236,10 @@ struct GestureCoordinateSelection: Equatable, Sendable {
     )
         -> Self
     {
-        func legacy(_ reason: String) -> Self {
-            Self(strategy: .legacy, reason: reason, normalized: .zero, offset: point)
+        func legacy(_ reason: String, isForced: Bool = false) -> Self {
+            Self(strategy: .legacy, reason: reason, normalized: .zero, offset: point, isForced: isForced)
         }
-        if forced == .legacy { return legacy("forced") }
+        if forced == .legacy { return legacy("forced", isForced: true) }
         guard let geometry else { return legacy("mappingUndefined(noObservation)") }
         let mismatch = hasMultiPanelMismatch(app: geometry.app, screen: geometry.screen)
         guard mismatch || forced != nil else { return legacy("singlePanel") }
@@ -239,7 +252,8 @@ struct GestureCoordinateSelection: Equatable, Sendable {
             strategy: strategy,
             reason: forced == nil ? "multiPanelMismatch" : "forced",
             normalized: normalized,
-            offset: nil
+            offset: nil,
+            isForced: forced != nil
         )
     }
 

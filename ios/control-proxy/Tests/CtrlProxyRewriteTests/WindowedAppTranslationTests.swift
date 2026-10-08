@@ -97,4 +97,102 @@ final class WindowedAppTranslationTests: XCTestCase {
         XCTAssertEqual(normalized.strategy, .appRelativeObserved)
         XCTAssertNil(normalized.windowTranslation(translation))
     }
+
+    func testForcedIsATypedFlagNotTheReasonText() {
+        let translation = GesturePoint(x: 230, y: 255)
+        let point = GesturePoint(x: 187, y: 311)
+        // A legacy selection whose reason text happens to read "forced" is still automatic.
+        let automatic = GestureCoordinateSelection(
+            strategy: .legacy, reason: "forced", normalized: .zero, offset: point
+        )
+        XCTAssertFalse(automatic.isForced)
+        XCTAssertEqual(automatic.windowTranslation(translation), translation)
+        // A forced selection stays untranslated whatever its reason text says.
+        let renamed = GestureCoordinateSelection(
+            strategy: .legacy, reason: "callerForced", normalized: .zero, offset: point, isForced: true
+        )
+        XCTAssertNil(renamed.windowTranslation(translation))
+
+        let windowed = GestureCoordinateGeometry(
+            app: windowSize, screen: screenSize, observation: windowSize, rotation: 0
+        )
+        XCTAssertTrue(GestureCoordinateSelection.choose(point: point, geometry: windowed, forced: .legacy).isForced)
+        XCTAssertTrue(
+            GestureCoordinateSelection.choose(point: point, geometry: windowed, forced: .appRelativeObserved).isForced
+        )
+        XCTAssertFalse(GestureCoordinateSelection.choose(point: point, geometry: windowed).isForced)
+    }
+
+    func testSpringboardAlertsMoveIntoTheWindowSpaceTheGesturePathTranslatesBack() throws {
+        let appFrame = CGRect(x: 0, y: 0, width: 375, height: 585)
+        let springboardFrame = CGRect(x: 0, y: 0, width: 834, height: 1210)
+        let windowFrame = CGRect(x: 230, y: 255, width: 375, height: 585)
+        var windowReads = 0
+        let offset = ElementLocator.springboardAlertOffset(
+            appFrame: appFrame, springboardFrame: springboardFrame,
+            windowFrame: { windowReads += 1; return windowFrame }
+        )
+        XCTAssertEqual(offset, CGPoint(x: -230, y: -255))
+        XCTAssertEqual(windowReads, 1)
+
+        // A SpringBoard alert and its button, in screen space, keep their nesting after the shift.
+        let alert = ElementLocator.screenFrame(
+            CGRect(x: 267, y: 480, width: 300, height: 250), enclosingFrame: nil, coordinateOffset: offset
+        )
+        let button = ElementLocator.screenFrame(
+            CGRect(x: 287, y: 585, width: 260, height: 40), enclosingFrame: alert.frame, coordinateOffset: alert.offset
+        )
+        XCTAssertEqual(button.frame, CGRect(x: 57, y: 330, width: 260, height: 40))
+
+        // The observed centre goes through the same automatic selection as an app node and
+        // lands back on the button's screen centre (417,605).
+        let center = GesturePoint(x: Double(button.frame.midX), y: Double(button.frame.midY))
+        let windowed = GestureCoordinateGeometry(
+            app: windowSize, screen: screenSize, observation: windowSize, rotation: 0
+        )
+        let selection = GestureCoordinateSelection.choose(point: center, geometry: windowed)
+        let translation = try XCTUnwrap(selection.windowTranslation(GesturePoint(x: 230, y: 255)))
+        let offsetPoint = try XCTUnwrap(selection.offset)
+        XCTAssertEqual(
+            GesturePoint(x: translation.x + offsetPoint.x, y: translation.y + offsetPoint.y),
+            GesturePoint(x: 417, y: 605)
+        )
+    }
+
+    func testSpringboardAlertsStayPutWithoutAnInsetWindow() {
+        var windowReads = 0
+        let read: () -> CGRect? = { windowReads += 1; return CGRect(x: 230, y: 255, width: 375, height: 585) }
+        let screen = CGRect(x: 0, y: 0, width: 834, height: 1210)
+        // Full-screen and rotated full-screen apps never query the window.
+        XCTAssertEqual(
+            ElementLocator.springboardAlertOffset(appFrame: screen, springboardFrame: screen, windowFrame: read),
+            .zero
+        )
+        XCTAssertEqual(
+            ElementLocator.springboardAlertOffset(
+                appFrame: CGRect(x: 0, y: 0, width: 1210, height: 834), springboardFrame: screen, windowFrame: read
+            ),
+            .zero
+        )
+        XCTAssertEqual(windowReads, 0)
+
+        let inset = CGRect(x: 0, y: 0, width: 375, height: 585)
+        // An unavailable window, or one that is not the app's, leaves screen-space bounds alone.
+        XCTAssertEqual(
+            ElementLocator.springboardAlertOffset(appFrame: inset, springboardFrame: screen, windowFrame: { nil }),
+            .zero
+        )
+        XCTAssertEqual(
+            ElementLocator.springboardAlertOffset(
+                appFrame: inset, springboardFrame: screen, windowFrame: { screen }
+            ),
+            .zero
+        )
+        // An unreadable SpringBoard frame has no mismatch to act on.
+        XCTAssertEqual(
+            ElementLocator.springboardAlertOffset(appFrame: inset, springboardFrame: .zero, windowFrame: read),
+            .zero
+        )
+        XCTAssertEqual(windowReads, 0)
+    }
 }

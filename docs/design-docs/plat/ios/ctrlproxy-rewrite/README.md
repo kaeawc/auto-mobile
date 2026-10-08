@@ -258,7 +258,10 @@ size and a different origin, an automatic point-offset tap, swipe, or drag adds 
 window origin: `base` is the window origin and `coordinateConstruction` is
 `windowOriginPlusPointOffset`. Full-screen apps and iPhones have no mismatch and
 perform no extra read. Normalized (multi-panel) selections and a forced `legacy`
-strategy are not translated.
+strategy are not translated. SpringBoard alerts merged into a windowed app's
+hierarchy arrive in screen space, so observe subtracts the same translation from
+their bounds (one `windows.firstMatch.frame` read, only when an alert is present).
+Every observed node is then window-relative and the single gesture rule holds.
 
 The points are XCUITest's resolved coordinates immediately before the gesture,
 not measured touch delivery. Screen metrics and scene/interface orientation

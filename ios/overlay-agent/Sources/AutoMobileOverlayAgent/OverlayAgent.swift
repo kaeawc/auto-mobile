@@ -156,7 +156,7 @@ final class OverlayAgent {
             switch type {
             case "show_overlay":
                 let spec = try decode(OverlaySpec.self, message["spec"])
-                model.show(spec)
+                model.show(spec, reset: message["reset"] as? Bool == true)
                 result(true, extra: missingAssetsExtra())
             // No update_overlay (#10550): a same-id show_overlay replaces the shown overlay.
             case "dismiss_overlay":

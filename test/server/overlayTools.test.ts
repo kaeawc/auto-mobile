@@ -37,6 +37,7 @@ import { event } from "../helpers/overlayTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { OVERLAY_EVENT_BUFFER_CAPACITY } from "../../src/features/overlay/OverlayEventBuffer";
 import { getRemovedToolActionHint } from "../../src/models/removedTools";
+import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const device: BootedDevice = { deviceId: "fake-overlay", platform: "android", name: "Fake" };
 const spec = {
@@ -50,11 +51,18 @@ describe("overlay MCP tool", () => {
   let timer: FakeTimer;
   let restore: () => void;
   let unsubscribe: () => void;
+  let invalidator: FakeDeviceWindowCacheInvalidator;
   beforeEach(() => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    unsubscribe = registerOverlayTools({ clientFactory: () => client, clock: timer, timer });
+    invalidator = new FakeDeviceWindowCacheInvalidator();
+    unsubscribe = registerOverlayTools({
+      clientFactory: () => client,
+      clock: timer,
+      timer,
+      cacheInvalidator: invalidator,
+    });
   });
   afterEach(() => {
     unsubscribe();
@@ -79,6 +87,27 @@ describe("overlay MCP tool", () => {
     expect(payload.error).toContain(getRemovedToolActionHint("prototype", action)!);
     expect(payload.error).toContain("use show");
     expect(client.getOverlayHistory()).toEqual([]);
+  });
+
+  test("a landed show or dismiss retires the device's cached observation; status and failures do not", async () => {
+    const preserved: (boolean | undefined)[] = [];
+    unsubscribe();
+    invalidator = new FakeDeviceWindowCacheInvalidator((_device, keep) => preserved.push(keep));
+    unsubscribe = registerOverlayTools({
+      clientFactory: () => client,
+      clock: timer,
+      timer,
+      cacheInvalidator: invalidator,
+    });
+    await call({ action: "show", spec });
+    await call({ action: "status" });
+    await call({ action: "dismiss", id: "panel" });
+    expect(invalidator.calls).toEqual([device, device]);
+    expect(preserved).toEqual([true, true]);
+    client.setOverlayResult({ success: false, error: "Refused" });
+    await call({ action: "show", spec });
+    await call({ action: "dismiss", all: true });
+    expect(invalidator.calls).toHaveLength(2);
   });
 
   test("an unknown action names the supported actions", async () => {

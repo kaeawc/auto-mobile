@@ -95,6 +95,10 @@ import {
 } from "../features/overlay/overlayMissingAssets";
 import { readObservationScreenshotBytes } from "./observationResources";
 import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../features/observe/DeviceWindowCacheInvalidator";
+import {
   MAX_OVERLAY_ASSET_COUNT,
   MAX_OVERLAY_ASSET_ID_LENGTH,
 } from "../features/overlay/overlayAssets";
@@ -478,6 +482,8 @@ export interface OverlayToolDependencies {
   clock?: Pick<Timer, "now">;
   timer?: Timer;
   lifecycle?: OverlayEventLifecycle;
+  /** Retires the device's cached observation after a show or dismiss lands; tests inject a fake. */
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 /** MCP name of the on-device prototype tool; `overlay` is its deprecated alias (#10495). */
 export const PROTOTYPE_TOOL_NAME = "prototype";
@@ -810,6 +816,7 @@ type OverlayHandlerDependencies = {
   target: OverlayTarget;
   assetReaders: AssetReaders;
   commits: OverlayCommitGenerations;
+  cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
 } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
 type OverlayOutput = z.infer<typeof overlayOutputSchema>;
@@ -884,6 +891,7 @@ async function performMutation(
     signal,
   );
   const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
+  retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = isSuperseded(commits, scope, target, generation)
     ? supersededResult(dependencies, { args, target, result, placed })
@@ -902,6 +910,21 @@ async function performMutation(
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
     ...missingAssetsOutput(result, [warning, placed.warning]),
   };
+}
+
+/**
+ * A show or dismiss that landed changed the screen, so the observation cached before it is stale:
+ * without this, the "Verify with observe" call right after returns the pre-mutation capture.
+ * The foreground app is unchanged, so the iOS SDK identity is preserved.
+ */
+function retireObservation(
+  invalidator: DeviceWindowCacheInvalidator,
+  device: BootedDevice,
+  result: OverlayResult,
+): void {
+  if (result.success) {
+    invalidator.invalidate(device, true);
+  }
 }
 
 function beginShowGeneration(
@@ -1404,6 +1427,8 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     TelemetryRecorder.getInstance(),
   );
   const commits = new OverlayCommitGenerations();
+  const cacheInvalidator =
+    dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   const clock = overlayClock(dependencies);
   const assetReaders: AssetReaders = {
     assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
@@ -1454,6 +1479,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       target,
       assetReaders,
       commits,
+      cacheInvalidator,
       now: () => clock.now(),
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,

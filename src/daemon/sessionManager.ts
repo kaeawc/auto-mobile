@@ -1121,6 +1121,9 @@ export class SessionManager {
   >();
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
   private readonly rotationRestoreBackoff: BackoffPolicy;
+  /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
+  private readonly abandonedRotations = new Map<string, RotationSessionState>();
+  private readonly abandonedRotationRetries = new Map<string, Promise<void>>();
   /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
   private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
   private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
@@ -1602,7 +1605,8 @@ export class SessionManager {
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await creation.promise;
-      // Natural point to retry a screen reader an earlier release could not restore.
+      // Natural point to retry a rotation or screen reader an earlier release could not restore.
+      await this.retryAbandonedRotationRestore(created.assignedDevice);
       await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
       return created;
     } finally {
@@ -3465,6 +3469,7 @@ export class SessionManager {
       keepScreenAwake?.applied === true ||
       Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
       this.abandonedScreenReaders.has(session.assignedDevice) ||
+      this.abandonedRotations.has(session.assignedDevice) ||
       Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
     );
   }
@@ -3532,9 +3537,17 @@ export class SessionManager {
     const pendingClockRestoration = session.cacheData.clock
       ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
       : null;
-    const pendingRotationRestoration = session.cacheData.rotation
+    // Snapshot before this release's own restore can record a fresh abandon: that one
+    // waits for the next start or release instead of an immediate repeat attempt.
+    const hadAbandonedRotation = this.abandonedRotations.has(session.assignedDevice);
+    const ownRotationRestoration = session.cacheData.rotation
       ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups))).pending
       : null;
+    const pendingRotationRestoration = hadAbandonedRotation
+      ? ownBudget(() =>
+          this.retryAbandonedRotationAfter(session.assignedDevice, ownRotationRestoration),
+        )
+      : ownRotationRestoration;
     const ownScreenReaderRestoration = session.cacheData.screenReader
       ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
           .pending
@@ -4471,8 +4484,13 @@ export class SessionManager {
       `Gave up restoring rotation settings on ${deviceId} ${when} ` +
         `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
         `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
-        `A fold or display change during the session can make the recorded settings unverifiable.`,
+        `A fold or display change during the session can make the recorded settings unverifiable. ` +
+        `Will try once more at the next session start or release on this device.`,
     );
+    // An older abandoned baseline is the truer original; keep it over a newer session's.
+    if (!this.abandonedRotations.has(deviceId)) {
+      this.abandonedRotations.set(deviceId, target.state);
+    }
     target.clear();
     const targets = this.pendingRotationRestores.get(deviceId);
     if (targets?.get(target.state) === target) {
@@ -4481,6 +4499,76 @@ export class SessionManager {
         this.pendingRotationRestores.delete(deviceId);
       }
     }
+  }
+
+  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
+  private async retryAbandonedRotationAfter(
+    deviceId: string,
+    own: Promise<void> | null,
+  ): Promise<void> {
+    try {
+      await own;
+    } finally {
+      await this.retryAbandonedRotationRestore(deviceId);
+    }
+  }
+
+  /**
+   * One bounded attempt at rotation settings an earlier release gave up on, awaited
+   * before the device is handed to a new session; never on a timer. A transient failure
+   * keeps the record for the next start or release. A window-manager-managed outcome is
+   * definitively unrecoverable, so the record is dropped. Either way the device proceeds.
+   */
+  private retryAbandonedRotationRestore(deviceId: string): Promise<void> {
+    const state = this.abandonedRotations.get(deviceId);
+    if (!state) {
+      return Promise.resolve();
+    }
+    const inFlight = this.abandonedRotationRetries.get(deviceId);
+    if (inFlight) {
+      return inFlight;
+    }
+    const controller = new AbortController();
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const forget = () => {
+      if (this.abandonedRotations.get(deviceId) === state) {
+        this.abandonedRotations.delete(deviceId);
+      }
+    };
+    const attempt = (async () => {
+      try {
+        await raceWithDeadline(
+          this.rotationRestorerFactory(device).restore(state, controller.signal),
+          {
+            timer: this.timer,
+            timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+            label: "Abandoned rotation restoration",
+          },
+        );
+        forget();
+        logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
+      } catch (error) {
+        controller.abort();
+        if (isNonRetryableRotationRestoreError(error)) {
+          forget();
+          logger.warn(
+            `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
+              `dropping the abandoned restore: ${errorMessage(error)}`,
+          );
+          return;
+        }
+        logger.warn(
+          `Rotation settings on ${deviceId} are still not restored; ` +
+            `will try again at the next session start or release: ${errorMessage(error)}`,
+        );
+      }
+    })().finally(() => {
+      if (this.abandonedRotationRetries.get(deviceId) === attempt) {
+        this.abandonedRotationRetries.delete(deviceId);
+      }
+    });
+    this.abandonedRotationRetries.set(deviceId, attempt);
+    return attempt;
   }
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
@@ -4496,6 +4584,7 @@ export class SessionManager {
       target.clear();
     }
     this.pendingRotationRestores.delete(deviceId);
+    this.abandonedRotations.delete(deviceId);
   }
 
   /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */

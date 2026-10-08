@@ -55,6 +55,13 @@ sealed interface OverlayInteraction {
   /** A `switch` or `checkbox` tap: flips the bound boolean, then runs the node's own actions. */
   data class Toggle(val key: String, val actions: List<OverlayAction> = emptyList()) :
     OverlayInteraction
+
+  /** A `radioGroup` option tap: binds the string key to the option's value, then runs actions. */
+  data class Choose(
+    val key: String,
+    val value: String,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
 }
 
 /**
@@ -120,6 +127,12 @@ class OverlayRuntime(
         // The validator keeps the bound key boolean; anything else leaves the control inert.
         val stored = current.state[interaction.key] as? OverlayScalar.BooleanValue ?: return
         change(interaction.key, OverlayScalar.BooleanValue(!stored.value))
+        tap(interaction.actions)
+      }
+      is OverlayInteraction.Choose -> {
+        // The validator keeps the bound key a string; anything else leaves the group inert.
+        if (current.state[interaction.key] !is OverlayScalar.Text) return
+        change(interaction.key, OverlayScalar.Text(interaction.value))
         tap(interaction.actions)
       }
     }

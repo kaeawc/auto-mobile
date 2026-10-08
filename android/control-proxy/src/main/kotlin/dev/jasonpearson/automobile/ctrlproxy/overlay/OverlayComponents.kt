@@ -3,9 +3,15 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
@@ -67,7 +73,10 @@ internal fun RenderOverlayToggle(
   }
 }
 
-/** A filled (default), outlined or text Material button whose tap runs the node's `onTap`. */
+/**
+ * A filled (default), tonal, elevated, outlined or text Material button, with an optional leading
+ * icon, whose tap runs the node's `onTap`.
+ */
 @Composable
 internal fun RenderOverlayButton(
   node: OverlayRenderNode,
@@ -77,11 +86,22 @@ internal fun RenderOverlayButton(
   val source = node.source as? OverlayButtonNode ?: return
   val actions = source.onTap.orEmpty()
   val onClick = { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) }
-  val content: @Composable RowScope.() -> Unit = { OverlayComponentLabel(node) }
+  val icon = overlayIcon(source.icon)
+  val padding =
+    if (icon != null) ButtonDefaults.ButtonWithIconContentPadding else ButtonDefaults.ContentPadding
+  val content: @Composable RowScope.() -> Unit = {
+    if (icon != null) {
+      Icon(icon, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+      Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+    }
+    OverlayComponentLabel(node)
+  }
   when (source.variant) {
-    "outlined" -> OutlinedButton(onClick, modifier, content = content)
-    "text" -> TextButton(onClick, modifier, content = content)
-    else -> Button(onClick, modifier, content = content)
+    "tonal" -> FilledTonalButton(onClick, modifier, contentPadding = padding, content = content)
+    "elevated" -> ElevatedButton(onClick, modifier, contentPadding = padding, content = content)
+    "outlined" -> OutlinedButton(onClick, modifier, contentPadding = padding, content = content)
+    "text" -> TextButton(onClick, modifier, contentPadding = padding, content = content)
+    else -> Button(onClick, modifier, contentPadding = padding, content = content)
   }
 }
 

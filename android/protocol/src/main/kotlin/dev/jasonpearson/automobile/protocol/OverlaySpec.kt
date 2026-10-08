@@ -342,6 +342,56 @@ data class OverlayButtonNode(
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val label: String,
   val variant: String = "filled",
+  val icon: String? = null,
+) : OverlayNode()
+
+@Serializable data class OverlayRadioOption(val value: String, val label: String)
+
+@SerialName("radioGroup")
+@Serializable
+data class OverlayRadioGroupNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val options: List<OverlayRadioOption>,
+) : OverlayNode()
+
+/** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
+@Serializable sealed class OverlayListItemTrailing
+
+@SerialName("switch")
+@Serializable
+data class OverlayListItemSwitch(val stateKey: String) : OverlayListItemTrailing()
+
+@SerialName("checkbox")
+@Serializable
+data class OverlayListItemCheckbox(val stateKey: String) : OverlayListItemTrailing()
+
+@SerialName("icon")
+@Serializable
+data class OverlayListItemIcon(val name: String) : OverlayListItemTrailing()
+
+@SerialName("listItem")
+@Serializable
+data class OverlayListItemNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val headline: String,
+  val supporting: String? = null,
+  val leadingIcon: String? = null,
+  val trailing: OverlayListItemTrailing? = null,
 ) : OverlayNode()
 
 @SerialName("scroll")

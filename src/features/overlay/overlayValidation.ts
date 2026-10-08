@@ -423,6 +423,55 @@ function pagerErrors(context: Context): OverlayValidationError | undefined {
   }
   return undefined;
 }
+function radioGroupErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  if (typeof stored !== "string") {
+    return fail(`${path}.stateKey`, "Radio group requires a string state key");
+  }
+  const values = new Set<unknown>();
+  for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
+    const optionValue = object(option)?.value;
+    if (values.has(optionValue)) {
+      return fail(`${path}.options[${index}].value`, "Duplicate radio option value");
+    }
+    values.add(optionValue);
+  }
+  return undefined;
+}
+/** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
+function listItemBindingErrors(
+  context: Context,
+  data: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const state = object(data.state) ?? {};
+  for (const { value, path } of context.nodes) {
+    const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
+    if (
+      trailing &&
+      typeof trailing.stateKey === "string" &&
+      typeof state[trailing.stateKey] !== "boolean"
+    ) {
+      return fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key");
+    }
+  }
+  return undefined;
+}
+function controlBindingError(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  if (value.type === "textField" && typeof stored !== "string") {
+    return fail(`${path}.stateKey`, "Text field requires a string state key");
+  }
+  if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
+    return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
+  }
+  return value.type === "radioGroup" ? radioGroupErrors(value, path, stored) : undefined;
+}
 function bindingErrors(
   context: Context,
   data: Record<string, unknown>,
@@ -433,11 +482,9 @@ function bindingErrors(
       continue;
     }
     const stored = state[value.stateKey];
-    if (value.type === "textField" && typeof stored !== "string") {
-      return fail(`${path}.stateKey`, "Text field requires a string state key");
-    }
-    if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
-      return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
+    const controlError = controlBindingError(value, path, stored);
+    if (controlError) {
+      return controlError;
     }
     if (value.type !== "tabBar" && value.type !== "bottomNav") {
       continue;
@@ -503,6 +550,7 @@ function validateValue(value: unknown): OverlayValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     pagerErrors(context) ??
     bindingErrors(context, object(value) ?? {}) ??
+    listItemBindingErrors(context, object(value) ?? {}) ??
     sheetBindingErrors(context, object(value) ?? {}) ??
     stateActionErrors(context, object(value) ?? {});
   if (error) {

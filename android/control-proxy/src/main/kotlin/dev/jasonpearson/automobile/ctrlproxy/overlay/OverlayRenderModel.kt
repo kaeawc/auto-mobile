@@ -37,6 +37,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound value of a `radioGroup` (the option marked selected); null for every other role. */
+  val selectedValue: String? = null,
 )
 
 data class OverlayRenderModel(
@@ -131,6 +133,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlayRadioGroupNode -> "radioGroup"
+      is OverlayListItemNode -> "listItem"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -144,6 +148,7 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlayListItemNode -> node.headline
       is OverlayIconNode -> node.name
       else -> ""
     }
@@ -191,7 +196,11 @@ private fun mapOverlayNode(
       state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
     } ?: false,
     checked =
-      overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+      (overlayToggleKey(node) ?: overlayListItemToggleKey(node))?.let {
+        state[it] == OverlayScalar.BooleanValue(true)
+      } ?: false,
+    selectedValue =
+      (node as? OverlayRadioGroupNode)?.let { (state[it.stateKey] as? OverlayScalar.Text)?.value },
   )
 }
 

@@ -1087,6 +1087,20 @@ EOF
   grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
 }
 
+@test "timing gate treats grouping runners and the shared-process allowlist as lane inputs" {
+  for input in scripts/lib/bun-unit-groups.sh scripts/lib/bun-unit-chunks.sh \
+    scripts/test/classify-shared-safe.ts test/shared-process-allowlist.txt; do
+    : > "$BUN_ARGS_FILE"
+    run env \
+      PATH="$STUB_BIN:$PATH" \
+      BUN_TEST_TIMING_BASE_REF=origin/main \
+      TIMING_CHANGED_FILES="$input\n" \
+      bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  done
+}
+
 @test "timing gate accepts successful empty changed shards without JUnit files" {
   run env PATH="$STUB_BIN:$PATH" BUN_TEST_TIMING_BASE_REF=origin/main \
     TIMING_CHANGED_FILES='src/example.ts\n' AUTOMOBILE_UNIT_TEST_WORKERS=2 \

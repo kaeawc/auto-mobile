@@ -6549,6 +6549,18 @@ export class SessionManager {
     };
   }
 
+  /**
+   * What bounds an in-flight execution's idle-release veto for `sessionId`, or undefined when
+   * nothing is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
+   * policy the idle sweep applies (#10671, #10712, #10713).
+   */
+  getIdleReleaseExecutionVeto(sessionId: string): { latestDeadlineMs?: number } | undefined {
+    if (!this.sessions.has(sessionId) || !this.activeSessionExecutionChecker(sessionId)) {
+      return undefined;
+    }
+    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId) };
+  }
+
   /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
   private expiredSessionReleaseReason(
     session: Session,

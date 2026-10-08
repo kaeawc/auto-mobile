@@ -100,6 +100,8 @@ export interface DaemonStateAccess {
     getSessionForDevice?(deviceId: string): string | null;
     /** Remember a registered client's name for `holderKind` diagnostics (#10671). */
     recordSessionClientName?(sessionId: string, clientName: string): void;
+    /** What bounds an in-flight call's idle-release veto, for `idleReleaseAt` (#10671). */
+    getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -665,6 +667,7 @@ export async function handleSessionInfo(
       ...sessionHoldDiagnostics(
         session,
         executions.getActiveDeviceSessionExecutionCount(sessionId),
+        manager.getIdleReleaseExecutionVeto?.(sessionId),
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -712,6 +715,7 @@ export async function handleActiveSessions(
               ...sessionHoldDiagnostics(
                 session,
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
+                manager.getIdleReleaseExecutionVeto?.(session.sessionId),
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }

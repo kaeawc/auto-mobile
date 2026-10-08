@@ -10,8 +10,13 @@ import {
   classifySessionHolderKind,
   idleReleaseAt,
   sessionHoldDiagnostics,
+  vetoedIdleReleaseAt,
   type SessionHoldSnapshot,
 } from "../../src/daemon/sessionHoldDiagnostics";
+import {
+  UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "../../src/daemon/unsettledExecutionVeto";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { ExecutionTracker } from "../../src/server/executionTracker";
@@ -108,6 +113,32 @@ describe("idleReleaseAt", () => {
   });
 });
 
+describe("idleReleaseAt under an in-flight execution's veto (#10712, #10713)", () => {
+  const idleDeadline = 121_000 + SUSPECT_GRACE_MS;
+
+  test("nothing in flight leaves the idle deadline", () => {
+    expect(vetoedIdleReleaseAt(snapshot(), undefined)).toBe(idleDeadline);
+  });
+
+  test("a call with a request deadline holds until that deadline plus grace", () => {
+    expect(vetoedIdleReleaseAt(snapshot(), { latestDeadlineMs: idleDeadline + 60_000 })).toBe(
+      idleDeadline + 60_000 + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
+    );
+  });
+
+  test("a request deadline that ends before the idle deadline never pulls release earlier", () => {
+    expect(vetoedIdleReleaseAt(snapshot(), { latestDeadlineMs: 2_000 })).toBe(idleDeadline);
+  });
+
+  test("a call with no deadline holds until the ceiling past the idle deadline", () => {
+    for (const latestDeadlineMs of [undefined, Number.POSITIVE_INFINITY]) {
+      expect(vetoedIdleReleaseAt(snapshot(), { latestDeadlineMs })).toBe(
+        idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS,
+      );
+    }
+  });
+});
+
 describe("session hold diagnostics through the daemon surfaces", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
@@ -190,6 +221,39 @@ describe("session hold diagnostics through the daemon surfaces", () => {
       holderKind: "cli",
       idleReleaseAt: session.lastUsedAt + 60_000,
     });
+  });
+
+  test("a vetoed session's reported idleReleaseAt is the instant the idle sweep releases it", async () => {
+    const sweepTimer = new FakeTimer();
+    const sweepManager = new SessionManager(sweepTimer, new FakeDeviceSessionPersistence());
+    try {
+      const session = await sweepManager.createSession(SESSION, DEVICE, "android");
+      const requestDeadline = session.expiresAt + 45_000;
+      sweepManager.setActiveSessionExecutionChecker(() => true);
+      sweepManager.setSessionExecutionDeadlineLookup(() => requestDeadline);
+      const released: string[] = [];
+      sweepManager.onSessionRelease((sessionId) => released.push(sessionId));
+
+      const info = await handleDaemonRequest(
+        request("daemon/sessionInfo", { sessionId: SESSION }),
+        stateFor(sweepManager),
+      );
+      const reported = (info.result as { idleReleaseAt: number }).idleReleaseAt;
+      expect(reported).toBe(requestDeadline + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS);
+
+      sweepTimer.setCurrentTime(reported - 1);
+      sweepManager.cleanupExpiredSessions();
+      await Promise.resolve();
+      expect(released).toEqual([]);
+
+      sweepTimer.setCurrentTime(reported);
+      sweepManager.cleanupExpiredSessions();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(released).toEqual([SESSION]);
+    } finally {
+      sweepManager.stopCleanupTimer();
+    }
   });
 
   test("activeSessions lists each held session only when asked, with its in-flight count", async () => {

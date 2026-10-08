@@ -12,6 +12,7 @@
 
 import { suspectGraceMsFor } from "./livenessOwnerLease";
 import type { Session } from "./sessionManager";
+import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
 
 /** The kind of client holding a device session. */
 export type SessionHolderKind = "stdio-proxy" | "desktop" | "ide" | "cli" | "junit" | "unknown";
@@ -22,8 +23,11 @@ export interface SessionHoldDiagnostics {
   /** The owner's last heartbeat, or null when no owner has heartbeated yet. */
   lastOwnerHeartbeatAt: number | null;
   /**
-   * When idle release is due: past this instant the next heartbeat-monitor scan
-   * releases the session unless a tool call is in flight or arrives first.
+   * When idle release is due: past this instant the next idle sweep releases the
+   * session unless a new tool call arrives first. While a call is in flight its
+   * veto pushes this out to the shared unsettled-execution bound (#10712, #10713):
+   * the call's request deadline plus grace, or the fallback ceiling past the idle
+   * deadline when some call has no deadline.
    */
   idleReleaseAt: number;
   holderKind: SessionHolderKind;
@@ -91,14 +95,45 @@ export function idleReleaseAt(session: SessionHoldSnapshot): number {
   return session.expiresAt + suspectGraceMsFor(session);
 }
 
+/** What bounds an in-flight execution's veto (`SessionManager.getIdleReleaseExecutionVeto`). */
+export interface IdleReleaseExecutionVeto {
+  latestDeadlineMs?: number;
+}
+
+/**
+ * {@link idleReleaseAt}, pushed out by an in-flight execution's veto under the shared
+ * unsettled-execution policy. The veto counts from the idle deadline, exactly as
+ * `SessionManager.isSessionExpired` judges a `heartbeat` session. The heartbeat
+ * monitor starts a `cli-idle` session's fallback window at its first scan past the
+ * idle deadline, so for those the ceiling-based instant can run up to one scan
+ * interval early; a deadline-based bound is exact for both policies.
+ */
+export function vetoedIdleReleaseAt(
+  session: SessionHoldSnapshot,
+  veto: IdleReleaseExecutionVeto | undefined,
+): number {
+  const idleDeadline = idleReleaseAt(session);
+  if (veto === undefined) {
+    return idleDeadline;
+  }
+  return Math.max(
+    idleDeadline,
+    unsettledExecutionVetoExpiresAt({
+      vetoedSince: idleDeadline,
+      latestDeadlineMs: veto.latestDeadlineMs,
+    }),
+  );
+}
+
 export function sessionHoldDiagnostics(
   session: SessionHoldSnapshot,
   activeExecutions: number,
+  veto?: IdleReleaseExecutionVeto,
 ): SessionHoldDiagnostics {
   return {
     lastToolActivityAt: session.lastUsedAt,
     lastOwnerHeartbeatAt: session.lastOwnerHeartbeat ?? null,
-    idleReleaseAt: idleReleaseAt(session),
+    idleReleaseAt: vetoedIdleReleaseAt(session, veto),
     holderKind: classifySessionHolderKind(session),
     activeExecutions,
   };

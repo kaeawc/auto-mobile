@@ -11,6 +11,7 @@ import {
 } from "../daemon/McpTimeoutError";
 import { SessionRecoveryAssignmentError } from "../models/SessionRecoveryAssignmentError";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
+import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 
 export interface ToolCallErrorContext {
   toolName: string;
@@ -59,13 +60,21 @@ export function shapeToolCallError(
                         retryable: true,
                       },
                     })
-                  : error instanceof ActionableError && error.containerFailure
+                  : error instanceof InputDeviceOwnedError
                     ? JSON.stringify({
                         success: false,
                         error: message,
-                        containerFailure: error.containerFailure,
+                        code: error.code,
+                        deviceId: error.deviceId,
+                        retryable: false,
                       })
-                    : `Error: ${message}`,
+                    : error instanceof ActionableError && error.containerFailure
+                      ? JSON.stringify({
+                          success: false,
+                          error: message,
+                          containerFailure: error.containerFailure,
+                        })
+                      : `Error: ${message}`,
       },
     ],
     isError: true,

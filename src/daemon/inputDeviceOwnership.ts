@@ -10,6 +10,13 @@ import {
  */
 export const DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session";
 
+const INPUT_REMEDY =
+  "acquire the device (setActiveDevice) and send input with that session's sessionUuid.";
+
+/** Remedy text for a refused device-mutating `tools/call` (see toolRegistry.ts). */
+export const TOOL_CALL_REMEDY =
+  "acquire the device (setActiveDevice) and call the tool with that session's sessionUuid, or wait for the holder to release it.";
+
 /**
  * `input/*` drives a device directly, so it follows device ownership (#10698): a device a session
  * holds takes input only from that session. A frame names its session with the optional
@@ -20,13 +27,18 @@ export const DEVICE_OWNED_BY_OTHER_SESSION_CODE = "device_owned_by_other_session
 export class InputDeviceOwnedError extends ActionableError {
   readonly code = DEVICE_OWNED_BY_OTHER_SESSION_CODE;
 
-  constructor(action: string, deviceId: string, requesterSessionUuid: string | undefined) {
+  constructor(
+    action: string,
+    readonly deviceId: string,
+    requesterSessionUuid: string | undefined,
+    remedy = INPUT_REMEDY,
+  ) {
     super(
       `${action} refused: device '${deviceId}' is held by another session. ` +
         (requesterSessionUuid
           ? `Session ${requesterSessionUuid} does not hold it; `
           : "The request carried no sessionUuid; ") +
-        `acquire the device (setActiveDevice) and send input with that session's sessionUuid.`,
+        remedy,
     );
     this.name = "InputDeviceOwnedError";
   }
@@ -41,6 +53,8 @@ export function assertInputRequesterHoldsDevice(input: {
   /** The `sessionUuid` the frame carried. */
   requesterSessionUuid: string | undefined;
   sessionManager: ToolSelectionSessionManager | undefined;
+  /** How the refused caller can proceed; defaults to the `input/*` remedy. */
+  remedy?: string;
 }): void {
   const { ownerSessionUuid, requesterSessionUuid, sessionManager } = input;
   if (!ownerSessionUuid) {
@@ -50,7 +64,7 @@ export function assertInputRequesterHoldsDevice(input: {
   if (requesterSessionUuid && base(requesterSessionUuid) === base(ownerSessionUuid)) {
     return;
   }
-  throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid);
+  throw new InputDeviceOwnedError(input.action, input.deviceId, requesterSessionUuid, input.remedy);
 }
 
 /**

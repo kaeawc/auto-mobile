@@ -432,7 +432,11 @@ describe("ToolRegistry autolock session enforcement", () => {
           deviceId: androidA.deviceId,
           sessionUuid,
         }),
-      ).rejects.toThrow("not an active daemon session");
+      ).rejects.toMatchObject({
+        // The owned device refuses a non-holder before admission (#10698).
+        code: "device_owned_by_other_session",
+        message: expect.stringContaining(`Session ${sessionUuid} does not hold it`),
+      });
       expect(daemonSessionManager.getSession(sessionUuid)).toBeNull();
     }
     expect(handlerCalls).toBe(0);

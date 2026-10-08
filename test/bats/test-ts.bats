@@ -60,6 +60,11 @@ setup() {
   export BUN_ARGS_FILE
   STUB_RECHECK_INDEX="$(mktemp)"
   export STUB_RECHECK_INDEX
+  # Every unit file runs isolated unless a test writes this shared-process
+  # allow-list (#10583); the committed list must not leak into stubbed lanes.
+  AUTOMOBILE_UNIT_SHARED_ALLOWLIST="$STUB_BIN/shared-process-allowlist.txt"
+  export AUTOMOBILE_UNIT_SHARED_ALLOWLIST
+  : > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
   cat > "$STUB_BIN/nproc" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${STUB_NPROC_FAIL:-}" == "1" ]]; then
@@ -104,6 +109,12 @@ if [[ "$1" == test && -n "${STUB_CHUNK_RECORD:-}" ]]; then
   done
   count="$(wc -l < "$STUB_CHUNK_RECORD" | tr -d ' ')"
   if [[ "$count" == "${STUB_CHUNK_FAIL:-}" ]]; then exit 7; fi
+fi
+if [[ "$1" == test && -n "${STUB_GROUP_LABEL_RECORD:-}" ]]; then
+  printf '%s\n' "${AUTOMOBILE_TEST_TIMING_GROUP_LABEL:-none}" >> "$STUB_GROUP_LABEL_RECORD"
+fi
+if [[ "$1" == test && -n "${STUB_SHARED_FAIL:-}" && " $* " != *" --isolate "* ]]; then
+  exit "$STUB_SHARED_FAIL"
 fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
@@ -1949,6 +1960,104 @@ EOF
     [[ "$output" == *"AUTOMOBILE_UNIT_TEST_CHUNK_FILES must be a positive integer"* ]]
   done
   [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+# Five of the twelve chunk fixtures are allow-listed for shared processes
+# (#10583). Comments, blank lines, CRLF endings and stale entries are ignored.
+write_shared_allowlist() {
+  printf '# shared-process allow-list\n\ntest/fixture01.test.ts\r\ntest/fixture02.test.ts\ntest/fixture05.test.ts\ntest/fixture08.test.ts\ntest/fixture11.test.ts\ntest/deleted.test.ts\n' \
+    > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
+}
+
+fixture_list() {
+  local list="" index
+  for index in "$@"; do list+=" $(printf 'test/fixture%02d.test.ts' "$index")"; done
+  printf '%s' "$list"
+}
+
+@test "unit shards run allow-listed files in one shared process and the rest isolated (#10583)" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  labels="$BATS_TEST_TMPDIR/labels"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$reports" STUB_GROUP_LABEL_RECORD="$labels" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane shared_files=5 isolated_files=7"* ]]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
+  shared="test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  # Shared files lead the round-robin, so both groups split evenly: 3+2 and 4+3.
+  grep -Fxq "$shared $reports/shard-0-shared.xml$(fixture_list 1 5 11)" "$BUN_ARGS_FILE"
+  grep -Fxq "$isolated $reports/shard-0.xml$(fixture_list 3 6 9)" "$BUN_ARGS_FILE"
+  grep -Fxq "$shared $reports/shard-1-shared.xml$(fixture_list 2 8)" "$BUN_ARGS_FILE"
+  grep -Fxq "$isolated $reports/shard-1.xml$(fixture_list 0 4 7 10)" "$BUN_ARGS_FILE"
+  for report in shard-0-shared shard-0 shard-1-shared shard-1; do
+    [ -s "$reports/$report.xml" ]
+  done
+  # The timing probe names the shared group; isolated files keep their own entries.
+  grep -Fxq "unit shard 0 shared process (3 files)" "$labels"
+  grep -Fxq "unit shard 1 shared process (2 files)" "$labels"
+  [ "$(grep -c '^none$' "$labels")" -eq 2 ]
+  [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=0"* ]]
+}
+
+@test "AUTOMOBILE_UNIT_SHARED_PROCESS=0 runs every unit file isolated as before" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    AUTOMOBILE_UNIT_SHARED_PROCESS=0 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane shared_files=0 isolated_files=12"* ]]
+  expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts"
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  grep -Fxq "$expected$(fixture_list 0 2 4 6 8 10)" "$BUN_ARGS_FILE"
+  grep -Fxq "$expected$(fixture_list 1 3 5 7 9 11)" "$BUN_ARGS_FILE"
+}
+
+@test "a failing shared process fails the shard and lane while its isolated group still runs" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 STUB_SHARED_FAIL=7 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: unit shard 0 shared process exited with status 7"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  grep -q -- '--isolate.*test/fixture00.test.ts' "$BUN_ARGS_FILE"
+}
+
+@test "chunked shards chunk the shared group without --isolate and never mix the groups" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  labels="$BATS_TEST_TMPDIR/labels"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=2 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" \
+    STUB_GROUP_LABEL_RECORD="$labels" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 7 ]
+  flags="--timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test $flags-0.xml$(fixture_list 1 2)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "test $flags-1.xml$(fixture_list 5 8)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "test $flags-2.xml$(fixture_list 11)" ]
+  [ "$(sed -n 4p "$BUN_ARGS_FILE")" = "test --isolate $flags-3.xml$(fixture_list 0 3)" ]
+  [ "$(sed -n 7p "$BUN_ARGS_FILE")" = "test --isolate $flags-6.xml$(fixture_list 10)" ]
+  [ "$(sed -n 3p "$labels")" = "unit shard 0 shared chunk 2 (1 files)" ]
+  [ "$(sed -n 4p "$labels")" = "none" ]
+}
+
+@test "one watchdog bounds the shared and isolated groups of a shard together" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  # Each group fits the 2s deadline (1.5s); the pair cannot. See the chunk
+  # watchdog test above for the margins.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
 }
 
 @test "timing gate summary records ordered samples and both median verdicts" {

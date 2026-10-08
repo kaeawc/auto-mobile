@@ -3,6 +3,8 @@
 # Canonical Bun test-lane runner.
 #
 #   unit        Hermetic *.test.ts tests, excluding integration and stress.
+#               Files on test/shared-process-allowlist.txt share one process
+#               per shard; the rest run with --isolate (#10583).
 #   changed     Unit tests affected by worktree/ref changes (local feedback).
 #   integration Real-I/O *.integration.test.ts tests.
 #   stress      Explicit test/stress/** tests.
@@ -325,6 +327,45 @@ run_randomized_unit() {
     --randomize "--seed=$seed" "${test_files[@]}"
 }
 
+# Shared-process split (#10583). Files on the allow-list (tier C: no static
+# shared-state signal, see scripts/test/classify-shared-safe.ts) run together
+# in one non-isolated `bun test` process per shard; every other file keeps
+# --isolate. New files run isolated until the list is regenerated.
+# AUTOMOBILE_UNIT_SHARED_PROCESS=0 runs every file isolated, as before.
+# Prints the allow-listed members of the discovered unit files, in order.
+shared_process_unit_files() {
+  local allowlist="${AUTOMOBILE_UNIT_SHARED_ALLOWLIST:-$ROOT/test/shared-process-allowlist.txt}"
+  if [[ "${AUTOMOBILE_UNIT_SHARED_PROCESS:-1}" == 0 || ! -f "$allowlist" ]]; then
+    return 0
+  fi
+  local discovered
+  discovered="$(discover_unit_test_files)"
+  # grep exits 1 when nothing matches; an empty group is a valid result.
+  grep -Fx -f <(tr -d '\r' < "$allowlist" | grep -v -e '^#' -e '^$') <<< "$discovered" || true
+}
+
+# Called in a unit shard's subshell. Allow-listed files lead the shard's list
+# (run_unit_shards orders them first and assigns round-robin), so the shard's
+# shared count follows from shared_total. Reads and sets run_unit_shards'
+# locals through Bash's dynamic scoping.
+configure_unit_shard_groups() {
+  local shard="$1"
+  if [[ "$shard_mode" != unit ]]; then
+    return 0
+  fi
+  export AUTOMOBILE_UNIT_SHARED_FILE_COUNT=0
+  if [[ "$shared_total" -gt "$shard" ]]; then
+    AUTOMOBILE_UNIT_SHARED_FILE_COUNT=$(((shared_total - shard + worker_count - 1) / worker_count))
+  fi
+  # Chunked shards split inside bun-unit-chunks.sh. An unchunked shard with
+  # shared files runs both groups through bun-unit-groups.sh under the same
+  # watchdog; a shard without shared files keeps the direct invocation.
+  if [[ "$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 && -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+    shard_args=(bash "$ROOT/scripts/lib/bun-unit-groups.sh" "$ROOT" "$runner_os"
+      "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
+  fi
+}
+
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
@@ -332,6 +373,9 @@ run_unit_shards() {
   local file index shard shard_number worker_count rc pid shard_status timing_log report_name
   local lane_start lane_elapsed shard_elapsed shard_wall_record physical_cores
   local test_files=()
+  local shared_files=()
+  local isolated_files=()
+  local shared_total=0
   local pids=()
   local shard_starts=()
   local shard_elapsed_seconds=()
@@ -349,13 +393,31 @@ run_unit_shards() {
     rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
     mkdir -p "$AUTOMOBILE_UNIT_JUNIT_DIR"
   fi
+  if [[ "$shard_mode" == unit ]]; then
+    while IFS= read -r file; do
+      shared_files+=("$file")
+    done < <(shared_process_unit_files)
+  fi
+  shared_total="${#shared_files[@]}"
+  # Both lists keep discovery order, so one merge walk separates them. Shared
+  # files go first so round-robin spreads both groups evenly across shards.
+  index=0
   while IFS= read -r file; do
-    test_files+=("$file")
+    if [[ "$index" -lt "$shared_total" && "$file" == "${shared_files[$index]}" ]]; then
+      index=$((index + 1))
+    else
+      isolated_files+=("$file")
+    fi
   done < <(discover_unit_test_files)
+  test_files=(${shared_files[@]+"${shared_files[@]}"} ${isolated_files[@]+"${isolated_files[@]}"})
 
   if [[ "${#test_files[@]}" -eq 0 ]]; then
     echo "No unit test files discovered" >&2
     return 1
+  fi
+  if [[ "$shard_mode" == unit ]]; then
+    printf 'test-ts: unit lane shared_files=%s isolated_files=%s\n' \
+      "$shared_total" "${#isolated_files[@]}" >&2
   fi
 
   worker_count="$unit_workers"
@@ -422,6 +484,7 @@ run_unit_shards() {
           --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/$report_name"
         )
       fi
+      configure_unit_shard_groups "$shard"
       local shard_budget="${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}"
       if [[ "$shard_mode" == unit && -n "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
         # One child owns the sequential loop: the watchdog bounds ALL chunks,

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, afterEach, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { appendTimingEvent } from "./fileTimingEvents";
@@ -44,14 +44,24 @@ test("timing probe appends one NDJSON line per event", () => {
 
 // Exercise the actual preload in a tiny child with no repository-wide preloads.
 // Setup is outside the per-test budget; assertions inspect data, not wall time.
+type ProbeEvent = { event: string; file: string; rss?: number };
 let probeDir: string;
-let probeEvents: { event: string; file: string; rss?: number }[];
-beforeAll(() => {
-  probeDir = mkdtempSync(join(tmpdir(), "file-timing-preload-"));
-  const fixture = join(probeDir, "probe.spec.ts");
-  const logPath = join(probeDir, "events.ndjson");
-  writeFileSync(fixture, 'import { test } from "bun:test"; test("fixture", () => {});\n');
-  writeFileSync(join(probeDir, "bunfig.toml"), "[test]\n");
+let probeFixture: string;
+let probeEvents: ProbeEvent[];
+let labelledEvents: ProbeEvent[];
+
+function runProbe(logName: string, groupLabel?: string): ProbeEvent[] {
+  const logPath = join(probeDir, logName);
+  // This suite may itself run in a labelled shared process (#10583); the
+  // child sees a label only when a case sets one.
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    AUTOMOBILE_TEST_TIMING_LOG: logPath,
+  };
+  delete env.AUTOMOBILE_TEST_TIMING_GROUP_LABEL;
+  if (groupLabel) {
+    env.AUTOMOBILE_TEST_TIMING_GROUP_LABEL = groupLabel;
+  }
   const result = Bun.spawnSync(
     [
       process.execPath,
@@ -59,17 +69,27 @@ beforeAll(() => {
       "--isolate",
       "--preload",
       resolve("test/setup/fileTimingProbe.ts"),
-      fixture,
+      probeFixture,
     ],
-    { cwd: probeDir, env: { ...process.env, AUTOMOBILE_TEST_TIMING_LOG: logPath } },
+    { cwd: probeDir, env },
   );
   if (result.exitCode !== 0) {
     throw new Error(`Timing preload fixture failed: ${result.stderr.toString()}`);
   }
-  probeEvents = readFileSync(logPath, "utf8")
+  return readFileSync(logPath, "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
+}
+
+beforeAll(() => {
+  // Bun.main is the resolved path (macOS tmpdir is a symlink).
+  probeDir = realpathSync(mkdtempSync(join(tmpdir(), "file-timing-preload-")));
+  probeFixture = join(probeDir, "probe.spec.ts");
+  writeFileSync(probeFixture, 'import { test } from "bun:test"; test("fixture", () => {});\n');
+  writeFileSync(join(probeDir, "bunfig.toml"), "[test]\n");
+  probeEvents = runProbe("events.ndjson");
+  labelledEvents = runProbe("labelled.ndjson", "unit shard 0 shared process (2 files)");
 });
 afterAll(() => rmSync(probeDir, { recursive: true, force: true }));
 
@@ -80,4 +100,12 @@ test("actual preload END event includes RSS bytes without changing START", () =>
   expect(probeEvents[1].event).toBe("end");
   expect(typeof probeEvents[1].rss).toBe("number");
   expect(probeEvents[1].rss).toBeGreaterThan(0);
+});
+
+test("actual preload names the test file, or the shared-process group when labelled", () => {
+  expect(probeEvents.map((event) => event.file)).toEqual([probeFixture, probeFixture]);
+  expect(labelledEvents.map((event) => event.file)).toEqual([
+    "unit shard 0 shared process (2 files)",
+    "unit shard 0 shared process (2 files)",
+  ]);
 });

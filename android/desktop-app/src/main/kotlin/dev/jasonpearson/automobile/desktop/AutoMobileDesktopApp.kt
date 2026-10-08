@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSess
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberPaneSessionUuidProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceBindErrorNotice
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceIdleReleasedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient
@@ -618,10 +619,23 @@ fun AutoMobileDesktopApp(
                         !viewingOnly
                     // A bind that failed for another reason is an error, not viewing (#10682).
                     val bindError = desktopSessionState.bindErrorMessage?.takeIf { focused }
+                    // Released for inactivity: the pane stays controllable, and its first input
+                    // binds the device again (owner decision 2026-10-08).
+                    val idleReleased =
+                      focused && desktopSessionState.idleReleasedDeviceId == column.deviceId
+                    val onUserInteraction = desktopSessionState.onUserInteraction
+                    val columnControlClientProvider =
+                      remember(workspaceControlClientProvider, onUserInteraction, column.deviceId) {
+                        val provider: () -> AutoMobileClient? = {
+                          onUserInteraction(column.deviceId)
+                          workspaceControlClientProvider()
+                        }
+                        provider
+                      }
                     val control =
                       rememberWorkspaceDeviceControl(
                         column = column,
-                        clientProvider = workspaceControlClientProvider,
+                        clientProvider = columnControlClientProvider,
                         enabled = controlActive,
                         sessionUuidProvider = paneSessionUuidProvider,
                       )
@@ -638,6 +652,11 @@ fun AutoMobileDesktopApp(
                       )
                       if (viewingOnly) {
                         DeviceViewingNotice(
+                          onTakeControl = desktopSessionState.requestControl,
+                          modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+                        )
+                      } else if (idleReleased) {
+                        DeviceIdleReleasedNotice(
                           onTakeControl = desktopSessionState.requestControl,
                           modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                         )

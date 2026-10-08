@@ -30,6 +30,21 @@ fun DeviceViewingNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier
 }
 
 /**
+ * Shown while the daemon has released the picked device from this desktop for inactivity (2 min
+ * with no tool call or input). The pane still mirrors it and stays controllable: the first input on
+ * it, or [onTakeControl], binds it again. Nothing re-binds it on its own.
+ */
+@Composable
+fun DeviceIdleReleasedNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier) {
+  PaneSessionNotice(
+    text = "Released after inactivity: interact with the device to control it again",
+    actionLabel = "Take control",
+    onAction = onTakeControl,
+    modifier = modifier,
+  )
+}
+
+/**
  * Shown when binding the picked device failed for a reason other than another session holding it
  * (#10682), after the session loop's bounded retries. [onRetry] makes one more bind attempt.
  */

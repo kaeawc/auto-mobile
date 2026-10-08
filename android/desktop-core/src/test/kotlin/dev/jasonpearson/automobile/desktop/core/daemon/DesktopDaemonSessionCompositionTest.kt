@@ -364,30 +364,100 @@ class DesktopDaemonSessionCompositionTest {
       assertEquals(1, transport.count("daemon/releaseSession"))
     }
 
-  @Test
-  fun `an idle-released session re-registers a fresh uuid instead of viewing`() = runComposeUiTest {
-    // #10682 C4: the daemon idle-releases a passive viewer's session; its UUID is terminal.
-    val transport = RecordingDaemonTransport()
+  /** Binds [pixel] under session-1, then has the daemon idle-release session-1 (C4). */
+  private fun ComposeUiTest.idleReleaseBoundSession(
+    transport: RecordingDaemonTransport
+  ): () -> DesktopDaemonSessionState {
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
     var state: DesktopDaemonSessionState? = null
     setContent { state = sessionHost(transport, binding) }
     mainClock.autoAdvance = false
     mainClock.advanceTimeByFrame()
     repeat(2) { tick() }
+    assertEquals("emulator-5554", state?.boundDeviceId)
 
     transport.releasedSessions += "session-1"
     tick()
     mainClock.advanceTimeByFrame()
     mainClock.advanceTimeByFrame()
+    return { requireNotNull(state) }
+  }
+
+  @Test
+  fun `an idle-released session views under a fresh uuid and never re-binds on its own`() =
+    runComposeUiTest {
+      // #10682 C4 + owner decision 2026-10-08: the daemon released the device for inactivity.
+      // Re-binding automatically would defeat that release (and repeat every 2 min).
+      val transport = RecordingDaemonTransport()
+      val state = idleReleaseBoundSession(transport)
+      repeat(5) { tick() }
+
+      // session-1's automatic re-send is refused as terminal exactly once; session-2 never binds.
+      assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+      assertEquals("emulator-5554", state().idleReleasedDeviceId)
+      assertEquals(null, state().boundDeviceId)
+      assertEquals(null, state().viewingDeviceId)
+      assertEquals(null, state().bindErrorMessage)
+      // Still registered and heartbeating as a fresh, unbound viewer.
+      assertEquals(true, state().isRegistered)
+      assertEquals(5, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
+      assertEquals("session-2", state().sessionUuidProvider())
+    }
+
+  @Test
+  fun `input on the idle-released device re-binds it exactly once`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val state = idleReleaseBoundSession(transport)
+    tick()
+
+    state().onUserInteraction("emulator-5556")
+    mainClock.advanceTimeByFrame()
+    tick()
+    assertEquals(2, transport.boundDevices().size)
+
+    repeat(3) { state().onUserInteraction("emulator-5554") }
+    mainClock.advanceTimeByFrame()
     repeat(3) { tick() }
 
-    // session-1's re-bind is refused as terminal exactly once; session-2 binds the device.
     assertEquals(3, transport.boundDevices().size)
-    assertEquals(null, state?.viewingDeviceId)
-    assertEquals(null, state?.bindErrorMessage)
-    assertEquals("emulator-5554", state?.boundDeviceId)
-    assertEquals(3, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
+    assertEquals("emulator-5554", state().boundDeviceId)
+    assertEquals(null, state().idleReleasedDeviceId)
+    assertEquals(0, transport.sessionsFor("daemon/heartbeat").count { it == "session-3" })
   }
+
+  @Test
+  fun `take control on the idle-released device re-binds it`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val state = idleReleaseBoundSession(transport)
+    tick()
+
+    state().requestControl()
+    mainClock.advanceTimeByFrame()
+    repeat(2) { tick() }
+
+    assertEquals(3, transport.boundDevices().size)
+    assertEquals("emulator-5554", state().boundDeviceId)
+    assertEquals(null, state().idleReleasedDeviceId)
+  }
+
+  @Test
+  fun `a daemon restart lapse re-binds on its own because the session was not released`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      tick()
+
+      transport.failNext("daemon/heartbeat")
+      repeat(3) { tick() }
+
+      assertEquals(2, transport.boundDevices().size)
+      assertEquals("emulator-5554", state?.boundDeviceId)
+      assertEquals(null, state?.idleReleasedDeviceId)
+    }
 
   @Test
   fun `take control with a released session uuid binds under a fresh session`() = runComposeUiTest {
@@ -412,6 +482,100 @@ class DesktopDaemonSessionCompositionTest {
     assertEquals("emulator-5554", state?.boundDeviceId)
     assertEquals(3, transport.boundDevices().size)
   }
+
+  @Test
+  fun `a failed bind to another device releases the device this session holds`() =
+    runComposeUiTest {
+      // Finding 1: the daemon throws before rebinding, so session-1 would keep holding pixel
+      // (invisible to every other session) behind a pane that cannot use the new pick.
+      val transport = RecordingDaemonTransport()
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals("emulator-5554", state?.boundDeviceId)
+
+      transport.unrelatedBindFailures = 99
+      binding.value = pixelFold
+      mainClock.advanceTimeByFrame()
+      repeat(MAX_BIND_ATTEMPTS) { tick() }
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      val freshHeartbeats = transport.sessionsFor("daemon/heartbeat").count { it == "session-2" }
+      repeat(3) { tick() }
+
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      // The fresh session shows the error without re-running the bounded retries.
+      assertEquals(1 + MAX_BIND_ATTEMPTS, transport.boundDevices().size)
+      assertEquals("Device 'emulator-5554' not found in device pool", state?.bindErrorMessage)
+      assertEquals(null, state?.boundDeviceId)
+      assertEquals(true, state?.isRegistered)
+      assertEquals(
+        freshHeartbeats + 3,
+        transport.sessionsFor("daemon/heartbeat").count { it == "session-2" },
+      )
+      // session-2 holds nothing, so closing the pane releases nothing more.
+      binding.value = null
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals(1, transport.count("daemon/releaseSession"))
+    }
+
+  @Test
+  fun `a failed bind without a held device stays on the same session`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    setContent { sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+    repeat(6) { tick() }
+
+    assertEquals(0, transport.count("daemon/releaseSession"))
+    assertEquals(setOf<String?>("session-1"), transport.sessionsFor("daemon/heartbeat").toSet())
+  }
+
+  @Test
+  fun `the session stays registered while a failing bind is retried`() = runComposeUiTest {
+    // Finding 3: streams authenticate with the session UUID during the bounded retries too.
+    val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+    val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeByFrame()
+
+    assertEquals(1, transport.boundDevices().size)
+    assertEquals(true, state?.isRegistered)
+    assertEquals("session-1", state?.sessionUuidProvider?.invoke())
+    assertEquals(null, state?.bindErrorMessage)
+    tick()
+    assertEquals(2, transport.boundDevices().size)
+    assertEquals("session-1", state?.sessionUuidProvider?.invoke())
+  }
+
+  @Test
+  fun `a surfaced bind error clears itself once a re-bind after a lapse succeeds`() =
+    runComposeUiTest {
+      // Finding 4: the device comes back after a daemon restart; no Retry click needed.
+      val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(4) { tick() }
+      assertEquals("Device 'emulator-5554' not found in device pool", state?.bindErrorMessage)
+
+      transport.unrelatedBindFailures = 0
+      transport.failNext("daemon/heartbeat")
+      repeat(2) { tick() }
+
+      assertEquals("emulator-5554", state?.boundDeviceId)
+      assertEquals(null, state?.bindErrorMessage)
+    }
 
   @Test
   fun `a refused bind is not a device hold so unfocusing releases nothing`() = runComposeUiTest {

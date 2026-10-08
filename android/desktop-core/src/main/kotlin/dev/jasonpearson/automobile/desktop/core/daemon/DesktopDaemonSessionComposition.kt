@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -55,6 +56,18 @@ data class DesktopDaemonSessionState(
    * resume failure. The pane is not view-only; [requestControl] retries.
    */
   val bindErrorMessage: String? = null,
+  /**
+   * The picked device the daemon released from this desktop for inactivity (owner decision
+   * 2026-10-08: 2 min after the last tool call). The pane keeps viewing it under a fresh, unbound
+   * session and stays controllable; the first input on it ([onUserInteraction]) or [requestControl]
+   * binds it again. The loop never re-binds it on its own, which would defeat the idle release.
+   */
+  val idleReleasedDeviceId: String? = null,
+  /**
+   * Called on the input dispatch path with the device a pane is about to drive. Re-binds an
+   * [idleReleasedDeviceId] once; a no-op otherwise. Safe to call from any thread.
+   */
+  val onUserInteraction: (String) -> Unit = {},
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -115,10 +128,25 @@ fun rememberDesktopDaemonSession(
   var boundDeviceId by remember(session) { mutableStateOf<String?>(null) }
   var viewingDeviceId by remember(session) { mutableStateOf<String?>(null) }
   var bindErrorMessage by remember(session) { mutableStateOf<String?>(null) }
+  // Both survive a session rotation (keyed on the socket, not the session). The idle-released
+  // device is viewed passively by the fresh session until the user interacts with it; a bind error
+  // that forced a rotation (to drop a hold on another device) is carried so the fresh session
+  // shows it instead of re-running the bounded retries.
+  var idleReleasedDeviceId by remember(socketPath) { mutableStateOf<String?>(null) }
+  var carriedBindError by remember(socketPath) { mutableStateOf<Pair<String, String>?>(null) }
   // Bumped only by an explicit "Take control" (#10660). It keys the binding effect, so each click
   // restarts it and makes exactly one fresh bind attempt.
   var controlRequests by remember(session) { mutableStateOf(0) }
   val requestControl: () -> Unit = remember(session) { { controlRequests++ } }
+  val interactionResumed = remember(session) { AtomicBoolean(false) }
+  val onUserInteraction: (String) -> Unit =
+    remember(session) {
+      { deviceId ->
+        if (idleReleasedDeviceId == deviceId && interactionResumed.compareAndSet(false, true)) {
+          controlRequests++
+        }
+      }
+    }
   val bindingMutex = remember(session) { Mutex() }
   val bindingGeneration = remember(session) { AtomicLong(0L) }
 
@@ -157,6 +185,15 @@ fun rememberDesktopDaemonSession(
       return@LaunchedEffect
     }
 
+    // A different pick, or an explicit Take control / pane input, ends the passive idle-released
+    // view; only the same pick with no user action since the release stays passive.
+    if (target?.deviceId != idleReleasedDeviceId || controlRequests > 0) {
+      idleReleasedDeviceId = null
+    }
+    val passive = target != null && idleReleasedDeviceId == target.deviceId
+    val carried = carriedBindError?.takeIf { it.first == target?.deviceId && controlRequests == 0 }
+    carriedBindError = null
+
     var refreshAfterRecovery = false
     var failureLogged = false
     // The daemon acknowledged this effect's binding (#10237). A healthy heartbeat cycle sends only
@@ -171,7 +208,13 @@ fun rememberDesktopDaemonSession(
     // Only the daemon's ownership refusal counts (#10682); any other failed bind is retried up to
     // [MAX_BIND_ATTEMPTS] times and then surfaced as [bindErrorMessage], never as viewing.
     var refused = false
-    var failedBinds = 0
+    var failedBinds = if (carried != null) MAX_BIND_ATTEMPTS else 0
+    if (carried != null) bindErrorMessage = carried.second
+    // This effect's binding was acknowledged and then lost to a heartbeat lapse, so the next bind
+    // is
+    // the loop re-sending it on its own, not a user action. If the daemon answers that the session
+    // was released, it was idle-released: view passively instead of grabbing the device again.
+    var lostAcknowledgedBind = false
     // Set when this session must be replaced by a fresh one before anything else happens: it still
     // holds a device the pane no longer controls (#10682 C3), or the daemon released its UUID
     // terminally (idle release, heartbeat expiry) so it can never bind again (C4).
@@ -181,22 +224,36 @@ fun rememberDesktopDaemonSession(
         bindingMutex.withLock {
           if (bindingGeneration.get() != generation) return@LaunchedEffect
           withContext(ioDispatcher) {
-            if (target == null || refused || failedBinds >= MAX_BIND_ATTEMPTS) {
+            if (target == null || refused || passive || failedBinds >= MAX_BIND_ATTEMPTS) {
               session.ensureRegistered()
             } else if (!bindingAcknowledged) {
               val result = session.client.setActiveDevice(target.deviceId, target.platform)
               when {
                 result.success -> {
                   bindingAcknowledged = true
+                  lostAcknowledgedBind = false
                   failedBinds = 0
+                  // A later bind succeeding (the device came back, the daemon restarted) clears
+                  // a surfaced bind error without a Retry click.
+                  bindErrorMessage = null
                   session.deviceBound(held = true)
                 }
                 result.refusal == SetActiveDeviceRefusal.SESSION_RELEASED -> {
-                  // A released UUID is terminal on the daemon; re-sending it would fail forever.
-                  // Mint a fresh session (as closing the last pane does) and bind under it.
+                  // A released UUID is terminal on the daemon; re-sending it would fail forever,
+                  // so the session is replaced by a fresh one. When the loop was re-sending a lost
+                  // binding on its own, the daemon released the device for inactivity: the fresh
+                  // session only views it until the user interacts. A user-initiated bind (new
+                  // pick, Take control, pane input) binds under the fresh session.
+                  val next =
+                    if (lostAcknowledgedBind) {
+                      idleReleasedDeviceId = target.deviceId
+                      "viewing ${target.deviceId} under a fresh session until it is used again"
+                    } else {
+                      "binding ${target.deviceId} under a fresh session"
+                    }
                   LOG.info(
                     "Desktop session ${session.sessionUuid} was released by the daemon; " +
-                      "re-registering a fresh session: ${result.message}"
+                      "$next: ${result.message}"
                   )
                   rotateSession = true
                 }
@@ -223,15 +280,34 @@ fun rememberDesktopDaemonSession(
                 else -> {
                   failedBinds++
                   val message = result.message ?: "Failed to set active device"
-                  // A bounded transient retry goes through the failure path below (delay, then
-                  // retry the bind); the last attempt surfaces the error and keeps the session
-                  // registered without the device.
-                  check(failedBinds >= MAX_BIND_ATTEMPTS) {
-                    "Binding ${target.deviceId} failed (attempt $failedBinds): $message"
+                  when {
+                    failedBinds < MAX_BIND_ATTEMPTS -> {
+                      // A bounded transient retry: stay registered (streams keep authenticating
+                      // with this UUID) and re-send the bind on the next heartbeat tick.
+                      LOG.info(
+                        "Binding ${target.deviceId} failed (attempt $failedBinds of " +
+                          "$MAX_BIND_ATTEMPTS), retrying: $message"
+                      )
+                      session.ensureRegistered()
+                    }
+                    session.holdsDevice -> {
+                      // The daemon refused before rebinding, so this session still holds the
+                      // device it bound earlier, which an unusable pane would keep from everyone
+                      // else until the idle window. Drop that hold by rotating the session; the
+                      // fresh session shows this error without holding anything.
+                      LOG.warn(
+                        "Could not bind ${target.deviceId}: $message; releasing the previously " +
+                          "bound device"
+                      )
+                      carriedBindError = target.deviceId to message
+                      rotateSession = true
+                    }
+                    else -> {
+                      LOG.warn("Could not bind ${target.deviceId}: $message")
+                      bindErrorMessage = message
+                      session.ensureRegistered()
+                    }
                   }
-                  LOG.warn("Could not bind ${target.deviceId}: $message")
-                  bindErrorMessage = message
-                  session.ensureRegistered()
                 }
               }
             }
@@ -277,8 +353,12 @@ fun rememberDesktopDaemonSession(
         .isSuccess
       if (!alive) {
         refreshAfterRecovery = true
+        if (bindingAcknowledged) lostAcknowledgedBind = true
         bindingAcknowledged = false
         boundDeviceId = null
+        // A surfaced bind error is retried once the session re-registers after a lapse (a daemon
+        // restart may have brought the device back); a success clears it.
+        if (failedBinds >= MAX_BIND_ATTEMPTS) failedBinds = 0
       }
     }
   }
@@ -291,5 +371,7 @@ fun rememberDesktopDaemonSession(
     viewingDeviceId = viewingDeviceId,
     requestControl = requestControl,
     bindErrorMessage = bindErrorMessage,
+    idleReleasedDeviceId = idleReleasedDeviceId,
+    onUserInteraction = onUserInteraction,
   )
 }

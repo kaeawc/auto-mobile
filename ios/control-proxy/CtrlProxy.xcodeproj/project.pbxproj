@@ -107,6 +107,7 @@
 		7BDD419F6FB6A41A3017007D /* SdkPreferenceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 520057BB8FF70A53CA17C826 /* SdkPreferenceClient.swift */; };
 		7CC5DBB93C39192D03AE27E1 /* ElementLocator+ForegroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A886B3100AE7FA92AC9E6FCA /* ElementLocator+ForegroundApp.swift */; };
 		7CD72A94D6DD1BBFCC5A8355 /* RequestStorageCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = E75FD4F7E1A317B6151CDD1C /* RequestStorageCapabilities.swift */; };
+		7E4BB3597B5D059F0399FEE3 /* XCUIQueryBound.swift in Sources */ = {isa = PBXBuildFile; fileRef = C168E7FAFEE984DE769D663C /* XCUIQueryBound.swift */; };
 		7EAF9F56CFE709431DB8DE33 /* AppSwitcherDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08125C56479E153437ACE83C /* AppSwitcherDetector.swift */; };
 		7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */; };
 		8042BC14FFCE449CF774EB8B /* ListDatabasesResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 929A3A8D39F74FF457388031 /* ListDatabasesResponse.swift */; };
@@ -460,6 +461,7 @@
 		BCB8F3CBE9F59194D59D6D75 /* HierarchyDebouncing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncing.swift; sourceTree = "<group>"; };
 		BE082F641352BEE72B8837D5 /* WebSocketServerLoopbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServerLoopbackTests.swift; sourceTree = "<group>"; };
 		C0F41D5B6451C08443819623 /* CommandHandler+Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CommandHandler+Storage.swift"; sourceTree = "<group>"; };
+		C168E7FAFEE984DE769D663C /* XCUIQueryBound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XCUIQueryBound.swift; sourceTree = "<group>"; };
 		C38A7234C20C5AE0671BD0AA /* RotationOrientationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationOrientationTests.swift; sourceTree = "<group>"; };
 		C4F91CACFEF2EA1DE401CC68 /* VoiceOverToggleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggleError.swift; sourceTree = "<group>"; };
 		C6857A73BC6AAAE5D1B811D6 /* ObjCExceptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridge.swift; sourceTree = "<group>"; };
@@ -653,6 +655,7 @@
 				64BB7DB0036B1C9E9A425225 /* WebSocketServer.swift */,
 				B5861E84E2E5E07B1F45E48D /* WireError.swift */,
 				A95FA1EB555DEABA48E644FC /* XCUIGestureCoordinateProvider.swift */,
+				C168E7FAFEE984DE769D663C /* XCUIQueryBound.swift */,
 				7D82763409BDA202A63775F6 /* Models */,
 			);
 			name = CtrlProxyRewrite;
@@ -1236,6 +1239,7 @@
 				C6FCA7F0906FAAFF8B08864B /* WindowInfo.swift in Sources */,
 				59A5A86AEBC4573A6CD96DFE /* WireError.swift in Sources */,
 				12C636EBC1D6C97DCCEDCEAA /* XCUIGestureCoordinateProvider.swift in Sources */,
+				7E4BB3597B5D059F0399FEE3 /* XCUIQueryBound.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

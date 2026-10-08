@@ -13,11 +13,14 @@ import os
             let base: XCUICoordinate
             let resolved: XCUICoordinate
             let application: XCUIApplication
+            /// Screen origin of an inset app window added to a point offset (#6635).
+            let windowTranslation: GesturePoint?
         }
 
         private let app: XCUIApplication
         private let locator: any ElementLocating
         private var relativeApp: XCUIApplication?
+        private var windowTranslation: GesturePoint?
         private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
 
         // Providers are created per gesture; share the reference across the runner process.
@@ -97,6 +100,7 @@ import os
                     let sameFrame = abs(size.width - cached.app.width) <= 1 &&
                         abs(size.height - cached.app.height) <= 1
                     let observation = sameFrame ? cached.observation : GestureSize(width: 0, height: 0)
+                    windowTranslation = readWindowTranslation(target, appFrame: frame)
                     let rotation = DeviceRotation.current() ?? cached.rotation
                     return GestureCoordinateGeometry(
                         app: size, screen: screen,
@@ -110,6 +114,24 @@ import os
             }
         }
 
+        /// Only runs on the mismatch path: an app frame smaller than the screen. One extra query.
+        private func readWindowTranslation(_ target: XCUIApplication, appFrame: CGRect) -> GesturePoint? {
+            do {
+                return try catchingObjCException {
+                    let window = target.windows.firstMatch.frame
+                    return windowedAppTranslation(
+                        appOrigin: GesturePoint(x: Double(appFrame.minX), y: Double(appFrame.minY)),
+                        appSize: GestureSize(width: Double(appFrame.width), height: Double(appFrame.height)),
+                        windowOrigin: GesturePoint(x: Double(window.minX), y: Double(window.minY)),
+                        windowSize: GestureSize(width: Double(window.width), height: Double(window.height))
+                    )
+                }
+            } catch {
+                logger.warning("app window origin unavailable; gestures stay app-frame relative: \(error)")
+                return nil
+            }
+        }
+
         func coordinate(selection: GestureCoordinateSelection) throws -> Coordinate {
             try catchingObjCException {
                 let target: XCUIApplication
@@ -119,11 +141,13 @@ import os
                     target = relativeApp ?? locator.foregroundBundleId
                         .map { XCUIApplication(bundleIdentifier: $0) } ?? app
                 }
-                let base = target.coordinate(withNormalizedOffset: CGVector(
+                let anchor = target.coordinate(withNormalizedOffset: CGVector(
                     dx: selection.normalized.x, dy: selection.normalized.y
                 ))
+                let translation = selection.windowTranslation(windowTranslation)
+                let base = translation.map { anchor.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? anchor
                 let resolved = selection.offset.map { base.withOffset(CGVector(dx: $0.x, dy: $0.y)) } ?? base
-                return Coordinate(base: base, resolved: resolved, application: target)
+                return Coordinate(base: base, resolved: resolved, application: target, windowTranslation: translation)
             }
         }
 

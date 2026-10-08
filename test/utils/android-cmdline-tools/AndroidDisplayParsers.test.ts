@@ -5,6 +5,7 @@ import {
   logicalDisplayIdForPanel,
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
+  parseTopFocusedDisplayId,
 } from "../../../src/utils/android-cmdline-tools/AndroidDisplayParsers";
 
 // The older fold-displays.txt uses cmd display get-displays syntax (inner ON,
@@ -380,5 +381,21 @@ describe("consistent Pixel 10 Pro Fold capture (API 36)", () => {
         expect(ids.has(innerKey)).toBe(true);
       }
     }
+  });
+});
+
+describe("parseTopFocusedDisplayId", () => {
+  const focusFixture = (name: string): string =>
+    readFileSync(join(import.meta.dir, "../../fixtures/android-focus-multidisplay", name), "utf8");
+  test("reads the captured top focused display", () => {
+    expect(
+      parseTopFocusedDisplayId(focusFixture("fold-overlay-focus-inner-window-focus.txt")),
+    ).toBe(0);
+    expect(
+      parseTopFocusedDisplayId(focusFixture("fold-overlay-focus-overlay-window-focus.txt")),
+    ).toBe(7);
+  });
+  test("is undefined when absent", () => {
+    expect(parseTopFocusedDisplayId("")).toBeUndefined();
   });
 });

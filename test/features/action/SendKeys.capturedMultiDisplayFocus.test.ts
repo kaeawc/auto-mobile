@@ -192,6 +192,10 @@ function concurrentHarness(
     stdout: concurrent[focus].displays,
     stderr: "",
   });
+  h.adb.setCommandResponse("mTopFocusedDisplayId", {
+    stdout: fixture(`fold-overlay-focus-${focus}-window-focus.txt`),
+    stderr: "",
+  });
   const transitions = new FakeDisplayTransitionReader();
   const capture = concurrent[focus].byLogicalId[pinned.logicalId];
   const observation: ObserveResult = {
@@ -261,6 +265,9 @@ describe("sendKeys pinned-panel focus check over captured concurrent displays (#
         expect(result.success).toBe(true);
         expect(h.inserted).toEqual(["hello"]);
         expect(h.clientCalls).toEqual(["insert:hello", "clear", "ime"]);
+        expect(h.adb.getExecutedCommands().some((c) => c.includes("mTopFocusedDisplayId"))).toBe(
+          false,
+        );
       });
     }
 
@@ -268,18 +275,34 @@ describe("sendKeys pinned-panel focus check over captured concurrent displays (#
       ["inner", overlayPanel],
       ["overlay", innerPanel],
     ] as const) {
-      // The pinned display's window list has no focused window, so the other display's focus is
-      // reported as unknown rather than by name; the refusal is what protects the input.
+      // The pinned display's window list has no focused window, so the refusal names the focused
+      // panel from the system's top-focused display instead.
       test(`${route} on the connected but unfocused panel while ${focus} holds focus refuses`, async () => {
         const h = concurrentHarness(focus, pinned);
+        const focusedKey = (focus === "inner" ? innerPanel : overlayPanel).key;
         const result = await run(h, pinned.key);
         expect(result.success).toBe(false);
         expect(result.error).toContain(`display "${pinned.key}"`);
-        expect(result.error).toContain("focused panel is unknown");
+        expect(result.error).toContain(`focused panel is "${focusedKey}"`);
+        expect(result.error).toContain(`setActiveDevice {display: "${focusedKey}"}`);
         expect(result.error).toContain("tapOn");
         expect(result.error).toContain("setActiveDevice {display: null}");
         expect(h.clientCalls).toEqual([]);
       });
     }
   }
+
+  test("refusal falls back to unknown when the top focused display cannot be read", async () => {
+    const h = concurrentHarness("inner", overlayPanel);
+    h.adb.setCommandResponse("mTopFocusedDisplayId", { stdout: "", stderr: "" });
+    const result = await h.action.execute(
+      commands,
+      undefined,
+      undefined,
+      undefined,
+      overlayPanel.key,
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("focused panel is unknown");
+  });
 });

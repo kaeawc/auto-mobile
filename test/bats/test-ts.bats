@@ -2089,6 +2089,18 @@ EOF
   [ "$(wc -l <<< "$output")" -eq 3 ]
 }
 
+@test "chunked shards skip the calibration probe so the shared chunk deadline holds" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  probes="$BATS_TEST_TMPDIR/probes"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=600 STUB_PROBE_RECORD="$probes" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/reports" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ ! -e "$probes" ]
+}
+
 @test "a failing chunk fails the shard and lane while later chunks still run" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
@@ -2384,6 +2396,49 @@ run_calibrated_timing_gate() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Infra warning (starved runner): suite.slow exceeded 100ms on its only sample (900.00ms) and cannot be re-run."* ]]
   grep -Fq 'WARN (infra: starved runner; not re-runnable)' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate scopes the first-sample budget to the sample's own shard and final attempt" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite fast 0.010
+  write_junit_report "$report_dir/shard-1.xml" "$OFFENDER_FILE" suite slow 0.200
+  # Shard 0 is starved (3x) on its discarded attempt 1 only; shard 1 is healthy.
+  printf 'unit shard 0 attempt 1 start\t75\t25\nunit shard 0 attempt 2 start\t25\t25\n' \
+    > "$report_dir/calibration-unit-shard-0.tsv"
+  printf 'unit shard 1 attempt 1 start\t25\t25\n' > "$report_dir/calibration-unit-shard-1.tsv"
+  run_calibrated_timing_gate STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 200.00ms of 3 isolated runs)"* ]]
+
+  # The same sample on a shard that itself measured 3x gets the scaled budget.
+  printf 'unit shard 1 attempt 1 start\t75\t25\n' > "$report_dir/calibration-unit-shard-1.tsv"
+  rm -f "$STUB_RECHECK_INDEX"
+  run_calibrated_timing_gate STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Test exceeded"* ]]
+}
+
+@test "timing gate keeps a partially rechecked file fail-closed on a starved runner" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite slow 0.900
+  seed_calibration 250
+  # Deterministic clock: one second elapses per isolated recheck run.
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+runs=0
+if [[ -f "$STUB_RECHECK_INDEX" ]]; then runs="$(cat "$STUB_RECHECK_INDEX")"; fi
+printf '%s\n' "$((1000 + runs))"
+EOF
+  chmod +x "$STUB_BIN/date"
+  run_calibrated_timing_gate STUB_RECHECK_INDEX="$STUB_RECHECK_INDEX" \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$STUB_RECHECK_INDEX")" -eq 1 ]
+  [[ "$output" == *"Could not verify within the 1s recheck budget: suite.slow"* ]]
+  [[ "$output" != *"Infra warning"* ]]
 }
 
 @test "timing gate slowdown override disables scaling and calibration settings are validated" {

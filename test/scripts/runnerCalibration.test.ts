@@ -12,6 +12,7 @@ import {
   positiveNumberFromEnv,
   readCalibrationDirectory,
   runCalibrationProbe,
+  shardSlowdowns,
   slowdownFactor,
 } from "../../scripts/lib/runner-calibration";
 
@@ -110,6 +111,22 @@ describe("calibration samples", () => {
         { label: "end", elapsedMs: 75, baselineMs: 25 },
       ]),
     ).toBe(3);
+  });
+
+  test("shardSlowdowns scopes each shard to its final attempt and ignores other labels", () => {
+    const slowdowns = shardSlowdowns([
+      { label: "unit shard 0 attempt 1 start", elapsedMs: 100, baselineMs: 25 },
+      { label: "unit shard 0 attempt 2 start", elapsedMs: 30, baselineMs: 25 },
+      { label: "unit shard 0 attempt 2 end", elapsedMs: 50, baselineMs: 25 },
+      { label: "unit shard 1 attempt 1 end", elapsedMs: 10, baselineMs: 25 },
+      { label: "changed shard 2 attempt 1 start", elapsedMs: 75, baselineMs: 25 },
+      { label: "start", elapsedMs: 999, baselineMs: 25 },
+    ]);
+    expect(Object.fromEntries(slowdowns)).toEqual({
+      "shard-0": 2,
+      "shard-1": 1,
+      "changed-shard-2": 3,
+    });
   });
 
   test("readCalibrationDirectory reads only calibration TSV files", () => {

@@ -237,6 +237,15 @@ fi
 
 rm -rf "$recheck_dir"
 mkdir -p "$recheck_dir"
+# Per-shard slowdowns (final attempt only) scope the budget to the shard that
+# produced each sample. An explicit BUN_TEST_TIMING_SLOWDOWN applies to all.
+shard_slowdowns_file="$recheck_dir/shard-slowdowns.tsv"
+: > "$shard_slowdowns_file"
+if [[ -z "${BUN_TEST_TIMING_SLOWDOWN:-}" ]]; then
+  if ! bun "$ROOT/scripts/lib/runner-calibration.ts" shard-slowdowns "$report_dir" > "$shard_slowdowns_file"; then
+    : > "$shard_slowdowns_file"
+  fi
+fi
 measured_rows="$recheck_dir/measured.tsv"
 offender_rows="$recheck_dir/offenders.tsv"
 recheck_rows="$recheck_dir/recheck.tsv"
@@ -302,20 +311,37 @@ END {
 # fast sibling's row stand in for a slow one, so aggregate the MAXIMUM duration
 # seen for each identity before deciding whether it is over budget. The first
 # sample is compared with the calibration-scaled budget (unscaled by default).
-awk -F"$field_sep" -v limit_ms="$first_sample_limit_ms" '
+awk -F"$field_sep" -v budget="$max_ms" -v cap="$max_slowdown" \
+  -v override="${BUN_TEST_TIMING_SLOWDOWN:-}" -v slowdown_file="$shard_slowdowns_file" '
+function shard_key(report,   base) {
+  base = report
+  sub(/^.*\//, "", base)
+  if (match(base, /^(changed-)?shard-[0-9]+/)) return substr(base, 1, RLENGTH)
+  return base
+}
+function limit_for(report,   s, k) {
+  k = shard_key(report)
+  s = (override != "") ? override + 0 : ((k in shard_slowdown) ? shard_slowdown[k] : 1)
+  if (s < 1) s = 1
+  if (s > cap + 0) s = cap + 0
+  return budget * s
+}
+BEGIN {
+  while ((getline line < slowdown_file) > 0) {
+    split(line, parts, "\t")
+    shard_slowdown[parts[1]] = parts[2] + 0
+  }
+  close(slowdown_file)
+}
 {
   key = $1 FS $2 FS $3 FS $7
-  if (!(key in maxval) || $4 + 0 > maxval[key]) {
+  if ($4 + 0 > limit_for($6) && (!(key in maxval) || $4 + 0 > maxval[key])) {
     maxval[key] = $4 + 0
     maxrow[key] = $0
   }
 }
 END {
-  for (key in maxrow) {
-    if (maxval[key] > limit_ms) {
-      print maxrow[key]
-    }
-  }
+  for (key in maxrow) print maxrow[key]
 }
 ' "$measured_rows" | sort > "$offender_rows"
 
@@ -528,9 +554,30 @@ awk -F"$field_sep" \
   -v unverified_file="$unverified_list" \
   -v recheck_runs="$recheck_runs" \
   -v runner_starved="$runner_starved" \
+  -v infra="$infra_slowdown" \
+  -v override="${BUN_TEST_TIMING_SLOWDOWN:-}" \
+  -v slowdown_file="$shard_slowdowns_file" \
   -v calibration_note="$calibration_note" \
   -v warning_list="$warning_list" '
+function shard_key(report,   base) {
+  base = report
+  sub(/^.*\//, "", base)
+  if (match(base, /^(changed-)?shard-[0-9]+/)) return substr(base, 1, RLENGTH)
+  return base
+}
+# A row is starved only when ITS shard measured above the infra threshold; an
+# explicit override applies to every shard, matching the global classification.
+function starved_for(report,   k) {
+  if (override != "") return runner_starved + 0
+  k = shard_key(report)
+  return (k in shard_slowdown) && shard_slowdown[k] > infra + 0
+}
 BEGIN {
+  while ((getline line < slowdown_file) > 0) {
+    split(line, parts, "\t")
+    shard_slowdown[parts[1]] = parts[2] + 0
+  }
+  close(slowdown_file)
   printf "# Unit timing budget summary\n\nBudget: %dms; configured re-runs: %d\n", limit_ms, recheck_runs > summary_file
   if (calibration_note != "") printf "\n%s\n", calibration_note > summary_file
   if (stall_notice != "") printf "\n%s\n", stall_notice > summary_file
@@ -634,9 +681,10 @@ FILENAME == recheck_file {
     label = label " #" $5
   }
   if ((key in samples) || ($1 in unverified) || ($1 in rechecked)) rechecked_tests++
-  if (($1 in unverified) && runner_starved + 0) {
-    # The only evidence is a first sample taken on a runner the calibration
-    # probe measured as starved: report infra, not a test regression.
+  if (($1 in unverified) && !(key in samples) && starved_for($6)) {
+    # The only evidence is a first sample from a shard the calibration probe
+    # measured as starved: report infra, not a test regression. A file with
+    # any complete isolated sample stays fail-closed (handled below).
     record("WARN (infra: starved runner; could not verify within the recheck budget)", "not computed")
     printf "Infra warning (starved runner): could not verify %s within the %ds recheck budget (first sample %.2fms; file %s).\n", label, limit_budget, $4, $1 > "/dev/stderr"
     next
@@ -680,7 +728,7 @@ FILENAME == recheck_file {
     fail = 1
     next
   }
-  if (runner_starved + 0) {
+  if (starved_for($6)) {
     record("WARN (infra: starved runner; not re-runnable)", "not computed")
     printf "Infra warning (starved runner): %s exceeded %dms on its only sample (%.2fms) and cannot be re-run.\n", label, limit_ms, $4 > "/dev/stderr"
     next

@@ -352,10 +352,17 @@ UNIT_CALIBRATION_TIMEOUT_SECONDS=15
 # Runner calibration probe (#10583): a fixed ~50ms CPU/event-loop workload at
 # shard start and end. scripts/validate-bun-test-timings.sh reads the samples
 # (calibration-*.tsv next to the JUnit reports) to scale the first-sample
-# 100ms budget on a starved runner. AUTOMOBILE_RUNNER_CALIBRATION=0 skips it.
+# 100ms budget on a starved runner. AUTOMOBILE_RUNNER_CALIBRATION=0 skips it,
+# and so does a chunk deadline (nightly macOS chunk lane).
 run_runner_calibration() {
   local out="$1" label="$2"
   if [[ "${AUTOMOBILE_RUNNER_CALIBRATION:-1}" == 0 ]]; then
+    return 0
+  fi
+  # Chunked shards share one lane-wide deadline (chunk_deadline, set by
+  # run_unit_shards) that a probe's own timeout would overrun on a starved
+  # runner, so they run uncalibrated: the gate then keeps the unscaled budget.
+  if [[ -n "${chunk_deadline:-}" ]]; then
     return 0
   fi
   # Best effort: a failed or stalled probe only loses this sample; it must

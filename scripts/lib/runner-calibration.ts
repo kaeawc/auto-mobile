@@ -127,6 +127,36 @@ export function maxSlowdown(samples: readonly CalibrationSample[]): number | nul
   return Math.max(...samples.map((sample) => slowdownFactor(sample.elapsedMs, sample.baselineMs)));
 }
 
+const SHARD_LABEL_PATTERN = /^(unit|changed) shard (\d+) attempt (\d+) (?:start|end)$/;
+
+/**
+ * Worst slowdown per shard report key (`shard-N` for the unit lane,
+ * `changed-shard-N` for the changed lane), using only the shard's FINAL
+ * attempt: a discarded attempt-1 probe describes a report that was deleted, and
+ * another shard's starvation says nothing about this shard's first samples.
+ * Samples whose label is not a shard label are ignored.
+ */
+export function shardSlowdowns(samples: readonly CalibrationSample[]): Map<string, number> {
+  const finalAttempt = new Map<string, number>();
+  const parsed = samples.flatMap((sample) => {
+    const match = SHARD_LABEL_PATTERN.exec(sample.label);
+    if (!match) {
+      return [];
+    }
+    const key = match[1] === "unit" ? `shard-${match[2]}` : `changed-shard-${match[2]}`;
+    const attempt = Number(match[3]);
+    finalAttempt.set(key, Math.max(attempt, finalAttempt.get(key) ?? 0));
+    return [{ key, attempt, slowdown: slowdownFactor(sample.elapsedMs, sample.baselineMs) }];
+  });
+  const result = new Map<string, number>();
+  for (const { key, attempt, slowdown } of parsed) {
+    if (attempt === finalAttempt.get(key)) {
+      result.set(key, Math.max(slowdown, result.get(key) ?? 1));
+    }
+  }
+  return result;
+}
+
 export function readCalibrationDirectory(directory: string): CalibrationSample[] {
   if (!existsSync(directory)) {
     return [];
@@ -151,7 +181,8 @@ export function positiveNumberFromEnv(value: string | undefined, fallback: numbe
 
 const USAGE =
   "Usage: bun scripts/lib/runner-calibration.ts probe <out.tsv> <label>\n" +
-  "       bun scripts/lib/runner-calibration.ts slowdown <report-dir>";
+  "       bun scripts/lib/runner-calibration.ts slowdown <report-dir>\n" +
+  "       bun scripts/lib/runner-calibration.ts shard-slowdowns <report-dir>";
 
 async function main(args: string[]): Promise<void> {
   const [mode, target, label] = args;
@@ -178,6 +209,13 @@ async function main(args: string[]): Promise<void> {
     // No samples prints nothing: the caller treats that as "no calibration".
     if (slowdown !== null) {
       console.log(slowdown.toFixed(2));
+    }
+    return;
+  }
+  if (mode === "shard-slowdowns" && target) {
+    // One `<report key>\t<slowdown>` line per shard; the gate scopes budgets by it.
+    for (const [key, slowdown] of shardSlowdowns(readCalibrationDirectory(target))) {
+      console.log(`${key}\t${slowdown.toFixed(2)}`);
     }
     return;
   }

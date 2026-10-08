@@ -441,6 +441,16 @@ export type ObserveResult = {
    */
   settled?: boolean;
 
+  /**
+   * Milliseconds the embedded-observation gate spent re-observing (#9591). Present only when the
+   * gate ran. `settled: false` with this near the gate's budget means the screen kept changing or
+   * reads were slow; well below it means the gate stopped early.
+   */
+  settleMs?: number;
+
+  /** Re-observations the embedded gate took; with `settleMs`, separates slow reads from motion. */
+  settlePolls?: number;
+
   /** True if a declarative waitFor condition or stability wait timed out. */
   timedOut?: boolean;
 

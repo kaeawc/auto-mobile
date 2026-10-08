@@ -72,6 +72,14 @@ export interface EmbeddedObservationSettleOutcome {
   observation: ObserveResult;
   /** Whether `observation` passed the stability gate. */
   settled: boolean;
+  /**
+   * Time the gate spent re-observing, on the injected timer; absent when the gate did not run.
+   * A `settled: false` near the budget means the screen moved or reads were slow; well below
+   * it means the gate stopped early (#9591).
+   */
+  settleMs?: number;
+  /** Re-observations the gate took; absent when it did not run or a read threw. */
+  settlePolls?: number;
 }
 
 /**
@@ -113,7 +121,10 @@ export async function settleEmbeddedObservation(
   // never-settling screen ordinarily ends through the loop's own timeout path and
   // never through the fence unless terminal work outlasts the margin (#9880).
   const strictDisplay = isExplicitDisplay(input.observation, input.args);
-  const fence = createSettleFence(input.timer ?? defaultTimer);
+  const timer = input.timer ?? defaultTimer;
+  const startedAt = timer.now();
+  const elapsed = (): number => timer.now() - startedAt;
+  const fence = createSettleFence(timer);
   try {
     const result = await input.settleObserve.execute({
       // Keep post-action polls on the panel selected at the shared tool boundary.
@@ -153,10 +164,20 @@ export async function settleEmbeddedObservation(
         undefined,
         input.signal,
       );
-      return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
+      return terminalCaptureOutcome(input, {
+        observation: input.observation,
+        settled: false,
+        settleMs: elapsed(),
+        settlePolls: result.polls,
+      });
     }
     await captureAdoptedObservation(input, result.observation);
-    return adoptedObservationOutcome(input, result);
+    return adoptedObservationOutcome(input, {
+      observation: result.observation,
+      settled: result.settled,
+      settleMs: elapsed(),
+      settlePolls: result.polls,
+    });
   } catch (error) {
     // Nothing here may fail an action that ALREADY RAN. A settle read that
     // errors (CtrlProxy hiccup, transient device read failure), the deadline
@@ -165,14 +186,22 @@ export async function settleEmbeddedObservation(
     // finalized unless the caller itself cancelled. Rethrowing would
     // turn a completed tap into a tool error, and a client that retried it
     // would tap twice.
-    logger.warn(`[EmbeddedObservationSettle] settle failed: ${errorMessage(error)}`, error);
+    const settleMs = elapsed();
+    logger.warn(
+      `[EmbeddedObservationSettle] settle failed after ${settleMs}ms: ${errorMessage(error)}`,
+      error,
+    );
     await finalizePendingTerminalScreenshot(
       input.observation,
       input.observation,
       undefined,
       input.signal,
     );
-    return terminalCaptureOutcome(input, { observation: input.observation, settled: false });
+    return terminalCaptureOutcome(input, {
+      observation: input.observation,
+      settled: false,
+      settleMs,
+    });
   } finally {
     fence.dispose();
   }
@@ -224,8 +253,8 @@ function adoptedObservationOutcome(
   result: EmbeddedObservationSettleOutcome,
 ): EmbeddedObservationSettleOutcome {
   return terminalCaptureOutcome(input, {
+    ...result,
     observation: mergeActionMetadata(input.observation, result.observation),
-    settled: result.settled,
   });
 }
 
@@ -574,6 +603,20 @@ async function settleEmbeddedObservationResponse(
   await finalizePendingTerminalScreenshot(observation, outcome.observation, undefined, ctx.signal);
   writeToolEnvelopePayload(view, {
     ...view.payload,
-    observation: { ...outcome.observation, settled: outcome.settled },
+    observation: {
+      ...outcome.observation,
+      settled: outcome.settled,
+      ...settleTiming(outcome),
+    },
   });
+}
+
+/** Gate timing for the wire, omitting fields the gate did not measure. */
+function settleTiming(
+  outcome: EmbeddedObservationSettleOutcome,
+): Pick<ObserveResult, "settleMs" | "settlePolls"> {
+  return {
+    ...(outcome.settleMs === undefined ? {} : { settleMs: outcome.settleMs }),
+    ...(outcome.settlePolls === undefined ? {} : { settlePolls: outcome.settlePolls }),
+  };
 }

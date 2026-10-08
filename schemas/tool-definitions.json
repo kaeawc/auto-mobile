@@ -4544,6 +4544,14 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -6583,6 +6591,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -15744,6 +15760,14 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -17783,6 +17807,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -23898,6 +23930,14 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -25937,6 +25977,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -31324,6 +31372,14 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -33363,6 +33419,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
@@ -35031,6 +35095,14 @@
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
                 },
+                "settleMs": {
+                  "description": "Same name/meaning as a full observation's `settleMs` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
+                  "type": "number"
+                },
                 "accessibilityAuditSkipped": {
                   "description": "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
                   "type": "string",
@@ -37070,6 +37142,14 @@
                 "settled": {
                   "description": "Whether this observation passed the hierarchy-stability gate (issue #6866): two consecutive structurally-equal captures. `false` means the bound expired, the action was not navigation-class, or the action failed — in every case the capture was never confirmed stable. Stamped on every embedded action observation.",
                   "type": "boolean"
+                },
+                "settleMs": {
+                  "description": "Milliseconds the hierarchy-stability gate spent re-observing (issue #9591). Present only when the gate ran. With `settled: false`, a value near the gate's budget means the screen kept changing or each read was slow; a value well below it means the gate stopped early.",
+                  "type": "number"
+                },
+                "settlePolls": {
+                  "description": "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
+                  "type": "number"
                 },
                 "accessibilityAuditSkipped": {
                   "description": "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",

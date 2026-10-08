@@ -205,6 +205,8 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "screenshotFormat",
   "screenshotMimeType",
   "settled",
+  "settleMs",
+  "settlePolls",
   "accessibilityAuditSkipped",
 ] as const satisfies readonly (keyof ObserveResult)[];
 

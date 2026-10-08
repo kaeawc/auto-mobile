@@ -261,6 +261,31 @@ run_runner() {
   [[ "$output" != *"Within-file"* ]]
 }
 
+@test "by default tagged slow files lead the single cross-file pass (#10478)" {
+  local name
+  for name in a-plain b-plain c-plain; do
+    printf '@test "%s" { true; }\n' "$name" > "$FIXTURES/${name}.bats"
+  done
+  printf '# bats file_tags=parallel-within-file\n@test "slow" { true; }\n' \
+    > "$FIXTURES/z-slow.bats"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBS=4 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Within-file"* ]]
+  # One GNU Parallel invocation for the parallel pass, no `bats --jobs`.
+  [ "$(grep -c '^parallel:' "$ARGS_FILE")" -eq 1 ]
+  ! grep -q -- '--jobs 4 2>&1' "$ARGS_FILE"
+  # The tagged file is dispatched first despite sorting last by name.
+  [ "$(grep -m1 '^bats:' "$ARGS_FILE")" = "bats:$FIXTURES/z-slow.bats" ]
+  for name in a-plain b-plain c-plain z-slow; do
+    [ "$(grep -c "^bats:$FIXTURES/${name}.bats$" "$ARGS_FILE")" -eq 1 ]
+  done
+}
+
 @test "rejects an invalid within-file jobs override" {
   run env \
     HOME="$FAKE_HOME" \

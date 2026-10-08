@@ -217,6 +217,12 @@ killed shard wrote no record. The bats test `unit shard wall time is each
 shard's own duration, not its reap time (#10583)` covers it: a slow shard 0 and
 a fast shard 1 must report different walls.
 
+Since #10644 the parent reaps attempts in completion order. It polls the live
+shard pids (`AUTOMOBILE_UNIT_SHARD_POLL_SECONDS`, default 0.2 s, because macOS
+Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
+and its retry window is judged against the lane cap at its own end time. The
+per-shard `.wall` record still excludes the end probe and the poll latency.
+
 ## 5. Change made: tier C files share processes
 
 The owner decided on 2026-10-08 to run tier C files in shared processes and

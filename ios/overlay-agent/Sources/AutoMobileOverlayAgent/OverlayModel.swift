@@ -87,6 +87,28 @@ final class OverlayModel: ObservableObject {
         apply { $0.select(index: index, pager: pager, key: key, then: actions) }
     }
 
+    /// A tap on a node's own target or one of its parts; see `OverlaySession.activate`.
+    func activate(_ target: OverlayTapTarget) {
+        apply { $0.activate(target) ?? [] }
+    }
+
+    func choose(key: String, value: String, then actions: [OverlayAction]) {
+        apply { $0.choose(key: key, value: value, then: actions) }
+    }
+
+    func slide(key: String, value: Double, then actions: [OverlayAction]) {
+        apply { $0.slide(key: key, value: value, then: actions) }
+    }
+
+    func setTime(hourKey: String, minuteKey: String, hour: Int, minute: Int, then actions: [OverlayAction]) {
+        apply { $0.setTime(hourKey: hourKey, minuteKey: minuteKey, hour: hour, minute: minute, then: actions) }
+    }
+
+    /// The dialog scrim: closes the dialog without running any button's actions.
+    func closeModal(_ node: OverlayNode) {
+        apply { $0.closeModal(node) }
+    }
+
     func dismiss(reason: OverlayDismissReason) {
         apply { $0.dismiss(reason: reason) }
     }

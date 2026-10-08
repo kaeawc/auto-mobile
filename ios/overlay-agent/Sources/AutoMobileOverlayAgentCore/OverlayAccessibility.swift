@@ -12,7 +12,9 @@ func interpolateOverlayText(
     _ text: String,
     state: [String: JSONValue],
     pager: PagerPosition?
-) -> String {
+)
+    -> String
+{
     var result = text
     if let pager {
         result = result.replacingOccurrences(of: "{page}", with: String(pager.page + 1))
@@ -26,7 +28,8 @@ func interpolateOverlayText(
 
 extension OverlayNode {
     /// The accessible label for this node, in Android's priority order (contentDescription, text,
-    /// icon, node kind). Placeholders are resolved in each. Nil means "let the native control
+    /// icon, node kind); `iconButton` and `fab` fall back to an extended FAB's label, then the icon. Placeholders are
+    /// resolved in each. Nil means "let the native control
     /// name itself": SwiftUI controls and containers are not labelled by their kind (the Android
     /// kind fallback exists only because Compose layouts have no native name), and a decorative
     /// icon has no name until it is tappable.
@@ -34,7 +37,9 @@ extension OverlayNode {
         state: [String: JSONValue],
         pager: PagerPosition?,
         tappable: Bool
-    ) -> String? {
+    )
+        -> String?
+    {
         let authored = contentDescription.map {
             interpolateOverlayText($0, state: state, pager: pager)
         }
@@ -42,6 +47,10 @@ extension OverlayNode {
         let shown = interpolateOverlayText(text ?? "", state: state, pager: pager)
         if !shown.isEmpty { return shown }
         if type == "icon", tappable, let name, !name.isEmpty { return name }
+        // Icon-only controls (#10439): an extended FAB's label, else the icon name.
+        if type == "iconButton" || type == "fab" {
+            return [label, icon].compactMap(\.self).first { !$0.isEmpty }
+        }
         return nil
     }
 }

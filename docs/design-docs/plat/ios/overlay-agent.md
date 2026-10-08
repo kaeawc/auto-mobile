@@ -101,4 +101,32 @@ is simulator-only and device launches will fail to load it.
   separate accessibility service involved.
 - Android reaches any app through CtrlProxy; iOS reaches only apps launched with the agent.
 
+## Material components
+
+The agent draws every component node of the shared vocabulary (#10439) with SwiftUI and
+follows Android's behavior for each: what a tap, pick or drag does, the `change` events it
+emits, and the `<testTag>.<part>` identifiers of composite parts. The tap semantics live in the
+UIKit-free core (`OverlayComponents.swift`), so the `simulate_tap` test hook performs the same
+transition as a real tap, including on a part identifier.
+
+| Node                            | iOS drawing                                                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `switch`, `checkbox`            | `Toggle`; a checkbox is a button whose square reads as selected                                                  |
+| `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol |
+| `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                        |
+| `chip`                          | Rounded button; a filter chip toggles its key and reads as selected                                              |
+| `card`                          | Rounded container, filled, elevated (shadow) or outlined                                                         |
+| `radioGroup`, `segmentedButton` | One button per option, identified `<testTag>.<value>`, with a selected trait                                     |
+| `listItem`                      | One row element; a toggle when it has a trailing switch or checkbox                                              |
+| `iconButton`, `fab`             | Icon buttons labelled by `contentDescription`, a FAB's `label`, else the icon                                    |
+| `topAppBar`                     | Header title; `<testTag>.navigation` and `<testTag>.actions.<index>` buttons                                     |
+| `divider`, `badge`, `progress`  | Hairline, dot or count capsule, determinate `ProgressView` or ring, indeterminate sweep                          |
+| `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                   |
+| `dialog`, `snackbar`            | Drawn above the author tree inside the overlay window; `<testTag>.confirm`, `.dismiss`, `.action`                |
+
+A segmented `Picker` cannot carry per-segment accessibility identifiers, so segmented buttons
+are drawn as a row of buttons. A dialog's scrim covers the whole window and takes every touch
+while it is open, even for floating or sheet placements; a snackbar takes touches only on
+itself. Material icon names map to SF Symbols; a name without a mapping draws a placeholder.
+
 See the [`prototype` tool reference](../../../tools.md#prototype).

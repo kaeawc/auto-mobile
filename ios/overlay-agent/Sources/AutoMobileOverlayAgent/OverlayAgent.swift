@@ -250,6 +250,8 @@ struct OverlayRootView: View {
             if let spec = model.spec {
                 placed(spec)
                     .opacity(Double(spec.window.opacity ?? 100) / 100)
+                OverlayModalLayer(model: model)
+                    .opacity(Double(spec.window.opacity ?? 100) / 100)
                 dismissControl
             }
         }
@@ -318,9 +320,11 @@ struct OverlayRootView: View {
 }
 
 extension View {
-    fileprivate func reportFrame(key: String, model: OverlayModel) -> some View {
+    /// Keeps `model.hitRects[key]` at this view's window frame while it is on screen.
+    func reportFrame(key: String, model: OverlayModel) -> some View {
         onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
             model.hitRects[key] = frame
         }
+        .onDisappear { model.hitRects[key] = nil }
     }
 }

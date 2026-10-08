@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import { checkIosNetworkFilter } from "../../src/doctor/checks/ios";
+import { parseMdmEnrollment } from "../../src/doctor/checks/macMdmEnrollment";
 import type { NetworkFilterHostStatus } from "../../src/features/networkFilter/NetworkFilterInstaller";
 import {
   NETWORK_FILTER_APPROVAL_STEPS,
@@ -15,11 +17,44 @@ const INSTALLED: NetworkFilterHostStatus = {
   report: { state: "ready", controllerState: "ready", detail: "Allow-only provider replied" },
 };
 
-function deps(status: NetworkFilterHostStatus | Error, platform: NodeJS.Platform = "darwin") {
+// Real `profiles status -type enrollment` capture from an unenrolled Mac.
+const NOT_ENROLLED = readFileSync(
+  new URL("../fixtures/macos-profiles/enrollment-not-enrolled.txt", import.meta.url),
+  "utf8",
+);
+// Not a capture (the capture host is unenrolled): the documented enrolled shape of the same command.
+const ENROLLED = "Enrolled via DEP: Yes\nMDM enrollment: Yes (User Approved)\n";
+
+function execReturning(stdout: string | Error) {
+  const calls: Array<[string, string[]]> = [];
+  const execFile = async (file: string, args: string[]) => {
+    calls.push([file, args]);
+    if (stdout instanceof Error) {
+      throw stdout;
+    }
+    return {
+      stdout,
+      stderr: "",
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (s: string) => stdout.includes(s),
+    };
+  };
+  return { calls, execFile };
+}
+
+function deps(
+  status: NetworkFilterHostStatus | Error,
+  platform: NodeJS.Platform = "darwin",
+  enrollment: string | Error = NOT_ENROLLED,
+) {
   const timeouts: Array<number | undefined> = [];
+  const exec = execReturning(enrollment);
   return {
     timeouts,
+    exec,
     value: {
+      execFile: exec.execFile,
       platform: () => platform,
       logger: new FakeLogger(),
       networkFilterInspector: {
@@ -34,6 +69,36 @@ function deps(status: NetworkFilterHostStatus | Error, platform: NodeJS.Platform
     },
   };
 }
+
+const APPROVAL_REQUIRED: NetworkFilterHostStatus = {
+  ...INSTALLED,
+  report: {
+    state: "approval_required",
+    controllerState: "approval_required",
+    detail: "Approve it",
+    nextSteps: NETWORK_FILTER_APPROVAL_STEPS,
+  },
+};
+const UNAVAILABLE: NetworkFilterHostStatus = {
+  ...INSTALLED,
+  report: { state: "unavailable", controllerState: "unavailable", detail: "XPC failed" },
+};
+
+describe("parseMdmEnrollment", () => {
+  test("the unenrolled capture is not enrolled", () => {
+    expect(parseMdmEnrollment(NOT_ENROLLED)).toEqual({ enrolled: false });
+  });
+
+  test("MDM enrollment or DEP enrollment alone counts as enrolled", () => {
+    expect(parseMdmEnrollment(ENROLLED).enrolled).toBe(true);
+    expect(parseMdmEnrollment("Enrolled via DEP: No\nMDM enrollment: Yes\n").enrolled).toBe(true);
+    expect(parseMdmEnrollment("Enrolled via DEP: Yes\nMDM enrollment: No\n").enrolled).toBe(true);
+  });
+
+  test("empty output is not enrolled", () => {
+    expect(parseMdmEnrollment("").enrolled).toBe(false);
+  });
+});
 
 describe("checkIosNetworkFilter", () => {
   test("ready passes and forwards the probe timeout", async () => {
@@ -59,31 +124,50 @@ describe("checkIosNetworkFilter", () => {
     expect(result.recommendation).toContain("--upgrade");
   });
 
-  test("approval required warns with the System Settings steps", async () => {
-    const result = await checkIosNetworkFilter(
-      deps({
-        ...INSTALLED,
-        report: {
-          state: "approval_required",
-          controllerState: "approval_required",
-          detail: "Approve it",
-          nextSteps: NETWORK_FILTER_APPROVAL_STEPS,
-        },
-      }).value,
-    );
+  test("approval required on an unenrolled Mac keeps the steps and adds one MDM line", async () => {
+    const result = await checkIosNetworkFilter(deps(APPROVAL_REQUIRED).value);
     expect(result).toMatchObject({ status: "warn", value: "approval_required" });
-    expect(result.recommendation).toBe(NETWORK_FILTER_APPROVAL_STEPS);
+    expect(result.recommendation).toStartWith(NETWORK_FILTER_APPROVAL_STEPS);
+    expect(result.recommendation).toContain("Managed Macs can pre-approve it via MDM");
+    expect(result.recommendation).not.toContain("mobileconfig");
   });
 
-  test("an unavailable provider warns with the activate hint", async () => {
-    const result = await checkIosNetworkFilter(
-      deps({
-        ...INSTALLED,
-        report: { state: "unavailable", controllerState: "unavailable", detail: "XPC failed" },
-      }).value,
-    );
+  for (const [label, status] of [
+    ["approval_required", APPROVAL_REQUIRED],
+    ["unavailable", UNAVAILABLE],
+  ] as const) {
+    test(`${label} on an MDM-enrolled Mac points to the managed-Macs page and profile`, async () => {
+      const { value, exec } = deps(status, "darwin", ENROLLED);
+      const result = await checkIosNetworkFilter(value);
+      expect(exec.calls).toEqual([["profiles", ["status", "-type", "enrollment"]]]);
+      expect(result.value).toBe(label);
+      expect(result.recommendation).toContain(
+        "https://kaeawc.github.io/auto-mobile/using/managed-macs/",
+      );
+      expect(result.recommendation).toContain("automobile-network-filter.mobileconfig");
+    });
+  }
+
+  test("unavailable on an unenrolled Mac keeps the activate hint and adds the MDM line", async () => {
+    const result = await checkIosNetworkFilter(deps(UNAVAILABLE).value);
     expect(result).toMatchObject({ status: "warn", value: "unavailable", detail: "XPC failed" });
     expect(result.recommendation).toContain(NETWORK_FILTER_INSTALL_COMMAND);
+    expect(result.recommendation).toContain("Managed Macs can pre-approve it via MDM");
+    expect(result.recommendation).not.toContain("mobileconfig");
+  });
+
+  test("a failing enrollment probe falls back to the unmanaged hint", async () => {
+    const { value } = deps(APPROVAL_REQUIRED, "darwin", new Error("profiles missing"));
+    const result = await checkIosNetworkFilter(value);
+    expect(result.recommendation).toContain("Managed Macs can pre-approve it via MDM");
+    expect(result.recommendation).not.toContain("mobileconfig");
+    expect(value.logger.at("debug").length).toBeGreaterThan(0);
+  });
+
+  test("enrollment is not probed when the filter is not waiting on approval", async () => {
+    const { value, exec } = deps(INSTALLED, "darwin", ENROLLED);
+    await checkIosNetworkFilter(value);
+    expect(exec.calls).toEqual([]);
   });
 
   test("an inspector failure warns instead of throwing", async () => {
@@ -95,7 +179,7 @@ describe("checkIosNetworkFilter", () => {
 
   test("skips off macOS and when no inspector is configured", async () => {
     expect((await checkIosNetworkFilter(deps(INSTALLED, "linux").value)).status).toBe("skip");
-    const { platform, logger } = deps(INSTALLED).value;
-    expect((await checkIosNetworkFilter({ platform, logger })).status).toBe("skip");
+    const { platform, logger, execFile } = deps(INSTALLED).value;
+    expect((await checkIosNetworkFilter({ platform, logger, execFile })).status).toBe("skip");
   });
 });

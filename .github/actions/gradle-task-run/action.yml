@@ -85,8 +85,10 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Namespace runners report as self-hosted but, unlike the self-hosted Mac,
+    # need the pinned JDK installed like GitHub-hosted runners.
     - name: "Install JDK"
-      if: runner.environment == 'github-hosted'
+      if: runner.environment == 'github-hosted' || startsWith(runner.name, 'nsc-runner-')
       uses: actions/setup-java@v5
       with:
         distribution: "zulu"

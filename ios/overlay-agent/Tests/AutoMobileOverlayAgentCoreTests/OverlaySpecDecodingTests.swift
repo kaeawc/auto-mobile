@@ -69,3 +69,58 @@ final class OverlaySpecDecodingTests: XCTestCase {
         XCTAssertNil(JSONValue.number(1e300).intValue)
     }
 }
+
+final class OverlayAccessibilityLabelTests: XCTestCase {
+    private func node(_ json: String) throws -> OverlayNode {
+        try JSONDecoder().decode(OverlayNode.self, from: Data(json.utf8))
+    }
+
+    private let state: [String: JSONValue] = ["n": .number(3), "who": .string("Ada")]
+
+    func testContentDescriptionDecodesAndWinsOverText() throws {
+        let box = try node(#"{"type":"text","text":"Close","contentDescription":"Close dialog"}"#)
+        XCTAssertEqual(box.contentDescription, "Close dialog")
+        XCTAssertEqual(box.accessibilityLabel(state: [:], pager: nil, tappable: false), "Close dialog")
+    }
+
+    func testPlaceholdersAreFilledInTheDescription() throws {
+        let box = try node(#"{"type":"box","contentDescription":"{who} has {n} items"}"#)
+        XCTAssertEqual(box.accessibilityLabel(state: state, pager: nil, tappable: false), "Ada has 3 items")
+    }
+
+    func testPagerPlaceholdersResolveInsideAPager() throws {
+        let text = try node(#"{"type":"box","contentDescription":"Page {page} of {pageCount}"}"#)
+        let label = text.accessibilityLabel(state: [:], pager: PagerPosition(page: 1, count: 4), tappable: false)
+        XCTAssertEqual(label, "Page 2 of 4")
+    }
+
+    func testTextIsUsedWhenThereIsNoDescription() throws {
+        let text = try node(#"{"type":"text","text":"Hello {who}"}"#)
+        XCTAssertEqual(text.accessibilityLabel(state: state, pager: nil, tappable: false), "Hello Ada")
+    }
+
+    func testEmptyResolvedDescriptionFallsThroughToText() throws {
+        let text = try node(#"{"type":"text","text":"Fallback","contentDescription":""}"#)
+        XCTAssertEqual(text.accessibilityLabel(state: [:], pager: nil, tappable: false), "Fallback")
+    }
+
+    func testTappableIconReadsAsItsNameButDecorativeIconDoesNot() throws {
+        let icon = try node(#"{"type":"icon","name":"settings"}"#)
+        XCTAssertEqual(icon.accessibilityLabel(state: [:], pager: nil, tappable: true), "settings")
+        XCTAssertNil(icon.accessibilityLabel(state: [:], pager: nil, tappable: false))
+    }
+
+    func testDescriptionBeatsIconName() throws {
+        let icon = try node(#"{"type":"icon","name":"settings","contentDescription":"Open settings"}"#)
+        XCTAssertEqual(icon.accessibilityLabel(state: [:], pager: nil, tappable: true), "Open settings")
+    }
+
+    func testContainersAreNotLabelledByKind() throws {
+        let row = try node(#"{"type":"row"}"#)
+        XCTAssertNil(row.accessibilityLabel(state: [:], pager: nil, tappable: true))
+    }
+
+    func testUnknownPlaceholderIsLeftAsWritten() {
+        XCTAssertEqual(interpolateOverlayText("a {missing} b", state: state, pager: nil), "a {missing} b")
+    }
+}

@@ -102,8 +102,8 @@ struct NodeView: View {
             Image(systemName: sfSymbols[node.name ?? ""] ?? "questionmark.square")
                 .font(.system(size: style?.textSize ?? 24))
                 .foregroundColor(Color(hex: style?.color) ?? .primary)
-                // Decorative: the spec has no content description for icons.
-                .accessibilityHidden(true)
+                // Decorative unless it has an authored description or is tappable.
+                .accessibilityHidden(accessibilityLabelOverride == nil)
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
         case "textField":
@@ -151,16 +151,23 @@ struct NodeView: View {
         if outer { Spacer(minLength: 0) }
     }
 
+    private var pagerPosition: PagerPosition? {
+        pager.map { PagerPosition(page: $0.page, count: $0.count) }
+    }
+
     private var interpolatedText: String {
-        var text = node.text ?? ""
-        if let pager {
-            text = text.replacingOccurrences(of: "{page}", with: String(pager.page + 1))
-                .replacingOccurrences(of: "{pageCount}", with: String(pager.count))
-        }
-        for (key, value) in model.state where text.contains("{\(key)}") {
-            text = text.replacingOccurrences(of: "{\(key)}", with: value.displayString)
-        }
-        return text
+        interpolateOverlayText(node.text ?? "", state: model.state, pager: pagerPosition)
+    }
+
+    /// Text nodes already read their text, so only an authored description or a tappable icon's
+    /// name needs to be applied explicitly.
+    private var accessibilityLabelOverride: String? {
+        guard node.contentDescription != nil || node.type == "icon" else { return nil }
+        return node.accessibilityLabel(
+            state: model.state,
+            pager: pagerPosition,
+            tappable: node.onTap != nil
+        )
     }
 
     private var textView: some View {
@@ -332,6 +339,7 @@ struct NodeView: View {
             .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model))
             .modifier(IdentifierModifier(
                 identifier: node.testTag ?? node.id,
+                label: accessibilityLabelOverride,
                 grouping: grouping
             ))
     }
@@ -431,18 +439,38 @@ enum AccessibilityGrouping {
 
 private struct IdentifierModifier: ViewModifier {
     let identifier: String?
+    let label: String?
     let grouping: AccessibilityGrouping
 
     func body(content: Content) -> some View {
-        switch (identifier, grouping) {
-        case (nil, _):
+        labelled(identified(content))
+    }
+
+    /// A label needs its own accessibility element: on a bare container SwiftUI would spread it
+    /// over the children.
+    @ViewBuilder private func identified(_ content: Content) -> some View {
+        if identifier == nil, label == nil || grouping == .leaf {
             content
-        case let (identifier?, .leaf):
-            content.accessibilityIdentifier(identifier)
-        case let (identifier?, .contain):
-            content.accessibilityElement(children: .contain).accessibilityIdentifier(identifier)
-        case let (identifier?, .combine):
-            content.accessibilityElement(children: .combine).accessibilityIdentifier(identifier)
+        } else if let identifier {
+            grouped(content).accessibilityIdentifier(identifier)
+        } else {
+            grouped(content)
+        }
+    }
+
+    @ViewBuilder private func grouped(_ content: Content) -> some View {
+        switch grouping {
+        case .leaf: content
+        case .contain: content.accessibilityElement(children: .contain)
+        case .combine: content.accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder private func labelled(_ content: some View) -> some View {
+        if let label {
+            content.accessibilityLabel(label)
+        } else {
+            content
         }
     }
 }

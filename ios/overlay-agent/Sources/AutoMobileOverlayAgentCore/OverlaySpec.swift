@@ -259,6 +259,8 @@ final class OverlayNode: Decodable {
     let children: [OverlayNode]?
     let child: OverlayNode?
     let text: String?
+    /// Authored accessible label (#10446); wins over the label derived from text or icon.
+    let contentDescription: String?
     let asset: String?
     let contentScale: String?
     let name: String?

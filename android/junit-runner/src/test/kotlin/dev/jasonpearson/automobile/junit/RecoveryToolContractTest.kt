@@ -209,6 +209,25 @@ class RecoveryToolContractTest {
   }
 
   @Test
+  fun `a device-pinned observe still validates against the observe schema`() {
+    // observe advertises deviceId; the pin turns a raw observe into project=full because the
+    // daemon rejects raw on a sessionless deviceId read (#10089).
+    val client = CapturingClient()
+    val pinned = DevicePinningMCPClient(client, "emulator-5556")
+    runBlocking {
+      AutoMobileAgent.ObserveTool(pinned).execute(AutoMobileAgent.ObserveTool.Args())
+      AutoMobileAgent.ObserveTool(pinned).execute(AutoMobileAgent.ObserveTool.Args(raw = true))
+      AutoMobileAgent.WaitForTool(pinned)
+        .execute(AutoMobileAgent.WaitForTool.Args(text = "Settings"))
+    }
+
+    assertEquals(3, client.calls.size)
+    client.calls.forEach { assertEquals("emulator-5556", it.parameters["deviceId"]) }
+    val problems = client.calls.flatMap(::violations)
+    assertTrue(problems.isEmpty(), problems.joinToString("\n"))
+  }
+
+  @Test
   fun `the contract check rejects the pre-10089 call shapes`() {
     val legacy =
       listOf(

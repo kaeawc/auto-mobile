@@ -155,11 +155,15 @@ open class AutoMobileAgent(
       // caller could pass raw concrete secrets, and matching only those would miss the escaped
       // representation in JSON tool results. Idempotent for the executor's already-expanded input.
       val redactionValues = SecretRedactor.secretValues(secretValues)
+      // Every recovery call — the agent's tools, WaitForTool and the liveness observe — targets
+      // the device the failed step ran on, not whichever device the daemon defaults to (#10089).
+      val deviceClient = DevicePinningMCPClient.pinTo(mcpClient, context.deviceId)
       val agentMcpClient =
-        if (redactionValues.isEmpty()) mcpClient else RedactingMCPClient(mcpClient, redactionValues)
+        if (redactionValues.isEmpty()) deviceClient
+        else RedactingMCPClient(deviceClient, redactionValues)
       val waitForRawMcpClient =
-        if (redactionValues.isEmpty()) mcpClient
-        else FailureRedactingMCPClient(mcpClient, redactionValues)
+        if (redactionValues.isEmpty()) deviceClient
+        else FailureRedactingMCPClient(deviceClient, redactionValues)
       val aiAgent =
         aiAgentFactory.createAIAgentWithMCPTools(
           modelConfig,
@@ -239,7 +243,7 @@ open class AutoMobileAgent(
               // Scrub the post-recovery liveness observe too (issue #6094): its view hierarchy can
               // carry an on-screen secret, and it is surfaced on the RecoveryOutcome. The device is
               // still queried with real values — only the returned text is redacted.
-              SecretRedactor.redact(mcpClient.callTool("observe", emptyMap()), redactionValues)
+              SecretRedactor.redact(deviceClient.callTool("observe", emptyMap()), redactionValues)
             } catch (e: Exception) {
               println("Warning: Post-recovery observe failed: ${e.message}")
               null

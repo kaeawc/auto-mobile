@@ -207,8 +207,15 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
+    val toolClient = slot<AutoMobileAgent.MCPClient>()
+    val rawClient = slot<AutoMobileAgent.MCPClient>()
     every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
+      mockAiAgentFactory.createAIAgentWithMCPTools(
+        modelConfig,
+        capture(toolClient),
+        5,
+        capture(rawClient),
+      )
     } returns mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
 
@@ -222,6 +229,11 @@ class AutoMobileAgentTest {
     assertEquals(1000L, result.recoveryTimeMs)
     assertTrue(result.observeResultAfterRecovery != null)
     coVerify(exactly = 1) { mockAIAgent.run(any()) }
+    // The agent's tools, WaitForTool and the liveness observe all target the failed device
+    // (#10089): with two devices attached an unpinned call is rejected or hits the wrong one.
+    assertTrue(toolClient.captured is DevicePinningMCPClient)
+    assertTrue(rawClient.captured is DevicePinningMCPClient)
+    verify(exactly = 1) { mockMcpClient.callTool("observe", mapOf("deviceId" to "emulator-5554")) }
   }
 
   private val recoveryContext =
@@ -590,9 +602,9 @@ class AutoMobileAgentTest {
     every { mockMcpClient.connect("http://localhost:3000") } just runs
     every { mockMcpClient.disconnect() } just runs
     every { mockConfigProvider.getModelConfig() } returns modelConfig
-    every {
-      mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, mockMcpClient, 5, mockMcpClient)
-    } returns mockAIAgent
+    // A known deviceId pins the clients handed to the agent (#10089), so match any client.
+    every { mockAiAgentFactory.createAIAgentWithMCPTools(modelConfig, any(), 5, any()) } returns
+      mockAIAgent
     every { mockMcpClient.callTool("observe", any()) } returns """{"elements": []}"""
     coEvery { mockAIAgent.run(capture(promptSlot)) } returns "Dismissed the dialog"
 

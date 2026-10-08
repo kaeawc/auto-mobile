@@ -3,7 +3,7 @@ import {
   hasPendingTerminalScreenshot,
   runWithPostActionCaptureScope,
 } from "../../../src/utils/PostActionCaptureContext";
-import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { BootedDevice, Element, ExecResult, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -207,14 +207,28 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
-    test("omitting maxInteractions stops after the pinned default of 200", async () => {
-      explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
+    // Every observation is a new screen with one fresh element, so only the
+    // interaction limit stops the run. The tap itself is stubbed: building a real
+    // TapOnElement per interaction costs ~0.2 ms, which pushed 200 of them over
+    // the 100 ms per-test budget on CI.
+    async function exploreFreshScreens(
+      options: { maxInteractions?: number } = {},
+    ): Promise<{ result: Awaited<ReturnType<Explore["execute"]>>; taps: number }> {
+      const graph = new FakeNavigationGraphManager();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const run = new Explore(
+        { deviceId: "test-device-123", platform: "android", source: "local" } as BootedDevice,
+        null,
+        timer,
+        graph,
+      );
       let observed = 0;
-      explore.observeScreen = {
+      run.observeScreen = {
         execute: async () => {
           observed++;
-          fakeGraph.setCurrentAppId("com.test.app");
-          fakeGraph.setCurrentScreenValue(`Screen${observed}`);
+          graph.setCurrentAppId("com.test.app");
+          graph.setCurrentScreenValue(`Screen${observed}`);
           return createMockObservation([
             createMockViewHierarchyNode({
               text: `Open screen ${observed}`,
@@ -222,16 +236,27 @@ describe("Explore", () => {
             }),
           ]);
         },
-      } as typeof explore.observeScreen;
-      const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
-      try {
-        const result = await explore.execute({});
-        expect(result.interactionsPerformed).toBe(200);
-        expect(result.stopReason).toBe("Reached max interactions limit (200)");
-        expect(tap).toHaveBeenCalledTimes(200);
-      } finally {
-        tap.mockRestore();
-      }
+      } as typeof run.observeScreen;
+      let taps = 0;
+      Reflect.set(run, "tapElement", async () => {
+        taps++;
+        return true;
+      });
+      const result = await run.execute(options);
+      return { result, taps };
+    }
+
+    // JIT warm-up outside the measured test: the first exploration in a process
+    // costs several times a warm one.
+    beforeAll(async () => {
+      await exploreFreshScreens({ maxInteractions: 50 });
+    });
+
+    test("omitting maxInteractions stops after the pinned default of 200", async () => {
+      const { result, taps } = await exploreFreshScreens();
+      expect(result.interactionsPerformed).toBe(200);
+      expect(result.stopReason).toBe("Reached max interactions limit (200)");
+      expect(taps).toBe(200);
     });
 
     test("does not include permission-denial controls in dry-run interactions", async () => {

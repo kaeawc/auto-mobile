@@ -246,6 +246,45 @@ describe("OverlayAgentProvider", () => {
     expect(await fs.readFile(dylibPath())).toEqual(DYLIB);
   });
 
+  test("a refused replace of an already verified dylib keeps that entry and drops the partial", async () => {
+    // Windows refuses to rename over a destination another handle holds open.
+    const refused = Object.assign(new Error("EPERM: operation not permitted, rename"), {
+      code: "EPERM",
+    });
+    const renameFile = async (): Promise<void> => {
+      await fs.writeFile(dylibPath(), DYLIB);
+      throw refused;
+    };
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const provider = makeProvider({ idGenerator: new FakeIdGenerator(["late"]), renameFile });
+      expect(await provider.ensure()).toEqual({ path: dylibPath(), source: "download" });
+    } finally {
+      debug.mockRestore();
+    }
+    expect((await fs.readdir(cacheDir)).sort()).toEqual([
+      OVERLAY_AGENT_CACHE_FILENAME,
+      OVERLAY_AGENT_METADATA_FILENAME,
+    ]);
+    expect(await fs.readFile(dylibPath())).toEqual(DYLIB);
+  });
+
+  test("a refused replace of an unverified dylib fails without deleting that entry", async () => {
+    const refused = Object.assign(new Error("EPERM: operation not permitted, rename"), {
+      code: "EPERM",
+    });
+    const otherBytes = Buffer.from("another attempt's different bytes");
+    const renameFile = async (): Promise<void> => {
+      await fs.writeFile(dylibPath(), otherBytes);
+      throw refused;
+    };
+    await expect(
+      makeProvider({ idGenerator: new FakeIdGenerator(["late"]), renameFile }).ensure(),
+    ).rejects.toThrow("EPERM");
+    expect(await fs.readdir(cacheDir)).toEqual([OVERLAY_AGENT_CACHE_FILENAME]);
+    expect(await fs.readFile(dylibPath())).toEqual(otherBytes);
+  });
+
   test("a failed attempt removes only its own partial", async () => {
     const otherPartial = `${dylibPath()}.other.download`;
     await fs.writeFile(otherPartial, DYLIB);

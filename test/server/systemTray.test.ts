@@ -28,7 +28,7 @@ import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import { logger, LogLevel } from "../../src/utils/logger";
+import { logger } from "../../src/utils/logger";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 
@@ -796,83 +796,58 @@ describe("systemTray unmatched-notification diagnostics", () => {
       criteria.tapActionLabel,
       appMatchTexts[0],
     ];
-    const waitForTarget = async (): Promise<void> => {
-      const fakeTimer = new FakeTimer();
-      const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
-      const fakeObserveScreen = new SequencedObserveScreen([
-        createObservation(createTrayHierarchy(notificationPreview)),
-        createObservation(createTrayHierarchy(notificationPreview)),
-        createObservation(createTrayHierarchy(notificationPreview)),
-        createObservation(
-          createTrayHierarchy(`${criteria.title} ${criteria.body} ${criteria.tapActionLabel}`),
-        ),
-      ]);
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy(notificationPreview)),
+      createObservation(createTrayHierarchy(notificationPreview)),
+      createObservation(createTrayHierarchy(notificationPreview)),
+      createObservation(
+        createTrayHierarchy(`${criteria.title} ${criteria.body} ${criteria.tapActionLabel}`),
+      ),
+    ]);
 
-      setSystemTrayDependencies({
-        timer: fakeTimer,
-        adbFactory: () => fakeAdb,
-        observeScreenFactory: () => fakeObserveScreen,
-      });
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen,
+    });
 
+    // Capture the level-method calls rather than draining the real singleton
+    // sink: logger.flush() awaits every write queued by earlier test files in
+    // the shard, which took seconds on Windows runners. The logger's own level
+    // gate is covered by its tests; this test owns which message goes to which
+    // level.
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
       const resultPromise = waitForNotificationMatch(device, criteria, appMatchTexts, 5000);
-
       await advancePendingSleeps(fakeTimer, 3);
-
       const result = await resultPromise;
 
       expect(result.match).not.toBeNull();
       expect(result.match!.match.matches.title?.text).toBe(criteria.title);
-    };
 
-    const previousLevel = logger.getLogLevel();
-    const stdoutSpy = spyOn(process.stdout, "write").mockImplementation(() => true);
-    logger.enableStdoutLogging();
-    try {
-      // The singleton logger may still have writes queued by earlier tests.
-      // Drain them before this test begins counting its own sink output.
-      await logger.flush();
-      stdoutSpy.mockClear();
-      logger.setLogLevel(LogLevel.INFO);
-      await waitForTarget();
-
-      // Prove the asynchronous sink is live at INFO so the absence checks cannot
-      // pass merely because logger output was never flushed.
-      const infoSentinel = "__system_tray_info_sink_4614__";
-      logger.info(infoSentinel);
-      await logger.flush();
-      expect(
-        stdoutSpy.mock.calls.some((call) => String(call[0] ?? "").includes(infoSentinel)),
-      ).toBe(true);
-
-      const infoDiagnostics = stdoutSpy.mock.calls
+      const diagnosticPrefix = "[systemTray][diag] shade open but no notification matched";
+      const infoDiagnostics = infoSpy.mock.calls
         .map((call) => String(call[0] ?? ""))
-        .filter((line) =>
-          line.includes("[INFO] [systemTray][diag] shade open but no notification matched"),
-        );
+        .filter((line) => line.includes(diagnosticPrefix));
       expect(infoDiagnostics).toHaveLength(1);
       expect(infoDiagnostics[0]).toContain("candidateCount=1");
       for (const payload of payloads) {
         expect(infoDiagnostics[0]).not.toContain(payload);
       }
 
-      stdoutSpy.mockClear();
-      logger.setLogLevel(LogLevel.DEBUG);
-      await waitForTarget();
-      await logger.flush();
-
-      const debugDiagnostics = stdoutSpy.mock.calls
+      const debugDiagnostics = debugSpy.mock.calls
         .map((call) => String(call[0] ?? ""))
-        .filter((line) =>
-          line.includes("[DEBUG] [systemTray][diag] shade open but no notification matched"),
-        );
+        .filter((line) => line.includes(diagnosticPrefix));
       expect(debugDiagnostics).toHaveLength(1);
       for (const payload of payloads) {
         expect(debugDiagnostics[0]).toContain(payload);
       }
     } finally {
-      logger.setLogLevel(previousLevel);
-      logger.disableStdoutLogging();
-      stdoutSpy.mockRestore();
+      infoSpy.mockRestore();
+      debugSpy.mockRestore();
     }
   });
 

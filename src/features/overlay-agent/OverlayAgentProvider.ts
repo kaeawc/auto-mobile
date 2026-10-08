@@ -50,6 +50,21 @@ export interface OverlayAgentProviderDeps {
   downloadTimeoutMs?: number;
   /** Local build outputs tried after the env override and before downloading. */
   localBuildPaths?: string[];
+  /** Atomically moves a verified partial into place; defaults to `fs.rename`. */
+  renameFile?: (from: string, to: string) => Promise<void>;
+}
+
+// Windows refuses to replace a destination another handle still has open (an overlapping
+// provider publishing the same release, or Defender scanning the fresh file).
+const REPLACE_REFUSED_CODES: ReadonlySet<string> = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+function isReplaceRefusal(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    REPLACE_REFUSED_CODES.has(error.code)
+  );
 }
 
 export type OverlayAgentSource = "explicit" | "env" | "local-build" | "cache" | "download";
@@ -80,6 +95,7 @@ export class OverlayAgentProvider {
   private readonly releaseUrlOverride?: string;
   private readonly downloadTimeoutMs: number;
   private readonly localBuildPaths: string[];
+  private readonly renameFile: (from: string, to: string) => Promise<void>;
   private inFlight: Promise<ResolvedOverlayAgent> | null = null;
 
   constructor(deps: OverlayAgentProviderDeps = {}) {
@@ -94,6 +110,7 @@ export class OverlayAgentProvider {
     this.releaseUrlOverride = deps.releaseUrl;
     this.downloadTimeoutMs = deps.downloadTimeoutMs ?? OVERLAY_AGENT_DOWNLOAD_TIMEOUT_MS;
     this.localBuildPaths = deps.localBuildPaths ?? [];
+    this.renameFile = deps.renameFile ?? fs.rename;
   }
 
   static getInstance(): OverlayAgentProvider {
@@ -198,13 +215,17 @@ export class OverlayAgentProvider {
     if (metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
       return false;
     }
+    // The sidecar only records what was once verified; re-hash so same-size corruption or a
+    // stale sidecar left by an interrupted publish never passes as a verified dylib.
+    return this.isPublishedDylibVerified(expected, metadata.size);
+  }
+
+  private async isPublishedDylibVerified(expected: string, size: number): Promise<boolean> {
     try {
       const stats = await fs.stat(this.dylibPath);
-      if (!stats.isFile() || stats.size !== metadata.size) {
+      if (!stats.isFile() || stats.size !== size) {
         return false;
       }
-      // The sidecar only records what was once verified; re-hash so same-size corruption or a
-      // stale sidecar left by an interrupted publish never passes as a verified dylib.
       const { checksum } = await this.checksumCalculator.computeFileSha256(this.dylibPath);
       return checksum.toLowerCase() === expected.toLowerCase();
     } catch (error) {
@@ -222,6 +243,32 @@ export class OverlayAgentProvider {
     }
     await fs.mkdir(this.cacheDir, { recursive: true, mode: SECURE_DIR_MODE });
     return this.cacheDir;
+  }
+
+  /**
+   * Moves this attempt's verified partial into place. Returns false when an overlapping attempt
+   * already published the same verified bytes and the platform refused to replace them; this
+   * attempt then discards its partial and must not remove the other attempt's entry on failure.
+   */
+  private async publishPartial(
+    partialPath: string,
+    expected: string,
+    size: number,
+  ): Promise<boolean> {
+    try {
+      await this.renameFile(partialPath, this.dylibPath);
+      return true;
+    } catch (error) {
+      if (!isReplaceRefusal(error) || !(await this.isPublishedDylibVerified(expected, size))) {
+        throw error;
+      }
+      // Safe to swallow: the destination already holds the expected verified bytes.
+      logger.debug(
+        `[OVERLAY_AGENT] Kept the overlay agent another attempt already published: ${errorMessage(error)}`,
+      );
+      await fs.rm(partialPath, { force: true });
+      return false;
+    }
   }
 
   private async download(expected: string): Promise<string> {
@@ -253,8 +300,7 @@ export class OverlayAgentProvider {
         );
       }
       const { size } = await fs.stat(partialPath);
-      published = true;
-      await fs.rename(partialPath, this.dylibPath);
+      published = await this.publishPartial(partialPath, expected, size);
       await fs.writeFile(
         this.metadataPath,
         JSON.stringify(

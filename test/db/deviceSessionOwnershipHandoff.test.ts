@@ -79,6 +79,7 @@ describe("liveness handoff through the real repository without a schema change",
         await rehydrate();
         timer.advanceTime(500);
         const beforeHeartbeat = manager.getSession("handoff")!.lastHeartbeat;
+        const lastToolActivity = manager.getSession("handoff")!.lastUsedAt;
         expect(
           await handleDaemonRequest(
             {
@@ -94,7 +95,8 @@ describe("liveness handoff through the real repository without a schema change",
             state(),
           ),
         ).toMatchObject({ success: true });
-        // A tokenless legacy heartbeat still refreshes clocks after restart.
+        // A tokenless legacy heartbeat still refreshes the liveness clocks after
+        // restart, but never the tool-activity clock (#10656).
         expect(timer.now()).toBeGreaterThan(beforeHeartbeat);
         expect(manager.getSession("handoff")).toMatchObject({
           lastHeartbeat: timer.now(),
@@ -102,8 +104,9 @@ describe("liveness handoff through the real repository without a schema change",
           hasReceivedHeartbeat: true,
         });
         expect(manager.getSession("handoff")?.livenessOwnerToken).toBeUndefined();
+        expect(manager.getSession("handoff")?.lastUsedAt).toBe(lastToolActivity);
         expect(await repo.getSession("handoff")).toMatchObject({
-          last_used_at_ms: timer.now(),
+          last_used_at_ms: lastToolActivity,
           has_received_heartbeat: 1,
           liveness_owner_token: null,
         });

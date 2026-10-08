@@ -127,7 +127,24 @@ describe("CLI-owned session liveness (#6870)", () => {
     expect(session.heartbeatTimeoutMs).toBe(7_000);
     expect(session.heartbeatTimeoutSource).toBe("custom");
     expect(session.sessionTimeoutMs).toBe(60_000);
-    expect(session.expiresAt).toBe(timer.now() + 60_000);
+    // Re-derived from the last tool activity (creation at 0), not from the
+    // restoring heartbeat: liveness never extends the idle deadline (#10656).
+    expect(session.lastUsedAt).toBe(0);
+    expect(session.expiresAt).toBe(session.lastUsedAt + 60_000);
+  });
+
+  it("adoptCliLivenessPolicy widens the idle deadline from the last tool call, not the declaration (#10656)", async () => {
+    await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+    timer.advanceTime(10_000);
+    await sessionManager.getOrCreateSession("s1");
+    timer.advanceTime(5_000);
+
+    sessionManager.adoptCliLivenessPolicy("s1");
+
+    const session = sessionManager.getSession("s1")!;
+    expect(session.lastUsedAt).toBe(10_000);
+    expect(session.expiresAt).toBe(10_000 + DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS);
+    expect(session.lastHeartbeat).toBe(15_000);
   });
 
   it("restoreHeartbeatLivenessPolicy falls back to the default strict timeout without a snapshot", async () => {

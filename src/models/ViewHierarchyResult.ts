@@ -196,6 +196,8 @@ export type HierarchyUnavailableReason =
   | "device_locked"
   | "incomplete_capture";
 
+export type OwnOverlayPlacement = "fullscreen" | "sheet" | "floating";
+
 export interface ViewHierarchyWindowInfo {
   displayId?: number | null;
   panelUniqueId?: string | null;
@@ -211,6 +213,16 @@ export interface ViewHierarchyWindowInfo {
    * capture-level `packageName`.
    */
   packageName?: string;
+  /**
+   * Placement of CtrlProxy's own interactive overlay window, only on that window and only from an
+   * APK advertising `overlay_window_metadata_v1`. See `ownOverlayHidesApp`.
+   */
+  overlayPlacement?: OwnOverlayPlacement;
+  /**
+   * Whether that overlay's rendered surface is fully opaque (window opacity 100 and an opaque
+   * root or scrim). Absent when unknown or from an older APK.
+   */
+  overlayOpaque?: boolean;
   hierarchy?: ViewHierarchyNode;
   /** Per-window truncation attribution; absent from older runners and complete windows. */
   truncationReasons?: string[] | null;

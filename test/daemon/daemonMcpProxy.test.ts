@@ -8,6 +8,7 @@ import {
   DaemonRestartDeferredError,
   DaemonToolUnavailableError,
   DaemonBoundSessionExpiredError,
+  DaemonConnectionSessionReleasedError,
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -4359,16 +4360,16 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        // The unscoped call renews the args-named binding; nothing heartbeats it (#10664).
-        await proxy.callTool("observe", {});
-        await proxy.callTool("listDevices", {});
+        // An unscoped device call has the bound UUID injected, and that forwarded
+        // call is what renews the replay lease. (Inventory tools such as
+        // listDevices never renew it, and neither do heartbeat acks: #10656.)
+        await proxy.callTool("tapOn", {});
         timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "listDevices", params: { sessionUuid: "session-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
           { toolName: "observe", params: { sessionUuid: "session-a" } },
         ]);
       } finally {
@@ -4452,10 +4453,11 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("successful heartbeats keep the replay lease alive across a failed tool transport", async () => {
-      // The failed tool request did not refresh the daemon session, but the
-      // independent heartbeat keeper did. The binding therefore remains live
-      // across the old replay-TTL boundary (issue #5411).
+    test("neither a failed tool transport nor successful heartbeats keep the replay lease alive", async () => {
+      // The failed tool request did not refresh the replay lease. The heartbeat
+      // keeper proves the owner is alive (issue #5411), but its acks are not tool
+      // use and must not renew the lease either (#10656): past the TTL the idle
+      // binding is retired instead of replayed.
       const timer = new FakeTimer();
       const client = new ScriptedDaemonClient({
         // A minted session is one this proxy claims and heartbeats (#10664).
@@ -4481,15 +4483,18 @@ describe("DaemonMcpProxy", () => {
           DaemonToolOutcomeUnknownError,
         );
         await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
-        await proxy.callTool("observe", {});
+        // The binding was minted from a result, so an unscoped call gets the connection state
+        // rather than the stale UUID (#5689).
+        const retired = proxy.callTool("observe", {});
+        await expect(retired).rejects.toBeInstanceOf(DaemonConnectionSessionReleasedError);
+        await expect(retired).rejects.toMatchObject({ reason: "replay-lease-expired" });
 
-        // The final implicit observe remains bound because heartbeat activity,
-        // not the failed tool attempt, refreshed the live session.
+        // The retired binding was not replayed onto the idle session.
         const lastCall = client.callToolCalls[client.callToolCalls.length - 1];
-        expect(lastCall).toEqual({
-          toolName: "observe",
-          params: { sessionUuid: "session-a" },
-        });
+        expect(lastCall?.toolName).toBe("tapOn");
+        expect(
+          client.callDaemonMethodCalls.some((call) => call.method === "daemon/heartbeat"),
+        ).toBe(true);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

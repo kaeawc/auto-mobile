@@ -9,6 +9,11 @@ on:
     paths:
       - "ios/overlay-agent/**"
       - "scripts/ios/overlay-agent-*"
+      - "scripts/ios/run_with_timeout.sh"
+      - "src/features/overlay/overlaySpec.ts"
+      - "src/features/overlay/overlayValidation.ts"
+      - "src/features/overlay/overlayVariants.ts"
+      - "src/utils/SystemTimer.ts"
       - "test/bats/overlay-agent-smoke.bats"
       - ".github/workflows/overlay-agent-smoke.yml"
   workflow_dispatch:

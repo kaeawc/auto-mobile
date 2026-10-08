@@ -1,6 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "stream",
+  "agentGuidance": false,
   "envMode": "strict",
   "globalDependencies": ["tsconfig.json"],
   "tasks": {

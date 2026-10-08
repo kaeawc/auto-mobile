@@ -15,6 +15,7 @@ import {
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { IosRunnerBusyError } from "../observe/ios/runnerErrorCodes";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import type { KeyboardHierarchyProvider } from "./Keyboard";
 import { getFocusedTextField, type FocusedTextField } from "./ClearText";
@@ -167,6 +168,11 @@ export class Clipboard {
         signal,
       );
     } catch (error) {
+      if (error instanceof IosRunnerBusyError) {
+        // The runner refused it before queuing, so nothing was pasted: a plain retry-safe failure.
+        logger.warn("[Clipboard] Runner busy; iOS clipboard command not run", error);
+        return { success: false, action, error: errorMessage(error) };
+      }
       if (dispatched) {
         logger.warn("[Clipboard] iOS paste reply was not confirmed", error);
         return this.indeterminatePasteResult(errorMessage(error));

@@ -11,6 +11,9 @@ type FocusCall = { method: "set" | "clear"; resourceId: string };
 export class FakeAccessibilityFocusService implements AccessibilityFocusService {
   calls: FocusCall[] = [];
   currentFocusElement: Element | null = null;
+  /** Successive read-backs, consumed in order; the last entry repeats. Overrides currentFocusElement. */
+  focusReadSequence: (Element | null)[] = [];
+  focusReads = 0;
   /** What the runner reported for set/clear; defaults to a real action being performed. */
   outcome: FocusActionOutcome = { alreadySatisfied: false };
   private setThrows: Error | null = null;
@@ -61,6 +64,10 @@ export class FakeAccessibilityFocusService implements AccessibilityFocusService 
     if (this.currentFocusError) {
       return { focusedElement: null, totalTimeMs: 5000, error: this.currentFocusError };
     }
-    return { focusedElement: this.currentFocusElement, totalTimeMs: 1 };
+    const seq = this.focusReadSequence;
+    const focusedElement =
+      seq.length > 0 ? seq[Math.min(this.focusReads, seq.length - 1)] : this.currentFocusElement;
+    this.focusReads++;
+    return { focusedElement, totalTimeMs: 1 };
   }
 }

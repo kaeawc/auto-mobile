@@ -35,6 +35,7 @@ describe("SetAccessibilityFocus cached freshness", () => {
 
   beforeEach(() => {
     timer = new FakeTimer();
+    timer.enableAutoAdvance();
     observe = new FakeObserveScreen();
     service = new FakeAccessibilityFocusService();
     serviceRequests = 0;
@@ -42,6 +43,7 @@ describe("SetAccessibilityFocus cached freshness", () => {
       { name: "focus-freshness", platform: "android", deviceId: "focus-freshness" },
       {
         observeScreen: observe,
+        timer,
         serviceFactory: () => {
           serviceRequests++;
           return service;

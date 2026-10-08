@@ -29,6 +29,16 @@ import type { FocusActionOutcome } from "../observe/android/CtrlProxyFocus";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { BaseVisualChange } from "../action/BaseVisualChange";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+
+/** The accessibility service reports focus asynchronously, so the read-back can lag the action. */
+const FOCUS_READBACK_ATTEMPTS = 5;
+const FOCUS_READBACK_INTERVAL_MS = 100;
+
+function focusMatchesTarget(focused: Element | null | undefined, resourceId: string): boolean {
+  const id = focused?.["resource-id"];
+  return Boolean(id) && (id === resourceId || id?.endsWith(`:id/${resourceId}`) === true);
+}
 
 /**
  * Minimal accessibility-focus capability surface, so this feature can be unit-tested
@@ -75,11 +85,26 @@ function selectedNativeId(
     : undefined;
 }
 
+function unconfirmedWarning(
+  action: string,
+  resourceId: string,
+  focusedElement: Element | undefined,
+  mismatch: boolean | undefined,
+  readError: string | undefined,
+): string {
+  const acknowledged = `Focus ${action} was acknowledged by the accessibility service but`;
+  return mismatch
+    ? `${acknowledged} the focus read-back still reports ${focusedElement?.["resource-id"] ?? "no element"} rather than the target ${resourceId}, so it could not be confirmed.`
+    : `${acknowledged} the resulting focus state could not be read back to confirm it (${readError}).`;
+}
+
 export interface SetAccessibilityFocusDependencies {
   resolver?: Pick<ElementResolver, "resolve">;
   observeScreen?: ObserveScreen;
   /** Factory so production resolves the live CtrlProxy client lazily; fakes inject directly. */
   serviceFactory?: (device: BootedDevice) => AccessibilityFocusService;
+  /** Paces the bounded read-back polling; fakes inject a FakeTimer. */
+  timer?: Timer;
 }
 
 export class SetAccessibilityFocus {
@@ -88,12 +113,14 @@ export class SetAccessibilityFocus {
   private readonly searchable = new SearchableHierarchy();
   private readonly observeScreen: ObserveScreen;
   private readonly serviceFactory: (device: BootedDevice) => AccessibilityFocusService;
+  private readonly timer: Timer;
 
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.observeScreen =
       deps.observeScreen ?? new RealObserveScreen(device, defaultAdbClientFactory);
+    this.timer = deps.timer ?? defaultTimer;
     this.serviceFactory =
       deps.serviceFactory ??
       ((d: BootedDevice) => AndroidCtrlProxyClient.getInstance(d, defaultAdbClientFactory));
@@ -130,11 +157,15 @@ export class SetAccessibilityFocus {
       return { success: false, error: message };
     }
 
-    const { focusedElement, readError } = await this.readBackFocus(service, action);
-    const confirmed = readError === undefined;
+    const { focusedElement, readError, mismatch } = await this.readBackFocus(
+      service,
+      action,
+      resourceId,
+    );
+    const confirmed = readError === undefined && !mismatch;
     const warning = confirmed
       ? undefined
-      : `Focus ${action} was acknowledged by the accessibility service but the resulting focus state could not be read back to confirm it (${readError}).`;
+      : unconfirmedWarning(action, resourceId, focusedElement, mismatch, readError);
     return {
       success: true,
       focusedElement,
@@ -153,6 +184,31 @@ export class SetAccessibilityFocus {
    * couldn't confirm" from "didn't focus" (#3922, #10036).
    */
   private async readBackFocus(
+    service: AccessibilityFocusService,
+    action: string,
+    resourceId: string,
+  ): Promise<{ focusedElement?: Element; readError?: string; mismatch?: boolean }> {
+    let focusedElement: Element | undefined;
+    for (let attempt = 0; attempt < FOCUS_READBACK_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await this.timer.sleep(FOCUS_READBACK_INTERVAL_MS);
+      }
+      const read = await this.readFocusOnce(service, action);
+      if (read.readError !== undefined) {
+        return { readError: read.readError };
+      }
+      focusedElement = read.focusedElement;
+      // The read-back can lag the action by one step (it reports the previous node),
+      // so only a result that agrees with the requested state counts as confirmation.
+      const onTarget = focusMatchesTarget(focusedElement, resourceId);
+      if (action === "clear" ? !onTarget : onTarget) {
+        return { focusedElement };
+      }
+    }
+    return { focusedElement, mismatch: true };
+  }
+
+  private async readFocusOnce(
     service: AccessibilityFocusService,
     action: string,
   ): Promise<{ focusedElement?: Element; readError?: string }> {

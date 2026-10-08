@@ -154,4 +154,25 @@ describe("host shell execution boundary (issue #4068)", () => {
       "refs/heads/main:refs/remotes/origin/main",
     ]);
   });
+
+  test("falls back to main when the stacked PR parent branch was deleted", () => {
+    let checks = 0;
+    const baseRef = resolveBaseRef(
+      "origin/main",
+      { GITHUB_ACTIONS: "true", GITHUB_BASE_REF: "work/deleted-parent" },
+      (_file, args) => {
+        if (args[0] === "rev-parse" && checks++ === 0) {
+          throw new Error("missing base");
+        }
+        if (
+          args.includes("refs/heads/work/deleted-parent:refs/remotes/origin/work/deleted-parent")
+        ) {
+          throw new Error("fatal: couldn't find remote ref");
+        }
+        return "";
+      },
+    );
+
+    expect(baseRef).toBe("origin/main");
+  });
 });

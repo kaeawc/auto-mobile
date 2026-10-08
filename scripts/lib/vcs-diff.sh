@@ -147,3 +147,23 @@ vcs_file_at_merge_base() {
   fi
   git show "$(git merge-base "$base_ref" HEAD):$file"
 }
+
+# Fetch the pull request base for a shallow GitHub Actions checkout and print
+# the resulting remote-tracking ref. A stacked PR whose parent branch was
+# deleted after the run started still carries that stale GITHUB_BASE_REF; the
+# fetch then fails (exit 128), so fall back to origin/main like GitHub does when
+# it retargets the PR. Returns non-zero only when neither ref can be fetched.
+vcs_fetch_pr_base() {
+  local base="$1"
+  if git fetch --no-tags --depth=1 origin "refs/heads/$base:refs/remotes/origin/$base" >/dev/null 2>&1; then
+    printf 'origin/%s\n' "$base"
+    return 0
+  fi
+  if [[ "$base" != main ]]; then
+    echo "warning: PR base '$base' no longer exists on origin (stacked parent deleted?); falling back to origin/main" >&2
+    git fetch --no-tags --depth=1 origin "refs/heads/main:refs/remotes/origin/main" >/dev/null 2>&1 || return 1
+    printf '%s\n' origin/main
+    return 0
+  fi
+  return 1
+}

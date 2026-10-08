@@ -38,6 +38,7 @@ import {
   HighlightOperationResult,
   HighlightShape,
   toActionableError,
+  ActionableError,
   nodeAttributes,
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -3537,7 +3538,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     fileName: string,
     timeoutMs?: number,
   ): Promise<StorageSubscription> {
+    // A provider call into an app without a process starts that process, and the next subscribe
+    // then fails with a misleading "inspection is disabled" (#10246). Decide "not running" here,
+    // before any provider call, so a refused subscribe leaves the app stopped.
+    if (!(await this.isAppProcessRunning(packageName))) {
+      throw new ActionableError(
+        `Cannot subscribe to storage: ${packageName} is not running. Launch the app first (launchApp) and subscribe again.`,
+      );
+    }
     return this.storage.subscribeStorage(packageName, fileName, timeoutMs);
+  }
+
+  /** True when the app has a live process; a failed probe counts as not running. */
+  private async isAppProcessRunning(packageName: string): Promise<boolean> {
+    try {
+      const result = await this.adb.executeCommand(`shell pidof ${shellQuote(packageName)}`);
+      return result.stdout.trim().length > 0;
+    } catch (error) {
+      // pidof exits non-zero when no process matches; that is the expected "not running" answer.
+      logger.debug(`pidof ${packageName} found no process: ${error}`);
+      return false;
+    }
   }
 
   async unsubscribeStorage(subscriptionId: string, timeoutMs?: number): Promise<void> {

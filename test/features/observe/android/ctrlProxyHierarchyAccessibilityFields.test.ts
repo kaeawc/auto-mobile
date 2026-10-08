@@ -6,6 +6,7 @@ import type {
 } from "../../../../src/features/observe/android/types";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import { projectAuditElements } from "../../../../src/features/accessibility/AuditElementProjection";
 import { projectSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../../src/features/utility/SearchableNode";
@@ -176,5 +177,19 @@ describe("CtrlProxyHierarchy accessibility fields", () => {
       }).hierarchy.node?.["view-id"];
     expect(id("First name", "")).toBe(id("First name", "Ada"));
     expect(id("First name", "Ada")).not.toBe(id("Last name", "Ada"));
+  });
+
+  // Wire shape per ViewHierarchyExtractor.kt (`textSize` = textSizeInPx); the repo has no
+  // numeric-textSize CtrlProxy capture (only null), so this node is not a device capture.
+  test("reported textSize (px) survives conversion to the audit element (#10134)", () => {
+    const converted = convert({ ...filledField, textSize: 48 });
+    expect(converted.hierarchy.node).toHaveProperty("textSize", 48);
+    const { elements } = projectAuditElements(converted);
+    expect(elements.find((element) => element.text === "Ada")?.textSize).toBe(48);
+  });
+
+  test.each([null, 0, -1, Number.NaN])("unreported textSize %p is not forwarded", (textSize) => {
+    const converted = convert({ ...filledField, textSize });
+    expect(converted.hierarchy.node).not.toHaveProperty("textSize");
   });
 });

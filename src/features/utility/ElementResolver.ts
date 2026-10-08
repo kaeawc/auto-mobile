@@ -8,7 +8,7 @@ import {
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import { isImeKeyEntry, type SearchableEntry } from "./SearchableNode";
 import { normalizeQuotes } from "./TextMatcher";
-import { boundsArea, boundsEqual } from "../../utils/bounds";
+import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "./elementProperties";
@@ -298,6 +298,56 @@ function promotableFocusAncestor(
     containsBounds(ancestor.bounds, label.bounds) &&
     eligible(ancestor, intent)
   );
+}
+
+/**
+ * A node drawn wholly outside its nearest sized ancestor, or under an ancestor that
+ * is, is parked out of sight — e.g. the iOS 26 `_UIFloatingTabBarItemView` copy UIKit
+ * nests inside a compact tab bar button's image view, far from the button. Each node
+ * is compared with its own nearest sized ancestor only, and window roots and scroll
+ * containers never park a child: content merely scrolled past a viewport stays a
+ * candidate exactly as before.
+ */
+function parkedOutOfSight(node: SearchableEntry, nodes: readonly SearchableEntry[]): boolean {
+  const sized = (entry: SearchableEntry | undefined) =>
+    entry?.bounds && boundsArea(entry.bounds) > 0 ? entry.bounds : undefined;
+  const parentOf = (entry: SearchableEntry) =>
+    entry.parentIndex === undefined ? undefined : nodes[entry.parentIndex];
+  let current: SearchableEntry | undefined = node;
+  while (current) {
+    let ancestor = parentOf(current);
+    while (ancestor && !sized(ancestor)) {
+      ancestor = parentOf(ancestor);
+    }
+    const own = sized(current);
+    const outer = sized(ancestor);
+    if (
+      own &&
+      outer &&
+      ancestor?.parentIndex !== undefined &&
+      !ancestor.affordances.includes("scroll") &&
+      !intersectBounds(own, outer)
+    ) {
+      return true;
+    }
+    current = ancestor;
+  }
+  return false;
+}
+
+/**
+ * Prefer matches that can be seen: when some matches are parked out of sight and
+ * others are not, drop the parked ones so a visible duplicate (the tab button that
+ * carries the same label) wins. With no visible match, keep them all so the caller
+ * still reports the matched element's missing tap area. Applied with and without
+ * `index` so skeleton replay indexes and indexed selection count the same set.
+ */
+function preferVisibleMatches(
+  matches: ElementResolution["matches"],
+  nodes: readonly SearchableEntry[],
+): ElementResolution["matches"] {
+  const visible = matches.filter(({ node }) => !parkedOutOfSight(node, nodes));
+  return visible.length > 0 && visible.length < matches.length ? visible : matches;
 }
 
 export function isWithin(
@@ -643,6 +693,7 @@ export class ElementResolver {
     intent: ResolutionIntent,
     preserveTextScope: boolean,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
+    matched.matches = preferVisibleMatches(matched.matches, snapshot.nodes);
     if (intent.preferToggle && selector.index === undefined && selector.elementId === undefined) {
       const toggles = this.toggleMatches(matched.matches, snapshot, intent);
       if (toggles.length > 0) {

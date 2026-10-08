@@ -12,6 +12,14 @@ import type {
 const ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY = 4;
 
 /**
+ * AccessibilityWindowInfo.TYPE_SYSTEM — how accessibility reports a
+ * `WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY` window, which is what a prototype shown with
+ * `window.layer: "app"` uses (#10496). The status and navigation bars are TYPE_SYSTEM too, so
+ * only an entry whose own root package is CtrlProxy's counts.
+ */
+const ACCESSIBILITY_WINDOW_TYPE_SYSTEM = 3;
+
+/**
  * `ActiveWindowInfo.type` stamped while the product's own interactive overlay
  * holds window focus, so the overlay's presence stays visible even though
  * `appId` names the app behind it.
@@ -43,18 +51,37 @@ export function isOwnOverlayFocused(
 }
 
 /**
- * CtrlProxy's own interactive-overlay windows in a capture, focused or not. The
- * window's own package wins when the APK reports it; older APKs fall back to the
- * capture's package.
+ * CtrlProxy's own interactive-overlay windows in a capture, focused or not.
+ *
+ * Explicit evidence decides first: a window the APK stamped with overlay metadata
+ * (`overlayPlacement` / `overlayOpaque`, `overlay_window_metadata_v1`) and that reports CtrlProxy's
+ * package is the overlay whatever its type. Otherwise the window type decides:
+ * - an accessibility-overlay window (the system layer) is CtrlProxy's when its own package says so,
+ *   and older APKs that omit it fall back to the capture's package;
+ * - a TYPE_SYSTEM window (the app layer, `TYPE_APPLICATION_OVERLAY`) is CtrlProxy's only when its
+ *   own package says so, because SystemUI's bars share that type (aovl D4).
+ * CtrlProxy's activity (an application window) and its keyboard (an input-method window) never count.
  */
 export function ownOverlayWindows(
   hierarchy: Pick<ViewHierarchyResult, "packageName" | "windows"> | undefined,
 ): ViewHierarchyWindowInfo[] {
-  return (hierarchy?.windows ?? []).filter(
-    (window) =>
-      window.type === ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY &&
-      (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE,
-  );
+  return (hierarchy?.windows ?? []).filter((window) => {
+    if (window.packageName === CTRL_PROXY_PACKAGE && hasOverlayMetadata(window)) {
+      return true;
+    }
+    if (window.type === ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY) {
+      return (window.packageName ?? hierarchy?.packageName) === CTRL_PROXY_PACKAGE;
+    }
+    return (
+      window.type === ACCESSIBILITY_WINDOW_TYPE_SYSTEM && window.packageName === CTRL_PROXY_PACKAGE
+    );
+  });
+}
+
+function hasOverlayMetadata(
+  window: Pick<ViewHierarchyWindowInfo, "overlayPlacement" | "overlayOpaque">,
+): boolean {
+  return window.overlayPlacement !== undefined || window.overlayOpaque !== undefined;
 }
 
 /**

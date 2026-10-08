@@ -53,7 +53,13 @@ class DatabaseInspectorProvider : ContentProvider() {
 
     // Check if inspection is enabled
     if (!DatabaseInspector.isEnabled()) {
-      result.putError("DISABLED", "Database inspection is disabled")
+      // Also the reply when a provider call cold-started the app's process before the SDK enabled
+      // inspection (#10210), so the message must not claim it was turned off.
+      result.putError(
+        "DISABLED",
+        "Database inspection is disabled or not yet initialised. If the app was not running, " +
+          "launch it first and retry",
+      )
       return result
     }
 

@@ -315,12 +315,14 @@ const observeSystemTray = (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
   signal?: AbortSignal,
+  requireFreshExtraction = false,
 ): Promise<ObserveResult> => {
   throwIfAborted(signal);
   return awaitWhileRequestIsLive(
     observeScreen.execute({
       skipWaitForFresh: false,
       minTimestamp,
+      ...(requireFreshExtraction ? { requireFreshExtraction: true } : {}),
       skipScreenshot: true,
       skipAccessibilityAudit: true,
       skipPerformanceAudit: true,
@@ -2377,8 +2379,10 @@ const waitForClearAllDismissal = async (
   const observer = observeScreenFactory(device);
   const deadlineMs = timer.now() + awaitTimeoutMs;
   const minTimestamp = await detector.getObservationTimestamp();
+  // A cache entry that merely meets the floor is served `verified: false`, which the readability
+  // check rejects; under load that stays "not readable" until the deadline (#10296/#10431).
   const read = () =>
-    raceWithDeadline(() => observeSystemTray(observer, minTimestamp, signal), {
+    raceWithDeadline(() => observeSystemTray(observer, minTimestamp, signal, true), {
       timer,
       signal,
       timeoutMs: Math.max(0, deadlineMs - timer.now()),
@@ -2441,7 +2445,7 @@ const waitForReadableClearAllMatch = async (
   );
   const read = () =>
     raceWithDeadline(
-      () => observeSystemTray(observeScreenFactory(device), opened.minTimestamp, signal),
+      () => observeSystemTray(observeScreenFactory(device), opened.minTimestamp, signal, true),
       raceOptions(),
     );
   let observation = opened.observation ?? (await read());

@@ -375,6 +375,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // unhealthy, so its onExit keeps the tracking: clearing it would hide a live
   // xcodebuild from the next start, which would then spawn a second one (#10234).
   private retainRunnerTrackingOnSupervisorExit = false;
+  // Runner PIDs terminated on purpose so an in-flight start can relaunch them
+  // (#10653). Their child exit/error events arrive while the kill is in flight,
+  // before untracking, and must not reach the supervisor: its onExit would abort
+  // the shared start and schedule a restart racing the relaunch.
+  private readonly retiredRunnerPids = new Set<number>();
 
   // Shared process startup prevents concurrent callers from launching duplicate runners.
   private sharedStart: SharedCtrlProxyStart | null = null;
@@ -2034,6 +2039,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   private trackStartedXcodebuild(child: ChildProcess): void {
     if (child.pid) {
+      // A reused PID belongs to this new runner, not to a retired one.
+      this.retiredRunnerPids.delete(child.pid);
       this.xcTestProcessId = child.pid;
       this.xcTestProcess = child;
       logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
@@ -2453,7 +2460,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Ignore events from a process we no longer track (e.g. hung-recovery already
       // tore it down and cleared tracking) so a late error can't double-run cleanup
       // or schedule an auto-restart of a deliberately-removed runner (#2834 review).
-      if (this.xcTestProcess !== child) {
+      if (this.xcTestProcess !== child || this.isRetiredRunnerEvent(child, "error")) {
         return;
       }
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
@@ -2467,7 +2474,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // Same untracked-exit guard as the error handler: after hung-recovery (or stop())
       // has already cleaned up and untracked this child, its late exit event must not
       // re-enter handleProcessExit and race an auto-restart against the caller.
-      if (this.xcTestProcess !== child) {
+      if (this.xcTestProcess !== child || this.isRetiredRunnerEvent(child, "exit")) {
         return;
       }
       this.handleProcessExit();
@@ -2510,6 +2517,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     const lower = output.toLowerCase();
     return IOSCtrlProxyManager.IMPORTANT_OUTPUT_MARKERS.some((marker) => lower.includes(marker));
+  }
+
+  /**
+   * True for an exit/error event from a runner retired for relaunch (#10653); the
+   * retirement owns its cleanup, so the event must not reach the supervisor.
+   */
+  private isRetiredRunnerEvent(child: ChildProcess, event: "exit" | "error"): boolean {
+    if (child.pid === undefined || !this.retiredRunnerPids.has(child.pid)) {
+      return false;
+    }
+    if (event === "exit") {
+      this.retiredRunnerPids.delete(child.pid);
+    }
+    logger.debug(`[IOSCtrlProxy] Ignoring ${event} from retired xcodebuild PID ${child.pid}`);
+    return true;
   }
 
   /**
@@ -3006,10 +3028,12 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (final) {
       sharedStart.teardownCommitted = true;
     }
-    // Suppress the exit-handler auto-restart across the kill + child-exit event only.
     this.isStopping = true;
     try {
       if (stillOurs && pid !== null) {
+        // isStopping alone does not gate the child exit handler, which would abort
+        // this start and schedule a duplicate supervisor restart (#10653).
+        this.retiredRunnerPids.add(pid);
         logger.warn(
           `[IOSCtrlProxy] CtrlProxy runner (PID ${pid}) did not answer its health endpoint ` +
             `within ${Math.round(launchWindowMs / 1000)}s of launch; terminating it` +
@@ -3835,6 +3859,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         );
         return;
       }
+      if (this.isRetiredRunnerEvent(child, "error")) {
+        return;
+      }
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
       this.handleProcessExit();
     });
@@ -3844,6 +3871,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         logger.debug(
           `[IOSCtrlProxy] Ignoring exit from stale xcodebuild PID ${child.pid ?? "unknown"}`,
         );
+        return;
+      }
+      if (this.isRetiredRunnerEvent(child, "exit")) {
         return;
       }
       if (code !== 0 || signal) {

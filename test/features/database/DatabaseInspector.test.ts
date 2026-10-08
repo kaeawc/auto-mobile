@@ -5,6 +5,7 @@ import { shellQuote } from "../../../src/utils/shellQuote";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { ActionableError } from "../../../src/models";
 import { ProviderUnavailableError } from "../../../src/features/storage/ProviderUnavailableError";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("DatabaseInspector", () => {
   const device: BootedDevice = {
@@ -17,6 +18,7 @@ describe("DatabaseInspector", () => {
   const databasePath = "/data/data/com.example.app/databases/app.db";
 
   let fakeAdb: FakeAdbClient;
+  let fakeTimer: FakeTimer;
   let inspector: DatabaseInspector;
 
   beforeEach(() => {
@@ -29,7 +31,52 @@ describe("DatabaseInspector", () => {
         stderr,
       );
     };
-    inspector = new DatabaseInspector(device, fakeAdb);
+    // Default: the app has a live process, so a DISABLED reply is reported as-is.
+    fakeAdb.setCommandResult(`shell pidof ${shellQuote(appId)}`, "4242\n");
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    inspector = new DatabaseInspector(device, fakeAdb, fakeTimer);
+  });
+
+  describe("sqlQuery against an app that is not running (#10210)", () => {
+    const sqlCmd = `shell content call --uri 'content://${appId}.automobile.database' --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'select 1'`;
+    const disabled = `Bundle[{success=false, errorType=DISABLED, error=Database inspection is disabled}]`;
+
+    test("names the stopped app and asks for a launch instead of reporting disabled inspection", async () => {
+      fakeAdb.setCommandResult(`shell pidof ${shellQuote(appId)}`, "");
+      fakeAdb.setCommandResultSequence(sqlCmd, [disabled]);
+
+      const error = await inspector.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error.message).toContain("was not running");
+      expect(error.message).toContain("launchApp");
+      expect(fakeTimer.getSleepHistory()).toEqual([DatabaseInspector.COLD_START_RETRY_DELAY_MS]);
+    });
+
+    test("retries once and returns rows when inspection comes up after the cold start", async () => {
+      fakeAdb.setCommandResult(`shell pidof ${shellQuote(appId)}`, "");
+      fakeAdb.setCommandResultSequence(sqlCmd, [
+        { stdout: disabled, stderr: "" },
+        {
+          stdout: `Bundle[{success=true, result={"type":"query","columns":["1"],"rows":[[1]]}}]`,
+          stderr: "",
+        },
+      ]);
+
+      const result = await inspector.executeSQL(appId, databasePath, "select 1");
+
+      expect(result.rows).toEqual([[1]]);
+    });
+
+    test("keeps the disabled message and does not retry when the app is running", async () => {
+      fakeAdb.setCommandResultSequence(sqlCmd, [disabled]);
+
+      const error = await inspector.executeSQL(appId, databasePath, "select 1").catch((e) => e);
+
+      expect(error.message).toBe("Database error (DISABLED): Database inspection is disabled");
+      expect(fakeTimer.getSleepHistory()).toEqual([]);
+    });
   });
 
   describe("listDatabases", () => {

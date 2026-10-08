@@ -19,7 +19,7 @@ import { SwipeResult } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { isRunnerDeadlineCompletedLate } from "../observe/ios/runnerErrorCodes";
+import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -38,7 +38,8 @@ export interface FencedGestureOptions extends GestureOptions {
 
 /**
  * A failed iOS swipe whose effect is unknown: sent without a runner reply (only a reply, success or
- * refusal, is acknowledged), or answered with the runner's "completed after its deadline" error.
+ * refusal, is acknowledged), or answered with the runner's "completed after its deadline" or
+ * "still executing past its bound" error.
  */
 function swipeOutcomeUnknown(
   result: {
@@ -50,7 +51,7 @@ function swipeOutcomeUnknown(
   dispatchedByHost: boolean,
 ): boolean {
   const unacknowledged = (result.dispatched ?? dispatchedByHost) && result.acknowledged !== true;
-  return unacknowledged || isRunnerDeadlineCompletedLate(result);
+  return unacknowledged || isRunnerGestureOutcomeUnknown(result);
 }
 
 /**
@@ -408,7 +409,8 @@ export class ExecuteGesture extends BaseVisualChange {
       return indeterminateResult(errorMessage(error));
     }
     // Only a runner reply (success or refusal) is acknowledged; a sent swipe without one may have run.
-    // A reply saying the gesture finished after its deadline is acknowledged but equally unknown.
+    // A reply saying the gesture finished after its deadline, or is still executing past the
+    // runner's bound, is acknowledged but equally unknown.
     if (!result.success && swipeOutcomeUnknown(result, dispatched)) {
       logger.warn(`[SWIPE] CtrlProxy iOS swipe outcome indeterminate: ${result.error}`);
       return indeterminateResult(result.error ?? "unknown error");
@@ -614,16 +616,22 @@ export class ExecuteGesture extends BaseVisualChange {
   }
 
   /**
-   * A gesture written to the runner whose reply never arrived may already have run, so it is
-   * indeterminate rather than a plain failure. A runner refusal is acknowledged and stays one.
+   * A gesture written to the runner whose reply never arrived, or whose reply says it is still
+   * executing, may already have run, so it is indeterminate rather than a plain failure. A runner
+   * refusal is acknowledged and stays one.
    */
   private throwIfIosGestureUnconfirmed(result: {
     success: boolean;
     error?: string;
+    errorCode?: string;
     dispatched?: boolean;
     acknowledged?: boolean;
   }): void {
-    if (!result.success && result.dispatched && result.acknowledged === false) {
+    if (
+      !result.success &&
+      result.dispatched &&
+      (result.acknowledged === false || isRunnerGestureOutcomeUnknown(result))
+    ) {
       throw new ActionableError(
         `Gesture outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The gesture may have been applied. Do not retry automatically. Observe before retrying.`,
       );

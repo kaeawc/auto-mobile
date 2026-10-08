@@ -83,6 +83,45 @@ describe("ExecuteGesture", () => {
     });
   });
 
+  describe("iOS swipe answered while the runner's gesture is still executing (#10016)", () => {
+    // CommandError.gestureBoundExceeded's text, as the runner sends it (pinned by the contract test).
+    const stillExecuting =
+      "Command request_swipe exceeded execution bound 4497ms in phase xcuitestGesture after 4499ms; XCUITest call is still executing and the runner stays busy until it returns";
+    const queryBound =
+      "Command request_hierarchy exceeded execution bound 10000ms after 10000ms waiting on a live XCUITest query; XCUITest call is still executing and the runner stays busy until it returns";
+
+    async function swipeWith(reply: { error: string; errorCode?: string }) {
+      const fakeClient = new FakeIOSCtrlProxy();
+      fakeClient.setSwipeResult({ success: false, totalTimeMs: 4500, ...reply });
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeClient as unknown as IOSCtrlProxyClient,
+      );
+      return new ExecuteGesture(iosDevice, null, new FakeTimer()).swipe(1, 2, 3, 4);
+    }
+
+    test("the typed code marks the acknowledged reply indeterminate", async () => {
+      const result = await swipeWith({
+        error: "runner said something else",
+        errorCode: "gesture_bound_exceeded",
+      });
+      expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+      expect(result.error).toContain("The swipe may have been applied");
+      expect(result.error).toContain("Do not retry automatically");
+    });
+
+    test("an older runner's wording still marks it indeterminate", async () => {
+      const result = await swipeWith({ error: stillExecuting });
+      expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+      expect(result.error).toContain(stillExecuting);
+    });
+
+    test("the query-bound wording, which has no gesture phase, stays a plain failure", async () => {
+      const result = await swipeWith({ error: queryBound });
+      expect(result.success).toBe(false);
+      expect(result).not.toHaveProperty("outcomeIndeterminate");
+    });
+  });
+
   test("an already aborted gesture dispatches no device command", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();

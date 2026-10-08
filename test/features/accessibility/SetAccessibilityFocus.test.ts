@@ -4,10 +4,12 @@ import { SetAccessibilityFocus } from "../../../src/features/accessibility/SetAc
 import {
   ActionableError,
   BootedDevice,
+  Element,
   ObserveResult,
   ViewHierarchyResult,
 } from "../../../src/models";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityFocusService } from "../../fakes/FakeAccessibilityFocusService";
 
 const androidDevice: BootedDevice = {
@@ -54,15 +56,19 @@ function makeObserveResult(viewHierarchy: ViewHierarchyResult): ObserveResult {
 describe("SetAccessibilityFocus", () => {
   let service: FakeAccessibilityFocusService;
   let observeScreen: FakeObserveScreen;
+  let timer: FakeTimer;
 
   const makeFeature = (device: BootedDevice = androidDevice) =>
     new SetAccessibilityFocus(device, {
       observeScreen,
+      timer,
       serviceFactory: () => service,
     });
 
   beforeEach(() => {
     service = new FakeAccessibilityFocusService();
+    timer = new FakeTimer();
+    timer.enableAutoAdvance();
     observeScreen = new FakeObserveScreen();
     observeScreen.setObserveResult(
       makeObserveResult(
@@ -549,6 +555,54 @@ describe("SetAccessibilityFocus", () => {
     // can distinguish "focused, couldn't confirm" from "didn't focus" (#3922).
     expect(result.confirmed).toBe(false);
     expect(result.warning).toContain("could not be read back");
+  });
+
+  test("waits for a lagging read-back to reach the target before confirming", async () => {
+    const stale = {
+      bounds: bounds(0, 0, 10, 10),
+      "resource-id": "com.example:id/previous",
+    } as Element;
+    const target = {
+      bounds: bounds(0, 0, 100, 50),
+      "resource-id": "com.example:id/title",
+    } as Element;
+    service.focusReadSequence = [stale, target];
+
+    const result = await makeFeature().execute({ resourceId: "com.example:id/title" });
+
+    expect(result.confirmed).toBe(true);
+    expect(result.focusedElement?.["resource-id"]).toBe("com.example:id/title");
+    expect(service.focusReads).toBe(2);
+  });
+
+  test("reports confirmed:false with the observed node when focus never reaches the target", async () => {
+    const stale = {
+      bounds: bounds(0, 0, 10, 10),
+      "resource-id": "com.example:id/previous",
+    } as Element;
+    service.focusReadSequence = [stale];
+
+    const result = await makeFeature().execute({ resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(result.confirmed).toBe(false);
+    expect(result.focusedElement?.["resource-id"]).toBe("com.example:id/previous");
+    expect(result.warning).toContain("com.example:id/previous");
+    expect(service.focusReads).toBe(5);
+  });
+
+  test("clear is unconfirmed while the target still holds focus", async () => {
+    service.currentFocusElement = {
+      bounds: bounds(0, 0, 100, 50),
+      "resource-id": "com.example:id/title",
+    } as Element;
+
+    const result = await makeFeature().execute({
+      action: "clear",
+      resourceId: "com.example:id/title",
+    });
+
+    expect(result.confirmed).toBe(false);
   });
 
   test("treats an error-carrying read-back result as unconfirmed (#10036)", async () => {

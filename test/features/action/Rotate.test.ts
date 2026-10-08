@@ -125,12 +125,33 @@ describe("Rotate", () => {
 
   test("non-default display uses per-display rotation without global settings writes", async () => {
     fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
-    fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
+    fakeAdb.setCommandResponse("shell wm size -d 2", createExecResult("Physical size: 1080x1920"));
     const result = await rotate.execute("landscape", undefined, true, undefined, 2);
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell cmd display get-displays",
-      "shell wm size",
+      "shell wm size -d 2",
+      "shell cmd window user-rotation -d 2 lock 1",
+    ]);
+  });
+
+  test("non-default display reads its own natural orientation (#10362)", async () => {
+    // Display 0 is naturally portrait; display 2 (e.g. a 1280x720 overlay) is naturally
+    // landscape, so landscape on display 2 is its natural rotation 0.
+    fakeAdb.setCommandResponse("shell cmd display get-displays", createExecResult(twoDisplays));
+    // The fake matches by substring in insertion order, so the per-display response goes first.
+    fakeAdb.setCommandResponse("shell wm size -d 2", createExecResult("Physical size: 1280x720"));
+    fakeAdb.setCommandResponse("shell wm size", createExecResult("Physical size: 1080x1920"));
+    const landscape = await rotate.execute("landscape", undefined, true, undefined, 2);
+    expect(landscape.value).toBe(0);
+    const portrait = await rotate.execute("portrait", undefined, true, undefined, 2);
+    expect(portrait.value).toBe(1);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell cmd display get-displays",
+      "shell wm size -d 2",
+      "shell cmd window user-rotation -d 2 lock 0",
+      "shell cmd display get-displays",
+      "shell wm size -d 2",
       "shell cmd window user-rotation -d 2 lock 1",
     ]);
   });

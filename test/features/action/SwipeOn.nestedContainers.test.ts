@@ -112,6 +112,13 @@ for (const [kind, message] of [
     if (kind.includes("ambiguous")) {
       expect(result.error).toContain("Candidates:");
     }
+    // #10325: the structured diagnostic reaches the swipeOn result, as dragAndDrop's does.
+    expect(result).toHaveProperty(
+      "containerFailure",
+      kind === "container-missing"
+        ? { level: 1, reason: "not-found", selector: container.container }
+        : { level: 2, reason: "ambiguous", selector: container },
+    );
     expect(h.runner.getCallCount()).toBe(0);
   });
 }

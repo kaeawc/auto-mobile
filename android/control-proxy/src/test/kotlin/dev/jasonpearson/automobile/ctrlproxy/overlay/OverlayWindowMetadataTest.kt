@@ -143,6 +143,15 @@ class OverlayWindowMetadataTest {
     assertFalse(isInteractiveOverlayWindow(overlay, null, "own.pkg", "own.pkg"))
     assertFalse(isInteractiveOverlayWindow(overlay, title, "other.pkg", "own.pkg"))
     assertFalse(isInteractiveOverlayWindow(overlay, title, null, "own.pkg"))
+    // The app layer's TYPE_APPLICATION_OVERLAY window reports as TYPE_SYSTEM (#10544).
+    val appLayer = AccessibilityWindowInfo.TYPE_SYSTEM
+    assertTrue(isInteractiveOverlayWindow(appLayer, title, "own.pkg", "own.pkg"))
+    // SystemUI's type-3 windows share the type but never the title or package.
+    assertFalse(
+      isInteractiveOverlayWindow(appLayer, "NotificationShade", "com.android.systemui", "own.pkg")
+    )
+    assertFalse(isInteractiveOverlayWindow(appLayer, title, "com.android.systemui", "own.pkg"))
+    assertFalse(isInteractiveOverlayWindow(appLayer, null, "own.pkg", "own.pkg"))
     assertFalse(
       isInteractiveOverlayWindow(
         AccessibilityWindowInfo.TYPE_APPLICATION,

@@ -4,6 +4,8 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
+import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import { RotationSettingManagedError } from "../../models/RotationSettingManagedError";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -33,6 +35,8 @@ export interface RotationRestoreSlot {
   record(state: RotationRestoreState): void;
   clear(): void;
 }
+
+type RotationSettingKey = "user_rotation" | "accelerometer_rotation";
 
 export interface RotateOptions {
   deadlineMs?: number;
@@ -186,19 +190,35 @@ export class Rotate extends BaseVisualChange {
   /** Restore recorded settings through the same CtrlProxy-first/ADB fallback as rotation. */
   async restoreRotationSettings(state: RotationRestoreState, signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal);
-    await this.getRotationLock().runExclusive(() => this.writeRotationSettings({ state, signal }));
+    await this.getRotationLock().runExclusive(() =>
+      this.writeRotationSettings({ state, signal, skipIfCurrent: true }),
+    );
   }
 
   private async writeRotationSettings(options: {
     state: RotationRestoreState;
     signal?: AbortSignal;
     assertCurrentDevice?: () => void;
+    /** Session restore only: rollback paths already compare their own live values first. */
+    skipIfCurrent?: boolean;
   }): Promise<void> {
-    const { state, signal, assertCurrentDevice } = options;
+    const { state, signal, assertCurrentDevice, skipIfCurrent } = options;
     const cleanup: RotationSettingCleanup = { needed: false, assertCurrentDevice };
+    const targets: Array<readonly [RotationSettingKey, number]> = [];
+    if (state.userRotation !== null) {
+      targets.push(["user_rotation", state.userRotation]);
+    }
+    if (state.accelerometerRotation !== null) {
+      targets.push(["accelerometer_rotation", state.accelerometerRotation]);
+    }
     // No observation or device discovery is needed for a settings-only restoration.
     // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
     await runWithAbortSignal(signal, async () => {
+      // Compare-and-skip: settings that already hold the restore values need no write and no
+      // read-back, which a window manager owning a folded panel's rotation could never verify.
+      if (skipIfCurrent && (await this.settingsAlreadyMatch(targets, signal))) {
+        return;
+      }
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
       }
@@ -210,17 +230,53 @@ export class Rotate extends BaseVisualChange {
           cleanup,
         );
       }
-      for (const [key, expected] of [
-        ["user_rotation", state.userRotation],
-        ["accelerometer_rotation", state.accelerometerRotation],
-      ] as const) {
-        if (expected !== null && (await this.readSystemSetting(key, signal)) !== String(expected)) {
-          throw new ActionableError(
-            `Restoration of ${key}=${expected} did not verify by read-back.`,
-          );
+      for (const [key, expected] of targets) {
+        const actual = await this.readSystemSetting(key, signal);
+        if (actual !== String(expected)) {
+          throw await this.readBackMismatch(key, expected, actual, signal);
         }
       }
     });
+  }
+
+  private async settingsAlreadyMatch(
+    targets: ReadonlyArray<readonly [RotationSettingKey, number]>,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    for (const [key, expected] of targets) {
+      if ((await this.readSystemSetting(key, signal)) !== String(expected)) {
+        return false;
+      }
+    }
+    return targets.length > 0;
+  }
+
+  /**
+   * A foldable's window manager re-applies rotation per device state (posture), so a mismatch
+   * there is a typed non-retryable outcome; elsewhere it stays a generic verification failure.
+   */
+  private async readBackMismatch(
+    key: RotationSettingKey,
+    expected: number,
+    actual: string | null,
+    signal?: AbortSignal,
+  ): Promise<ActionableError> {
+    let foldable = false;
+    try {
+      const { stdout } = await awaitWhileRequestIsLive(
+        this.adb.executeCommand("shell cmd device_state print-states"),
+        signal,
+      );
+      foldable = parseAndroidDeviceStates(stdout).length > 1;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`[Rotate] Could not read device states after ${key} read-back mismatch`, error);
+    }
+    return foldable
+      ? new RotationSettingManagedError({ key, expected, actual })
+      : new ActionableError(
+          `Restoration of ${key}=${expected} did not verify by read-back (read ${actual ?? "unset"}).`,
+        );
   }
 
   private async readUserRotation(signal?: AbortSignal): Promise<number | null> {
@@ -1097,7 +1153,7 @@ export class Rotate extends BaseVisualChange {
             await this.assertDisplayExists(display, signal);
             const rotation = rotationForOrientation(
               orientation,
-              await readNaturalLandscape(this.adb, signal),
+              await readNaturalLandscape(this.adb, signal, display),
             );
             const mode = lockOrientation === false ? "free" : "lock";
             await this.adb.executeCommand(

@@ -1,3 +1,4 @@
+import type { ContainerFailure } from "./ActionableError";
 import { Element } from "./Element";
 import { ElementBounds } from "./ElementBounds";
 import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
@@ -44,6 +45,8 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
+  /** Which container level failed to resolve (not found or ambiguous), as dragAndDrop reports. */
+  containerFailure?: ContainerFailure;
   skipped?: "already-checked";
   effect?: TapEffect;
   /** Semantic link confirmed by the native runner. */

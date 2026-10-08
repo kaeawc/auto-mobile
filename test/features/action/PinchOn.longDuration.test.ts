@@ -190,6 +190,48 @@ for (const platform of ["android", "ios"] as const) {
       expect(history()).toHaveLength(1);
     });
 
+    test("iOS gesture still executing past the runner bound is indeterminate (#10016)", async () => {
+      if (platform !== "ios") {
+        return;
+      }
+      timer.enableAutoAdvance();
+      const stillExecuting =
+        "Command request_pinch exceeded execution bound 4497ms in phase xcuitestGesture after 4499ms; XCUITest call is still executing and the runner stays busy until it returns";
+      for (const reply of [
+        { error: "x", errorCode: "gesture_bound_exceeded" },
+        { error: stillExecuting },
+      ]) {
+        ios.setPinchResult({
+          success: false,
+          totalTimeMs: 4500,
+          dispatched: true,
+          acknowledged: true,
+          ...reply,
+        });
+        const result = await pinch.execute({ direction: "in", autoTarget: false });
+        expect(result.error).toStartWith("Pinch outcome is indeterminate:");
+        expect(result.error).toContain("Do not retry automatically");
+      }
+    });
+
+    test("iOS query-bound error stays a plain failure (#10016)", async () => {
+      if (platform !== "ios") {
+        return;
+      }
+      timer.enableAutoAdvance();
+      const queryBound =
+        "Command request_hierarchy exceeded execution bound 10000ms after 10000ms waiting on a live XCUITest query; XCUITest call is still executing and the runner stays busy until it returns";
+      ios.setPinchResult({
+        success: false,
+        totalTimeMs: 100,
+        error: queryBound,
+        dispatched: true,
+        acknowledged: true,
+      });
+      const result = await pinch.execute({ direction: "in", autoTarget: false });
+      expect(result.error).toBe(queryBound);
+    });
+
     test("iOS pre-dispatch failure stays a plain failure", async () => {
       if (platform !== "ios") {
         return;

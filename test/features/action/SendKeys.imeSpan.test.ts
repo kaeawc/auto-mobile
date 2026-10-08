@@ -107,6 +107,60 @@ test("three IME commands perform one light verification read each", async () => 
   expect(verifiedCommands).toEqual([1, 2, 3]);
 });
 
+// #10411 keeps one IME input session across consecutive type commands; the device must append
+// each request at the live caret. The host sends each text once and verifies the combined field.
+function fieldModel(insert: (field: string, text: string) => string) {
+  let field = "";
+  const read: SendKeysObserver = {
+    execute: async () => ({
+      ...focused,
+      viewHierarchy: {
+        hierarchy: {
+          node: { $: { focused: "true", class: "android.widget.EditText", text: field } },
+        },
+      },
+    }),
+  };
+  const h = harness(read);
+  const commit = h.client.commitViaIme;
+  h.client.commitViaIme = async (...args) => {
+    const result = await commit(...args);
+    field = insert(field, args[0]);
+    return result;
+  };
+  return { h, read, field: () => field };
+}
+
+test("two multi-character IME types in one span append in order without a keyboard switch", async () => {
+  const { h, field } = fieldModel((current, text) => current + text);
+  const result = await h.action.execute([type("abc"), type("def")]);
+  expect(result).toMatchObject({ success: true, completedCommands: 2 });
+  expect(h.committed).toEqual(["abc", "def"]);
+  expect(field()).toBe("abcdef");
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("a second IME type that lands reversed in the span is a verification failure", async () => {
+  const { h, read } = fieldModel((current, text) =>
+    current ? current + [...text].reverse().join("") : text,
+  );
+  // Verification re-reads the field on the fake clock before reporting the mismatch.
+  h.timer.enableAutoAdvance();
+  const action = new SendKeys(h.device, h.adbFactory, {
+    executor: new DefaultSendKeysCommandExecutor(h.device, h.adbFactory, read, {
+      textClient: h.client,
+      timer: h.timer,
+    }),
+    observer: read,
+    timer: h.timer,
+    timestampProvider: { now: async () => 1 },
+  });
+  const result = await action.execute([type("abc"), type("def")]);
+  expect(result).toMatchObject({ success: false, completedCommands: 1, failedIndex: 1 });
+  expect(result.error).toContain('the focused field holds "abcfed"');
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
 test("light IME verification still rejects a mismatched multi-segment suffix", async () => {
   const read: SendKeysObserver = {
     execute: async () => ({

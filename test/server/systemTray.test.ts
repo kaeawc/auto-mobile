@@ -4627,4 +4627,40 @@ describe("Android systemTray clearAll initial shade readiness", () => {
       expect(timer.now()).toBeLessThan(2000);
     });
   }
+  test("clearAll forces a device capture because a floor-meeting cached tree is served unverified (#10296)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    const observer = new FakeObserveScreen();
+    const swipes = () =>
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe"));
+    observer.setObserveResult(() =>
+      swipes().length === 0
+        ? createObservation(headerlessTwoNotificationGroups.expanded)
+        : createEmptyTrayObservation(),
+    );
+    // The hierarchy source serves its cache (verified: false) unless a device capture is required.
+    const execute = observer.execute.bind(observer);
+    observer.execute = async (options) => {
+      const observation = await execute(options);
+      return options?.requireFreshExtraction
+        ? observation
+        : { ...observation, freshness: { isFresh: false, verified: false } as never };
+    };
+    setSystemTrayDependencies({
+      timer,
+      adbFactory: () => adb,
+      observeScreenFactory: () => observer,
+    });
+    registerInteractionTools();
+
+    const result = await ToolRegistry.getTool("systemTray")!.deviceAwareHandler!(device, {
+      action: "clearAll",
+      notification: { title: "Delta" },
+      awaitTimeout: 2000,
+    });
+
+    expect(JSON.parse(result.content[0].text).dismissedCount).toBe(1);
+    expect(swipes()).toHaveLength(1);
+  });
 });

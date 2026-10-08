@@ -9,6 +9,7 @@ import { FakeOverlayAssetFileReader } from "../fakes/FakeOverlayAssetFileReader"
 import { FakeTimer } from "../fakes/FakeTimer";
 import { event } from "../helpers/overlayTestEvent";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
+import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const simulator: BootedDevice = { deviceId: "SIM-UDID", platform: "ios", name: "iPhone" };
 const png = Buffer.concat([
@@ -36,7 +37,9 @@ describe("prototype tool on an iOS simulator", () => {
   let timer: FakeTimer;
   let restore: () => void;
   let unsubscribe: () => void;
+  let invalidator: FakeDeviceWindowCacheInvalidator;
   beforeEach(() => {
+    invalidator = new FakeDeviceWindowCacheInvalidator();
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     ctrlProxy = new FakeCtrlProxy(timer);
@@ -49,6 +52,7 @@ describe("prototype tool on an iOS simulator", () => {
       clock: timer,
       timer,
       assetFileReader: new FakeOverlayAssetFileReader().addFile("/img/logo.png", png),
+      cacheInvalidator: invalidator,
     });
   });
   afterEach(() => {
@@ -107,6 +111,13 @@ describe("prototype tool on an iOS simulator", () => {
     expect(payload.lastResult).toMatchObject({ id: "panel", lastAction: "dismiss", success: true });
     expect(types()).toEqual(["show_overlay", "show_overlay", "dismiss_overlay"]);
     expect(agent.requests[2].body).toEqual({ id: "panel" });
+  });
+
+  test("a landed show and dismiss retire the simulator's cached observation", async () => {
+    await call({ action: "show", spec });
+    expect(invalidator.calls).toEqual([simulator]);
+    await call({ action: "dismiss", id: "panel" });
+    expect(invalidator.calls).toEqual([simulator, simulator]);
   });
 
   test("agent overlay_event pushes reach awaitEvent through the shared coordinator", async () => {

@@ -1,4 +1,7 @@
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -35,6 +38,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import * as iosProcessState from "../../src/features/action/CrashApp";
 import * as androidProcessState from "../../src/utils/android-cmdline-tools/androidProcessState";
 import { shellQuote } from "../../src/utils/shellQuote";
+
+const documentsTarget = {
+  domain: "app_containers" as const,
+  appId: "com.example.app",
+  container: "documents" as const,
+};
+const DIRECTORY_MARKER = "AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY";
+/** The directory-destination guard every Android write script starts with. */
+const refuseDirectory = (destination: string) =>
+  `if [ -d '${destination}' ]; then echo ${DIRECTORY_MARKER} >&2; exit 1; fi; `;
 
 function execResult(stdout: string, stderr = "") {
   return {
@@ -335,6 +348,63 @@ describe("AppFileService", () => {
       }
     });
 
+    test("refuses a destination that is an existing directory and leaves no temp file in it", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError("sh -c", new Error(`exit 1 ${DIRECTORY_MARKER}`));
+      const service = createAppFileServiceForTesting({
+        adbFactory: adbFactoryFor(adb),
+        fileSystem: new TestAppFileFileSystem(),
+        idGenerator: new CountingIdGenerator("tmp"),
+        timer: new FakeTimer(),
+      });
+
+      const error = await service
+        .putFile({
+          device,
+          userId: 0,
+          target: documentsTarget,
+          files: [{ contentText: "clobber-dir", destinationPath: "sub" }],
+        })
+        .then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+
+      expect((error as Error).message).toContain("the destination is an existing directory");
+      expect(adb.getExecutedCommands()).toContain(
+        `shell run-as 'com.example.app' rm -f 'files/.automobile-tmp-1.tmp'`,
+      );
+    });
+
+    test("the write script exits at the guard, before any move, when the destination is a directory", async () => {
+      const adb = new FakeAdbExecutor();
+      const service = createAppFileServiceForTesting({
+        adbFactory: adbFactoryFor(adb),
+        fileSystem: new TestAppFileFileSystem(),
+        idGenerator: new CountingIdGenerator("tmp"),
+        timer: new FakeTimer(),
+      });
+      await service.putFile({
+        device,
+        userId: 0,
+        target: documentsTarget,
+        files: [{ contentText: "x", destinationPath: "sub" }],
+      });
+      const write = adb.getExecutedCommands().find((command) => command.includes("chmod 600"));
+      const script = write?.slice(write.indexOf("sh -c"));
+      const root = mkdtempSync(join(tmpdir(), "app-file-dir-"));
+      try {
+        mkdirSync(join(root, "files", "sub"), { recursive: true });
+        const run = spawnSync("sh", ["-c", script ?? "exit 9"], { cwd: root, encoding: "utf8" });
+        expect(run.status).toBe(1);
+        expect(run.stderr).toContain(DIRECTORY_MARKER);
+        expect(readdirSync(join(root, "files", "sub"))).toEqual([]);
+        expect(readdirSync(join(root, "files"))).toEqual(["sub"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     test("single app-container write copies to a sibling temporary file before rename", async () => {
       const adb = new FakeAdbExecutor();
       const service = createAppFileServiceForTesting({
@@ -351,6 +421,7 @@ describe("AppFileService", () => {
       });
       expect(result.success).toBe(true);
       const script =
+        refuseDirectory("files/nested/a.txt") +
         "mkdir -p 'files/nested' && cp '/data/local/tmp/automobile-tmp-1-a.txt' 'files/nested/.automobile-tmp-1.tmp' && chmod 600 'files/nested/.automobile-tmp-1.tmp' && mv -f 'files/nested/.automobile-tmp-1.tmp' 'files/nested/a.txt'";
       expect(adb.getExecutedCommands()).toContain(
         `shell run-as 'com.example.app' sh -c ${shellQuote(script)}`,
@@ -508,6 +579,7 @@ describe("AppFileService", () => {
           files: files("a.txt", "b.txt"),
         });
         const script =
+          refuseDirectory("files/a.txt") +
           `mkdir -p 'files' && cp '/data/local/tmp/automobile-tmp-1-a.txt' 'files/.automobile-tmp-1.tmp' && ` +
           `chmod 600 'files/.automobile-tmp-1.tmp' && ` +
           `{ if [ -f 'files/a.txt' ]; then cp 'files/a.txt' 'files/.automobile-tmp-1.bak.part' && ` +
@@ -1656,6 +1728,7 @@ describe("AppFileService", () => {
         userId,
       });
       const script =
+        refuseDirectory("files/fixtures/welcome.txt") +
         "mkdir -p 'files/fixtures' && " +
         "cp '/data/local/tmp/automobile-tmp-1-welcome.txt' 'files/fixtures/.automobile-tmp-1.tmp' && " +
         "chmod 600 'files/fixtures/.automobile-tmp-1.tmp' && " +
@@ -3285,13 +3358,13 @@ function appFileOperationCommands(
       return [
         `shell mkdir -p '${root}/fixtures'`,
         `push '/fixtures/welcome.txt' '${temporary}'`,
-        `shell sh -c ${shellQuote(`mv -f '${temporary}' '${path}'`)}`,
+        `shell sh -c ${shellQuote(`${refuseDirectory(path)}mv -f '${temporary}' '${path}'`)}`,
         `shell rm -f '${temporary}'`,
       ];
     }
     const temp = "/data/local/tmp/automobile-tmp-1-welcome.txt";
     const temporary = `${root}/fixtures/.automobile-tmp-1.tmp`;
-    const script = `mkdir -p '${root}/fixtures' && cp '${temp}' '${temporary}' && chmod 600 '${temporary}' && mv -f '${temporary}' '${path}'`;
+    const script = `${refuseDirectory(path)}mkdir -p '${root}/fixtures' && cp '${temp}' '${temporary}' && chmod 600 '${temporary}' && mv -f '${temporary}' '${path}'`;
     return [
       `push '/fixtures/welcome.txt' '${temp}'`,
       `${prefix} sh -c ${shellQuote(script)}`,

@@ -1009,16 +1009,37 @@ for (const [actual, requested, compatible] of [
   });
 }
 
-test("relay-only callbacks remain absent and a metrics-requiring joiner is private", async () => {
+test("android relay-first then a metrics consumer shares one capture and detaches by refcount", async () => {
   const h = harness();
   const a = h.acquire();
   await a.start();
-  expect(h.sources[0].options.onFrameMetrics).toBeUndefined();
   expect(h.sources[0].options.onAudioData).toBeUndefined();
-  const b = h.acquire({ onFrameMetrics: () => {} });
+  const seen: unknown[] = [];
+  const b = h.acquire({ onFrameMetrics: (value) => seen.push(value) });
+  await b.start();
+  expect(h.sources).toHaveLength(1);
+  expect(h.sources[0].starts).toBe(1);
+  const metrics = { fps: 30 } as unknown as Parameters<
+    NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>
+  >[0];
+  h.sources[0].options.onFrameMetrics?.(metrics);
+  expect(seen).toEqual([metrics]);
+  await b.stop();
+  expect(h.sources[0].stops).toBe(0);
+  h.sources[0].options.onFrameMetrics?.(metrics);
+  expect(seen).toHaveLength(1);
+  await a.stop();
+  expect(h.sources[0].stops).toBe(1);
+});
+test("ios relay-first keeps a metrics-requiring joiner private", async () => {
+  const h = harness();
+  const ios = { deviceId: "i", platform: "ios", name: "Sim" } as BootedDevice;
+  const a = h.acquire({ device: ios });
+  await a.start();
+  expect(h.sources[0].options.onFrameMetrics).toBeUndefined();
+  const b = h.acquire({ device: ios, onFrameMetrics: () => {} });
   await b.start();
   expect(h.sources).toHaveLength(2);
-  expect(h.sources[1].options.onFrameMetrics).toBeDefined();
   await Promise.all([a.stop(), b.stop()]);
 });
 test("simultaneous private stops fence fresh creation and private fatal errors stay local", async () => {

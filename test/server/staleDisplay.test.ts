@@ -174,10 +174,11 @@ describe("last rendered generation persistence", () => {
         const action = new BaseVisualChange(device, new FakeAdbExecutor(), timer, undefined, {
           displayTransitions: transitions,
         });
+        // Caller coordinates (tapAt) are refused; a selector tapOn would re-read instead (#9847).
         await expect(
           action.observedInteraction(async () => ({ success: true }), {
             changeExpected: false,
-            predictionContext: { toolName: "tapOn", toolArgs: {} },
+            predictionContext: { toolName: "tapAt", toolArgs: {} },
           }),
         ).rejects.toMatchObject({
           details: {

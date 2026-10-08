@@ -95,6 +95,10 @@ import {
 } from "../features/overlay/overlayMissingAssets";
 import { readObservationScreenshotBytes } from "./observationResources";
 import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "../features/observe/DeviceWindowCacheInvalidator";
+import {
   MAX_OVERLAY_ASSET_COUNT,
   MAX_OVERLAY_ASSET_ID_LENGTH,
 } from "../features/overlay/overlayAssets";
@@ -478,13 +482,14 @@ export interface OverlayToolDependencies {
   clock?: Pick<Timer, "now">;
   timer?: Timer;
   lifecycle?: OverlayEventLifecycle;
+  /** Retires the device's cached observation after a show or dismiss lands; tests inject a fake. */
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 /** MCP name of the on-device prototype tool; `overlay` is its deprecated alias (#10495). */
 export const PROTOTYPE_TOOL_NAME = "prototype";
 export const DEPRECATED_OVERLAY_TOOL_NAME = "overlay";
 const responseFor = (payload: z.infer<typeof overlayOutputSchema>) =>
   withIsErrorOnFailure(createStructuredToolResponse(payload), payload.success);
-let unsubscribeOverlayLifecycle: (() => void) | undefined;
 
 // Validation has already succeeded. Forward authored specs unchanged; omitted
 // defaults (including opacity=100) remain the wire contract's defaults.
@@ -810,6 +815,7 @@ type OverlayHandlerDependencies = {
   target: OverlayTarget;
   assetReaders: AssetReaders;
   commits: OverlayCommitGenerations;
+  cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
 } & Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">;
 type OverlayOutput = z.infer<typeof overlayOutputSchema>;
@@ -884,6 +890,7 @@ async function performMutation(
     signal,
   );
   const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
+  retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = isSuperseded(commits, scope, target, generation)
     ? supersededResult(dependencies, { args, target, result, placed })
@@ -902,6 +909,21 @@ async function performMutation(
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
     ...missingAssetsOutput(result, [warning, placed.warning]),
   };
+}
+
+/**
+ * A show or dismiss that landed changed the screen, so the observation cached before it is stale:
+ * without this, the "Verify with observe" call right after returns the pre-mutation capture.
+ * The foreground app is unchanged, so the iOS SDK identity is preserved.
+ */
+function retireObservation(
+  invalidator: DeviceWindowCacheInvalidator,
+  device: BootedDevice,
+  result: OverlayResult,
+): void {
+  if (result.success) {
+    invalidator.invalidate(device, true);
+  }
 }
 
 function beginShowGeneration(
@@ -1348,25 +1370,30 @@ function subscribeOverlayCleanup(
   };
 }
 
+/** Transports cached per underlying client; shared with the host that owns the subscriptions. */
+interface OverlayTransportCache {
+  android: WeakMap<OverlayClient, AndroidOverlayTransport>;
+  ios: WeakMap<OverlayAgentClient, IosOverlayTransport>;
+}
+
 /**
  * One transport per underlying client keeps the coordinator's per-device event subscription
- * stable across calls, exactly as when it subscribed to the client itself.
+ * stable across calls and across MCP connections, exactly as when it subscribed to the client.
  */
 function overlayTargets(
   clientFactory: (device: BootedDevice) => OverlayClient,
   agentConnections: OverlayAgentConnections,
+  transports: OverlayTransportCache,
 ): {
   androidTarget: (device: BootedDevice) => OverlayTarget;
   iosTarget: (device: BootedDevice) => OverlayTarget | undefined;
 } {
-  const androidTransports = new WeakMap<OverlayClient, AndroidOverlayTransport>();
-  const iosTransports = new WeakMap<OverlayAgentClient, IosOverlayTransport>();
   const androidTarget = (device: BootedDevice): OverlayTarget => {
     const client = clientFactory(device);
-    let transport = androidTransports.get(client);
+    let transport = transports.android.get(client);
     if (transport === undefined) {
       transport = new AndroidOverlayTransport(client);
-      androidTransports.set(client, transport);
+      transports.android.set(client, transport);
     }
     return { transport, android: transport };
   };
@@ -1375,10 +1402,10 @@ function overlayTargets(
     if (agent === undefined) {
       return undefined;
     }
-    let transport = iosTransports.get(agent);
+    let transport = transports.ios.get(agent);
     if (transport === undefined) {
       transport = new IosOverlayTransport(agent);
-      iosTransports.set(agent, transport);
+      transports.ios.set(agent, transport);
     }
     return { transport };
   };
@@ -1389,21 +1416,101 @@ function overlayClock(dependencies: OverlayToolDependencies): Pick<Timer, "now">
   return dependencies.clock ?? dependencies.timer ?? defaultTimer;
 }
 
-export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
-  // Registry replacement makes the previous handler, store and event buffers obsolete.
-  unsubscribeOverlayLifecycle?.();
+/**
+ * Host-side overlay state: status, event buffers, commit generations and transports. The daemon
+ * re-registers the tool for every MCP connection, so this state must outlive any one handler.
+ */
+interface OverlayHost {
+  store: OverlayStatusStore;
+  events: OverlayEventCoordinator;
+  commits: OverlayCommitGenerations;
+  transports: OverlayTransportCache;
+  dispose(): void;
+}
+
+function createOverlayHost(dependencies: OverlayToolDependencies): OverlayHost {
   const store = dependencies.store ?? new InMemoryOverlayStatusStore(overlayClock(dependencies));
-  const clientFactory =
-    dependencies.clientFactory ??
-    ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
-  const agentConnections = dependencies.agentConnections ?? noOverlayAgentConnections;
-  const { androidTarget, iosTarget } = overlayTargets(clientFactory, agentConnections);
   const events = new OverlayEventCoordinator(
     dependencies.timer ?? defaultTimer,
     store,
     TelemetryRecorder.getInstance(),
   );
-  const commits = new OverlayCommitGenerations();
+  const unsubscribeCleanup = subscribeOverlayCleanup(
+    dependencies.lifecycle ?? defaultOverlayLifecycle(),
+    events,
+  );
+  let disposed = false;
+  return {
+    store,
+    events,
+    commits: new OverlayCommitGenerations(),
+    transports: { android: new WeakMap(), ios: new WeakMap() },
+    dispose: () => {
+      if (!disposed) {
+        disposed = true;
+        unsubscribeCleanup();
+        events.dispose();
+      }
+    },
+  };
+}
+
+/** The daemon-process host every default registration (one per MCP connection) shares. */
+let daemonOverlayHost: OverlayHost | undefined;
+let activeRegistration: { host: OverlayHost; dispose: () => void } | undefined;
+
+/**
+ * Injecting any piece of host state (store, clock, timer, lifecycle) asks for a private host owned
+ * by that registration; otherwise every registration shares the daemon host, so a second MCP
+ * connection keeps the first one's status and pending events (keyed by session and device).
+ */
+function overlayHostFor(dependencies: OverlayToolDependencies): OverlayHost {
+  const { store, clock, timer, lifecycle } = dependencies;
+  if (store || clock || timer || lifecycle) {
+    return createOverlayHost(dependencies);
+  }
+  daemonOverlayHost ??= createOverlayHost(dependencies);
+  return daemonOverlayHost;
+}
+
+/**
+ * A private host is disposed with its registration. The shared host is disposed only by the
+ * registration currently installed: an older connection's disposer must not wipe it.
+ */
+function overlayRegistrationDisposer(host: OverlayHost): () => void {
+  const dispose = () => {
+    const active = activeRegistration?.dispose === dispose;
+    if (active) {
+      activeRegistration = undefined;
+    }
+    if (host !== daemonOverlayHost) {
+      host.dispose();
+    } else if (active) {
+      host.dispose();
+      daemonOverlayHost = undefined;
+    }
+  };
+  return dispose;
+}
+
+export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
+  const host = overlayHostFor(dependencies);
+  // Replacing a registration that used a different host makes that host's state obsolete.
+  if (activeRegistration && activeRegistration.host !== host) {
+    activeRegistration.dispose();
+  }
+  const { store, events, commits } = host;
+  const clientFactory =
+    dependencies.clientFactory ??
+    ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
+  const agentConnections = dependencies.agentConnections ?? noOverlayAgentConnections;
+  const { androidTarget, iosTarget } = overlayTargets(
+    clientFactory,
+    agentConnections,
+    host.transports,
+  );
+  const cacheInvalidator =
+    dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   const clock = overlayClock(dependencies);
   const assetReaders: AssetReaders = {
     assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
@@ -1454,6 +1561,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       target,
       assetReaders,
       commits,
+      cacheInvalidator,
       now: () => clock.now(),
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
@@ -1488,17 +1596,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
     },
     { defaultEnabled: false, hidden: true, outputSchema: overlayOutputSchema },
   );
-  const unsubscribeCleanup = subscribeOverlayCleanup(
-    dependencies.lifecycle ?? defaultOverlayLifecycle(),
-    events,
-  );
-  const unsubscribe = () => {
-    unsubscribeCleanup();
-    events.dispose();
-    if (unsubscribeOverlayLifecycle === unsubscribe) {
-      unsubscribeOverlayLifecycle = undefined;
-    }
-  };
-  unsubscribeOverlayLifecycle = unsubscribe;
-  return unsubscribe;
+  const dispose = overlayRegistrationDisposer(host);
+  activeRegistration = { host, dispose };
+  return dispose;
 }

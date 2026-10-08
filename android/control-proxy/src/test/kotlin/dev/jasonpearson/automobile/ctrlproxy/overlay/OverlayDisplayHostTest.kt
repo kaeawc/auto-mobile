@@ -172,23 +172,36 @@ class OverlayDisplayHostTest {
   }
 
   @Test
-  fun `app layer windows use the application overlay type on the default display`() = runTest {
-    assertTrue(host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)))
-    assertEquals(
-      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-      defaultManager.added.single().type,
-    )
-    assertTrue(host.show(sheet(0)))
-    // A window's type cannot change after add: the system layer attaches a fresh window.
-    assertEquals(
-      listOf(
+  fun `app layer windows use their own application overlay context on the default display`() =
+    runTest {
+      // The service's WindowManager carries the accessibility-overlay token, which would stack an
+      // app-layer window above the notification shade and status bar (#10529).
+      val appManager = displays.connect(0)
+      assertTrue(host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)))
+      assertEquals(listOf(OverlayWindowLayer.APP), displays.openedLayers)
+      assertEquals(
         WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        appManager.added.single().type,
+      )
+      assertTrue(defaultManager.added.isEmpty())
+      assertTrue(host.show(sheet(0)))
+      // A window's type cannot change after add: the system layer attaches a fresh window through
+      // the service's own WindowManager and removes the app-layer one.
+      assertEquals(
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-      ),
-      defaultManager.added.map { it.type },
-    )
-    assertEquals(1, defaultManager.removals)
-    assertTrue(defaultManager.updated.isEmpty())
+        defaultManager.added.single().type,
+      )
+      assertEquals(listOf(OverlayWindowLayer.APP), displays.openedLayers)
+      assertEquals(1, appManager.removals)
+      assertTrue(defaultManager.updated.isEmpty())
+    }
+
+  @Test
+  fun `an app layer window that cannot be opened attaches nothing`() = runTest {
+    val error = runCatching { host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)) }
+    assertEquals("Cannot attach an app-layer window", error.exceptionOrNull()?.message)
+    assertTrue(defaultManager.added.isEmpty())
+    assertFalse(host.isShowing)
   }
 
   @Test

@@ -2116,8 +2116,10 @@ async function attachObserveCrop(
   if (!args.crop) {
     return;
   }
-  // The wire applies scope only to full projections. Resolve over that same
-  // exposed tree, before raw append or skeleton projection can replace it.
+  // Full projections expose the scoped hierarchy itself, so resolve over that same
+  // tree before raw append can replace it. The skeleton projection also applies
+  // FOCUS/REGION, but only as a row filter over the unscoped tree, so skeleton
+  // crops still resolve against the unscoped observation.
   const selectorObservation =
     args.project === "full" || (args.raw && args.project !== "skeleton")
       ? applyObserveScopeExperiments(

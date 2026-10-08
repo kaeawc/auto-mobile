@@ -79,8 +79,10 @@ Compact action metadata defaults on. Opt out with
 feature-flag key `actions-compact-metadata` set to false. The existing
 `--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
 wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
+An explicit CLI/env choice is connection-scoped: the proxy relays it on its
+connection profile, never restarts the shared daemon for it, and never persists it.
 Without an explicit choice (unset or other env values), proxies relay no preference
-and preserve the shared daemon's effective setting without a reconciliation restart.
+and use the shared daemon's effective setting.
 With an external action call's `sessionUuid` and session store,
 this omits each unchanged `observation` block independently: `insets`,
 `systemInsets`, `backStack`, `gfxMetrics`, `displayedTimeMetrics`, `deviceLock`,

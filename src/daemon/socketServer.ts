@@ -14,6 +14,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
@@ -295,6 +296,8 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
   }
 }
 
+const JSONRPC_INVALID_PARAMS = -32602;
+
 export function mcpRequestFailureDetails(
   error: unknown,
   cause: DaemonRequestFailureCause | undefined,
@@ -302,6 +305,11 @@ export function mcpRequestFailureDetails(
   return {
     ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
     ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
+    // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
+    // resource URI) so the proxy can return -32602 instead of -32603.
+    ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
+      ? { code: JSONRPC_INVALID_PARAMS }
+      : {}),
     ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
     ...(cause ? { requestFailureCause: cause } : {}),
   };

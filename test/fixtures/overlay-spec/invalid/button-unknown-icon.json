@@ -13,7 +13,7 @@
         {
           "type": "button",
           "label": "B",
-          "icon": "rocket"
+          "icon": "not_an_icon"
         }
       ]
     }

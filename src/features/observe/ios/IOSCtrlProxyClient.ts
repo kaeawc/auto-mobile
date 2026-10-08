@@ -19,6 +19,7 @@ import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger
 import { decodeSdkEventBatches, type DecodedSdkEvent } from "./decodeSdkEventBatches";
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
+import { IosRunnerBusyError } from "./runnerErrorCodes";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
@@ -3391,7 +3392,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   ): boolean {
     if (decoded) {
       if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
-        this.requestManager.reject(decoded.requestId, new ActionableError(decoded.errorMessage));
+        this.requestManager.reject(decoded.requestId, new IosRunnerBusyError(decoded.errorMessage));
         return true;
       }
       if (decoded.errorMessage !== undefined) {

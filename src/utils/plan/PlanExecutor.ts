@@ -592,6 +592,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           executedSteps: result.executedSteps,
           totalSteps: track.length,
           skippedSteps: result.skippedSteps.length > 0 ? result.skippedSteps : undefined,
+          steps: result.steps,
           executionTimeMs: debugMode ? this.timer.now() - deviceStartTime : undefined,
           failedStep: result.failedStep
             ? {
@@ -833,6 +834,21 @@ export class DefaultPlanExecutor implements PlanExecutor {
   /**
    * Execute a single device track.
    */
+  /** Appends a track step to the `debug.steps`-shaped trace the plan health summary reads. */
+  private recordTrackStep(
+    steps: ExecutePlanStepDebugInfo[],
+    planIndex: number,
+    tool: string,
+    status: ExecutePlanStepDebugInfo["status"],
+    startedAt: number,
+  ): void {
+    steps.push({
+      step: `Execute step ${planIndex + 1}: ${tool}`,
+      status,
+      durationMs: this.timer.now() - startedAt,
+    });
+  }
+
   private async executeDeviceTrack(
     device: string,
     track: TrackedStep[],
@@ -858,10 +874,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       participantFailed?: boolean;
     };
     skippedSteps: DeviceSkippedStepResult[];
+    steps: ExecutePlanStepDebugInfo[];
     warnings: PlanStepWarnings[];
     toolResults: PlanStepToolResult[];
   }> {
     let executedSteps = 0;
+    const steps: ExecutePlanStepDebugInfo[] = [];
     const skippedSteps: DeviceSkippedStepResult[] = [];
     const warnings: PlanStepWarnings[] = [];
     const toolResults = new StepToolResultCollector(toolResultsBudget);
@@ -914,6 +932,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
         }
 
+        this.recordTrackStep(steps, planIndex, step.tool, stepResult.status, stepStartTime);
+
         if (stepResult.status === "skipped") {
           logger.warn(
             `[PARALLEL_EXEC][${device}] optional step ${step.tool} failed; skipping and continuing: ${stepResult.error}`,
@@ -946,6 +966,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               ...(participantFailure ? { participantFailed: true } : {}),
             },
             skippedSteps,
+            steps,
             warnings,
             toolResults: toolResults.toArray() ?? [],
           };
@@ -966,6 +987,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         executedSteps,
         totalSteps: track.length,
         skippedSteps,
+        steps,
         warnings,
         toolResults: toolResults.toArray() ?? [],
       };
@@ -987,6 +1009,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           error: errorMsg,
         },
         skippedSteps,
+        steps,
         warnings,
         toolResults: toolResults.toArray() ?? [],
       };

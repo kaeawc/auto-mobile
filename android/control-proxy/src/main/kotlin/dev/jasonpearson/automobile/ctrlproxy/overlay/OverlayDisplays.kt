@@ -34,9 +34,12 @@ fun interface OverlayDisplayWindows {
 }
 
 /**
- * Production display seams over [service]. Non-default displays use a window context created from
- * the display's own context (API 30+); the gesture routing already rejects non-default ids below
- * API 30 before they reach this class, so [open] returns null there rather than guessing.
+ * Production display seams over [service]. Every window opened here uses a window context created
+ * from the display's own context for the layer's type (API 30+), never the service's own
+ * WindowManager, whose accessibility-overlay token would stack an app-layer window above the
+ * notification shade (#10529). The gesture routing already rejects non-default ids below API 30
+ * before they reach this class, so [open] returns null there rather than guessing; an app-layer
+ * window on the default display uses the application context's WindowManager there instead.
  */
 class AndroidOverlayDisplays(
   private val service: Context,
@@ -50,7 +53,11 @@ class AndroidOverlayDisplays(
 
   @TargetApi(Build.VERSION_CODES.R)
   override fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow? {
-    if (sdkInt < Build.VERSION_CODES.R) return null
+    if (sdkInt < Build.VERSION_CODES.R) {
+      return if (displayId == Display.DEFAULT_DISPLAY && layer == OverlayWindowLayer.APP) {
+        applicationWindow()
+      } else null
+    }
     val display = display(displayId) ?: return null
     val windowContext =
       service.createDisplayContext(display).createWindowContext(layer.windowType, null)
@@ -61,6 +68,19 @@ class AndroidOverlayDisplays(
         it,
         navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
         density = { windowContext.resources.displayMetrics.density },
+      )
+    }
+  }
+
+  private fun applicationWindow(): OverlayDisplayWindow? {
+    val app = service.applicationContext
+    val windowManager = app.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+    return windowManager?.let {
+      OverlayDisplayWindow(
+        app,
+        it,
+        navigationBarBottomPx = { navigationBarBottomPx(it, sdkInt) },
+        density = { app.resources.displayMetrics.density },
       )
     }
   }

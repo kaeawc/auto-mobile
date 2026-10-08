@@ -193,9 +193,47 @@ function parseTimelineParams(params: Record<string, string>): {
   // takes the documented default, an unknown one is an error rather than a
   // silent fallback to a different range.
   return {
-    dateRange: normalizeDateRange(params.dateRange) ?? DEFAULT_TIMELINE_DATE_RANGE,
-    aggregation: normalizeAggregation(params.aggregation),
+    dateRange:
+      validateTimelineQueryValue(params, "dateRange", normalizeDateRange) ??
+      DEFAULT_TIMELINE_DATE_RANGE,
+    aggregation: validateTimelineQueryValue(params, "aggregation", normalizeAggregation),
   };
+}
+
+/** The undecoded value of `key` in the requested URI's query, as the client sent it. */
+function rawQueryValue(uri: string | undefined, key: string): string | undefined {
+  const queryStart = uri?.indexOf("?") ?? -1;
+  if (uri === undefined || queryStart < 0) {
+    return undefined;
+  }
+  const entry = uri
+    .slice(queryStart + 1)
+    .split("&")
+    .find((part) => part.split("=", 1)[0] === key);
+  return entry === undefined ? undefined : entry.slice(key.length + 1);
+}
+
+/**
+ * Validate one query value. The registry decodes query values leniently (a
+ * truncated escape such as `%E0%A4%A` becomes U+FFFD plus leftovers), so an
+ * invalid value is reported with the client's raw, still-escaped text instead
+ * of that mangled decode. A raw value that differs from the decoded one always
+ * contains an escape, so it fails the same validator and yields that message.
+ */
+function validateTimelineQueryValue<T>(
+  params: Record<string, string>,
+  key: (typeof TIMELINE_QUERY_KEYS)[number],
+  normalize: (value: unknown) => T,
+): T {
+  try {
+    return normalize(params[key]);
+  } catch (error) {
+    const raw = rawQueryValue(getRequestedResourceUri(params), key);
+    if (raw !== undefined && raw !== params[key]) {
+      normalize(raw);
+    }
+    throw error;
+  }
 }
 
 function errorContent(uri: string, message: string): ResourceContent {

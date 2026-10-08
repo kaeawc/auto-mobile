@@ -20,6 +20,9 @@ const load = (name: string): ObserveResult =>
   JSON.parse(readFileSync(join(fixtureDir, name), "utf8")) as ObserveResult;
 const discoverTab = load("ipad-ios27-floating-tab-bar-discover.json");
 const demosScrolled = load("ipad-ios27-demos-row-under-navigation-bar.json");
+// Captured on an iPhone 17 simulator, iOS 26.5, Playground Discover tab. The visible "Demos"
+// UIButton in the bottom UITabBar encloses an off-screen _UIFloatingTabBarItemView duplicate.
+const iphoneTabBar = load("iphone17-ios26-floating-tab-bar-demos.json");
 
 afterEach(() => AndroidCtrlProxyClient.resetInstances());
 
@@ -110,5 +113,15 @@ describe("iPad floating tab bar inside the navigation bar frame (#10635)", () =>
       forTapTarget: true,
     });
     expect(rowClip).toEqual({ bounds: null, coveredBy: "navigation bar" });
+  });
+});
+
+describe("iPhone tab bar item that encloses an off-screen floating duplicate", () => {
+  test("tapOn taps the visible tab button instead of the clipped floating item", async () => {
+    const { result, points } = await tapOn(iphoneTabBar, "Demos");
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    // Centre of the UIButton [110,795,205,849], not the floating item [341,36,428,72].
+    expect(points).toEqual([{ x: 157, y: 822 }]);
   });
 });

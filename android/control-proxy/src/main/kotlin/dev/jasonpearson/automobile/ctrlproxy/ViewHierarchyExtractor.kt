@@ -19,6 +19,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayWindowMetadata
+import dev.jasonpearson.automobile.ctrlproxy.overlay.hasInteractiveOverlayTitle
 import kotlin.math.max
 import kotlin.math.min
 
@@ -32,8 +33,9 @@ internal constructor(
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   internal val logOptimizationDecisions: Boolean = false,
   /**
-   * Metadata for CtrlProxy's own interactive overlay window, asked per captured overlay-type window
-   * with the window's root package and title; null for any other window or when none is showing.
+   * Metadata for CtrlProxy's own interactive overlay window, asked per captured window that carries
+   * the interactive overlay's type and title (either layer) with the window's root package and
+   * title; null for any other window or when none is showing.
    */
   private val ownOverlayMetadata:
     (windowPackage: String?, title: CharSequence?) -> OverlayWindowMetadata? =
@@ -479,6 +481,7 @@ internal constructor(
                 isFocused = window.isFocused,
                 hierarchy = processedElement,
                 windowBounds = ElementBounds(windowBounds),
+                isOwnInteractiveOverlay = hasInteractiveOverlayTitle(window.type, window.title),
               )
             )
           }
@@ -722,8 +725,10 @@ internal constructor(
     panelUniqueId: String?,
     packageName: String?,
   ): WindowInfo {
+    // Both layers' windows (the app layer reports as TYPE_SYSTEM) carry the metadata; the title
+    // keeps SystemUI's type-3 windows and the highlight overlay out (#10544).
     val overlay =
-      if (window.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+      if (hasInteractiveOverlayTitle(window.type, window.title))
         ownOverlayMetadata(packageName, window.title)
       else null
     return WindowInfo(
@@ -1632,6 +1637,8 @@ internal constructor(
     val isFocused: Boolean,
     val hierarchy: UIElementInfo,
     val windowBounds: ElementBounds? = null,
+    /** CtrlProxy's own interactive overlay window (either layer); never an occluder here. */
+    val isOwnInteractiveOverlay: Boolean = false,
   )
 
   private data class OrderCounter(var value: Int = 0)
@@ -1795,6 +1802,16 @@ internal constructor(
         .mapTo(mutableSetOf()) {
           it.windowId
         }
+    // The host decides what CtrlProxy's own interactive overlay covers (isFullyCoveredByOwnOverlay,
+    // layer:"app", covered-tap refusal), so its windows must not prune the app nodes beneath them
+    // here; dropping those nodes left the host nothing to scope or refuse (#10608/#10544).
+    val ownOverlayWindowKeys =
+      windowEntries
+        .asSequence()
+        .filter { it.isOwnInteractiveOverlay }
+        .mapTo(mutableSetOf()) {
+          it.windowId
+        }
     for (windowEntry in windowEntries) {
       val hierarchy = windowEntry.hierarchy
       val windowKey = windowEntry.windowId
@@ -1898,7 +1915,11 @@ internal constructor(
         // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
         // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
         // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
-        if (occluder.windowKey != node.windowKey && occluder.windowKey in imeWindowKeys) {
+        // CtrlProxy's own interactive overlay windows are skipped the same way (see above).
+        if (
+          occluder.windowKey != node.windowKey &&
+            (occluder.windowKey in imeWindowKeys || occluder.windowKey in ownOverlayWindowKeys)
+        ) {
           continue
         }
         val intersection = intersectBounds(node.bounds, occluderBounds) ?: continue

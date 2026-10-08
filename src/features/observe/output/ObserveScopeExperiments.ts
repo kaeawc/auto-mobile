@@ -1,7 +1,7 @@
 import { ElementResolver, matchedSourceNode } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import type { ElementContainerSelector } from "../../../models/PinchOnOptions";
-import type { ObserveResult } from "../../../models/ObserveResult";
+import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import { nodeAttributes } from "../../../models/ViewHierarchyResult";
@@ -693,6 +693,54 @@ export function applyObserveScopeExperiments(
   const out = run.current === input ? clone(input) : run.current;
   scopeLayoutWarnings(out, survivors, prunedBeforeOverview);
   out.observeScope = buildScopeMetadata({ ...run, current: out }, nodesBefore, gatedOff);
+  return out;
+}
+
+/**
+ * Scope a skeleton-projected `observe` payload, the default projection. The
+ * skeleton replaces the hierarchy, so FOCUS and REGION run on the full sanitized
+ * tree and the skeleton and context keep only rows whose bounds belong to a
+ * surviving node. OVERVIEW summarizes the hierarchy and has no skeleton form, so a
+ * requested OVERVIEW is reported in `gatedOff` rather than silently ignored.
+ */
+export function applyObserveScopeToSkeleton(
+  projected: ObserveResult,
+  full: ObserveResult,
+  cfg: ObserveScopeConfig,
+): ObserveResult {
+  const gatedOff: ObserveScopeKind[] = [
+    ...(cfg.gatedOff ?? []),
+    ...(cfg.overview ? (["overview"] as const) : []),
+  ];
+  if (!cfg.focus && !cfg.region && gatedOff.length === 0) {
+    return projected;
+  }
+  const scoped = applyObserveScopeExperiments(full, { ...cfg, overview: false, gatedOff });
+  const out: ObserveResult = { ...projected, observeScope: scoped.observeScope };
+  if ((scoped.observeScope?.applied.length ?? 0) === 0) {
+    return out;
+  }
+  const survivors = new Set<string>();
+  const walk = (nodes: NodeRecord[]): void => {
+    for (const node of nodes) {
+      const bounds = readBounds(attr(node, "bounds"));
+      if (bounds) {
+        survivors.add(boundsKey(bounds));
+      }
+      walk(childrenOf(node));
+    }
+  };
+  walk(rootNodes(scoped));
+  const inScope = (row: SkeletonElement): boolean => {
+    const bounds = readBounds(row.bounds);
+    return bounds !== null && survivors.has(boundsKey(bounds));
+  };
+  if (out.skeleton) {
+    out.skeleton = out.skeleton.filter(inScope);
+  }
+  if (out.context) {
+    out.context = out.context.filter(inScope);
+  }
   return out;
 }
 

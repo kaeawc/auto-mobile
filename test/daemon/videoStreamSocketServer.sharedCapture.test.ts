@@ -156,8 +156,10 @@ for (const first of ["webrtc", "relay"] as const) {
         await h.relay.request(socket, "subscribe");
         await startWebrtc();
       }
-      expect(h.counts()).toEqual(first === "webrtc" ? [1, 0] : [1, 1]);
-      expect(h.sources).toHaveLength(first === "webrtc" ? 1 : 2);
+      // Either order shares one capture (#9798): the webrtc-created entry never sees the relay
+      // create, and a relay-created entry now fans frame metrics out to the late WebRTC joiner.
+      expect(h.counts()).toEqual(first === "webrtc" ? [1, 0] : [0, 1]);
+      expect(h.sources).toHaveLength(1);
       expect(h.sources[0].starts).toBe(1);
       if (first === "webrtc") {
         await stopWebRtcStream(streamId);
@@ -169,8 +171,7 @@ for (const first of ["webrtc", "relay"] as const) {
         await h.relay.request(socket, "unsubscribe");
         h.timer.advanceTime(3_000);
         await h.relay.close();
-        expect(h.sources[0].stops).toBe(1);
-        expect(h.sources[1].stops).toBe(0);
+        expect(h.sources[0].stops).toBe(0);
         await stopWebRtcStream(streamId);
       }
       expect(h.sources[0].stops).toBe(1);

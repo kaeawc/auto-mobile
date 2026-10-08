@@ -60,9 +60,27 @@ fun overlayWindowMetadata(
 }
 
 /**
- * Whether a captured accessibility window is the interactive overlay: an accessibility-overlay
- * window that is CtrlProxy's own (its root reports our package) and carries the interactive
- * overlay's title, so the highlight overlay is never mistaken for it.
+ * Whether an accessibility window type can be one of CtrlProxy's interactive overlay windows: the
+ * system layer's accessibility overlay, or the app layer's TYPE_APPLICATION_OVERLAY window, which
+ * accessibility reports as [AccessibilityWindowInfo.TYPE_SYSTEM] (#10544).
+ */
+fun isInteractiveOverlayWindowType(windowType: Int): Boolean =
+  windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
+    windowType == AccessibilityWindowInfo.TYPE_SYSTEM
+
+/**
+ * Whether a captured window carries the interactive overlay's type and title. The title is set only
+ * by `interactiveOverlayLayoutParams`, so it tells the interactive overlay apart from the highlight
+ * overlay (same type and package) and from SystemUI's type-3 windows (shade, status bar).
+ */
+fun hasInteractiveOverlayTitle(windowType: Int, title: CharSequence?): Boolean =
+  isInteractiveOverlayWindowType(windowType) &&
+    title?.toString() == INTERACTIVE_OVERLAY_WINDOW_TITLE
+
+/**
+ * Whether a captured accessibility window is the interactive overlay: a window of either overlay
+ * layer that is CtrlProxy's own (its root reports our package) and carries the interactive
+ * overlay's title, so the highlight overlay and SystemUI windows are never mistaken for it.
  */
 fun isInteractiveOverlayWindow(
   windowType: Int,
@@ -70,7 +88,4 @@ fun isInteractiveOverlayWindow(
   windowPackage: String?,
   ownPackage: String?,
 ): Boolean =
-  windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
-    ownPackage != null &&
-    windowPackage == ownPackage &&
-    title?.toString() == INTERACTIVE_OVERLAY_WINDOW_TITLE
+  hasInteractiveOverlayTitle(windowType, title) && ownPackage != null && windowPackage == ownPackage

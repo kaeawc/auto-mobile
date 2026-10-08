@@ -2162,7 +2162,9 @@ matching, first-node behavior, and unchanged metadata without `chain`. An object
 with `elementId` or `container` is a nested selector; every other object keeps
 the flat `resourceId`/`text` anchor, ignoring extra fields. Boolean foreground-app
 focus keeps its existing metadata.
-As before, scope transforms apply to full projection, not the default skeleton.
+On the default skeleton projection, `focus` and `region` run on the full tree and
+the skeleton and context keep only the rows that survive them; `overview` has no
+skeleton form and is reported in `observeScope.gatedOff`.
 
 A failed new selector returns an empty subtree and `observeScope.focus.matched:
 false`, with the resolver's unchanged `error`. A missing leaf reports
@@ -2458,6 +2460,7 @@ Use `AUTOMOBILE_ACTIONS_COMPACT_METADATA=0`, `--no-actions-compact-metadata`,
 or feature flag `actions-compact-metadata=false` to restore full metadata.
 `--actions-compact-metadata` or exact env `1` explicitly enables it. Negative CLI
 wins over positive CLI, then exact env `0`/`1`, then persisted state, then on.
-Unset or other env values express no preference: proxies relay no compact-metadata
-option and reuse the daemon's effective setting without restarting it.
+An explicit CLI/env choice applies to that connection only: proxies relay it on
+the connection profile, never restart the shared daemon for it, and never persist it.
+Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).

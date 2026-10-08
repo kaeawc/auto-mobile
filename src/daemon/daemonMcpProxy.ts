@@ -755,7 +755,6 @@ export const STARTUP_OPTION_DEFICIT_KEYS: readonly (keyof DaemonOptions)[] = [
   ...REUSE_CRITICAL_STRING_OPTION_KEYS,
   ...REUSE_CRITICAL_NUMBER_OPTION_KEYS,
   "accessibilityUseBaseline",
-  "actionsCompactMetadata",
   "eventAllMarkers",
 ];
 
@@ -818,11 +817,12 @@ function requestedOptionDeficits<T>(
  * #3846): a client that does not ask for a flag has no opinion on it, so a flag
  * the daemon already has is never reported as a deficit just because a
  * particular caller (e.g. a bare short-lived CLI client) didn't request it.
- * Compact metadata compares explicit on/off; an unrecorded running value defaults on.
- * Other booleans are compared strictly (`=== true`), so `undefined` and `false` both
+ * Booleans are compared strictly (`=== true`), so `undefined` and `false` both
  * read as "no opinion"; strings and marker arrays count only when the client
  * supplies one that differs from the daemon's. Connection presentation options
- * are intentionally absent from this comparison.
+ * (including the compact-metadata opt-out, relayed per connection) are
+ * intentionally absent from this comparison, so they never restart the shared
+ * daemon.
  * Returns a human-readable list (empty when the daemon already satisfies every
  * requested flag) for logging and error messages.
  */
@@ -837,13 +837,6 @@ export function startupOptionDeficits(
       running,
       (options, key) => (options?.[key] === true ? true : undefined),
       (options, key) => options?.[key] === true,
-    ),
-    ...requestedOptionDeficits(
-      ["actionsCompactMetadata"],
-      requested,
-      running,
-      (options) => options?.actionsCompactMetadata,
-      (options) => options?.actionsCompactMetadata ?? true,
     ),
     ...requestedOptionDeficits(
       REUSE_CRITICAL_STRING_OPTION_KEYS,
@@ -888,8 +881,8 @@ export function startupOptionDeficits(
  * silently strip a flag the daemon was already launched with (issue #3846) —
  * it only ever adds flags the client explicitly asks for. Boolean CLI options
  * are one-directional: `false` means the caller has no opinion, so every
- * active boolean on the running daemon is force-preserved. Compact metadata
- * instead preserves the running value only when the client has no preference.
+ * active boolean on the running daemon is force-preserved. Connection
+ * presentation options are dropped: they are relayed per connection instead.
  */
 export function mergeDaemonOptions(
   running: DaemonOptions | undefined,
@@ -904,8 +897,6 @@ export function mergeDaemonOptions(
       mergedRecord[key] = true;
     }
   }
-  merged.actionsCompactMetadata =
-    requestedOptions.actionsCompactMetadata ?? runningOptions.actionsCompactMetadata;
   if (requested?.accessibilityAudit === true) {
     merged.accessibilityUseBaseline = requested.accessibilityUseBaseline === true;
   }

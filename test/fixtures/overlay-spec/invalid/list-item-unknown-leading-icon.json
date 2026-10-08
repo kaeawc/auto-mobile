@@ -13,7 +13,7 @@
         {
           "type": "listItem",
           "headline": "H",
-          "leadingIcon": "rocket"
+          "leadingIcon": "not_an_icon"
         }
       ]
     }

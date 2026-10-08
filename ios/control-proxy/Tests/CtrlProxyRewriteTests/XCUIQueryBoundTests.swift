@@ -39,6 +39,17 @@ final class XCUIQueryBoundTests: XCTestCase {
         ))
     }
 
+    func testGestureBoundErrorCarriesOutcomeUnknownWireCode() throws {
+        let error = CommandError.gestureBoundExceeded(
+            command: "request_swipe", phase: "xcuitestGesture", boundMs: 4500, elapsedMs: 4502
+        )
+        XCTAssertEqual(error.wireCode, "gesture_bound_exceeded")
+        XCTAssertNotNil(try XCTUnwrap(error.errorDescription).range(
+            of: #"exceeded execution bound \d+ms in phase [\s\S]*XCUITest call is still executing"#,
+            options: .regularExpression
+        ))
+    }
+
     private func server(
         timer: FakeProxyTimer, clock: FakeMonotonicClock,
         handler: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload

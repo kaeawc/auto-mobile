@@ -13,6 +13,9 @@ import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 
+const POST_NAVIGATION_VERIFY_READS = 2;
+const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
+
 /**
  * Opens the recent apps screen.
  *
@@ -67,19 +70,7 @@ export class RecentApps extends BaseVisualChange {
     };
     const result: RecentAppsResult = await this.observedInteraction(async () => {
       // A cached overview could describe a screen the user has since left.
-      const current = await awaitWhileRequestIsLive(
-        this.observeScreen.execute({
-          freshness: "fresh",
-          requireFreshExtraction: true,
-          skipCache: true,
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          skipPerformanceAudit: true,
-          timeoutMs: options.timeoutMs,
-          signal,
-        }),
-        signal,
-      );
+      const current = await this.readFreshObservation(options.timeoutMs, signal);
       if (await this.isAndroidOverview(current, signal)) {
         options.changeExpected = false;
         return { success: true, method: "hardware" };
@@ -87,11 +78,68 @@ export class RecentApps extends BaseVisualChange {
       return perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal));
     }, options);
     // Keep indeterminate delivery failures intact; never retry a toggle to verify it.
-    if (result.success && !(await this.isAndroidOverview(result.observation, signal))) {
+    if (result.success && !(await this.confirmOverviewOpened(result.observation, signal))) {
       result.success = false;
       result.error = "Android recent apps overview could not be verified after navigation";
     }
     return result;
+  }
+
+  /**
+   * `requireFreshExtraction` only forces a device capture when the read carries a
+   * `minTimestamp` floor; without it the hierarchy source serves its cached tree
+   * (`Cache hit ... fresh: false`), which this check would then treat as "not open"
+   * and press Recents again, closing an open overview (#10349). Stamp each read
+   * with the device clock so only a tree extracted after the call is accepted, and
+   * re-read once when the first read is still reported stale.
+   */
+  private async readFreshObservation(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<ObserveResult> {
+    let observation: ObserveResult | undefined;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const minTimestamp = await awaitWhileRequestIsLive(this.adb.getDeviceTimestampMs(), signal);
+      observation = await awaitWhileRequestIsLive(
+        this.observeScreen.execute({
+          freshness: "fresh",
+          requireFreshExtraction: true,
+          minTimestamp,
+          skipCache: true,
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+          skipPerformanceAudit: true,
+          timeoutMs,
+          signal,
+        }),
+        signal,
+      );
+      if (observation.freshness?.isFresh !== false) {
+        break;
+      }
+    }
+    return observation as ObserveResult;
+  }
+
+  /**
+   * The settle observation can be a cached or mid-transition tree, so a miss is
+   * re-checked with bounded genuinely fresh reads before reporting a failure.
+   */
+  private async confirmOverviewOpened(
+    observation: ObserveResult | undefined,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (await this.isAndroidOverview(observation, signal)) {
+      return true;
+    }
+    for (let attempt = 0; attempt < POST_NAVIGATION_VERIFY_READS; attempt++) {
+      await this.timer.sleep(POST_NAVIGATION_VERIFY_DELAY_MS);
+      const fresh = await this.readFreshObservation(3000, signal);
+      if (await this.isAndroidOverview(fresh, signal)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async isAndroidOverview(

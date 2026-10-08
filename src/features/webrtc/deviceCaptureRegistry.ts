@@ -179,7 +179,11 @@ class CaptureEntry {
       request.options,
       request.flexibleHints,
     );
-    if (request.options.onFrameMetrics && !this.request.options.onFrameMetrics) {
+    if (
+      request.options.onFrameMetrics &&
+      !this.request.options.onFrameMetrics &&
+      !this.fansOutFrameMetricsWithoutCreator()
+    ) {
       conflicts.push("onFrameMetrics");
     }
     if (
@@ -200,6 +204,14 @@ class CaptureEntry {
       );
     }
     return false;
+  }
+  /**
+   * Only the iOS source computes metric snapshots on demand (when the callback exists), so a
+   * joiner needing them cannot attach to an entry created without. Android sources never
+   * produce frame metrics, so wiring the fan-out costs nothing and every consumer can share.
+   */
+  private fansOutFrameMetricsWithoutCreator(): boolean {
+    return this.request.device.platform !== "ios";
   }
   add(request: DeviceCaptureRequest): CaptureHandle {
     const handle = new CaptureHandle(this, request.options, request.hasConsumers ?? true);
@@ -502,13 +514,15 @@ class CaptureEntry {
         this.fanout((options) => options.onIdleAttestationSupport?.(supported)),
       onRotation: (rotation) => this.fanout((options) => options.onRotation?.(rotation)),
       onDroppedFrames: (drops) => this.fanout((options) => options.onDroppedFrames?.(drops)),
-      // iOS computes snapshots only when this callback exists. Preserve creator-only work.
-      onFrameMetrics: this.request.options.onFrameMetrics
-        ? (metrics) => {
-            this.frameMetrics = metrics;
-            this.fanout((options) => options.onFrameMetrics?.(metrics));
-          }
-        : undefined,
+      // iOS computes snapshots only when this callback exists. Preserve creator-only work there;
+      // elsewhere always wire the fan-out so later consumers share this capture (#9798).
+      onFrameMetrics:
+        this.request.options.onFrameMetrics || this.fansOutFrameMetricsWithoutCreator()
+          ? (metrics) => {
+              this.frameMetrics = metrics;
+              this.fanout((options) => options.onFrameMetrics?.(metrics));
+            }
+          : undefined,
       onAudioData: this.request.options.onAudioData
         ? (chunk) => this.fanout((options) => options.onAudioData?.(chunk))
         : undefined,

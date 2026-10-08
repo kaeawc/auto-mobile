@@ -48,6 +48,52 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `every node type has the same fields in the Kotlin models and the shared contract`() {
+    val contract =
+      Json.parseToJsonElement(
+          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+            .readBytes()
+            .decodeToString()
+        )
+        .jsonObject
+    val variants =
+      contract
+        .getValue("definitions")
+        .jsonObject
+        .getValue("node")
+        .jsonObject
+        .getValue("variants")
+        .jsonObject
+    // A sealed serializer's descriptor holds the discriminator, then one element per subclass.
+    val subclasses = OverlayNode.serializer().descriptor.getElementDescriptor(1)
+    val models =
+      (0 until subclasses.elementsCount).associate { index ->
+        val node = subclasses.getElementDescriptor(index)
+        node.serialName to ((0 until node.elementsCount).map(node::getElementName) + "type").toSet()
+      }
+    assertEquals(variants.keys, models.keys)
+    for ((type, variant) in variants) {
+      assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
+    }
+  }
+
+  @Test
+  fun `button and list item icons accept the full icon set`() {
+    for (root in
+      listOf(
+        """{"type":"button","label":"Connect","icon":"wifi"}""",
+        """{"type":"listItem","headline":"Wi-Fi","leadingIcon":"wifi"}""",
+        """{"type":"listItem","headline":"Wi-Fi","trailing":{"type":"icon","name":"wifi"}}""",
+      )) {
+      val spec = """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":$root}"""
+      val accepted = OverlaySpecValidator.validate(spec)
+      assertTrue(accepted is OverlaySpecValidation.Success, accepted.toString())
+      val unknown = OverlaySpecValidator.validate(spec.replace("\"wifi\"", "\"not_an_icon\""))
+      assertTrue(unknown is OverlaySpecValidation.Failure, root)
+    }
+  }
+
+  @Test
   fun `raw byte limit includes whitespace and accepts its exact boundary`() {
     val input = validJson.getValue(valid.first())
     val padding =

@@ -7,6 +7,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import { logger } from "../../src/utils/logger";
 import { PortManager } from "../../src/utils/PortManager";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #10649: a caller such as getApple extends the shared health-poll deadline to its
@@ -50,7 +51,10 @@ interface Harness {
  * Builds a simulator manager whose health endpoint answers only when `healthy`
  * says so. Each spawned runner is "ours" until terminated.
  */
-function createHarness(healthy: (launchIndex: number, sinceLaunchMs: number) => boolean): Harness {
+function createHarness(
+  healthy: (launchIndex: number, sinceLaunchMs: number) => boolean,
+  options: { exitOnTerminate?: boolean } = {},
+): Harness {
   const timer = new FakeTimer();
   const executor = new FakeProcessExecutor();
   const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -89,6 +93,14 @@ function createHarness(healthy: (launchIndex: number, sinceLaunchMs: number) => 
   );
   spyOn(internals, "terminateHungRunnerProcess").mockImplementation(async (pid: number) => {
     harness.terminated.push(pid);
+    if (options.exitOnTerminate) {
+      // A real tree kill delivers the xcodebuild child's exit event while the
+      // retirement is still in flight, before the PID is untracked (#10653).
+      const killed = executor
+        .getSpawnedProcesses()
+        .find((spawned) => spawned.process.pid === pid)?.process;
+      (killed as FakeChildProcess | undefined)?.emit("exit", null, "SIGTERM");
+    }
   });
   return harness;
 }
@@ -140,6 +152,23 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
       .map((spawned) => spawned.process.pid);
     expect(harness.terminated).toEqual([firstPid!]);
     expect(harness.manager["xcTestProcessId"]).toBe(secondPid!);
+  });
+
+  test("a retired runner's exit event does not abort the relaunch or schedule a supervisor restart (#10653)", async () => {
+    const harness = createHarness((launchIndex) => launchIndex === 1, { exitOnTerminate: true });
+    harness.timer.enableAutoAdvance();
+
+    await harness.manager.start({ minimumHealthPollDurationMs: ACQUISITION_BUDGET_MS });
+
+    expect(harness.launches).toHaveLength(2);
+    const [firstPid, secondPid] = harness.executor
+      .getSpawnedProcesses()
+      .map((spawned) => spawned.process.pid);
+    expect(harness.terminated).toEqual([firstPid!]);
+    expect(harness.manager["xcTestProcessId"]).toBe(secondPid!);
+    // The deliberate retirement must not leave a duplicate supervisor restart racing
+    // the in-setup relaunch.
+    expect(harness.manager["processSupervisor"].isRestartPending()).toBe(false);
   });
 
   test("fails with an actionable health-check error before the caller deadline when every launch stays frozen", async () => {

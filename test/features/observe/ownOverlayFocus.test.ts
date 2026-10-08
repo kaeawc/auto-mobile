@@ -5,7 +5,11 @@ import {
   ownOverlayHidesApp,
   ownOverlayWindows,
 } from "../../../src/features/observe/ownOverlayFocus";
-import { capturedOverlayHierarchy } from "../../helpers/overlayWindowCapture";
+import {
+  PROTOTYPE_CAPTURE,
+  capturedAppLayerOverlayHierarchy,
+  capturedOverlayHierarchy,
+} from "../../helpers/overlayWindowCapture";
 import launcherCapture from "../../fixtures/android-launcher/launcher-recents-emulator-5602.json";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
@@ -196,5 +200,40 @@ describe("isOwnOverlayFocused (#10000)", () => {
         windows: [{ id: 2, type: 4, isFocused: true, bounds }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("ownOverlayWindows: app-layer prototype windows (aovl D4)", () => {
+  test("the captured app-layer window (TYPE_SYSTEM, no metadata) is listed; the status bar is not", () => {
+    const hierarchy = capturedAppLayerOverlayHierarchy();
+    expect(ownOverlayWindows(hierarchy).map((window) => window.id)).toEqual([
+      PROTOTYPE_CAPTURE.appLayerOverlayWindowId,
+    ]);
+  });
+
+  test("a TYPE_SYSTEM window counts only when its own package is CtrlProxy's", () => {
+    const statusBar = { id: 3, type: 3, isFocused: true, bounds };
+    // A CtrlProxy-labelled capture from an APK that omits window packages must not adopt SystemUI.
+    expect(ownOverlayWindows({ packageName: CTRL_PROXY_PACKAGE, windows: [statusBar] })).toEqual(
+      [],
+    );
+    const own = { id: 4, type: 3, isFocused: true, packageName: CTRL_PROXY_PACKAGE, bounds };
+    expect(isOwnOverlayFocused({ packageName: "com.example.app", windows: [own] })).toBe(true);
+  });
+
+  test("overlay metadata on a CtrlProxy window decides over the window type", () => {
+    const stamped = {
+      id: 5,
+      type: 3,
+      packageName: CTRL_PROXY_PACKAGE,
+      overlayPlacement: "floating" as const,
+      overlayOpaque: false,
+      bounds,
+    };
+    const app = { id: 1, type: 1, packageName: CTRL_PROXY_PACKAGE, bounds };
+    const ime = { id: 2, type: 2, packageName: CTRL_PROXY_PACKAGE, bounds };
+    expect(
+      ownOverlayWindows({ packageName: "com.example.app", windows: [app, ime, stamped] }),
+    ).toEqual([stamped]);
   });
 });

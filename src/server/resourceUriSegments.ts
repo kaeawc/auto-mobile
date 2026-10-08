@@ -5,6 +5,14 @@ import { logger } from "../utils/logger";
 export const MALFORMED_URI_SEGMENT_MESSAGE =
   "Malformed resource URI: a path segment is not valid percent-encoding.";
 
+/** A resource URI path segment is not valid percent-encoding: the client's invalid params. */
+export class MalformedResourceUriError extends ActionableError {
+  constructor() {
+    super(MALFORMED_URI_SEGMENT_MESSAGE);
+    this.name = "MalformedResourceUriError";
+  }
+}
+
 /**
  * Decode a percent-encoded URI path segment, returning null when the encoding is
  * malformed (a bare `%`, `%zz`, a truncated multi-byte escape).
@@ -28,13 +36,14 @@ export function safeDecodeSegment(value: string): string | null {
 
 /**
  * Like {@link safeDecodeSegment}, for contract parsers whose callers already
- * surface thrown errors to the client: throws an ActionableError instead of the
+ * surface thrown errors to the client: throws a {@link MalformedResourceUriError}
+ * (an ActionableError the resource registry maps to invalid params) instead of the
  * raw `URIError`.
  */
 export function decodeSegmentOrThrow(value: string): string {
   const decoded = safeDecodeSegment(value);
   if (decoded === null) {
-    throw new ActionableError(MALFORMED_URI_SEGMENT_MESSAGE);
+    throw new MalformedResourceUriError();
   }
   return decoded;
 }

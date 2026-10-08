@@ -21,10 +21,8 @@ process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 import type { DaemonOptions } from "./daemon/types";
 import { configureToolSelectionCliDefaults } from "./features/toolSelection/SessionToolSelectionService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import {
-  OUTPUT_REDUCTION_FLAG_SPECS,
-  resolveActionsCompactMetadata,
-} from "./utils/outputReductionFlags";
+import { persistedOutputReductionOverrides } from "./features/featureFlags/persistedOutputReductionOverrides";
+import { resolveActionsCompactMetadata } from "./utils/outputReductionFlags";
 import { hasGlobalHelpFlag } from "./cli/helpFlag";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
@@ -410,14 +408,9 @@ async function main() {
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
       ["mcp-recording", mcpRecording, "--mcp-recording"],
-      ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
-        (spec) => !spec.disableCli || outputReduction[spec.field] !== undefined,
-      ).map((spec): CliFeatureFlagOverride => [
-        spec.featureFlagKey,
-        outputReduction[spec.field] === true,
-        spec.label,
-        undefined,
-      ]),
+      ...persistedOutputReductionOverrides(outputReduction).map(
+        ({ key, label }): CliFeatureFlagOverride => [key, true, label, undefined],
+      ),
     ];
 
     // All DB-touching feature-flag startup work: migration-gated initialize()
@@ -431,7 +424,7 @@ async function main() {
       await featureFlagService.initialize();
 
       for (const [key, enabled, flagLabel, config] of cliOverrides) {
-        if (!enabled && key !== "actions-compact-metadata") {
+        if (!enabled) {
           continue;
         }
         await featureFlagService.setFlag(key, enabled, config);
@@ -439,6 +432,7 @@ async function main() {
       }
 
       // Resolve local behavior after persistence is loaded; keep the relay tri-state.
+      // The CLI/env compact-metadata choice is never persisted (#10377).
       serverConfig.setActionsCompactMetadataEnabled(
         resolveActionsCompactMetadata(
           outputReduction.actionsCompactMetadata,

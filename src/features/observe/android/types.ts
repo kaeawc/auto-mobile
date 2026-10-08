@@ -95,6 +95,8 @@ export interface AccessibilityNode {
   occludedByViewId?: string;
   extras?: Record<string, string>;
   recomposition?: RecompositionNodeInfo;
+  /** Text size in px from ExtraRenderingInfo.textSizeInPx (API 30+); null/absent when unreported. */
+  textSize?: number | null;
   node?: AccessibilityNode | AccessibilityNode[];
 }
 

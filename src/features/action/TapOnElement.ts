@@ -4701,6 +4701,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             bounds: { left: 0, top: 0, right: 0, bottom: 0 },
           } as Element,
           ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
+          ...(error instanceof ActionableError && error.containerFailure
+            ? { containerFailure: error.containerFailure }
+            : {}),
           ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
         },
         error,

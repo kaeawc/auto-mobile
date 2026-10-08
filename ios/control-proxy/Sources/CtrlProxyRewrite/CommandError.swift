@@ -23,14 +23,17 @@ public enum CommandError: LocalizedError, Sendable {
 
     /// Machine-readable code for the wire's additive `errorCode` field; `nil` for errors the host
     /// tells apart by wording alone. The host reads the code first and matches the wording only
-    /// for older runners that omit it. Both values are pinned against the TypeScript constants in
+    /// for older runners that omit it. Every value is pinned against the TypeScript constants in
     /// `src/features/observe/ios/runnerErrorCodes.ts` by `runnerErrorCodes.contract.test.ts`.
     public var wireCode: String? {
         switch self {
         case let .deadlineExceeded(_, _, gestureCompleted):
             return gestureCompleted ? "deadline_completed_late" : "deadline_not_started"
+        case .gestureBoundExceeded:
+            // The XCUITest call is still running and can still land: the outcome is unknown.
+            return "gesture_bound_exceeded"
         case .unknownCommand, .missingParameter, .invalidParameter, .executionFailed,
-             .gestureBoundExceeded, .queryBoundExceeded:
+             .queryBoundExceeded:
             return nil
         }
     }

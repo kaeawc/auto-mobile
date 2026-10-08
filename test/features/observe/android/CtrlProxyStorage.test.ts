@@ -28,6 +28,8 @@ describe("CtrlProxyStorage (Android)", function () {
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
     fakeAdb.setScreenState(true);
+    // The inspected app has a live process unless a test says otherwise (#10246).
+    fakeAdb.setCommandResponse("pidof", { stdout: "4242\n", stderr: "" });
 
     testDevice = {
       deviceId: "test-device-storage",
@@ -345,6 +347,33 @@ describe("CtrlProxyStorage (Android)", function () {
   });
 
   describe("subscribeStorage", function () {
+    test("refuses a stopped app before any provider request and never starts it (#10246)", async function () {
+      fakeAdb.setCommandResponse("pidof", { stdout: "", stderr: "" });
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        const baseCount = socket!.sentMessages.length;
+
+        // A second and third attempt get the same stable error, not "inspection is disabled".
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await expect(client.subscribeStorage("com.example", "settings.xml")).rejects.toThrow(
+            /com\.example is not running.*launchApp/,
+          );
+        }
+        expect(socket!.sentMessages.length).toBe(baseCount);
+      } finally {
+        await client.close();
+      }
+    });
+
     test("resolves with a subscription rebuilt from the device's flat result fields", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = AndroidCtrlProxyClient.createForTesting(

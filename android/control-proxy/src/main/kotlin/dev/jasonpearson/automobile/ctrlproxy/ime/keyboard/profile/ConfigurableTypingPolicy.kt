@@ -17,8 +17,11 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
     return onFinishInput()
   }
 
+  // The composing cursor is not re-read from the snapshot here: onSelectionChanged already applies
+  // every editor report as it arrives, and a snapshot taken before this policy's latest composing
+  // edit is echoed (automation commits a word in one synchronous run) would move the cursor back
+  // to the start of the new text and type it reversed (#10411).
   override fun onText(text: String, snapshot: TextSnapshot): List<ImeOp> {
-    updateComposingCursor(snapshot)
     var cursorInEditor = snapshot.selectionStart
     val ops = mutableListOf<ImeOp>()
     ImeGraphemes.split(text).forEach { char ->
@@ -84,12 +87,17 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
   }
 
   override fun onSelectionChanged(snapshot: TextSnapshot): List<ImeOp> {
+    // With nothing composing here, a report that still shows a composing span is a late echo of a
+    // word this policy already finished: the cursor did not land in committed text, so it must not
+    // recompose, and it must not consume the automation finish echo still on its way.
+    val staleComposingEcho = composingBuffer.isEmpty() && snapshot.composingStart >= 0
     val suppressRecompose =
-      automationFinishEchoCursor == snapshot.selectionStart &&
-        snapshot.selectionStart == snapshot.selectionEnd &&
-        snapshot.composingStart == -1 &&
-        snapshot.composingEnd == -1
-    automationFinishEchoCursor = null
+      staleComposingEcho ||
+        automationFinishEchoCursor == snapshot.selectionStart &&
+          snapshot.selectionStart == snapshot.selectionEnd &&
+          snapshot.composingStart == -1 &&
+          snapshot.composingEnd == -1
+    if (!staleComposingEcho) automationFinishEchoCursor = null
     val ops = mutableListOf<ImeOp>()
     if (composingBuffer.isNotEmpty() && selectionLeftComposingSpan(snapshot)) {
       finishComposingInto(ops)

@@ -12,6 +12,8 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.overlay.INTERACTIVE_OVERLAY_WINDOW_TITLE
+import dev.jasonpearson.automobile.ctrlproxy.overlay.OverlayWindowMetadata
 import java.util.Random
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -1096,6 +1098,138 @@ class ViewHierarchyExtractorTest {
 
     assertTrue(json.encodeToString(ViewHierarchy.serializer(), result).contains("Discover"))
     assertEquals(bounds(0, 1291, 295, 1543), result.windows!!.first { it.id == 423 }.bounds)
+  }
+
+  /**
+   * A floating overlay window covering one app row, as in the #10608/#10544 repro (p7/p8): the
+   * row's bounds lie wholly inside the overlay's root.
+   */
+  private fun coveredRowExtraction(
+    overlayType: Int,
+    overlayPackage: String,
+    overlayTitle: CharSequence?,
+    extractor: ViewHierarchyExtractor = this.extractor,
+  ): ViewHierarchy {
+    val app =
+      fakeNode(
+        packageName = "example.app",
+        text = "App",
+        bounds = Rect(0, 0, 1080, 2400),
+        children =
+          listOf(
+            fakeNode("example.app", text = "Visible row", bounds = Rect(0, 200, 1080, 400)),
+            fakeNode("example.app", text = "Covered row", bounds = Rect(100, 1000, 980, 1200)),
+          ),
+      )
+    val overlay =
+      fakeNode(
+        packageName = overlayPackage,
+        text = "Overlay card",
+        bounds = Rect(0, 900, 1080, 1400),
+      )
+    return extractor.extractFromAllWindows(
+      listOf(
+        fakeWindow(1, 0, app, focused = true, active = true),
+        fakeWindow(
+          2,
+          5,
+          overlay,
+          type = overlayType,
+          bounds = Rect(0, 900, 1080, 1400),
+          title = overlayTitle,
+        ),
+      ),
+      null,
+    )
+  }
+
+  @Test
+  fun `own interactive overlay windows of either layer do not prune covered app rows`() {
+    // The app layer's TYPE_APPLICATION_OVERLAY window reports as TYPE_SYSTEM (#10544).
+    for (type in
+      listOf(
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+        AccessibilityWindowInfo.TYPE_SYSTEM,
+      )) {
+      val result =
+        coveredRowExtraction(
+          type,
+          "dev.jasonpearson.automobile.ctrlproxy",
+          INTERACTIVE_OVERLAY_WINDOW_TITLE,
+        )
+      val serialized = json.encodeToString(ViewHierarchy.serializer(), result)
+      assertTrue("type $type", serialized.contains("Covered row"))
+      assertFalse("type $type", serialized.contains("\"occlusionState\":\"hidden\""))
+      assertTrue("type $type", serialized.contains("Overlay card"))
+    }
+  }
+
+  @Test
+  fun `third-party and highlight overlays still prune covered app rows`() {
+    for ((type, pkg, title) in
+      listOf(
+        Triple(AccessibilityWindowInfo.TYPE_SYSTEM, "com.android.systemui", "NotificationShade"),
+        Triple(AccessibilityWindowInfo.TYPE_SYSTEM, "com.android.systemui", null),
+        // CtrlProxy's highlight overlay keeps today's behaviour: only the interactive title skips.
+        Triple(
+          AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+          "dev.jasonpearson.automobile.ctrlproxy",
+          "AutoMobile Overlay",
+        ),
+        // The interactive title on an application window is not an overlay window.
+        Triple(
+          AccessibilityWindowInfo.TYPE_APPLICATION,
+          "other.app",
+          INTERACTIVE_OVERLAY_WINDOW_TITLE,
+        ),
+      )) {
+      val serialized =
+        json.encodeToString(ViewHierarchy.serializer(), coveredRowExtraction(type, pkg, title))
+      assertFalse("$type $title", serialized.contains("Covered row"))
+      assertTrue("$type $title", serialized.contains("Visible row"))
+    }
+  }
+
+  @Test
+  fun `overlay metadata is stamped on both overlay layers but never on SystemUI windows`() {
+    val asked = mutableListOf<Pair<String?, String?>>()
+    val stamping =
+      ViewHierarchyExtractor(
+        ownOverlayMetadata = { pkg, title ->
+          asked += pkg to title?.toString()
+          OverlayWindowMetadata("floating", opaque = false)
+        }
+      )
+    val own = "dev.jasonpearson.automobile.ctrlproxy"
+    for (type in
+      listOf(
+        AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY,
+        AccessibilityWindowInfo.TYPE_SYSTEM,
+      )) {
+      val window =
+        coveredRowExtraction(type, own, INTERACTIVE_OVERLAY_WINDOW_TITLE, stamping)
+          .windows!!
+          .single { it.id == 2 }
+      assertEquals("type $type", "floating", window.overlayPlacement)
+      assertEquals("type $type", false, window.overlayOpaque)
+    }
+    assertEquals(List(2) { own to INTERACTIVE_OVERLAY_WINDOW_TITLE }, asked)
+
+    asked.clear()
+    for (title in listOf("NotificationShade", "StatusBar", null)) {
+      val window =
+        coveredRowExtraction(
+            AccessibilityWindowInfo.TYPE_SYSTEM,
+            "com.android.systemui",
+            title,
+            stamping,
+          )
+          .windows!!
+          .single { it.id == 2 }
+      assertNull(window.overlayPlacement)
+      assertNull(window.overlayOpaque)
+    }
+    assertTrue(asked.isEmpty())
   }
 
   @Test
@@ -2603,9 +2737,11 @@ class ViewHierarchyExtractorTest {
     focused: Boolean = false,
     active: Boolean = false,
     bounds: Rect? = null,
+    title: CharSequence? = null,
   ): AccessibilityWindowInfo {
     val window = AccessibilityWindowInfo.obtain()
     val shadow = org.robolectric.Shadows.shadowOf(window)
+    title?.let { shadow.setTitle(it) }
     shadow.setId(id)
     shadow.setLayer(layer)
     shadow.setType(type)
@@ -3533,6 +3669,7 @@ class ViewHierarchyExtractorTest {
     isActive: Boolean = true,
     isFocused: Boolean = true,
     windowBounds: ElementBounds? = null,
+    isOwnInteractiveOverlay: Boolean = false,
   ): Any {
     val windowEntryClass = this.javaClass.declaredClasses.first { it.simpleName == "WindowEntry" }
     val constructor =
@@ -3545,6 +3682,7 @@ class ViewHierarchyExtractorTest {
         Boolean::class.javaPrimitiveType,
         UIElementInfo::class.java,
         ElementBounds::class.java,
+        Boolean::class.javaPrimitiveType,
       )
     constructor.isAccessible = true
     return constructor.newInstance(
@@ -3556,6 +3694,7 @@ class ViewHierarchyExtractorTest {
       isFocused,
       hierarchy,
       windowBounds,
+      isOwnInteractiveOverlay,
     )
   }
 

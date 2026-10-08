@@ -98,6 +98,20 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
     expect(repository.timelineQueries).toEqual([]);
   });
 
+  test.each([
+    ["dateRange", "?dateRange=%E0%A4%A", "Invalid dateRange: %E0%A4%A."],
+    ["aggregation", "?aggregation=%E0%A4%A", "Invalid aggregation: %E0%A4%A."],
+  ])(
+    "an invalid %s echoes the raw escaped value, not a lenient decode",
+    async (_key, query, message) => {
+      const body = await readTimeline(`automobile:failures/timeline${query}`);
+
+      expect(body.error).toContain(message);
+      expect(body.error).not.toContain("\uFFFD");
+      expect(repository.timelineQueries).toEqual([]);
+    },
+  );
+
   test("a malformed query escape does not surface as an McpError", async () => {
     const outcome = await readHandler(
       { params: { uri: "automobile:failures/timeline?dateRange=bad%zz" } },

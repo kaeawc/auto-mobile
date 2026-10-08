@@ -2,6 +2,7 @@ import { Platform } from "./Platform";
 import type { FailureObservationSummary } from "./FailureObservation";
 import type {
   ExecutePlanDebugInfo,
+  ExecutePlanStepDebugInfo,
   PlanDeviceFailure,
   PlanSkippedStep,
   PlanStepToolResult,
@@ -96,6 +97,11 @@ export interface DeviceExecutionResult {
   totalSteps: number;
   executionTimeMs?: number;
   skippedSteps?: DeviceSkippedStepResult[];
+  /**
+   * This track's step trace in execution order, in the same shape as `debug.steps` of a
+   * single-device run. Kept off the `executePlan` response; the plan health summary reads it.
+   */
+  steps?: ExecutePlanStepDebugInfo[];
   failedStep?: {
     stepIndex: number; // Index in plan
     trackIndex: number; // Index in device track

@@ -105,6 +105,7 @@ import {
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import { NetworkState } from "../server/NetworkState";
 import { registerNetworkStateSessionCleanup } from "../server/networkStateSessionCleanup";
+import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -418,6 +419,43 @@ interface CapturedDisconnectRecoveryOptions {
   preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>;
 }
 
+/**
+ * Pick the daemon's HTTP port: the preferred port first, then every other port
+ * in the documented `DAEMON_PORT_RANGE_START`-`DAEMON_PORT_RANGE_END` range
+ * (ascending from the preferred port, then wrapping to the range start). A
+ * preferred port outside the range has no fallback.
+ */
+export async function findAvailableDaemonPort(
+  preferredPort: number,
+  isPortAvailable: (port: number) => Promise<boolean>,
+): Promise<number> {
+  if (await isPortAvailable(preferredPort)) {
+    return preferredPort;
+  }
+  const inRange =
+    preferredPort >= DAEMON_PORT_RANGE_START && preferredPort <= DAEMON_PORT_RANGE_END;
+  const rangePorts = Array.from(
+    { length: DAEMON_PORT_RANGE_END - DAEMON_PORT_RANGE_START + 1 },
+    (_, index) => DAEMON_PORT_RANGE_START + index,
+  );
+  const fallbacks = inRange
+    ? [
+        ...rangePorts.filter((port) => port > preferredPort),
+        ...rangePorts.filter((port) => port < preferredPort),
+      ]
+    : [];
+  for (const port of fallbacks) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(
+    inRange
+      ? `No available ports in range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END}`
+      : `Port ${preferredPort} is not available (outside the fallback range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END})`,
+  );
+}
+
 export class Daemon {
   // One probe lifetime shared by all MCP connections and daemon doctor calls.
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
@@ -702,6 +740,7 @@ export class Daemon {
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
     registerNetworkStateSessionCleanup(this.sessionManager);
+    registerPerformanceMonitorSessionCleanup(this.sessionManager);
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {
@@ -918,7 +957,7 @@ export class Daemon {
 
       // Find an available port. In strict-port mode (issue #6260, restart's
       // atomic guard) we deliberately skip findAvailablePort()'s probe-then-
-      // release preflight and its port+1..3 fallback: that preflight releases
+      // release preflight and its in-range port fallback: that preflight releases
       // its probe socket before this process actually binds, leaving a window
       // for a competitor to claim the canonical port and for the fallback to
       // paper over it with a "successful" restart on the wrong port. Leaving
@@ -1120,22 +1159,7 @@ export class Daemon {
    * Find an available port in the configured range
    */
   private async findAvailablePort(preferredPort: number): Promise<number> {
-    // Try preferred port first (faster path)
-    if (await this.isPortAvailable(preferredPort)) {
-      return preferredPort;
-    }
-
-    // If preferred port fails, try a few alternatives
-    for (let i = 1; i <= 3; i++) {
-      const port = preferredPort + i;
-      if (port <= DAEMON_PORT_RANGE_END && (await this.isPortAvailable(port))) {
-        return port;
-      }
-    }
-
-    throw new Error(
-      `No available ports in range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END}`,
-    );
+    return findAvailableDaemonPort(preferredPort, (port) => this.isPortAvailable(port));
   }
 
   /**

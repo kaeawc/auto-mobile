@@ -196,6 +196,15 @@ for (const kind of ["tapOn", "tapAny"] as const) {
       const result = await h.execute({ container });
       expect(result.success).toBe(false);
       expect(result.error).toContain(error);
+      if (kind === "tapOn") {
+        // #10325: the handler result carries the structured diagnostic, not only the message.
+        const level = error.includes("level 1") ? 1 : 2;
+        expect(result).toHaveProperty("containerFailure", {
+          level,
+          reason: "not-found",
+          selector: level === 1 ? container.container : container,
+        });
+      }
       expect(h.taps()).toBe(0);
     });
     test("missing target stays within the selected item despite outside duplicates", async () => {

@@ -113,6 +113,7 @@ private fun RenderOverlayNode(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
+  weightAxis: OverlayWeightAxis? = null,
 ) {
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
@@ -123,10 +124,10 @@ private fun RenderOverlayNode(
       enter = overlayEnterTransition(node.source.transition),
       exit = overlayExitTransition(node.source.transition),
     ) {
-      RenderOverlayNodeContent(node, interact)
+      RenderOverlayNodeContent(node, interact, weightAxis = weightAxis)
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact, parentModifier)
+    RenderOverlayNodeContent(node, interact, parentModifier, weightAxis)
   }
 }
 
@@ -135,8 +136,9 @@ private fun RenderOverlayNodeContent(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
+  weightAxis: OverlayWeightAxis? = null,
 ) {
-  val modifier = parentModifier.then(overlayNodeModifier(node, interact))
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact, weightAxis))
   // Containers whose children can appear, disappear or change animate their size with them.
   val containerModifier = modifier.overlayAnimateSize(LocalOverlayMotion.current)
   when (node.role) {
@@ -150,7 +152,14 @@ private fun RenderOverlayNodeContent(
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact, rowWeight(it)) }
+        node.children.forEach {
+          RenderOverlayNode(
+            it,
+            interact,
+            rowWeight(it),
+            it.weightAxis(OverlayWeightAxis.HORIZONTAL),
+          )
+        }
       }
     "column" ->
       Column(
@@ -158,7 +167,14 @@ private fun RenderOverlayNodeContent(
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+        node.children.forEach {
+          RenderOverlayNode(
+            it,
+            interact,
+            columnWeight(it),
+            it.weightAxis(OverlayWeightAxis.VERTICAL),
+          )
+        }
       }
     "text" -> {
       val source = node.style.source
@@ -176,9 +192,9 @@ private fun RenderOverlayNodeContent(
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        fontFamily =
-          if (role == null || source.fontFamily != null) rememberOverlayFontFamily(node.style)
-          else null,
+        // Only an authored family overrides; otherwise the text inherits the theme's family through
+        // its role or the themed body style, as plain text in the prototyped app would (#10561).
+        fontFamily = if (source.fontFamily != null) rememberOverlayFontFamily(node.style) else null,
         textAlign = node.style.textAlign,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,
@@ -229,7 +245,14 @@ private fun RenderOverlayNodeContent(
     "chip" -> RenderOverlayChip(node, modifier, interact)
     "card" ->
       RenderOverlayCard(node, modifier) {
-        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+        node.children.forEach {
+          RenderOverlayNode(
+            it,
+            interact,
+            columnWeight(it),
+            it.weightAxis(OverlayWeightAxis.VERTICAL),
+          )
+        }
       }
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
@@ -436,7 +459,9 @@ private fun RenderOverlaySheet(
             .size(32.dp, 4.dp)
             .background(Color.Gray, RoundedCornerShape(2.dp))
         )
-      node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+      node.children.forEach {
+        RenderOverlayNode(it, interact, columnWeight(it), it.weightAxis(OverlayWeightAxis.VERTICAL))
+      }
     }
   }
 }
@@ -445,6 +470,7 @@ private fun RenderOverlaySheet(
 private fun overlayNodeModifier(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
+  weightAxis: OverlayWeightAxis? = null,
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
@@ -458,10 +484,24 @@ private fun overlayNodeModifier(
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
-  modifier = dimensionModifier(modifier, style.width, horizontal = true)
-  modifier = dimensionModifier(modifier, style.height, horizontal = false)
-  modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
+  // Bounds before the authored size: `width`/`height`/`fill` are then coerced into min/max, where
+  // the reverse order would clamp the bounds into an already-fixed size instead (#10537).
   modifier = sizeConstraintModifier(modifier, style)
+  modifier =
+    dimensionModifier(
+      modifier,
+      style.width,
+      horizontal = true,
+      weighted = weightAxis == OverlayWeightAxis.HORIZONTAL,
+    )
+  modifier =
+    dimensionModifier(
+      modifier,
+      style.height,
+      horizontal = false,
+      weighted = weightAxis == OverlayWeightAxis.VERTICAL,
+    )
+  modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
   style.aspectRatio?.let { modifier = modifier.aspectRatio(it.toFloat()) }
   val shape =
     overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
@@ -484,7 +524,7 @@ private fun overlayNodeModifier(
     this[OverlayRole] = node.role
     if (node.role == "icon" || node.role == "image") role = Role.Image
     // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
-    overlayContentDescription(node.role, node.text, node.iconName, tappable)?.let {
+    overlayContentDescription(node.role, node.text, node.iconName, tappable, node.children)?.let {
       contentDescription = it
     }
     overlayStateDescription(node.role, node.page, node.children.size)?.let {
@@ -537,39 +577,78 @@ private val SEMANTICS_FREE_CONTAINERS =
 
 /**
  * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
- * its icon name. Layout containers with neither text nor actions get none, so they stay out of the
- * skeleton instead of being labelled by their node kind ("box", "row"). Every other node keeps its
- * kind as the label.
+ * its icon name, and so does a tappable layout container whose only content is an icon (a FAB). A
+ * layout container is never labelled by its node kind ("box", "row") while it has content
+ * (#10524, #10608): its children label it instead. Only a tappable container with no children at
+ * all keeps its kind, as nothing else names it. Every other node keeps its kind as the label.
  */
 internal fun overlayContentDescription(
   role: String,
   text: String,
   iconName: String?,
   tappable: Boolean,
+  children: List<OverlayRenderNode> = emptyList(),
 ): String? =
   when {
     text.isNotEmpty() -> text
     tappable && !iconName.isNullOrEmpty() -> iconName
-    !tappable && role in SEMANTICS_FREE_CONTAINERS -> null
-    else -> role
+    role !in SEMANTICS_FREE_CONTAINERS -> role
+    !tappable -> null
+    children.isEmpty() -> role
+    else -> overlayIconOnlyLabel(children)
   }
+
+/**
+ * The icon name when the only visible content under a container is one named icon, possibly inside
+ * plain single-child layout containers; null for any other content.
+ */
+private fun overlayIconOnlyLabel(children: List<OverlayRenderNode>): String? {
+  val only = children.filter { it.visible }.singleOrNull() ?: return null
+  return when {
+    only.role == "icon" -> only.iconName?.takeIf { it.isNotEmpty() }
+    only.role in SEMANTICS_FREE_CONTAINERS &&
+      only.text.isEmpty() &&
+      only.source?.onTap.isNullOrEmpty() -> overlayIconOnlyLabel(only.children)
+    else -> null
+  }
+}
 
 /** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
 internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =
   if (role == "pager" && pageCount > 0) "Page ${page + 1} of $pageCount" else null
 
+/**
+ * A node with no authored size on the main axis of its Row/Column `weight` ([weighted]) takes the
+ * weighted space: wrapping its content there would shrink an empty box to nothing (#10537).
+ */
 private fun dimensionModifier(
   modifier: Modifier,
   size: OverlayDimension?,
   horizontal: Boolean,
+  weighted: Boolean = false,
 ): Modifier =
   when (size) {
     OverlayDimension.Fill -> if (horizontal) modifier.fillMaxWidth() else modifier.fillMaxHeight()
     is OverlayDimension.Dp ->
       if (horizontal) modifier.width(size.dp.toFloat().dp)
       else modifier.height(size.dp.toFloat().dp)
-    OverlayDimension.Wrap,
-    null -> if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
+    null -> if (weighted) modifier else wrapContent(modifier, horizontal)
+    OverlayDimension.Wrap -> wrapContent(modifier, horizontal)
+  }
+
+private fun wrapContent(modifier: Modifier, horizontal: Boolean): Modifier =
+  if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
+
+/** The main axis a Row/Column child's `weight` fills. */
+internal enum class OverlayWeightAxis {
+  HORIZONTAL,
+  VERTICAL,
+}
+
+/** [axis] when this child carries a `weight`, so its own size on that axis does not wrap. */
+private fun OverlayRenderNode.weightAxis(axis: OverlayWeightAxis): OverlayWeightAxis? =
+  axis.takeIf {
+    style.source.weight != null
   }
 
 /** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
@@ -580,7 +659,7 @@ private fun RowScope.rowWeight(child: OverlayRenderNode): Modifier =
 private fun ColumnScope.columnWeight(child: OverlayRenderNode): Modifier =
   child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
 
-/** Applied after width/height so `fill` and `dp` are clamped by the authored min/max. */
+/** Applied before width/height so `fill` and `dp` are clamped by the authored min/max. */
 private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Modifier =
   if (
     style.minWidth == null &&

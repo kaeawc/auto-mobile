@@ -662,10 +662,37 @@ async function releaseDaemonLivenessOwnership(
 }
 
 export function printUnknownDaemonCommand(command: string | undefined): void {
+  printDaemonUsageError(
+    command === undefined ? "Missing daemon command." : `Unknown daemon command: ${command}`,
+  );
+}
+
+/** Daemon commands that take no positional arguments. */
+const NO_POSITIONAL_DAEMON_COMMANDS = new Set([
+  "status",
+  "health",
+  "diagnose",
+  "available-devices",
+]);
+
+/**
+ * The first stray positional word given to a no-argument daemon command. A word
+ * right after a `--flag` is treated as that flag's value, so launch options such
+ * as `--port 3001` keep working after the command.
+ */
+export function strayDaemonCommandArgument(command: string, args: string[]): string | undefined {
+  if (!NO_POSITIONAL_DAEMON_COMMANDS.has(command)) {
+    return undefined;
+  }
+  return args.find(
+    (arg, index) =>
+      arg !== "" && !arg.startsWith("-") && (index === 0 || !args[index - 1].startsWith("--")),
+  );
+}
+
+function printDaemonUsageError(message: string): void {
   try {
-    console.error(
-      command === undefined ? "Missing daemon command." : `Unknown daemon command: ${command}`,
-    );
+    console.error(message);
     console.log("\nAvailable commands:");
     console.log("  start                 Start the daemon");
     console.log("  stop                  Stop the daemon");
@@ -720,6 +747,10 @@ export async function runDaemonCommand(
   const handler = Object.hasOwn(handlers, command) ? handlers[command] : undefined;
   if (!handler) {
     return printUnknownDaemonCommand(command);
+  }
+  const stray = strayDaemonCommandArgument(command, args);
+  if (stray !== undefined) {
+    return printDaemonUsageError(`Unexpected argument for daemon ${command}: ${stray}`);
   }
   return handler();
 }

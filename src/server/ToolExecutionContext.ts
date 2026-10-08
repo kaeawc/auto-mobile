@@ -343,13 +343,41 @@ function isReadinessSatisfied(
  * free: a replacement session is a distinct object, so it can only ever see
  * its own flights, and the predecessor's entry becomes eligible for GC once
  * nothing else references that stale `Session`.
+ *
+ * A flight runs only while someone is waiting for it (#7541 follow-up, owner
+ * decision 2026-10-08). It continues while ANY waiter remains. Once the last
+ * waiter detaches: before device preparation starts, `controller` cancels the
+ * flight outright; after it starts, `noWaiters` is aborted instead. That never
+ * interrupts a `setup()` step already in progress, but it ends the retry sleep
+ * early, and the next attempt boundary ends the flight with an `abandoned`
+ * outcome rather than running `setup()` again. A caller arriving after either
+ * signal fired waits for that flight to settle, then starts a fresh one.
  */
 interface ReadinessUpgradeFlight {
   controller: AbortController;
-  work: Promise<void>;
+  noWaiters: AbortController;
+  work: Promise<ReadinessSetupOutcome>;
   settled: boolean;
   waiters: number;
   devicePreparationStarted: boolean;
+}
+
+/**
+ * Result of one readiness setup run. `abandoned` means the shared flight lost
+ * its last waiter after device preparation started, so it stopped at an
+ * attempt boundary without recording a readiness level.
+ */
+type ReadinessSetupOutcome =
+  | { status: "ready" }
+  | { status: "abandoned"; reason: "noWaiters"; attemptsCompleted: number };
+
+const READINESS_READY: ReadinessSetupOutcome = { status: "ready" };
+
+/** Shared-flight hooks threaded into {@link runDeviceReadinessSetup}. */
+interface ReadinessFlightHooks {
+  onDevicePreparationStart: () => void;
+  /** Aborted when the flight's last waiter detaches after preparation started. */
+  noWaiters: AbortSignal;
 }
 
 const readinessUpgradeInFlight = new WeakMap<Session, ReadinessUpgradeFlight>();
@@ -387,9 +415,11 @@ async function ensureReadinessUpgraded(
 
     const inFlight = readinessUpgradeInFlight.get(session);
     if (inFlight) {
-      // A flight cancelled while still queued for the device lock must settle
-      // before a new caller starts another attempt.
-      if (inFlight.controller.signal.aborted) {
+      // A flight that lost its last waiter (cancelled while still queued for
+      // the device lock, or winding down to an `abandoned` outcome after
+      // preparation started) must settle before a new caller starts a fresh
+      // attempt; joining it would wait on a flight that will not retry.
+      if (inFlight.controller.signal.aborted || inFlight.noWaiters.signal.aborted) {
         await inFlight.work.catch((error: unknown) => {
           // This is the expected result of the last waiter leaving before
           // device preparation; the next loop iteration starts a fresh flight.
@@ -413,7 +443,8 @@ async function ensureReadinessUpgraded(
     // assigning `flight.work`.
     const flight: ReadinessUpgradeFlight = {
       controller,
-      work: Promise.resolve(),
+      noWaiters: new AbortController(),
+      work: Promise.resolve(READINESS_READY),
       settled: false,
       waiters: 0,
       devicePreparationStarted: false,
@@ -423,8 +454,11 @@ async function ensureReadinessUpgraded(
       sessionManager,
       requiredReadiness,
       controller.signal,
-      () => {
-        flight.devicePreparationStarted = true;
+      {
+        onDevicePreparationStart: () => {
+          flight.devicePreparationStarted = true;
+        },
+        noWaiters: flight.noWaiters.signal,
       },
     ).finally(() => {
       flight.settled = true;
@@ -441,7 +475,9 @@ async function ensureReadinessUpgraded(
 /**
  * A request may stop waiting without cancelling shared device preparation.
  * While the flight is still queued for the device lock, the final waiter may
- * abort it; once preparation starts, it must finish under its own signal.
+ * abort it. Once preparation starts, a `setup()` step in progress always runs
+ * to completion (#7541), but the final waiter leaving signals `noWaiters` so
+ * the flight stops at its next attempt boundary instead of retrying.
  */
 async function awaitReadinessFlight(
   flight: ReadinessUpgradeFlight,
@@ -452,10 +488,14 @@ async function awaitReadinessFlight(
     await awaitReadinessWork(flight.work, signal);
   } finally {
     flight.waiters -= 1;
-    if (flight.waiters === 0 && !flight.settled && !flight.devicePreparationStarted) {
-      flight.controller.abort(
-        new ActionableError("Readiness setup cancelled before device preparation"),
-      );
+    if (flight.waiters === 0 && !flight.settled) {
+      if (flight.devicePreparationStarted) {
+        flight.noWaiters.abort();
+      } else {
+        flight.controller.abort(
+          new ActionableError("Readiness setup cancelled before device preparation"),
+        );
+      }
     }
   }
 }
@@ -520,9 +560,10 @@ async function runDeviceReadinessSetup(
   sessionManager: SessionManager,
   requiredReadiness: DeviceReadinessLevel,
   signal?: AbortSignal,
-  onDevicePreparationStart?: () => void,
-): Promise<void> {
+  flightHooks?: ReadinessFlightHooks,
+): Promise<ReadinessSetupOutcome> {
   signal?.throwIfAborted();
+  let outcome = READINESS_READY;
   if (session.platform === "android" && requiredReadiness !== "booted") {
     // #6227 P1 follow-up: serialize this session-scoped upgrade against the
     // SAME per-device readiness lock the acquisition paths
@@ -534,10 +575,10 @@ async function runDeviceReadinessSetup(
     // `setup()` on the shared per-device `AndroidCtrlProxyManager` singleton.
     // Both paths derive the key via `deviceReadinessLockKey`, so they queue on
     // one lock and setup on a device is never run concurrently.
-    await withDeviceReadinessLock(
+    outcome = await withDeviceReadinessLock(
       deviceReadinessLockKey(session.platform, session.assignedDevice),
       () => {
-        onDevicePreparationStart?.();
+        flightHooks?.onDevicePreparationStart();
         return runWithAbortSignal(signal, () =>
           // #7541: reuse the SessionManager's own injected Timer (a FakeTimer
           // in tests) rather than hard-wiring defaultTimer, so this retry
@@ -548,7 +589,7 @@ async function runDeviceReadinessSetup(
             session.sessionId,
             session.platform,
             sessionManager.getTimer(),
-            signal,
+            { signal, noWaiters: flightHooks?.noWaiters },
             sessionManager,
           ),
         );
@@ -556,8 +597,14 @@ async function runDeviceReadinessSetup(
       { signal },
     );
   }
+  if (outcome.status === "abandoned") {
+    // Nobody is waiting and the device never reached the level: record
+    // nothing, so the next caller starts a fresh flight.
+    return outcome;
+  }
   ensureSessionIsCurrent(session, sessionManager);
   sessionManager.setDeviceReadiness(session.sessionId, requiredReadiness);
+  return outcome;
 }
 
 /** Await shared readiness work without making a cancelled request wait for it. */
@@ -654,14 +701,67 @@ interface A11yRetryContext {
   sessionId: string;
   timer: Timer;
   signal?: AbortSignal;
+  noWaiters?: AbortSignal;
+}
+
+/** Cancellation inputs for {@link ensureAccessibilityServiceReady}. */
+interface A11yReadinessCancellation {
+  /** The flight's own signal: aborts the run outright. */
+  signal?: AbortSignal;
+  /** The flight lost its last waiter: stop at the next attempt boundary. */
+  noWaiters?: AbortSignal;
+}
+
+/**
+ * The retry delay between setup attempts (#7541). It ends early once the
+ * shared flight has no waiters left, clearing its timer, so an abandoned
+ * flight does not hold a timer just to discover nobody is waiting.
+ */
+function retryDelay(timer: Timer, ms: number, noWaiters?: AbortSignal): Promise<void> {
+  if (!noWaiters) {
+    return timer.sleep(ms);
+  }
+  if (noWaiters.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    const onNoWaiters = () => {
+      timer.clearTimeout(handle);
+      resolve();
+    };
+    const handle = timer.setTimeout(() => {
+      noWaiters.removeEventListener("abort", onNoWaiters);
+      resolve();
+    }, ms);
+    noWaiters.addEventListener("abort", onNoWaiters, { once: true });
+  });
+}
+
+/**
+ * The attempt-boundary check (#7541 follow-up): a flight whose last waiter
+ * detached ends here instead of calling `setup()` again.
+ */
+function abandonedAtAttemptBoundary(
+  deviceId: string,
+  attemptsCompleted: number,
+  noWaiters?: AbortSignal,
+): ReadinessSetupOutcome | undefined {
+  if (!noWaiters?.aborted) {
+    return undefined;
+  }
+  logger.debug(
+    `[A11yRetry] Readiness flight abandoned: no waiters (deviceId=${deviceId}, attemptsCompleted=${attemptsCompleted})`,
+  );
+  return { status: "abandoned", reason: "noWaiters", attemptsCompleted };
 }
 
 /**
  * Handle a failed `setup()` result for one attempt (pulled out of
  * `ensureAccessibilityServiceReady` to stay under the complexity ratchet).
  * Sleeps and returns when the failure's typed `category` is retryable and
- * attempts remain, so the caller's `for` loop can `continue`; otherwise
- * throws the terminal `ActionableError`.
+ * attempts remain, so the caller's `for` loop can `continue` (the sleep ends
+ * early, and the loop then stops, if the shared flight has lost every
+ * waiter); otherwise throws the terminal `ActionableError`.
  */
 async function handleSetupFailure(
   setupResult: ProxySetupResult,
@@ -681,7 +781,7 @@ async function handleSetupFailure(
     logger.warn(
       `[A11yRetry] Transient failure on attempt ${ctx.attempt}/${ctx.maxAttempts}, retrying in ${ctx.retryDelayMs}ms: ${errorMsg}`,
     );
-    await awaitReadinessWork(ctx.timer.sleep(ctx.retryDelayMs), ctx.signal);
+    await awaitReadinessWork(retryDelay(ctx.timer, ctx.retryDelayMs, ctx.noWaiters), ctx.signal);
     return;
   }
 
@@ -694,8 +794,10 @@ async function handleSetupFailure(
  * Handle a `waitForConnection() === false` result for one attempt (issue
  * #7541): sleeps and returns when attempts remain, so the caller's `for`
  * loop can `continue` into a fresh `tryRebindUnhealthyAccessibilityService` +
- * `setup()` — a real health-check-and-rebind rather than a bare repeat;
- * otherwise throws the terminal `ActionableError`. An abort/cancellation
+ * `setup()` — a real health-check-and-rebind rather than a bare repeat,
+ * unless the shared flight has lost every waiter, which ends the sleep early
+ * and stops the loop at its attempt boundary; otherwise throws the terminal
+ * `ActionableError`. An abort/cancellation
  * while waiting (e.g. a typed `DeviceLostError` surfaced via `signal.reason`,
  * #7536) rejects `awaitReadinessWork` and propagates uncaught, so a lost
  * device fails fast instead of being retried.
@@ -716,7 +818,7 @@ async function handleConnectionFailure(
     logger.warn(
       `[A11yRetry] CtrlProxy connection failed on attempt ${ctx.attempt}/${ctx.maxAttempts}, retrying in ${ctx.retryDelayMs}ms`,
     );
-    await awaitReadinessWork(ctx.timer.sleep(ctx.retryDelayMs), ctx.signal);
+    await awaitReadinessWork(retryDelay(ctx.timer, ctx.retryDelayMs, ctx.noWaiters), ctx.signal);
     return;
   }
 
@@ -731,9 +833,10 @@ async function ensureAccessibilityServiceReady(
   sessionId: string,
   platform: Platform,
   timer: Timer = defaultTimer,
-  signal?: AbortSignal,
+  cancellation: A11yReadinessCancellation = {},
   sessionManager?: SessionManager,
-): Promise<void> {
+): Promise<ReadinessSetupOutcome> {
+  const { signal, noWaiters } = cancellation;
   const device: BootedDevice = {
     name: deviceId,
     platform,
@@ -751,6 +854,12 @@ async function ensureAccessibilityServiceReady(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     signal?.throwIfAborted();
+    // A `setup()` already running always completes; only a new attempt is
+    // skipped once every waiter has detached.
+    const abandoned = abandonedAtAttemptBoundary(deviceId, attempt - 1, noWaiters);
+    if (abandoned) {
+      return abandoned;
+    }
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityServiceReady");
     const retryCtx: A11yRetryContext = {
@@ -761,6 +870,7 @@ async function ensureAccessibilityServiceReady(
       sessionId,
       timer,
       signal,
+      noWaiters,
     };
 
     const readinessDriver = getDeviceReadinessProxyDriver(device);
@@ -815,8 +925,12 @@ async function ensureAccessibilityServiceReady(
         `[ToolExecutionContext] No timing data captured for setup (deviceId=${deviceId})`,
       );
     }
-    return;
+    return READINESS_READY;
   }
+  // Unreachable: the final attempt either returns or its failure handler throws.
+  throw new ActionableError(
+    `Failed to setup accessibility service for device ${deviceId} (session ${sessionId})`,
+  );
 }
 
 async function probeConnectedAccessibilityService(

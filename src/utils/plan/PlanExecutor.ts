@@ -834,6 +834,21 @@ export class DefaultPlanExecutor implements PlanExecutor {
   /**
    * Execute a single device track.
    */
+  /** Appends a track step to the `debug.steps`-shaped trace the plan health summary reads. */
+  private recordTrackStep(
+    steps: ExecutePlanStepDebugInfo[],
+    planIndex: number,
+    tool: string,
+    status: ExecutePlanStepDebugInfo["status"],
+    startedAt: number,
+  ): void {
+    steps.push({
+      step: `Execute step ${planIndex + 1}: ${tool}`,
+      status,
+      durationMs: this.timer.now() - startedAt,
+    });
+  }
+
   private async executeDeviceTrack(
     device: string,
     track: TrackedStep[],
@@ -917,11 +932,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           toolResults.add(planIndex, step.tool, stepResult.toolPayload, device);
         }
 
-        steps.push({
-          step: `Execute step ${planIndex + 1}: ${step.tool}`,
-          status: stepResult.status,
-          durationMs: this.timer.now() - stepStartTime,
-        });
+        this.recordTrackStep(steps, planIndex, step.tool, stepResult.status, stepStartTime);
 
         if (stepResult.status === "skipped") {
           logger.warn(

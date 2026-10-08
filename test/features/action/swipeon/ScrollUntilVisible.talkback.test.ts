@@ -53,7 +53,7 @@ const TARGET_ELEMENT: Element = {
 
 function makeScrollUntilVisible({
   accessibilityDetector,
-  finder,
+  scrollResolver,
   timer,
   accessibilityService,
   observeResults,
@@ -64,7 +64,7 @@ function makeScrollUntilVisible({
   voiceOverExecutor,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
-  finder: FakeElementFinder;
+  scrollResolver: FakeScrollElementResolver;
   timer: FakeTimer;
   accessibilityService: FakeScrollAccessibilityService;
   observeResults: ObserveResult[];
@@ -105,7 +105,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device,
-    resolver: new FakeScrollElementResolver(finder),
+    resolver: scrollResolver,
     geometry: fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
@@ -131,6 +131,7 @@ const BASE_OPTIONS: SwipeOnResolvedOptions = {
 describe("ScrollUntilVisible TalkBack focus behavior", () => {
   let detector: FakeAccessibilityDetector;
   let finder: FakeElementFinder;
+  let scrollResolver: FakeScrollElementResolver;
   let timer: FakeTimer;
   let accessibilityService: FakeScrollAccessibilityService;
   let talkBackExecutor: FakeTalkBackSwipeExecutor;
@@ -138,6 +139,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
   beforeEach(() => {
     detector = new FakeAccessibilityDetector();
     finder = new FakeElementFinder();
+    scrollResolver = new FakeScrollElementResolver(finder);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
@@ -146,12 +148,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 
   test("unknown TalkBack retries once and marks the scroll result without setting focus", async () => {
     detector.setDefaultResult(null);
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let searches = 0;
     finder.findElementByText = () => (++searches > 1 ? TARGET_ELEMENT : null);
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1)],
@@ -170,12 +172,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("does not call requestAction(focus) even with focusTarget:true when element already visible", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -190,7 +192,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("does not call requestAction(focus) when element found after scrolling", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       let findCount = 0;
       finder.findElementByText = (_h: any, _t: any) => {
         findCount++;
@@ -199,7 +201,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
@@ -219,12 +221,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("passes the injected ADB executor (not null) to detectMethod (#3915 regression)", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -242,13 +244,13 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("forwards the injected featureFlags to detectMethod (#3925 regression)", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
       const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -263,12 +265,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("does not call requestAction(focus) when focusTarget is not set and element already visible", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -283,12 +285,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("calls requestAction(focus, resourceId) when focusTarget:true and element already visible", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -308,7 +310,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("calls requestAction(focus) after scrolling finds element with focusTarget:true", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       let findCount = 0;
       finder.findElementByText = (_h: any, _t: any) => {
         findCount++;
@@ -317,7 +319,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
@@ -337,7 +339,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("does not call requestAction(focus) after scrolling finds element without focusTarget", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       let findCount = 0;
       finder.findElementByText = (_h: any, _t: any) => {
         findCount++;
@@ -346,7 +348,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
@@ -360,7 +362,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     });
 
     test("never calls requestAction(clear_focus) during scrolling", async () => {
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       let findCount = 0;
       finder.findElementByText = (_h: any, _t: any) => {
         findCount++;
@@ -369,7 +371,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [
@@ -395,12 +397,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         scrollable: false,
       } as unknown as Element;
 
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = elementWithoutId;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -417,12 +419,12 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     test("succeeds even when requestAction(focus) throws", async () => {
       accessibilityService.setRequestActionThrows(new Error("focus action failed"));
 
-      finder.nextScrollableContainer = CONTAINER_ELEMENT;
+      scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       finder.nextElementByText = TARGET_ELEMENT;
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,
-        finder,
+        scrollResolver,
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
@@ -492,7 +494,8 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
       hierarchy: { node: { $: CONTAINER_ELEMENT } },
     });
     const finder = new FakeElementFinder();
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const scrollResolver = new FakeScrollElementResolver(finder);
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     // The target is only in the hierarchy once the device has scrolled forward.
     finder.findElementByText = (hierarchy: ViewHierarchyResult, _text: string) =>
       hierarchyShowsTarget(hierarchy) ? TARGET_ELEMENT : null;
@@ -516,7 +519,7 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService: new FakeScrollAccessibilityService(),
       observeResults: [],
@@ -549,7 +552,8 @@ describe("ScrollUntilVisible TalkBack ACTION_SCROLL direction (#6116)", () => {
 describe("ScrollUntilVisible VoiceOver behavior", () => {
   test("returns the VoiceOver unsupported result without dispatching a TalkBack or synthesized swipe", async () => {
     const finder = new FakeElementFinder();
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const scrollResolver = new FakeScrollElementResolver(finder);
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const talkBackExecutor = new FakeTalkBackSwipeExecutor();
@@ -572,7 +576,7 @@ describe("ScrollUntilVisible VoiceOver behavior", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: new FakeAccessibilityDetector(),
-      finder,
+      scrollResolver,
       timer,
       accessibilityService: new FakeScrollAccessibilityService(),
       observeResults: [makeObserveResult(0)],
@@ -594,6 +598,7 @@ describe("ScrollUntilVisible VoiceOver behavior", () => {
 describe("ScrollUntilVisible end-of-list detection", () => {
   let detector: FakeAccessibilityDetector;
   let finder: FakeElementFinder;
+  let scrollResolver: FakeScrollElementResolver;
   let timer: FakeTimer;
   let accessibilityService: FakeScrollAccessibilityService;
   let talkBackExecutor: FakeTalkBackSwipeExecutor;
@@ -602,6 +607,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(true);
     finder = new FakeElementFinder();
+    scrollResolver = new FakeScrollElementResolver(finder);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
@@ -609,14 +615,14 @@ describe("ScrollUntilVisible end-of-list detection", () => {
   });
 
   test("throws when hierarchy unchanged for maxUnchangedScrolls iterations", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     finder.nextElementByText = null; // never found
 
     // Same observation repeated — fingerprint will never change
     const sameObs = makeObserveResult(99);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, sameObs, sameObs, sameObs],
@@ -627,7 +633,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
   });
 
   test("continues scrolling when hierarchy changes between iterations", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => {
       findCount++;
@@ -637,7 +643,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     // Varying observations so fingerprint changes each scroll
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [
@@ -657,7 +663,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
   });
 
   test("resets unchanged count when hierarchy changes", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => {
       findCount++;
@@ -670,7 +676,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
     const sameA = makeObserveResult(10);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameA, sameA, makeObserveResult(30), makeObserveResult(40)],
@@ -699,7 +705,8 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
     return requestAction(...args);
   };
   const finder = new FakeElementFinder();
-  finder.nextScrollableContainer = CONTAINER_ELEMENT;
+  const scrollResolver = new FakeScrollElementResolver(finder);
+  scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
   finder.findElementByText = () => (page === 2 ? TARGET_ELEMENT : null);
   const executor = new TalkBackSwipeExecutor(
     DEVICE,
@@ -712,7 +719,7 @@ test("review: TalkBack searches three disjoint keyed pages without scroll_backwa
   );
   const suv = makeScrollUntilVisible({
     accessibilityDetector: detector,
-    finder,
+    scrollResolver,
     timer,
     accessibilityService: new FakeScrollAccessibilityService(),
     observeResults: [],

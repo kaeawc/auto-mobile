@@ -28,3 +28,4 @@ Start with [installation](../index.md#install), then see the
 acts, and returns updated state.
 
 Android contract design: [agent-authored overlay specification](plat/android/overlay-ux.md).
+iOS simulator overlays: [overlay agent](plat/ios/overlay-agent.md).

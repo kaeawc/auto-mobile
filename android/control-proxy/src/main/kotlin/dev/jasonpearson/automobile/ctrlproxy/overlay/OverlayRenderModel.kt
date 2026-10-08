@@ -41,6 +41,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound number of a `slider`; 0 for every other role. */
+  val sliderValue: Double = 0.0,
 )
 
 data class OverlayRenderModel(
@@ -85,6 +87,7 @@ private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
     is OverlayRowNode -> node.children
     is OverlayColumnNode -> node.children
     is OverlayPagerNode -> node.children
+    is OverlayCardNode -> node.children
     else -> emptyList()
   }
 
@@ -135,6 +138,9 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlaySliderNode -> "slider"
+      is OverlayChipNode -> "chip"
+      is OverlayCardNode -> "card"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -148,6 +154,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlaySliderNode -> node.label.orEmpty()
+      is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
       else -> ""
     }
@@ -196,6 +204,9 @@ private fun mapOverlayNode(
     } ?: false,
     checked =
       overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+    sliderValue =
+      (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
+        ?: 0.0,
   )
 }
 
@@ -265,13 +276,17 @@ fun overlayColor(value: String): Color {
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
 
+/** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
+private fun overlayHexColor(value: String?): Color? =
+  value?.takeIf { it.startsWith("#") }?.let(::overlayColor)
+
 fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
   OverlayRenderStyle(
     style,
-    style.background?.let(::overlayColor),
-    style.border?.color?.let(::overlayColor),
+    overlayHexColor(style.background),
+    overlayHexColor(style.border?.color),
     // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
-    style.color?.let(::overlayColor) ?: Color.Unspecified,
+    overlayHexColor(style.color) ?: Color.Unspecified,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
@@ -366,7 +381,7 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,
       "padding.end" to style.padding?.end,
-      "cornerRadius" to style.cornerRadius,
+      "cornerRadius" to (style.cornerRadius as? OverlayCornerRadius.Dp)?.dp,
       "border.width" to style.border?.width,
       "spacing" to style.spacing,
       "textSize" to style.textSize,

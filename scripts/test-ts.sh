@@ -330,7 +330,7 @@ run_unit_shards() {
   local changed_ref="${2:-}"
   local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
   local file index shard shard_number worker_count rc pid shard_status timing_log report_name
-  local lane_start lane_elapsed shard_elapsed physical_cores
+  local lane_start lane_elapsed shard_elapsed shard_wall_record physical_cores
   local test_files=()
   local pids=()
   local shard_starts=()
@@ -404,6 +404,7 @@ run_unit_shards() {
     fi
 
     (
+      shard_started="$(date +%s)"
       timing_log="$shard_root/timing-shard-${shard}.ndjson"
       # These exports intentionally belong to the unit-shard subshell.
       # shellcheck disable=SC2030
@@ -452,6 +453,10 @@ run_unit_shards() {
         ${shard_args[@]+"${shard_args[@]}"} \
           ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
       fi
+      # The parent reaps shards in index order, so its clock would report every
+      # shard as finishing with the slowest earlier one (#10583). Record this
+      # shard's own test wall time before the timing summary runs.
+      printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
       if [[ -s "$timing_log" ]]; then
         bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
       fi
@@ -475,6 +480,13 @@ run_unit_shards() {
     shard_status=0
     wait "$pid" || shard_status=$?
     shard_elapsed=$(($(date +%s) - shard_starts[index]))
+    # A killed shard writes no record; keep the reap-time upper bound for it.
+    if [[ -f "$shard_root/shard-${index}.wall" ]]; then
+      shard_wall_record="$(< "$shard_root/shard-${index}.wall")"
+      if [[ "$shard_wall_record" =~ ^[0-9]+$ ]]; then
+        shard_elapsed="$shard_wall_record"
+      fi
+    fi
     shard_elapsed_seconds+=("$shard_elapsed")
     shard_statuses+=("$shard_status")
     if [[ "$shard_status" -eq 124 ]]; then

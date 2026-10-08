@@ -27,7 +27,10 @@ export type OverlayAgentRequestType =
   | "dismiss_overlay"
   | "put_overlay_asset"
   | "remove_overlay_asset"
-  | "get_overlay_status";
+  | "get_overlay_status"
+  // Test hook: the agent advertises it only when launched with
+  // AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS=1 (scripts/ios/overlay-agent-smoke.sh does that).
+  | "simulate_tap";
 
 export type OverlayAgentMessage = Record<string, unknown>;
 

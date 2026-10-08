@@ -59,7 +59,10 @@ final class OverlayAgent {
             Bundle.main.bundleIdentifier ?? "?",
             configuration.port
         )
-        let server = OverlayServer(configuration: configuration) { [weak self] message, reply in
+        let server = OverlayServer(
+            configuration: configuration,
+            capabilities: OverlayTestHooks.capabilities(enabled: testHooksEnabled)
+        ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
         model.onEvent = { [weak server] event in server?.broadcast(event) }

@@ -1,8 +1,9 @@
 version: 2.1
 
 # Continuation config for the CircleCI macOS/iOS lanes. Reached from
-# .circleci/config.yml (the setup pipeline) when path filtering set `run-ios`
-# or the post-merge coverage trigger set `run-swift-coverage-main`. See its header
+# .circleci/config.yml (the setup pipeline) when path filtering set `run-ios` or
+# `run-prototype-simulator`, or the post-merge coverage trigger set
+# `run-swift-coverage-main`. See its header
 # for the why, the budget, and the REQUIRED dynamic-config project setting.
 #
 # Scope: ios-swift-packages and ios-xcode-build mirror the same-named jobs in
@@ -13,6 +14,10 @@ version: 2.1
 # per repo policy), so this job's CircleCI check is NOT a required status check.
 # All jobs call the SAME repo scripts, so build logic stays single-sourced.
 #
+# prototype-simulator (the "Prototype Simulator" check) is the overlay agent's
+# per-runtime simulator smoke test, moved here from GitHub Actions. It is advisory
+# like ios-playground-tests: keep it OFF the branch-protection required list.
+#
 # Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
 # are "true" (derived from cert-secret presence). No secrets are configured on
 # CircleCI, so these build unsigned — correct for a simulator build+test lane.
@@ -22,6 +27,10 @@ parameters:
     type: boolean
     default: false
   run-swift-coverage-main:
+    type: boolean
+    default: false
+  # Set by path filtering in config.yml when the overlay agent's smoke inputs change.
+  run-prototype-simulator:
     type: boolean
     default: false
 
@@ -161,6 +170,46 @@ jobs:
       - store_artifacts:
           path: coverage/swift-coverage-badge.json
 
+  # "Prototype Simulator": per-runtime smoke test for the iOS overlay agent (#10569).
+  # Injection depends on simulator dyld behaviour and each runtime's Swift runtime, so
+  # a new Xcode or runtime can break it silently. Each matrix leg boots ONE fresh
+  # simulator, used serially and deleted afterwards. Advisory: simulator tests must not
+  # gate merges, so this check stays OFF the required list.
+  # Run locally on a Mac: bash scripts/ios/overlay-agent-smoke.sh 26
+  prototype-simulator:
+    parameters:
+      ios:
+        type: string
+        description: "iOS runtime version passed to overlay-agent-smoke.sh (26 matches 26.x)."
+    executor: ios
+    steps:
+      - checkout_without_lfs
+      - run:
+          name: "Report toolchain"
+          command: xcodebuild -version && xcrun simctl list runtimes iOS
+      - run:
+          name: "Install Bun"
+          # Pin to package.json's packageManager so CircleCI runs the same Bun as GitHub.
+          command: |
+            bun_version="$(jq -r '.packageManager | sub("^bun@"; "")' package.json)"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v${bun_version}"
+            echo 'export PATH="${HOME}/.bun/bin:${PATH}"' >> "${BASH_ENV}"
+      - run:
+          name: "Install dependencies"
+          command: bash scripts/ci/install-bun-deps.sh
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Run overlay agent smoke test (iOS << parameters.ios >>)"
+          # Exit 3 (runtime missing) fails the leg: the image is expected to ship the
+          # runtime, so a vanished runtime is an image change worth seeing.
+          command: bash scripts/ios/overlay-agent-smoke.sh "<< parameters.ios >>"
+          no_output_timeout: 20m
+      - store_artifacts:
+          path: scratch/overlay-agent-smoke
+          destination: overlay-agent-smoke-ios-<< parameters.ios >>
+
 workflows:
   ios-macos:
     # Gate the whole workflow on the parameter path-filtering set. When false
@@ -175,3 +224,14 @@ workflows:
     when: << pipeline.parameters.run-swift-coverage-main >>
     jobs:
       - swift-code-coverage
+
+  prototype-simulator:
+    when: << pipeline.parameters.run-prototype-simulator >>
+    jobs:
+      - prototype-simulator:
+          name: "Prototype Simulator iOS << matrix.ios >>"
+          matrix:
+            parameters:
+              # One leg per iOS runtime. Add a version here (e.g. "27") once the
+              # `ios` executor's Xcode image ships that runtime.
+              ios: ["26"]

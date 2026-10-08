@@ -11,9 +11,10 @@ version: 2.1
 #
 # DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline.
 # The path-filtering job diffs PR branches against main and continues to
-# .circleci/continue_config.yml only when iOS sources changed. Post-merge Swift
-# coverage has a separate parameter-gated path, triggered by GitHub Actions only
-# for coverage-input changes. Other pushes never spin up a macOS executor.
+# .circleci/continue_config.yml, whose workflows run only when iOS sources (or the
+# Prototype Simulator's overlay-agent inputs) changed. Post-merge Swift coverage
+# has a separate parameter-gated path, triggered by GitHub Actions only for
+# coverage-input changes. Other pushes never spin up a macOS executor.
 # This replaces the old `halt_if_no_ios_changes`, which ran AFTER a full macOS checkout and
 # therefore still billed macOS minutes for every push. The heavier macOS jobs
 # live in continue_config.yml.
@@ -84,12 +85,25 @@ jobs:
           # Mirror GitHub's filter-ios paths (ios/**, scripts/ios/**,
           # .swiftformat, .swiftlint.yml) plus .circleci/** so config changes
           # revalidate. Keep this in sync with `filter-ios` in pull_request.yml.
+          # The run-prototype-simulator lines gate the advisory "Prototype Simulator"
+          # (overlay agent smoke) workflow on its own inputs: the overlay agent, its
+          # smoke script and driver, and the TypeScript the driver imports. Comments
+          # cannot go inside the mapping block itself; the orb reads every line.
           mapping: |
             ios/.* run-ios true
             scripts/ios/.* run-ios true
             \.swiftformat run-ios true
             \.swiftlint\.yml run-ios true
             \.circleci/.* run-ios true
+            ios/overlay-agent/.* run-prototype-simulator true
+            scripts/ios/overlay-agent-.* run-prototype-simulator true
+            scripts/ios/run_with_timeout\.sh run-prototype-simulator true
+            src/features/overlay/overlaySpec\.ts run-prototype-simulator true
+            src/features/overlay/overlayValidation\.ts run-prototype-simulator true
+            src/features/overlay/ios/.* run-prototype-simulator true
+            src/utils/SystemTimer\.ts run-prototype-simulator true
+            test/bats/overlay-agent-smoke\.bats run-prototype-simulator true
+            \.circleci/continue_config\.yml run-prototype-simulator true
       - path-filtering/generate-config
       - continuation/continue:
           configuration_path: /tmp/generated-config.yml

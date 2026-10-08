@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import android.util.Log
 import android.view.Display
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidator
@@ -20,9 +19,9 @@ fun interface OverlayResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
   /**
-   * A successful `show_overlay` or `update_overlay` that references assets the device does not
-   * have: a warning carried by the same single `overlay_result`, so the host can re-upload. Sinks
-   * that predate it drop the list.
+   * A successful `show_overlay` that references assets the device does not have: a warning carried
+   * by the same single `overlay_result`, so the host can re-upload. Sinks that predate it drop the
+   * list.
    */
   suspend fun sendWithMissingAssets(
     requestId: String?,
@@ -41,8 +40,9 @@ fun interface OverlayResultSink {
 
 /**
  * One active ID/spec, serialized with host mutations. Validation/mapping happen before replacement;
- * rejected requests retain the previous spec/window. State patches merge, including new valid keys;
- * the canonical validator supplies key rules and JSON paths. There is no opacity-only wire field.
+ * rejected requests retain the previous spec/window. Every show carries a full spec whose state is
+ * authoritative; the canonical validator supplies key rules and JSON paths. There is no
+ * opacity-only wire field.
  */
 class OverlayController(
   private val host: InteractiveOverlayHost,
@@ -61,7 +61,7 @@ class OverlayController(
    * show replacement or a temporary lock-screen hide.
    */
   private val clearAssets: () -> Unit = {},
-  /** Whether the asset store holds [id]; `show` and `update` report referenced ids that fail. */
+  /** Whether the asset store holds [id]; `show` reports referenced ids that fail. */
   private val hasAsset: (String) -> Boolean = { true },
   /** Decoded-image cache the rendered overlay draws `image` nodes from. */
   private val images: OverlayImageCache? = null,
@@ -122,41 +122,28 @@ class OverlayController(
     classDiscriminator = "type"
   }
 
-  /** [displayId] null means the default display, exactly as before display targeting. */
-  suspend fun show(requestId: String?, spec: OverlaySpec, displayId: Int? = null) =
+  /**
+   * Always renders the full [spec]. When [spec]'s id is the overlay on screen and [reset] is false,
+   * it replaces that overlay in place: it stays on the display it was shown on ([displayId] is
+   * ignored) and each pager keeps its page, matched by pager id and clamped to the new page count.
+   * The new spec's state is authoritative; values the user changed are not carried over. Otherwise
+   * (another id, nothing shown, or [reset]) it is a fresh show on [displayId], where null means the
+   * default display, exactly as before display targeting.
+   */
+  suspend fun show(
+    requestId: String?,
+    spec: OverlaySpec,
+    displayId: Int? = null,
+    reset: Boolean = false,
+  ) =
     execute(requestId) {
+      val inPlace = !reset && activeRuntime?.current?.spec?.id == spec.id
       display(
         spec,
         replace = activeRuntime != null,
-        displayId = displayId ?: Display.DEFAULT_DISPLAY,
+        preservePages = inPlace,
+        displayId = if (inPlace) shownDisplayId() else displayId ?: Display.DEFAULT_DISPLAY,
       )
-      missingAssets()
-    }
-
-  suspend fun update(
-    requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
-  ) =
-    execute(requestId) {
-      val current = activeRuntime?.current?.spec
-      require(current?.id == id) { "Unknown overlay id: $id" }
-      require((spec == null) != (state == null)) { "Exactly one of spec or state is required" }
-      require(spec == null || spec.id == id) { "spec.id: Must match overlay id $id" }
-      // A replacement spec stays on the display the overlay was shown on.
-      if (spec != null)
-        display(spec, replace = true, preservePages = true, displayId = shownDisplayId())
-      else {
-        val patched =
-          validate(checkNotNull(current).copy(state = current.state.orEmpty() + state.orEmpty()))
-        render(patched) // Validate Compose sizes too, before mutating the live runtime.
-        val runtime = checkNotNull(activeRuntime)
-        runtime.replace(patched)
-        armIdle(runtime)
-        ensureShowing(runtime)
-        syncTextFieldFocus(runtime)
-      }
       missingAssets()
     }
 
@@ -538,20 +525,6 @@ class OverlayController(
       Log.w("OverlayController", "Overlay window could not be restored", error)
       false
     }
-
-  /**
-   * A state-only update never touches the host, so a window the host cleared as detached would
-   * leave the runtime windowless while the request reports success. A lock-hidden window is
-   * legitimate (restored on unlock) and keeps the patched state; otherwise restore it now, and fail
-   * the request when the overlay could not come back (the runtime then ended once, as teardown).
-   */
-  private suspend fun ensureShowing(runtime: OverlayRuntime) {
-    if (host.isShowing || lifecycle.isBlocked()) return
-    relayoutOrRestore(runtime)
-    check(runtime === activeRuntime && (host.isShowing || lifecycle.isBlocked())) {
-      "Overlay window was lost and could not be restored"
-    }
-  }
 
   /**
    * The window may hold input focus only while a text field is visible in the CURRENT tree, so a

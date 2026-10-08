@@ -178,35 +178,7 @@ describe("overlay window.layer and window.persistence", () => {
     expect(awaited.event?.sequence).toBe(1);
   });
 
-  test("update with a spec is checked like show", async () => {
-    await call({ action: "show", spec: spec() });
-    client.setSupportedCommands([]);
-    const payload = await call({
-      action: "update",
-      id: "proto",
-      spec: spec({ persistence: "device" }),
-    });
-    expect(payload.success).toBe(false);
-    expect(payload.error).toContain("overlay_window_options_v1");
-    expect(client.getOverlayHistory()).toHaveLength(1);
-  });
-
-  test("showVariants carries layer and persistence onto the composed window", async () => {
-    const payload = await call({
-      action: "showVariants",
-      id: "proto",
-      variants: [{ spec: { type: "text", text: "Only" } }],
-      layer: "app",
-      persistence: "device",
-    });
-    expect(payload.success).toBe(true);
-    expect(client.getOverlayHistory()).toMatchObject([
-      { method: "show", spec: { window: { layer: "app", persistence: "device" } } },
-    ]);
-    expect(adb.getExecutedCommands()).toEqual([OVERLAY_APP_LAYER_APPOP_COMMAND]);
-  });
-
-  test("layer and persistence are showVariants-only top-level parameters", () => {
+  test("layer and persistence are not top-level show parameters", () => {
     const parsed = overlaySchema.safeParse({ action: "show", spec: spec(), layer: "app" });
     expect(parsed.success).toBe(false);
   });

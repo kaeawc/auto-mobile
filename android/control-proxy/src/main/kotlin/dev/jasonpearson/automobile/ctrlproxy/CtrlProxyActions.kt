@@ -3,7 +3,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 
 /**
@@ -347,14 +346,8 @@ interface CtrlProxyActions {
 
   fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?)
 
-  fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?)
-
-  fun updateOverlay(
-    requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
-  )
+  /** [reset] starts a same-id show fresh instead of replacing the overlay in place. */
+  fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean)
 
   fun dismissOverlay(requestId: String?, id: String?, all: Boolean?)
 

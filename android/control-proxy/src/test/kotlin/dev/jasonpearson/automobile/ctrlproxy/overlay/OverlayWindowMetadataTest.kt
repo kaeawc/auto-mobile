@@ -189,12 +189,7 @@ class OverlayWindowMetadataTest {
     controller.show("r1", spec(OverlayFullscreenPlacement()))
     assertEquals(OverlayWindowMetadata("fullscreen", false), controller.windowMetadata())
 
-    controller.update(
-      "r2",
-      "panel",
-      spec(OverlaySheetPlacement("bottom", 120.0), opacity = 50),
-      null,
-    )
+    controller.show("r2", spec(OverlaySheetPlacement("bottom", 120.0), opacity = 50))
     assertEquals(OverlayWindowMetadata("sheet", false), controller.windowMetadata())
 
     controller.dismiss("r3", "panel", null)

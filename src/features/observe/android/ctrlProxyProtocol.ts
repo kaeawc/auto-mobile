@@ -438,13 +438,13 @@ export interface ShowOverlayMessage {
   spec: OverlaySpec;
   /** Android logical display; omitted for the default display. Requires overlay_display_id_v1. */
   displayId?: number;
+  /**
+   * Only `true` is sent. A show whose spec.id is the overlay on screen replaces it in place (pages
+   * and display kept); `reset` starts it fresh. A device that predates it ignores the field and
+   * always starts fresh, which is what `reset` asks for.
+   */
+  reset?: true;
 }
-/** Replacement spec.id must equal the top-level id; hosts reject mismatches before sending. */
-export type OverlayUpdate = { id: string } & (
-  | { spec: OverlaySpec; state?: never }
-  | { state: OverlayState; spec?: never }
-);
-export type UpdateOverlayMessage = { type: "update_overlay"; requestId: string } & OverlayUpdate;
 export type OverlayDismiss = { id: string; all?: never } | { all: true; id?: never };
 export type DismissOverlayMessage = { type: "dismiss_overlay"; requestId: string } & OverlayDismiss;
 /**
@@ -482,7 +482,7 @@ export interface OverlayResult {
   requestId?: string;
   timestamp?: number;
   /**
-   * Warning, not a failure: after a successful show_overlay or update_overlay, the asset ids the
+   * Warning, not a failure: after a successful show_overlay, the asset ids the
    * spec references that the device has no copy of (never uploaded, or cleared since), so the
    * host can re-upload them. Absent when nothing is missing and on devices that predate it.
    */
@@ -827,7 +827,6 @@ export type CtrlProxyRequest =
   | GetCurrentFocusMessage
   | GetTraversalOrderMessage
   | ShowOverlayMessage
-  | UpdateOverlayMessage
   | DismissOverlayMessage
   | InspectOverlaysMessage
   | PutOverlayAssetMessage
@@ -873,7 +872,6 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  */
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "show_overlay",
-  "update_overlay",
   "dismiss_overlay",
   "put_overlay_asset",
   "remove_overlay_asset",
@@ -1086,7 +1084,6 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   get_traversal_order: true,
   add_highlight: true,
   show_overlay: true,
-  update_overlay: true,
   dismiss_overlay: true,
   inspect_overlays: true,
   put_overlay_asset: true,
@@ -1360,19 +1357,15 @@ export const ctrlProxyRequests = {
     requestId: string;
     spec: OverlaySpec;
     displayId?: number;
+    reset?: boolean;
   }): ShowOverlayMessage {
     return {
       type: "show_overlay",
       requestId: args.requestId,
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
+      ...(args.reset === true ? { reset: true as const } : {}),
     };
-  },
-
-  updateOverlay(args: { requestId: string } & OverlayUpdate): UpdateOverlayMessage {
-    return args.spec !== undefined
-      ? { type: "update_overlay", requestId: args.requestId, id: args.id, spec: args.spec }
-      : { type: "update_overlay", requestId: args.requestId, id: args.id, state: args.state };
   },
 
   inspectOverlays(args: { requestId: string }): InspectOverlaysMessage {

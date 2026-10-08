@@ -188,7 +188,6 @@ import type {
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
-  OverlayUpdate,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import {
@@ -1310,11 +1309,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
-  ): Promise<OverlayResult>;
-  requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
+    reset?: boolean,
   ): Promise<OverlayResult>;
   requestDismissOverlay(
     target: OverlayDismiss,
@@ -3596,15 +3591,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
     perf?: PerformanceTracker,
     displayId?: number,
+    reset?: boolean,
   ): Promise<OverlayResult> {
-    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId);
-  }
-  requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    return this.overlays.requestUpdateOverlay(update, timeoutMs, perf);
+    return this.overlays.requestShowOverlay(spec, timeoutMs, perf, displayId, reset);
   }
   requestDismissOverlay(
     target: OverlayDismiss,
@@ -5332,7 +5321,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         [
           "request_click_focused_input",
           "show_overlay",
-          "update_overlay",
           "dismiss_overlay",
           "put_overlay_asset",
           "remove_overlay_asset",

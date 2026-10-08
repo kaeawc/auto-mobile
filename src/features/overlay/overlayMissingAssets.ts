@@ -19,7 +19,7 @@ function quoted(ids: readonly string[]): string {
 }
 
 /**
- * The warning for a successful show/update whose device result still lists missing assets. It
+ * The warning for a successful show whose device result still lists missing assets. It
  * separates ids the caller never supplied (upload them) from ids it did supply (the one automatic
  * retry did not help, so something is clearing them).
  */
@@ -29,7 +29,7 @@ export function missingAssetsWarning(input: MissingAssetsWarningInput): string {
   const parts: string[] = [];
   if (unsupplied.length > 0) {
     parts.push(
-      `The device has no copy of overlay asset(s) ${quoted(unsupplied)}, so those images show placeholders. Upload them with assets: [{id, path}] on a show or an update with spec.`,
+      `The device has no copy of overlay asset(s) ${quoted(unsupplied)}, so those images show placeholders. Upload them with assets: [{id, path}] on a show.`,
     );
   }
   if (supplied.length > 0) {

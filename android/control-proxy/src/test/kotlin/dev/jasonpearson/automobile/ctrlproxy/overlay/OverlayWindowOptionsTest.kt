@@ -138,10 +138,10 @@ class OverlayWindowOptionsTest {
   }
 
   @Test
-  fun `updating a persisted overlay to session scope restores the disconnect dismissal`() =
+  fun `re-showing a persisted overlay with session scope restores the disconnect dismissal`() =
     runTest {
       controller.show(null, spec(persistence = "device"))
-      controller.update(null, "proto", spec(persistence = "session"), null)
+      controller.show(null, spec(persistence = "session"))
       controller.onClientCountChanged(0)
       assertFalse(host.isShowing)
       assertEquals("""{"reason":"disconnect"}""", lastDismissReason())

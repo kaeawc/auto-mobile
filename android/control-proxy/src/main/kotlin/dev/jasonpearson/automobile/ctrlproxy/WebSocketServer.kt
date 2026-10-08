@@ -133,7 +133,7 @@ class WebSocketServer(
 
     /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
     private val overlayRequestTypes =
-      setOf("show_overlay", "update_overlay", "dismiss_overlay", "inspect_overlays") +
+      setOf("show_overlay", "dismiss_overlay", "inspect_overlays") +
         overlayAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -282,7 +282,7 @@ class WebSocketServer(
         return "Malformed request: a numeric value is out of range or not representable."
       }
       if (
-        type in listOf("show_overlay", "update_overlay", "dismiss_overlay") &&
+        type in listOf("show_overlay", "dismiss_overlay") &&
           cause.contains("Class discriminator was missing") &&
           !cause.contains("at path:")
       ) {

@@ -22,7 +22,6 @@ import type {
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
-  OverlayUpdate,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
@@ -118,8 +117,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         timeoutMs: number;
         perf?: PerformanceTracker;
         displayId?: number;
+        reset?: boolean;
       }
-    | { method: "update"; update: OverlayUpdate; timeoutMs: number; perf?: PerformanceTracker }
     | { method: "dismiss"; target: OverlayDismiss; timeoutMs: number; perf?: PerformanceTracker }
   > = [];
   private readonly overlayListeners = new Set<(event: OverlayEvent) => void>();
@@ -130,7 +129,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.overlayResult = result;
   }
 
-  /** Results returned, in order, by the next show/update requests before the default. */
+  /** Results returned, in order, by the next show requests before the default. */
   queueOverlayResults(...results: OverlayResult[]): void {
     this.queuedOverlayResults.push(...results);
   }
@@ -148,6 +147,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     timeoutMs = 5000,
     perf?: PerformanceTracker,
     displayId?: number,
+    reset?: boolean,
   ): Promise<OverlayResult> {
     this.checkFailure("requestShowOverlay");
     this.overlayHistory.push({
@@ -156,17 +156,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       timeoutMs,
       perf,
       ...(displayId === undefined ? {} : { displayId }),
+      ...(reset === undefined ? {} : { reset }),
     });
-    return this.nextOverlayResult();
-  }
-
-  async requestUpdateOverlay(
-    update: OverlayUpdate,
-    timeoutMs = 5000,
-    perf?: PerformanceTracker,
-  ): Promise<OverlayResult> {
-    this.checkFailure("requestUpdateOverlay");
-    this.overlayHistory.push({ method: "update", update, timeoutMs, perf });
     return this.nextOverlayResult();
   }
 

@@ -2,16 +2,19 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { OverlayEvent, OverlayResult } from "../observe/android/ctrlProxyProtocol";
 
-export type OverlayMutation = "show" | "update" | "dismiss";
+export type OverlayMutation = "show" | "dismiss";
 export interface OverlayLastResult {
   id?: string;
   all?: true;
   lastAction: OverlayMutation;
+  /**
+   * Android logical display the overlay is on: the one requested for a fresh show; a same-id show
+   * without reset and a dismiss echo the shown overlay's.
+   */
   /** Reported by the device through `inspect`, not shown by this host. */
   adopted?: true;
   /** Adopted overlays only: the device keeps it after the host disconnects (`persistence: "device"`). */
   persistent?: boolean;
-  /** Android logical display requested for a show; update/dismiss echo the shown overlay's. */
   displayId?: number;
   success: boolean;
   error?: string;
@@ -39,6 +42,11 @@ export interface OverlayScope {
 }
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
+  /**
+   * The overlay currently shown with this id on the device, from any session. The device holds one
+   * active overlay, so whether a same-id show replaces in place is a device-wide fact.
+   */
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined;
   startShow(scope: OverlayScope): void;
   /**
    * The device reported this overlay as showing (`inspect`). Presence and its last known
@@ -99,6 +107,16 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
       })),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
+  }
+
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        return { ...entry };
+      }
+    }
+    return undefined;
   }
 
   /** Only events after this show attempt can establish its successful snapshot. */
@@ -165,7 +183,7 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
   ): OverlayLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
-    // An update or dismiss acts on the overlay already shown, wherever it was shown.
+    // A dismiss acts on the overlay already shown, wherever it was shown.
     const shownDisplay =
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId

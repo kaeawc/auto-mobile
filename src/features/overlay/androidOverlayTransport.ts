@@ -5,7 +5,6 @@ import type {
   OverlayDismiss,
   OverlayEvent,
   OverlayResult,
-  OverlayUpdate,
 } from "../observe/android/ctrlProxyProtocol";
 import type { OverlayAssetUpload } from "./overlayAssets";
 import type { OverlaySpec } from "./overlaySpec";
@@ -15,7 +14,6 @@ import type { OverlayDeviceStatus, OverlayShowOptions, OverlayTransport } from "
 export type AndroidOverlayClient = Pick<
   AndroidCtrlProxyClient,
   | "requestShowOverlay"
-  | "requestUpdateOverlay"
   | "requestInspectOverlays"
   | "requestDismissOverlay"
   | "requestPutOverlayAsset"
@@ -25,19 +23,20 @@ export type AndroidOverlayClient = Pick<
 >;
 
 /**
- * Forwards every call to CtrlProxy unchanged. `update`, `inspect` and `supportsCommand` are Android-only
- * extras outside the shared interface: CtrlProxy still has `update_overlay`, and display
- * targeting is gated on a CtrlProxy capability.
+ * Forwards every call to CtrlProxy unchanged. `inspect` and `supportsCommand` are Android-only extras outside
+ * the shared interface: display targeting is gated on a CtrlProxy capability.
  */
 export class AndroidOverlayTransport implements OverlayTransport {
   constructor(private readonly client: AndroidOverlayClient) {}
 
   show(spec: OverlaySpec, options: OverlayShowOptions = {}): Promise<OverlayResult> {
-    return this.client.requestShowOverlay(spec, options.timeoutMs, undefined, options.displayId);
-  }
-
-  update(update: OverlayUpdate, timeoutMs?: number): Promise<OverlayResult> {
-    return this.client.requestUpdateOverlay(update, timeoutMs);
+    return this.client.requestShowOverlay(
+      spec,
+      options.timeoutMs,
+      undefined,
+      options.displayId,
+      options.reset,
+    );
   }
 
   inspect(timeoutMs?: number): Promise<OverlayResult> {

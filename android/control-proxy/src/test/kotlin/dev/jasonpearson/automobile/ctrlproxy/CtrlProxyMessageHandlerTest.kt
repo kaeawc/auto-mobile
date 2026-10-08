@@ -5,7 +5,6 @@ import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.OverlayResult
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlayTextNode
 import dev.jasonpearson.automobile.protocol.PinchResult
@@ -1148,25 +1147,10 @@ class CtrlProxyMessageHandlerTest {
     assertEquals("s", lastCall.second[0])
     assertEquals("panel", (lastCall.second[1] as OverlaySpec).id)
     assertEquals(OverlayTextNode(text = "Hello"), (lastCall.second[1] as OverlaySpec).root)
-    dispatch("""{"type":"update_overlay","requestId":"u","id":"panel","spec":$spec}""")
-    assertEquals("updateOverlay", lastCall.first)
-    assertEquals(
-      listOf("u", "panel", json.decodeFromString<OverlaySpec>(spec), null),
-      lastCall.second,
-    )
-    dispatch(
-      """{"type":"update_overlay","requestId":"p","id":"panel","state":{"enabled":true,"count":2.5}}"""
-    )
-    assertEquals("updateOverlay", lastCall.first)
-    assertEquals(
-      listOf(
-        "p",
-        "panel",
-        null,
-        mapOf("enabled" to OverlayScalar.BooleanValue(true), "count" to OverlayScalar.Numeric(2.5)),
-      ),
-      lastCall.second,
-    )
+    assertEquals(false, lastCall.second[3])
+    dispatch("""{"type":"show_overlay","requestId":"r","spec":$spec,"reset":true}""")
+    assertEquals("showOverlay", lastCall.first)
+    assertEquals(true, lastCall.second[3])
     dispatch("""{"type":"dismiss_overlay","requestId":"d","id":"panel"}""")
     assertEquals("dismissOverlay", lastCall.first)
     assertEquals(listOf("d", "panel", null), lastCall.second)
@@ -1249,13 +1233,9 @@ class CtrlProxyMessageHandlerTest {
     runTest {
       val spec =
         """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
-      val updateError = "update_overlay requires exactly one of spec or state"
       val dismissError = "dismiss_overlay requires exactly one of id or all:true"
       val cases =
         listOf(
-          """{"type":"update_overlay","requestId":"bad","id":"panel"}""" to updateError,
-          """{"type":"update_overlay","requestId":"bad","id":"panel","spec":$spec,"state":{}}""" to
-            updateError,
           """{"type":"dismiss_overlay","requestId":"bad"}""" to dismissError,
           """{"type":"dismiss_overlay","requestId":"bad","id":"panel","all":true}""" to
             dismissError,

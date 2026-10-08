@@ -136,11 +136,7 @@ describe("prototype tool on an iOS simulator", () => {
   });
 
   test.each([
-    [{ action: "update", id: "panel", state: { title: "x" } }, "same id"],
-    [
-      { action: "showVariants", id: "panel", variants: [{ image: { asset: "logo" } }] },
-      "showVariants is Android only",
-    ],
+    [{ action: "show", spec, reset: true }, "reset is Android only"],
     [{ action: "show", spec, display: "inner" }, "display is Android only"],
   ])("%o is refused before any agent request", async (input, message) => {
     const { response, payload } = await call(input);

@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 
 /**
@@ -154,13 +153,11 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) {}
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {}
-
-  override fun updateOverlay(
+  override fun showOverlay(
     requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
+    spec: OverlaySpec,
+    displayId: Int?,
+    reset: Boolean,
   ) {}
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {}
@@ -516,15 +513,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     record("addHighlight", requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) =
-    record("showOverlay", requestId, spec, displayId)
-
-  override fun updateOverlay(
-    requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
-  ) = record("updateOverlay", requestId, id, spec, state)
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean) =
+    record("showOverlay", requestId, spec, displayId, reset)
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) =
     record("dismissOverlay", requestId, id, all)

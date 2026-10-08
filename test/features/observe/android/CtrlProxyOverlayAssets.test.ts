@@ -239,7 +239,7 @@ describe("CtrlProxy overlay assets", () => {
     { label: "no handshake commands", commands: [] as string[] },
     {
       label: "full set without asset requests",
-      commands: ["full_command_set_v1", "show_overlay", "update_overlay", "dismiss_overlay"],
+      commands: ["full_command_set_v1", "show_overlay", "dismiss_overlay"],
     },
   ])("older device ($label) is never sent an asset request", async ({ commands }) => {
     const { client, socket } = await harness(commands);

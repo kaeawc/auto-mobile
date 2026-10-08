@@ -358,7 +358,7 @@ square. While an image decodes the node shows a plain gray box. An unknown asset
 file the OS evicted from the cache directory (the store still lists it but `read`
 returns null) or undecodable bytes renders a gray box with a broken-image glyph.
 
-`show_overlay` and `update_overlay` list the referenced ids the device has no copy of in
+`show_overlay` lists the referenced ids the device has no copy of in
 `overlay_result.missingAssets`, in first-use order. It is a warning: `success` stays true
 and the overlay is shown with placeholders, so the host can upload the assets and the
 nodes fill in without another `show`. The field is omitted when nothing is missing and
@@ -366,7 +366,7 @@ from every other result, so older hosts see the frame they always did. An id the
 lists but whose file was evicted is not reported at `show` time; it renders the
 placeholder. Dismissal clearing is unchanged.
 
-Host surface: the `overlay` tool's `show` and `update` (with `spec`) take
+Host surface: the `overlay` tool's `show` takes
 `assets: [{id, path}]`, an absolute daemon-readable file path per asset. The host
 reads and validates every file first (signature-detected MIME type, the contract
 limits, unique ids), then uploads sequentially before the overlay request; any
@@ -378,7 +378,7 @@ wait, retention lease), which is readable by any client, so no access is widened
 
 When `overlay_result.missingAssets` lists an id the same call uploaded (the device
 cleared its store between the upload and the show), the host re-uploads those assets
-once from the bytes it already holds and re-sends the show or update once. It never
+once from the bytes it already holds and re-sends the show once. It never
 loops: if they are still missing, or the retry fails or is cancelled, the first
 successful result is returned with `missingAssets` and a `warning` on the tool output.
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
@@ -552,37 +552,32 @@ list is a `column` with `repeat` whose single child is the row template).
   the path `container.repeat[item].children[template]`, which is also its Compose
   key, so a row keeps its identity for as long as it keeps its index.
 
-### Host helper: showVariants
+### Re-showing an overlay
 
-The `overlay` tool's `showVariants` action composes public nodes and actions:
-one helper pager named `variants`, with one page per alternative. Fullscreen
-pages stack their content and control row in a box. Floating pages contain only
-the control row, leaving the app live underneath; applying alternatives through
-an SDK is outside this MVP. Controls sit inside each page so `{page}` and
-`{pageCount}` resolve against their enclosing pager. Arrows use `setPage`;
-pick uses only `emit("selected", {index, label?})`, with a static zero-based
-page index and optional label. It does not dismiss on pick.
+`show_overlay` always carries a full spec; there is no partial update (#10490).
+When `spec.id` is the overlay already on screen and `reset` is absent or false,
+the device replaces it in place: it keeps the display the overlay is on (the
+request's `displayId` is ignored), and each pager keeps its settled page,
+matched by pager id and clamped to the new page count. The new spec's `state`
+is authoritative; values the user changed by tapping or typing are not carried
+over unless the spec includes them. The window content is rebuilt from the new
+runtime, so a text field shows the spec's value and edits still in flight from
+the previous showing are dropped. Event sequences continue per id, as for any
+re-show. `reset: true`, a different id, or nothing on screen is a fresh show:
+pages start from the spec and the requested display is used. `reset` is only
+sent when true; a device that predates it ignores the field and always starts
+fresh. The host reports a `display` that a same-id show ignored as a `warning`
+on the tool result.
 
-Variants supply exactly one existing asset-image reference or public node
-fragment, plus an optional label of at most 256 characters. The helper accepts
-1–12 variants and validates all supplied content in carousel context against
-contract limits, including before floating content is omitted.
-Image variants reference asset ids; `display` and `assets` (file paths, screenshot
-observations) are accepted exactly as for `show` and go through the same display
-resolution, upload-before-show staging and single missing-asset re-send of the
-composed spec.
-`opacity` passes through; floating placement defaults to `bottomCenter` with
-zero offset. The composed spec goes through the ordinary `show` path, so the
-event subscription, fresh sequence epoch, replacement of another shown overlay
-and host status are exactly those of `show`. `waitForSelection` then waits on
-the coordinator's `awaitEvent` wait (default 30000 ms; the tool's `timeoutMs`
-bounds only the show request), so timeout, request cancellation, session
-release, device removal and a device-side dismissal all settle it. The MCP
-request deadline for such a call is the show stage (with `assets`, the upload-and-send
-budget of `show`) plus the 30 s wait plus 30 s of headroom. Whether
-the Kotlin renderer resolves `{page}`/`{pageCount}` inside a pager and emits the
-static payload is not verified without a device. See
-[tool inputs and results](../../../tools.md#prototype) for the complete helper surface.
+### Presenting alternatives
+
+The host has no carousel helper; `showVariants` and its on-device pick were
+removed (#10489, #10488). An agent shows one design with `show`, explains it and
+the others in the conversation, and shows the next on request, or shows one spec
+whose `pager` holds every design with a visible label per page (see the
+full-screen pager example below). The user chooses in chat; nothing waits on the
+device for a choice. `pager`, `setPage` and `{page}`/`{pageCount}` interpolation
+remain spec primitives for that.
 
 ## Anchors
 
@@ -623,7 +618,7 @@ other axis, preserving authored node dimensions, then applies the offset.
 
 The host resolves selectors against the app hierarchy with the overlay excluded,
 converts pixels to dp once using the target display density, and accounts for
-the overlay origin and cutout. Resolution happens at show/update, not live.
+the overlay origin and cutout. Resolution happens at show, not live.
 Missing or ambiguous elements fail the tool call before showing content, with
 candidates and hierarchy timestamp handled by #9316/#9302. Anchors can be authored
 in any placement: the host subtracts the window's screen origin; a floating
@@ -694,9 +689,9 @@ with the existing observer-session generation so rapid reconnects cannot erase t
 zero edge or dismiss a replacement from a new observer session. No state is
 persisted across process restart.
 
-Idle means no interaction or accepted update. The device fallback TTL is five
-minutes (300,000 ms), positive and settable locally on the controller. Show,
-accepted state/spec updates, and user interactions restart it (initial/restored
+Idle means no interaction or accepted show. The device fallback TTL is five
+minutes (300,000 ms), positive and settable locally on the controller. Shows
+(including a same-id show) and user interactions restart it (initial/restored
 unchanged pager reports are rendering and do not count); configuration
 changes and safety hide/restore do not. Hidden overlays still expire. The current
 strict protocol has no TTL or device-session-release message: no wire field is

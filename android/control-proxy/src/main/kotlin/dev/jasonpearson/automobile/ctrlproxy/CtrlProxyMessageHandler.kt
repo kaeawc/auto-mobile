@@ -72,7 +72,6 @@ import dev.jasonpearson.automobile.protocol.SubscribeStorage
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
 import dev.jasonpearson.automobile.protocol.UnsubscribeStorage
-import dev.jasonpearson.automobile.protocol.UpdateOverlay
 import dev.jasonpearson.automobile.protocol.ValidateFrameContext
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
@@ -488,18 +487,7 @@ class CtrlProxyMessageHandler(
             error = error,
           )
         }
-        actions.showOverlay(request.requestId, request.spec, request.displayId)
-      }
-      is UpdateOverlay -> {
-        if ((request.spec == null) == (request.state == null)) {
-          return OverlayResult(
-            timestamp = System.currentTimeMillis(),
-            requestId = request.requestId,
-            success = false,
-            error = "update_overlay requires exactly one of spec or state",
-          )
-        }
-        actions.updateOverlay(request.requestId, request.id, request.spec, request.state)
+        actions.showOverlay(request.requestId, request.spec, request.displayId, request.reset)
       }
       is DismissOverlay -> {
         if ((request.id == null) == (request.all == null) || request.all == false) {

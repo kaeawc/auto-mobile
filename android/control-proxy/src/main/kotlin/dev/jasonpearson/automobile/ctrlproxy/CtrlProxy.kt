@@ -98,7 +98,6 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
-import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
 import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
@@ -3178,17 +3177,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun addHighlight(requestId: String?, highlightId: String?, shape: HighlightShape?) =
     handleAddHighlight(requestId, highlightId, shape)
 
-  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?) {
-    launchRequestScope(requestId) { overlayController.show(requestId, spec, displayId) }
-  }
-
-  override fun updateOverlay(
-    requestId: String?,
-    id: String,
-    spec: OverlaySpec?,
-    state: Map<String, OverlayScalar>?,
-  ) {
-    launchRequestScope(requestId) { overlayController.update(requestId, id, spec, state) }
+  override fun showOverlay(requestId: String?, spec: OverlaySpec, displayId: Int?, reset: Boolean) {
+    launchRequestScope(requestId) { overlayController.show(requestId, spec, displayId, reset) }
   }
 
   override fun dismissOverlay(requestId: String?, id: String?, all: Boolean?) {

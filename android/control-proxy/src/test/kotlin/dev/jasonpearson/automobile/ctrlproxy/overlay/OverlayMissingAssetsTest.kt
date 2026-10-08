@@ -75,21 +75,22 @@ class OverlayMissingAssetsTest {
   }
 
   @Test
-  fun `a state patch reports assets cleared since the show so the host can re-upload`() = runTest {
-    upload("hero")
-    controller.show("r1", spec("hero"))
-    store.remove("hero")
-    controller.update("r2", "panel", null, mapOf("k" to OverlayScalar.Text("v")))
-    assertEquals(Reply(true, null, listOf("hero")), replies.last())
-  }
+  fun `a same-id show reports assets cleared since the first show so the host can re-upload`() =
+    runTest {
+      upload("hero")
+      controller.show("r1", spec("hero"))
+      store.remove("hero")
+      controller.show("r2", spec("hero"))
+      assertEquals(Reply(true, null, listOf("hero")), replies.last())
+    }
 
   @Test
-  fun `a spec update reports the replacement's missing assets`() = runTest {
+  fun `a same-id show reports the replacement's missing assets`() = runTest {
     controller.show("r1", spec())
-    controller.update("r2", "panel", spec("late"), null)
+    controller.show("r2", spec("late"))
     assertEquals(Reply(true, null, listOf("late")), replies.last())
     upload("late")
-    controller.update("r3", "panel", spec("late"), null)
+    controller.show("r3", spec("late"))
     assertEquals(Reply(true, null, emptyList()), replies.last())
   }
 
@@ -131,10 +132,10 @@ class OverlayMissingAssetsTest {
   }
 
   @Test
-  fun `a spec update on a shown display reports missing assets and stays on that display`() =
+  fun `a same-id show on a shown display reports missing assets and stays on that display`() =
     runTest {
       controller.show("r1", spec(), displayId = 2)
-      controller.update("r2", "panel", spec("late"), null)
+      controller.show("r2", spec("late"))
       assertEquals(Reply(true, null, listOf("late")), replies.last())
       assertEquals(2, host.requests.last().displayId)
     }

@@ -48,7 +48,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
       new FakeAdbExecutor(),
       {
         observeScreen: observe,
-        finder,
+        scrollables: finder,
         timer,
         executeGesture: gesture,
         accessibilityDetector: new FakeAccessibilityDetector(),

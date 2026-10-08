@@ -1,0 +1,36 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.label}"
+        }
+      ],
+      "repeat": {
+        "items": [
+          {
+            "id": "a",
+            "label": "Alpha",
+            "price": 3,
+            "on": true
+          },
+          {
+            "id": "b",
+            "price": 4.5,
+            "on": false
+          }
+        ],
+        "as": "item"
+      }
+    }
+  },
+  "expectedPath": "root.children[0].text"
+}

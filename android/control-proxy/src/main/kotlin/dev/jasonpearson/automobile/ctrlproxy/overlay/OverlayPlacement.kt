@@ -100,7 +100,7 @@ fun interactiveOverlayLayoutParams(
       PixelFormat.TRANSLUCENT,
     )
     .apply {
-      title = "AutoMobile Interactive Overlay"
+      title = INTERACTIVE_OVERLAY_WINDOW_TITLE
       when (placement) {
         is OverlayPlacement.Fullscreen -> {
           width = match

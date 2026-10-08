@@ -41,6 +41,7 @@ import {
   RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
   type BoundSessionLoss,
+  boundSessionLossMessage,
   type DaemonRequestFailureCause,
   type DaemonOptions,
 } from "./types";
@@ -364,10 +365,7 @@ function isExpiredLoopbackMcpSession(error: unknown): boolean {
 
 class ReleasedBoundSessionError extends Error {
   constructor(readonly failure: BoundSessionLoss) {
-    super(
-      `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). ` +
-        "Acquire a new device session before continuing.",
-    );
+    super(boundSessionLossMessage(failure));
     this.name = "ReleasedBoundSessionError";
   }
 }

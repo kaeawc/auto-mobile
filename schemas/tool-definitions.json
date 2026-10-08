@@ -3794,7 +3794,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. overlay:true (iOS simulators only) relaunches the app with the overlay agent injected, so its current state is lost.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3819,6 +3819,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "overlay": {
+          "description": "iOS simulator only: inject the overlay agent so the overlay tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (overlays need no injection) and for com.apple.* apps.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -6928,6 +6932,32 @@
         },
         "observedAppId": {
           "type": "string"
+        },
+        "overlayAgent": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "agentVersion": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["port", "agentVersion", "protocolVersion", "capabilities"],
+          "additionalProperties": false
         },
         "observationOmitted": {
           "type": "object",
@@ -18396,6 +18426,24 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["decrement"]
+                              },
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              },
+                              "by": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["type", "key"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["dismiss"]
                               }
                             },
@@ -18556,6 +18604,72 @@
                           },
                           "required": ["width", "color"],
                           "additionalProperties": false
+                        },
+                        "elevation": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "gradient": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["linear"]
+                                },
+                                "angle": {
+                                  "type": "number"
+                                },
+                                "stops": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "color": {
+                                        "type": "string",
+                                        "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                      },
+                                      "position": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      }
+                                    },
+                                    "required": ["color"],
+                                    "additionalProperties": false
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 4
+                                }
+                              },
+                              "required": ["type", "angle", "stops"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["radial"]
+                                },
+                                "stops": {
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/gradient/anyOf/0/properties/stops/items"
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 4
+                                }
+                              },
+                              "required": ["type", "stops"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "aspectRatio": {
+                          "type": "number",
+                          "minimum": 0.000001
                         },
                         "alpha": {
                           "type": "number",
@@ -18905,6 +19019,41 @@
                       "required": ["edges", "types"],
                       "additionalProperties": false
                     },
+                    "repeat": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            },
+                            "propertyNames": {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        },
+                        "as": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                        }
+                      },
+                      "required": ["items", "as"],
+                      "additionalProperties": false
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["box"]
@@ -18950,6 +19099,9 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["row"]
@@ -18994,6 +19146,9 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
                     },
                     "type": {
                       "type": "string",
@@ -20153,6 +20308,24 @@
                               "properties": {
                                 "type": {
                                   "type": "string",
+                                  "enum": ["decrement"]
+                                },
+                                "key": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                },
+                                "by": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": ["type", "key"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
                                   "enum": ["dismiss"]
                                 }
                               },
@@ -20313,6 +20486,72 @@
                             },
                             "required": ["width", "color"],
                             "additionalProperties": false
+                          },
+                          "elevation": {
+                            "type": "number",
+                            "minimum": 0
+                          },
+                          "gradient": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["linear"]
+                                  },
+                                  "angle": {
+                                    "type": "number"
+                                  },
+                                  "stops": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "color": {
+                                          "type": "string",
+                                          "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                        },
+                                        "position": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        }
+                                      },
+                                      "required": ["color"],
+                                      "additionalProperties": false
+                                    },
+                                    "minItems": 2,
+                                    "maxItems": 4
+                                  }
+                                },
+                                "required": ["type", "angle", "stops"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": ["radial"]
+                                  },
+                                  "stops": {
+                                    "type": "array",
+                                    "items": {
+                                      "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/gradient/anyOf/0/properties/stops/items"
+                                    },
+                                    "minItems": 2,
+                                    "maxItems": 4
+                                  }
+                                },
+                                "required": ["type", "stops"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "aspectRatio": {
+                            "type": "number",
+                            "minimum": 0.000001
                           },
                           "alpha": {
                             "type": "number",
@@ -20672,6 +20911,41 @@
                         "required": ["edges", "types"],
                         "additionalProperties": false
                       },
+                      "repeat": {
+                        "type": "object",
+                        "properties": {
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
+                              },
+                              "propertyNames": {
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              }
+                            },
+                            "minItems": 1,
+                            "maxItems": 32
+                          },
+                          "as": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          }
+                        },
+                        "required": ["items", "as"],
+                        "additionalProperties": false
+                      },
                       "type": {
                         "type": "string",
                         "enum": ["box"]
@@ -20717,6 +20991,9 @@
                       "safeAreaPadding": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
                       },
+                      "repeat": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/repeat"
+                      },
                       "type": {
                         "type": "string",
                         "enum": ["row"]
@@ -20761,6 +21038,9 @@
                       },
                       "safeAreaPadding": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "repeat": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/repeat"
                       },
                       "type": {
                         "type": "string",

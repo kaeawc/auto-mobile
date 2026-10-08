@@ -8,8 +8,10 @@
 # It then dismisses the overlay, and always shuts down and deletes the simulator it created. Only
 # that one UDID is ever touched, serially.
 #
-# Not covered: tapping a control and asserting the overlay_event (needs XCUITest or a coordinate
-# tap; there is no headless input path on the host yet).
+# Taps are headless through the agent's simulate_tap test hook (the app is launched with
+# AUTOMOBILE_OVERLAY_AGENT_TEST_HOOKS=1; production launches never set it): the script taps the
+# demo's `like-button` twice and asserts the host receives overlay_event "liked" with an
+# increasing sequence. This exercises the spec action and event path, not UIKit touch delivery.
 #
 # Usage: scripts/ios/overlay-agent-smoke.sh <ios-version|latest>   e.g. 26, 18.5, latest
 #
@@ -141,7 +143,7 @@ baseline="${log_dir}/baseline.png"
 xcrun simctl io "${udid}" screenshot "${baseline}"
 
 echo "== relaunch with the agent injected"
-"${driver[@]}" launch "${udid}" "${bundle_id}"
+"${driver[@]}" launch "${udid}" "${bundle_id}" --test-hooks
 
 echo "== wait for the agent"
 connected=false
@@ -171,6 +173,19 @@ shown="${log_dir}/shown.png"
 xcrun simctl io "${udid}" screenshot "${shown}"
 if cmp -s "${baseline}" "${shown}"; then
   fail "screenshot with the overlay equals the baseline (overlay not in the pixels)"
+fi
+
+echo "== tap the like button twice and expect overlay_event"
+sequences=()
+for tap in 1 2; do
+  "${driver[@]}" tap like-button > "${log_dir}/tap-${tap}.json"
+  [[ "$(jq -r '.result.success' "${log_dir}/tap-${tap}.json")" == true ]] || fail "simulate_tap failed: $(cat "${log_dir}/tap-${tap}.json")"
+  [[ "$(jq -r '[.events[] | select(.type == "overlay_event" and .kind == "emit" and .name == "liked" and .id == "floating-demo")] | length' "${log_dir}/tap-${tap}.json")" == 1 ]] \
+    || fail "tap ${tap} did not deliver exactly one overlay_event 'liked': $(cat "${log_dir}/tap-${tap}.json")"
+  sequences+=("$(jq -r '.events[0].sequence' "${log_dir}/tap-${tap}.json")")
+done
+if ! [[ ${sequences[0]} =~ ^[0-9]+$ && ${sequences[1]} =~ ^[0-9]+$ ]] || ((sequences[1] <= sequences[0])); then
+  fail "overlay_event sequence did not increase (${sequences[*]})"
 fi
 
 echo "== dismiss"

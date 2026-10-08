@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.OverlayCondition
+import dev.jasonpearson.automobile.protocol.OverlayDecrementAction
 import dev.jasonpearson.automobile.protocol.OverlayIncrementAction
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlayStyle
@@ -43,6 +44,13 @@ internal fun OverlayIncrementAction.nextValue(state: Map<String, OverlayScalar>)
   return if (next.isFinite()) OverlayScalar.Numeric(next) else null
 }
 
+/** The stepped-down value: [OverlayIncrementAction] with the sign of `by` flipped (default 1). */
+internal fun OverlayDecrementAction.nextValue(state: Map<String, OverlayScalar>): OverlayScalar? {
+  val current = (state[key] as? OverlayScalar.Numeric)?.value ?: return null
+  val next = current - (by ?: 1.0)
+  return if (next.isFinite()) OverlayScalar.Numeric(next) else null
+}
+
 /**
  * The base style with every `styleWhen` entry whose condition holds merged over it, in authored
  * order, so a later matching entry wins per property. A present property replaces the base value as
@@ -69,6 +77,9 @@ private fun OverlayStyle.mergedOver(overlay: OverlayStyle): OverlayStyle =
     background = overlay.background ?: background,
     cornerRadius = overlay.cornerRadius ?: cornerRadius,
     border = overlay.border ?: border,
+    elevation = overlay.elevation ?: elevation,
+    gradient = overlay.gradient ?: gradient,
+    aspectRatio = overlay.aspectRatio ?: aspectRatio,
     alpha = overlay.alpha ?: alpha,
     alignment = overlay.alignment ?: alignment,
     arrangement = overlay.arrangement ?: arrangement,

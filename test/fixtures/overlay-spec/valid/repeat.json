@@ -1,0 +1,124 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "Pick one"
+      },
+      {
+        "type": "column",
+        "children": [
+          {
+            "type": "row",
+            "children": [
+              {
+                "type": "text",
+                "text": "{index}: {item.label} costs {item.price} ({other.label}) {item.on}",
+                "visibleWhen": {
+                  "key": "selected",
+                  "notEquals": "{item.id}"
+                },
+                "styleWhen": [
+                  {
+                    "when": {
+                      "all": [
+                        {
+                          "key": "selected",
+                          "equals": "{item.id}"
+                        },
+                        {
+                          "not": {
+                            "key": "count",
+                            "gt": 0
+                          }
+                        }
+                      ]
+                    },
+                    "style": {
+                      "background": "#2255CC"
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "text",
+                "text": "tap",
+                "onTap": [
+                  {
+                    "type": "setState",
+                    "key": "selected",
+                    "value": "{item.id}"
+                  },
+                  {
+                    "type": "setState",
+                    "key": "last",
+                    "value": "{index}"
+                  },
+                  {
+                    "type": "emit",
+                    "name": "pick_{item.id}",
+                    "payload": {
+                      "id": "{item.id}"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "repeat": {
+          "items": [
+            {
+              "id": "a",
+              "label": "Alpha",
+              "price": 3,
+              "on": true
+            },
+            {
+              "id": "b",
+              "label": "Beta",
+              "price": 4.5,
+              "on": false
+            }
+          ],
+          "as": "item"
+        },
+        "style": {
+          "spacing": 4
+        }
+      },
+      {
+        "type": "box",
+        "onTap": [
+          {
+            "type": "decrement",
+            "key": "count"
+          },
+          {
+            "type": "decrement",
+            "key": "count",
+            "by": 2
+          }
+        ],
+        "children": [
+          {
+            "type": "text",
+            "text": "-"
+          }
+        ]
+      }
+    ]
+  },
+  "state": {
+    "selected": "a",
+    "last": 0,
+    "count": 3
+  }
+}

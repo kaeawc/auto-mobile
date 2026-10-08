@@ -341,6 +341,10 @@ class WebSocketServer(
     // A device-persistent overlay buffers its events while no host is connected and replays them,
     // and inspect_overlays reports what it is showing. Older hosts never send inspect_overlays.
     add("overlay_persistence_replay_v1")
+    // Window entries for CtrlProxy's own interactive overlay carry overlayPlacement and
+    // overlayOpaque, so the host can tell how much of the app the overlay hides. Older APKs never
+    // send them and the host falls back to bounds.
+    add("overlay_window_metadata_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

@@ -46,7 +46,7 @@ strings; they do not share the state-key restriction.
 
 | Constant                         | Value            | Counting rule                                                                                      |
 | -------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_OVERLAY_NODES`              | 500              | Includes root and every child/page/sheet child.                                                    |
+| `MAX_OVERLAY_NODES`              | 500              | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
 | `MAX_OVERLAY_DEPTH`              | 24               | Root has depth 1; only node nesting counts.                                                        |
 | `MAX_OVERLAY_IMAGES`             | 32               | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
 | `MAX_OVERLAY_SPEC_BYTES`         | 262144 (256 KiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
@@ -171,9 +171,9 @@ layout room.
 
 | `type`        | Node-specific properties                                                                                                                                                                                                                    |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `box`         | Required `children` array, possibly empty; children stack.                                                                                                                                                                                  |
-| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                                                                                                               |
-| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                                                                                                                 |
+| `box`         | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                    |
+| `row`         | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                 |
+| `column`      | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                   |
 | `text`        | Required `text` string, possibly empty.                                                                                                                                                                                                     |
 | `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
 | `icon`        | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
@@ -273,24 +273,27 @@ Text size uses sp, so it follows the system font scale. Negative offsets/positio
 are allowed; sizes are nonnegative, except text size and sheet height/detent
 height which must be positive. Positive values use a minimum of 0.000001.
 
-| Property                                         | Accepted value                                                                                                               |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                     |
-| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
-| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
-| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
-| `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                               |
-| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                   |
-| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                              |
-| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
-| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
-| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
-| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                    |
-| `textSize`                                       | Positive sp; scaled by the system font scale.                                                                                |
-| `fontWeight`                                     | Integer 100–900.                                                                                                             |
-| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
-| `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
-| `fontFamily`                                     | A system name (`default`, `sansSerif`, `serif`, `monospace`) or `{asset: "<id>"}` naming an uploaded TTF/OTF font (#10443).  |
+| Property                                         | Accepted value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere).                                                                                                                                                                                                                                                                                                                                                                                       |
+| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `elevation`                                      | Nonnegative dp. Draws a shadow in the node's corner shape, behind its clip, background and border.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `gradient`                                       | `{type: "linear", angle, stops}` or `{type: "radial", stops}`. `angle` is a finite number of degrees clockwise from left-to-right (0 = left to right, 90 = top to bottom). `stops` is 2–4 `{color, position?}` with a hex color and an optional 0–1 `position`; positions apply only when every stop has one (a position below the previous stop's is raised to it), otherwise stops are evenly spaced. Radial gradients are centered and reach the corners. Painted over `background` in the node's corner shape. |
+| `aspectRatio`                                    | Positive number (width / height) applied after the size bounds.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.                                                                                                                                                                                                                                                                                                                                                                                               |
+| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `textSize`                                       | Positive sp; scaled by the system font scale.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `fontWeight`                                     | Integer 100–900.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `maxLines`                                       | Integer 1–2147483647.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `fontFamily`                                     | A system name (`default`, `sansSerif`, `serif`, `monospace`) or `{asset: "<id>"}` naming an uploaded TTF/OTF font (#10443).                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
 of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
@@ -436,6 +439,7 @@ without `visibleWhen`, or when motion is off. `pressScale` is a follow-up.
 | `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
 | `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
 | `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
+| `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                 |
 | `dismiss`     | No additional properties.                                                                                                                                  |
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
@@ -461,16 +465,15 @@ A condition is exactly one of these forms. `visibleWhen` takes any of them;
 Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
-`toggle` and `increment` validate their `key` against the declared `state`
+`toggle`, `increment` and `decrement` validate their `key` against the declared `state`
 (`root.onTap[0].key`), and are no-ops at runtime if the key's type was changed by
-other means. After an `onTap` action list finishes, if `setState`, `toggle` or
-`increment` changed state, the device emits exactly one `change` event carrying
+other means. After an `onTap` action list finishes, if `setState`, `toggle`,
+`increment` or `decrement` changed state, the device emits exactly one `change` event carrying
 the final state (#10622), so host `status` follows button taps. A single changed
 key sends `{key, value}`; several send `{keys, values}`. `emit` actions still fire
 in order with the state at that point, a list that nets no change emits nothing,
 and a switch or checkbox tap keeps its own `{key, value}` change before its
-`onTap` runs. Wire patches from the host stay silent. List templates
-and a `decrement` alias are later slices of #10440.
+`onTap` runs. Wire patches from the host stay silent.
 
 ### Conditional style: styleWhen
 
@@ -483,6 +486,71 @@ a property set by a later matching entry wins, and properties no entry sets keep
 the base value. Merging is per top-level property, so `padding` and `border`
 replace the base object whole rather than merging edge by edge. Conditions read the
 node's local state, so pager `{page}`/`{pageCount}` keys work inside a pager.
+
+### List templates: repeat
+
+A `box`, `row` or `column` may declare `repeat: {items, as}` to render one template
+per item without writing every row out. The container's `children` are the
+template: they are instantiated once per entry of `items`, in item order, as
+siblings inside the same container (the container itself is not repeated, so a
+list is a `column` with `repeat` whose single child is the row template).
+
+```json
+{
+  "type": "column",
+  "repeat": {
+    "items": [
+      { "name": "Alpha", "tag": "a" },
+      { "name": "Beta", "tag": "b" }
+    ],
+    "as": "item"
+  },
+  "children": [
+    {
+      "type": "text",
+      "text": "{index}: {item.name}",
+      "styleWhen": [
+        { "when": { "key": "picked", "equals": "{item.tag}" }, "style": { "color": "#2255CC" } }
+      ],
+      "onTap": [{ "type": "setState", "key": "picked", "value": "{item.tag}" }]
+    }
+  ]
+}
+```
+
+- `items` is a literal array of 1 to 32 objects declared in the spec. Each object
+  maps state-style field names to scalar values (string, finite number, boolean);
+  no nesting. `as` names the item binding (a state-key-shaped identifier). State
+  values are scalar, so a state key cannot hold a list; per-state-key lists are not
+  supported.
+- Placeholders are `{index}` (the zero-based position) and `{<as>.<field>}`. They
+  are bound in a template child's `text`, in condition operands (`equals` and
+  `notEquals` strings in `visibleWhen`, `styleWhen[].when` and nested `all`/`any`/
+  `not`), in `setState.value` and in `emit.name`. Anything else, including a
+  `{key}` state placeholder, other braces, and the container's own fields, is not a
+  repeat placeholder and is untouched. Inside a template `{index}` shadows a state
+  key named `index`. A string that is exactly one placeholder keeps the item's own
+  type, so `equals: "{item.id}"` matches a numeric state value when `id` is a number;
+  a placeholder inside a longer string renders to text (integral numbers without a
+  decimal point). `emit.payload` is not interpolated. Bound values are plain text, but a
+  `text` node is then interpolated against state as usual, so an item string that itself
+  reads `{status}` shows the state value; item values cannot be escaped.
+- Validation, with the same paths in TypeScript and Kotlin: a placeholder naming a
+  field that is missing from any item fails at the string (for example
+  `root.children[0].text`, message `Unknown repeat field "nme"`); a template may not
+  contain another `repeat` (`root.children[0].repeat`) or a `pager`
+  (`root.children[0]`); `repeat` on a leaf node is an unknown property; an `emit.name`
+  that binds to an empty string for any item fails at the name (`root.children[0].onTap[0].name`).
+- Limits count the expanded tree. `MAX_OVERLAY_NODES` and `MAX_OVERLAY_IMAGES` are
+  checked against every instance, and an overflow fails at the container's
+  `repeat` (for example `root.children[2].repeat`, `Expanded node limit exceeded`).
+  `MAX_OVERLAY_DEPTH` is unaffected by design: instances are siblings, so a
+  template child is exactly as deep as it was written. Because items are literal,
+  all of this is decided statically; the renderer re-checks the expanded count
+  before layout as a backstop.
+- Rendering expands the template before layout. Each instance node renders under
+  the path `container.repeat[item].children[template]`, which is also its Compose
+  key, so a row keeps its identity for as long as it keeps its index.
 
 ### Host helper: showVariants
 

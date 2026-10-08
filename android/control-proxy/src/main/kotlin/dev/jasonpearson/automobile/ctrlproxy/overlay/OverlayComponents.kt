@@ -136,7 +136,18 @@ internal fun RenderOverlayButton(
     "elevated" -> ElevatedButton(onClick, modifier, contentPadding = padding, content = content)
     "outlined" -> OutlinedButton(onClick, modifier, contentPadding = padding, content = content)
     "text" -> TextButton(onClick, modifier, contentPadding = padding, content = content)
-    else -> Button(onClick, modifier, contentPadding = padding, content = content)
+    else ->
+      // An authored gradient is painted behind the button, so its container must not cover it.
+      Button(
+        onClick,
+        modifier,
+        colors =
+          if (node.style.source.gradient != null)
+            ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+          else ButtonDefaults.buttonColors(),
+        contentPadding = padding,
+        content = content,
+      )
   }
 }
 

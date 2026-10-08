@@ -182,6 +182,16 @@ the current owner (a restarted owner resuming). A session on the CLI idle policy
 never has a live lease for this purpose: its one-shot CLI owners exit between
 invocations, so the next invocation's new token can always claim it.
 
+Heartbeats prove liveness, not use. A heartbeat-policy session also has a
+30-minute idle window measured from its last tool call, and heartbeats never
+extend it: they renew only the owner lease and its grace window. An agent that
+acquires a device and then makes no tool calls for 30 minutes loses the session
+and its device even while its proxy stays open and keeps heartbeating; the
+release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
+The proxy's replay of a remembered session binding follows the same rule: only
+forwarded tool calls refresh it. `session-info` reports `lastUsedAt` as the last
+tool call and `expiresAt` as the idle deadline.
+
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
 session and changes nothing: the owner, policy, and every deadline stay as the
@@ -192,7 +202,12 @@ opens the session to a new claim, including one from a previously used token.
 To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
-A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
+A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
+(from a `getAndroid`, `getApple` or `startDevice` result) or was started with
+through `--initial-session-uuid`. A `sessionUuid` that is only passed to a tool
+call is forwarded with that call but never claimed or heartbeated, so a proxy
+cannot inherit a session another owner holds, even after that owner's lease
+lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
 heartbeat and restores the strict heartbeat policy. By default the proxy mints a
 new owner token per process, so a restarted proxy is a different token and is
 locked out while the previous process's lease is live. A harness that restarts
@@ -203,7 +218,7 @@ keeper for a one-shot CLI session can claim with
 `--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
 that CLI claim adopts the CLI idle policy described below, and is refused on a
 proxy-owned session (see "Supported liveness stack"). Ordinary ticks from the
-current owner refresh deadlines without changing the policy.
+current owner renew its lease without changing the policy or the idle deadline.
 
 A displaced token's non-claiming `daemon/heartbeat` returns
 `{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes
@@ -309,6 +324,16 @@ session at a time. The daemon does not hold its own stalls against owners: when
 its heartbeat monitor runs more than 2 s later than scheduled it moves every
 session's lease forward by exactly that lateness, so a daemon stall of a few
 seconds cannot push a heartbeating owner past lease plus grace.
+
+Idle time is wall-clock, host sleep included. A stall that on its own outlasts a
+session's idle window (its timeout plus the suspect grace), such as a laptop
+asleep for longer than that, is idleness and is not forgiven, so waking the host
+may release the session. The verdict does not depend on which timer runs first
+after the wake: the monitor tick, an owner heartbeat, a tool call and the
+periodic sweep all apply the same stall check before judging expiry. The owner's
+next call fails with `bound_session_lost` and a message saying the session was
+released after sitting idle (time asleep counts) and that it must acquire a new
+device session.
 
 When the lease and grace are already spent by the time recovery starts (a long
 proxy stall, such as a sleeping laptop), the daemon may have forgiven its own
@@ -628,31 +653,33 @@ clean shutdown then stops it after active device sessions are released.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                         | Use and accepted values                                                                                                                                | Default                                      |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                                                                       | process working directory at module load     |
-| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Local iOS CtrlProxy derived-data root; filesystem path.                                                                                                | data directory `derived-data`                |
-| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache directory; filesystem path.                                                                                                 | coordination directory `ctrl-proxy-ios`      |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Trimmed custom iOS bundle download URL; HTTPS unless insecure asset URL opt-in.                                                                        | release bundle URL                           |
-| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Trimmed local iOS archive/bundle override; filesystem path; wins over bundle-path override.                                                            | unset; released bundle                       |
-| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Trimmed local iOS runner bundle or archive override; filesystem path.                                                                                  | unset; released bundle                       |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Trimmed 64-character hexadecimal executable SHA256 for local/custom runner; wins over local-build derivation.                                          | release registry checksum                    |
-| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Checksum executable: exact trimmed `runner` or `xctest`; other nonempty values fail.                                                                   | release registry target                      |
-| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Derive and pin local runner executable hash after build/extract, then reverify before launch; `1`/`true` enables (case-insensitive, no trimming).      | off                                          |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Trimmed expected device app bundle hash; device-specific override wins.                                                                                | released device app hash                     |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Trimmed expected device app bundle hash; overrides generic/device release hash.                                                                        | generic override or released device app hash |
-| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Trimmed expected simulator app bundle hash.                                                                                                            | unset; no simulator app hash verification    |
-| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash enforcement; exact `true`/`1` enables.                                                                                        | off                                          |
-| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or pinned Team ID failures fatal; `1`/`true` enables (case-insensitive, no trimming).                                        | off; failures warn                           |
-| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Trimmed Apple Team ID to verify on downloaded runner bundle; warn or refuse according to require-codesign.                                             | unset                                        |
-| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs, trimmed; wins over single Team ID.                                                                                   | auto-detected signing teams                  |
-| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID, also parsed as a comma-separated list; used without plural setting.                                                            | auto-detected signing teams                  |
-| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                                                                               | automatic profile discovery                  |
-| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; used without UUID, wins over specifier.                                                                                     | automatic profile discovery                  |
-| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier; used without UUID or name.                                                                                             | automatic profile discovery                  |
-| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Trimmed signing identity string.                                                                                                                       | auto-detected identity                       |
-| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file path for signing; filesystem path.                                                                                                   | runner/app entitlements discovery            |
-| `AUTOMOBILE_IOS_TAP_STRATEGY`                    | Diagnostic tap strategy (only at debug log level): exact `legacy`, `appRelative`, `appRelativeObserved`, `displayTargeted`, `displayTargetedObserved`. | runner default strategy                      |
+| Variable                                         | Use and accepted values                                                                                                                                | Default                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| `AUTOMOBILE_PROJECT_ROOT`                        | Root used by local iOS CtrlProxy source builds; filesystem path.                                                                                       | process working directory at module load       |
+| `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`         | Local iOS CtrlProxy derived-data root; filesystem path.                                                                                                | data directory `derived-data`                  |
+| `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`            | iOS CtrlProxy bundle cache directory; filesystem path.                                                                                                 | coordination directory `ctrl-proxy-ios`        |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL`           | Trimmed custom iOS bundle download URL; HTTPS unless insecure asset URL opt-in.                                                                        | release bundle URL                             |
+| `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`             | Trimmed local iOS archive/bundle override; filesystem path; wins over bundle-path override.                                                            | unset; released bundle                         |
+| `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`          | Trimmed local iOS runner bundle or archive override; filesystem path.                                                                                  | unset; released bundle                         |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256`        | Trimmed 64-character hexadecimal executable SHA256 for local/custom runner; wins over local-build derivation.                                          | release registry checksum                      |
+| `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET` | Checksum executable: exact trimmed `runner` or `xctest`; other nonempty values fail.                                                                   | release registry target                        |
+| `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD`      | Derive and pin local runner executable hash after build/extract, then reverify before launch; `1`/`true` enables (case-insensitive, no trimming).      | off                                            |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH`             | Trimmed expected device app bundle hash; device-specific override wins.                                                                                | released device app hash                       |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_DEVICE`      | Trimmed expected device app bundle hash; overrides generic/device release hash.                                                                        | generic override or released device app hash   |
+| `AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH_SIMULATOR`   | Trimmed expected simulator app bundle hash.                                                                                                            | unset; no simulator app hash verification      |
+| `AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH`        | Skip iOS app bundle hash enforcement; exact `true`/`1` enables.                                                                                        | off                                            |
+| `AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN`         | Make codesign, Gatekeeper or pinned Team ID failures fatal; `1`/`true` enables (case-insensitive, no trimming).                                        | off; failures warn                             |
+| `AUTOMOBILE_IOS_HELPER_TEAM_ID`                  | Trimmed Apple Team ID to verify on downloaded runner bundle; warn or refuse according to require-codesign.                                             | unset                                          |
+| `AUTOMOBILE_IOS_TEAM_IDS`                        | Comma-separated signing Team IDs, trimmed; wins over single Team ID.                                                                                   | auto-detected signing teams                    |
+| `AUTOMOBILE_IOS_TEAM_ID`                         | Single signing Team ID, also parsed as a comma-separated list; used without plural setting.                                                            | auto-detected signing teams                    |
+| `AUTOMOBILE_IOS_PROFILE_UUID`                    | Provisioning profile UUID; wins over name and specifier.                                                                                               | automatic profile discovery                    |
+| `AUTOMOBILE_IOS_PROFILE_NAME`                    | Provisioning profile name; used without UUID, wins over specifier.                                                                                     | automatic profile discovery                    |
+| `AUTOMOBILE_IOS_PROFILE_SPECIFIER`               | Provisioning profile specifier; used without UUID or name.                                                                                             | automatic profile discovery                    |
+| `AUTOMOBILE_IOS_CODE_SIGN_IDENTITY`              | Trimmed signing identity string.                                                                                                                       | auto-detected identity                         |
+| `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`     | Entitlements file path for signing; filesystem path.                                                                                                   | runner/app entitlements discovery              |
+| `AUTOMOBILE_IOS_TAP_STRATEGY`                    | Diagnostic tap strategy (only at debug log level): exact `legacy`, `appRelative`, `appRelativeObserved`, `displayTargeted`, `displayTargetedObserved`. | runner default strategy                        |
+| `AUTOMOBILE_IOS_OVERLAY_AGENT`                   | Local iOS simulator overlay-agent dylib override; filesystem path that must exist; wins over local build output and release download.                  | unset; local build output, then released dylib |
+| `AUTOMOBILE_SKIP_IOS_OVERLAY_AGENT_DOWNLOAD`     | Refuse to download the released overlay-agent dylib when no verified cached copy exists; `1`/`true` enables (case-insensitive, no trimming).           | off; download on first overlay use             |
 
 </div>
 

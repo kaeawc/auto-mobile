@@ -1,6 +1,7 @@
 import { z } from "zod";
 import contract from "../../../schemas/overlay-spec-contract.json";
 import { logger } from "../../utils/logger";
+import { repeatErrors } from "./overlayRepeat";
 import { overlaySpecSchema, type OverlaySpec, MAX_OVERLAY_SPEC_BYTES } from "./overlaySpec";
 
 interface Rule {
@@ -577,6 +578,10 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
     check: (stored) => typeof stored === "number" && Number.isFinite(stored),
     message: "Increment requires a numeric state key",
   },
+  decrement: {
+    check: (stored) => typeof stored === "number" && Number.isFinite(stored),
+    message: "Decrement requires a numeric state key",
+  },
 };
 function stateActionErrors(
   context: Context,
@@ -604,6 +609,7 @@ function validateValue(value: unknown): OverlayValidationResult {
   };
   const error =
     walk(value, definitions.spec, "", context, 0) ??
+    repeatErrors(value) ??
     pagerErrors(context) ??
     bindingErrors(context, object(value) ?? {}) ??
     listItemBindingErrors(context, object(value) ?? {}) ??

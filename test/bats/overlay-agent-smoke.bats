@@ -80,6 +80,16 @@ case "$1" in
       echo '{"type":"overlay_result","success":true}'
     fi
     ;;
+  tap)
+    n=$(($(cat "${STUB_STATE}/taps" 2> /dev/null || echo 0) + 1))
+    echo "${n}" > "${STUB_STATE}/taps"
+    case "${STUB_DRIVER_MODE}" in
+      tap-rejected) echo '{"result":{"type":"overlay_result","success":false,"error":"simulate_tap is a test hook"},"events":[]}' ;;
+      tap-no-event) echo '{"result":{"type":"overlay_result","success":true},"events":[]}' ;;
+      tap-flat-sequence) echo '{"result":{"type":"overlay_result","success":true},"events":[{"type":"overlay_event","id":"floating-demo","kind":"emit","name":"liked","sequence":4}]}' ;;
+      *) echo "{\"result\":{\"type\":\"overlay_result\",\"success\":true},\"events\":[{\"type\":\"overlay_event\",\"id\":\"floating-demo\",\"kind\":\"emit\",\"name\":\"liked\",\"sequence\":${n}}]}" ;;
+    esac
+    ;;
   dismiss)
     rm -f "${shown_file}"
     if [[ ${STUB_DRIVER_MODE} == event-before-reply ]]; then
@@ -100,7 +110,8 @@ STUB
   [[ ${output} == *"PASS on iOS 26.5"* ]]
   grep -q "xcrun simctl create overlay-agent-smoke-26.5-.* dt.iPhone17Pro com.apple.CoreSimulator.SimRuntime.iOS-26-5" "${STUB_LOG}"
   grep -q "xcrun simctl boot UDID-FRESH" "${STUB_LOG}"
-  grep -q "driver launch UDID-FRESH com.apple.Preferences" "${STUB_LOG}"
+  grep -q "driver launch UDID-FRESH com.apple.Preferences --test-hooks" "${STUB_LOG}"
+  [ "$(grep -c '^driver tap like-button$' "${STUB_LOG}")" -eq 2 ]
   grep -q "xcrun simctl shutdown UDID-FRESH" "${STUB_LOG}"
   grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
   [ -f "${OVERLAY_SMOKE_LOG_DIR}/shown.png" ]
@@ -181,4 +192,33 @@ STUB
   [[ ${output} == *"did not finish booting"* ]]
   grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
   ! grep -q "driver launch" "${STUB_LOG}"
+}
+
+@test "taps the like button headlessly and asserts increasing overlay_event sequences" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [ "$(jq -r '.events[0].sequence' "${OVERLAY_SMOKE_LOG_DIR}/tap-1.json")" -eq 1 ]
+  [ "$(jq -r '.events[0].sequence' "${OVERLAY_SMOKE_LOG_DIR}/tap-2.json")" -eq 2 ]
+}
+
+@test "fails when the agent rejects simulate_tap" {
+  export STUB_DRIVER_MODE=tap-rejected
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"simulate_tap failed"* ]]
+  grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
+}
+
+@test "fails when a tap delivers no overlay_event" {
+  export STUB_DRIVER_MODE=tap-no-event
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"did not deliver exactly one overlay_event"* ]]
+}
+
+@test "fails when the overlay_event sequence does not increase" {
+  export STUB_DRIVER_MODE=tap-flat-sequence
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"sequence did not increase"* ]]
 }

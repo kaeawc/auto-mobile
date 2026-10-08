@@ -51,6 +51,9 @@ export interface OverlayAssetRequestOptions {
   onDispatch?: () => void;
 }
 
+/** Matches the device's offline ring (OVERLAY_OFFLINE_EVENT_CAPACITY in CtrlProxy). */
+const STAGED_OVERLAY_EVENT_CAPACITY = 200;
+
 const overlayEventSchema = z.object({
   type: z.literal("overlay_event"),
   timestamp: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -65,6 +68,8 @@ const overlayEventSchema = z.object({
 
 export class CtrlProxyOverlays {
   private readonly listeners = new Set<(event: OverlayEvent) => void>();
+  /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
+  private readonly staged: OverlayEvent[] = [];
 
   constructor(private readonly context: DelegateContext) {}
 
@@ -329,6 +334,11 @@ export class CtrlProxyOverlays {
 
   onOverlayEvent(listener: (event: OverlayEvent) => void): () => void {
     this.listeners.add(listener);
+    // The device drains its offline ring on any connect, not only for inspect. Events that arrived
+    // with nobody listening go to the first subscriber, in wire order, instead of being lost.
+    for (const event of this.staged.splice(0)) {
+      this.deliver(listener, event);
+    }
     return () => {
       this.listeners.delete(listener);
     };
@@ -346,16 +356,24 @@ export class CtrlProxyOverlays {
       return;
     }
     if (this.listeners.size === 0) {
-      logger.debug("[CTRL_PROXY] overlay_event has no subscribers");
+      // Not a drop: the next subscriber (an inspect or a shown overlay) receives it.
+      this.staged.push(decoded.data);
+      if (this.staged.length > STAGED_OVERLAY_EVENT_CAPACITY) {
+        this.staged.shift();
+      }
       return;
     }
     for (const listener of this.listeners) {
-      try {
-        listener(decoded.data);
-      } catch (error) {
-        // One failed consumer must not interrupt delivery to the remaining subscribers.
-        logger.warn("[CTRL_PROXY] Overlay event listener failed", error);
-      }
+      this.deliver(listener, decoded.data);
+    }
+  }
+
+  private deliver(listener: (event: OverlayEvent) => void, event: OverlayEvent): void {
+    try {
+      listener(event);
+    } catch (error) {
+      // One failed consumer must not interrupt delivery to the remaining subscribers.
+      logger.warn("[CTRL_PROXY] Overlay event listener failed", error);
     }
   }
 }

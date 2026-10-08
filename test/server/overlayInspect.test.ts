@@ -6,6 +6,7 @@ import {
   type OverlayEventLifecycle,
 } from "../../src/server/overlayTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import type { BootedDevice } from "../../src/models";
 import type { OverlayEvent } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
@@ -245,5 +246,45 @@ describe("overlay inspect (#10494)", () => {
     expect(payload.success).toBe(true);
     expect(payload.overlays).toEqual([]);
     expect((await call({ action: "status" })).overlays).toEqual([]);
+  });
+});
+
+describe("overlay inspect across sessions (#10494)", () => {
+  test("an empty report clears the overlay another session tracked on the device", async () => {
+    const restore = preserveToolRegistry();
+    const timer = new FakeTimer();
+    const client = new FakeCtrlProxy(timer);
+    client.setSupportedCommands(["overlay_window_options_v1", "overlay_persistence_replay_v1"]);
+    const unsubscribe = registerOverlayTools({
+      clientFactory: () => client,
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      lastRenderedObservation: () => undefined,
+      clock: timer,
+      timer,
+    });
+    try {
+      const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+      const run = async (session: string, input: Record<string, unknown>) =>
+        runWithToolSelectionContext({ routingSessionUuid: session }, async () =>
+          overlayOutputSchema.parse((await handler(device, input)).structuredContent),
+        );
+      await run("session-a", {
+        action: "show",
+        spec: {
+          id: "proto",
+          window: { placement: { type: "fullscreen" } },
+          root: { type: "text", text: "Hello" },
+        },
+      });
+      expect((await run("session-a", { action: "status" })).overlays).toHaveLength(1);
+
+      client.setInspectReply({ success: true, overlays: [] });
+      await run("session-b", { action: "inspect" });
+
+      expect((await run("session-a", { action: "status" })).overlays).toEqual([]);
+    } finally {
+      unsubscribe();
+      restore();
+    }
   });
 });

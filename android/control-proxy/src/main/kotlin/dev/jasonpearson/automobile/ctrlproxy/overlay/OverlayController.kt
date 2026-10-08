@@ -395,7 +395,11 @@ class OverlayController(
   suspend fun inspect(requestId: String?) = mutex.withLock {
     try {
       check(!destroyed) { "Overlay host destroyed" }
-      replayOfflineEvents()
+      // Reporting lastSequence while events are still held would make the host skip them as
+      // duplicates on the next inspect, so an incomplete replay fails this inspect instead.
+      check(replayOfflineEvents()) {
+        "Buffered overlay events could not be delivered; the device kept them, retry inspect"
+      }
       val overlays = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
       sink.sendOverlayStatus(requestId, overlays, offlineEvents.dropped)
     } catch (error: CancellationException) {

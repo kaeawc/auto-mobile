@@ -123,6 +123,9 @@ class OverlayOfflineReplayTest {
 
     controller.inspect("first")
     assertTrue(events.isEmpty())
+    // The failed inspect must not report a high-water mark that covers the undelivered events.
+    assertTrue(statuses.isEmpty())
+    assertEquals(1, failures.size)
 
     controller.inspect("second")
     assertEquals(listOf("a", "b", "c"), events.map { it.name })

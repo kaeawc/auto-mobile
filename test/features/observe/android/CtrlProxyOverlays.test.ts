@@ -516,6 +516,31 @@ describe("CtrlProxy overlays", () => {
     expect(received).toHaveLength(1);
   });
 
+  test("events pushed while nobody listens go to the next subscriber in order", async () => {
+    const { client, receive } = await harness();
+    await receive(event);
+    await receive({ ...event, sequence: 2 });
+    const received: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => received.push(value));
+    await receive({ ...event, sequence: 3 });
+    expect(received.map((value) => value.sequence)).toEqual([1, 2, 3]);
+
+    const later: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => later.push(value));
+    expect(later).toEqual([]);
+  });
+
+  test("staged events are bounded to the device's offline ring", async () => {
+    const { client, receive } = await harness();
+    for (let sequence = 1; sequence <= 205; sequence++) {
+      await receive({ ...event, sequence });
+    }
+    const received: OverlayEvent[] = [];
+    client.onOverlayEvent((value) => received.push(value));
+    expect(received).toHaveLength(200);
+    expect(received[0]?.sequence).toBe(6);
+  });
+
   test("listener errors are logged and other listeners still receive", async () => {
     const { client, receive } = await harness();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});

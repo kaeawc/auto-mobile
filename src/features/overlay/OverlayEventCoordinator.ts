@@ -91,7 +91,10 @@ export class OverlayEventCoordinator {
     lastSequence: number,
   ): void {
     const known = this.entries.get(scopeKey(scope, id));
-    if (known?.shown && !known.terminal) {
+    // A replayed terminal event may already have ended the entry (shown false, terminal true)
+    // before this runs; its unconsumed events are still this host's to deliver.
+    const holdsEvents = known?.terminal === true && known.buffer.status().pendingCount > 0;
+    if ((known?.shown && !known.terminal) || holdsEvents) {
       // Re-inspecting an overlay this host already tracks must not start a new epoch: that would
       // clear the unconsumed events, and advancing the ledger below would make them unrecoverable.
       this.watch(scope, id, client);

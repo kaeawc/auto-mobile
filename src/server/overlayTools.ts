@@ -1005,10 +1005,12 @@ function dropUnreportedOverlays(
   scope: OverlayScope,
   reportedIds: ReadonlySet<string>,
 ): void {
-  for (const entry of store.status(scope).overlays) {
-    if (entry.id !== undefined && !reportedIds.has(entry.id)) {
-      events.dismiss(scope.deviceId, entry.id);
-      store.dismissed(scope, entry.id);
+  // The device holds one overlay for every session, so stale ids are enumerated device-wide: a
+  // session that tracked the vanished overlay is not necessarily the one inspecting.
+  for (const id of store.shownIds(scope.deviceId)) {
+    if (!reportedIds.has(id)) {
+      events.dismiss(scope.deviceId, id);
+      store.dismissed(scope, id);
     }
   }
 }

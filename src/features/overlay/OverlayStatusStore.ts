@@ -48,6 +48,8 @@ export interface OverlayStatusStore {
   recordEvent(scope: OverlayScope, event: OverlayEvent): void;
   /** The device reported a terminal dismissal for this overlay; its presence is gone. */
   dismissed(scope: OverlayScope, id: string): void;
+  /** Ids any session on the device still lists as shown. */
+  shownIds(deviceId: string): readonly string[];
   clearDevice(deviceId: string): void;
   /** Forgets every scope on each device the session touched; returns those device ids. */
   clearSession(sessionUuid: string): readonly string[];
@@ -240,6 +242,18 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
 
   dismissed(scope: OverlayScope, id: string): void {
     this.clearShown(scope.deviceId, id);
+  }
+
+  shownIds(deviceId: string): readonly string[] {
+    const ids = new Set<string>();
+    for (const known of this.scopes.values()) {
+      if (known.deviceId === deviceId) {
+        for (const id of known.shown.keys()) {
+          ids.add(id);
+        }
+      }
+    }
+    return Array.from(ids);
   }
 
   private createResult(

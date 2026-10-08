@@ -1,6 +1,7 @@
 @testable import AutoMobileSDK
 import Foundation
 import Network
+import os
 import XCTest
 
 final class SdkHierarchyServerTests: XCTestCase {
@@ -492,15 +493,13 @@ final class SdkHierarchyServerTests: XCTestCase {
         let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
         let queue = DispatchQueue(label: "sdk-hierarchy-server-test-client")
         let responded = expectation(description: "server responds")
-        let responseLock = NSLock()
-        var response = Data()
+        let response = OSAllocatedUnfairLock(initialState: Data())
 
+        @Sendable
         func receive() {
             connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, isComplete, error in
                 if let data = data, !data.isEmpty {
-                    responseLock.lock()
-                    response.append(data)
-                    responseLock.unlock()
+                    response.withLock { $0.append(data) }
                 }
                 if isComplete || error != nil {
                     responded.fulfill()
@@ -521,9 +520,7 @@ final class SdkHierarchyServerTests: XCTestCase {
         wait(for: [responded], timeout: 5)
         connection.cancel()
 
-        responseLock.lock()
-        defer { responseLock.unlock() }
-        return String(data: response, encoding: .utf8) ?? ""
+        return String(data: response.withLock { $0 }, encoding: .utf8) ?? ""
     }
 
     private func withRunningServer(

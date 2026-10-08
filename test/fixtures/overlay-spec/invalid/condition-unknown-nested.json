@@ -1,0 +1,31 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "any": [
+          {
+            "key": "a",
+            "equals": 1
+          },
+          {
+            "key": "a",
+            "equals": 1,
+            "extra": 1
+          }
+        ]
+      }
+    },
+    "state": {
+      "a": 1
+    }
+  },
+  "expectedPath": "root.visibleWhen.any[1].extra"
+}

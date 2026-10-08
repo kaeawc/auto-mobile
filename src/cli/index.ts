@@ -31,6 +31,7 @@ import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { serverConfig } from "../utils/ServerConfig";
 import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
+import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
 import {
   ensureCliToolSelectionProfileStoreWritable,
   loadPersistedCliToolSelectionProfile,
@@ -498,6 +499,11 @@ function handleToolResult(result: any, toolName: string): void {
 
     printPlanFailureProgress(actualResult, toolName);
 
+    const ownershipHint = cliDeviceOwnershipHint(actualResult, toolName);
+    if (ownershipHint) {
+      console.error(ownershipHint);
+    }
+
     process.exit(1);
   }
 }
@@ -639,6 +645,14 @@ Session-based Execution:
   (10 minutes by default, AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS) rather than the
   heartbeat contract a long-running MCP connection keeps, so it survives the gap
   between one-shot invocations. Every call refreshes it.
+
+Device ownership:
+  A device a session holds takes calls only from that session. A call without
+  --session-uuid (or with another session's) on a held device is refused with
+  code device_owned_by_other_session. Pass the sessionUuid that getAndroid,
+  getApple or startDevice returned, or wait for the holder to release the device.
+  Tools that only watch (observe, identifyInteractions, hitTest) are allowed on any
+  device. killDevice and deleteDevice also accept --force true to stop a held device.
 `);
 
   // Show categorized tools

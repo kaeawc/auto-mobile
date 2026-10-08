@@ -47,6 +47,12 @@ Use `listDevices` to inspect them and `setActiveDevice` to select one. For
 repeatable CLI calls, associate calls with the session UUID returned when you
 acquire a device and pass it with `--session-uuid`.
 
+A device a session holds takes calls only from that session: a `--cli` call
+without that session's `--session-uuid` on it is refused with
+`device_owned_by_other_session`, except read-only `observe`. `killDevice` and
+`deleteDevice` accept `--force true` to stop a held device anyway. See
+[Device ownership](using/device-ownership.md).
+
 ## When does the daemon release a device session?
 
 An MCP client's session is released about 10 s after its owner's last heartbeat

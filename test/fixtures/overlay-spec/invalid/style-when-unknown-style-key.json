@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "styleWhen": [
+        {
+          "when": {
+            "key": "selected",
+            "equals": true
+          },
+          "style": {
+            "background": "#2255CC"
+          }
+        },
+        {
+          "when": {
+            "key": "selected",
+            "equals": true
+          },
+          "style": {
+            "colour": "#112233"
+          }
+        }
+      ]
+    },
+    "state": {
+      "selected": true,
+      "count": 3
+    }
+  },
+  "expectedPath": "root.styleWhen[1].style.colour"
+}

@@ -11,7 +11,10 @@ import {
 } from "../../models/ViewHierarchyResult";
 import { attachRawViewHierarchy, getRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { DefaultElementParser } from "../utility/ElementParser";
+import type { AccessibilityHierarchy as AndroidWireHierarchy } from "./android/types";
 import { iosWindowLayer } from "./ios/iosWindowLayer";
+import { linkWindowRoots } from "./linkWindowRoots";
+import type { XCTestHierarchy } from "./ios/types";
 import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 import { INTERACTIVE_OVERLAY_WINDOW_TYPE, ownOverlayWindows } from "./ownOverlayFocus";
 
@@ -304,6 +307,43 @@ export function scopeHierarchyToLayer(
   // Scoping an already-scoped capture again is a no-op.
   scopedCache.set(scoped, { [layer]: scoped });
   return scoped;
+}
+
+/**
+ * A device capture as app screen identity sees it (issue #9305 (e)): AutoMobile's own overlay
+ * windows are removed and a capture labelled with the overlay host's package is attributed to the
+ * app behind it. Navigation fingerprints are computed from this, so showing, paging or dismissing
+ * a prototype overlay neither changes the app screen's identity nor records a navigation.
+ *
+ * Takes the captures the hierarchy pushes carry (the Android CtrlProxy wire capture and the iOS
+ * runner's XCTestHierarchy) and returns the same shape. A capture with no overlay is returned
+ * unchanged, as the same object, so screens without an overlay keep their fingerprints.
+ */
+export function appWindowsOnly(capture: AndroidWireHierarchy): AndroidWireHierarchy;
+export function appWindowsOnly(capture: XCTestHierarchy): XCTestHierarchy;
+export function appWindowsOnly(
+  capture: AndroidWireHierarchy | XCTestHierarchy,
+): AndroidWireHierarchy | XCTestHierarchy {
+  // Wire window entries do not carry their roots, and an app-layer overlay (TYPE_SYSTEM) is only
+  // recognized by the nodes it hosts, so link the roots when the overlay host owns a window.
+  const linked = capture.windows?.some(
+    (window) => window.packageName === CTRL_PROXY_PACKAGE && window.hierarchy === undefined,
+  )
+    ? { ...capture, windows: linkWindowRoots(capture.hierarchy, capture.windows) }
+    : capture;
+  // Both wire shapes carry the fields scoping reads (`packageName`, `windows`, the root node with
+  // its `windowId`-stamped window roots); scoping spreads the input, so every other field survives.
+  const scoped = scopeHierarchyToLayer(linked as ViewHierarchyResult, "app");
+  if (scoped === linked) {
+    return capture;
+  }
+  if (linked === capture) {
+    return scoped as typeof capture;
+  }
+  // Hand back the captured window entries, without the roots linked above.
+  const kept = new Set(scoped.windows);
+  const windows = capture.windows?.filter((_, index) => kept.has(linked.windows![index]!));
+  return { ...(scoped as typeof capture), windows };
 }
 
 const NO_OVERLAY_SHOWING =

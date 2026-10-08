@@ -76,6 +76,7 @@ import {
   HierarchyNavigationUpdateMetrics,
 } from "../../navigation/HierarchyNavigationDetector";
 import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
+import { appWindowsOnly } from "../hierarchyLayer";
 import {
   DeviceServiceClient,
   ObserverPendingRequestTimeoutError,
@@ -4867,7 +4868,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     const conversionStart = this.timer.now();
-    const convertedHierarchy = this.convertHierarchyForNavigation(hierarchy);
+    // Screen identity follows the app's windows only (#9305): the overlay agent's UIWindow is
+    // removed, so showing, paging or dismissing a prototype records no navigation.
+    const convertedHierarchy = this.convertHierarchyForNavigation(appWindowsOnly(hierarchy));
     const conversionMs = this.timer.now() - conversionStart;
 
     const metrics: HierarchyNavigationUpdateMetrics = {

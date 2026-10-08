@@ -66,6 +66,7 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
+import { appWindowsOnly } from "../hierarchyLayer";
 import { isDeepStrictEqual } from "node:util";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
@@ -6611,9 +6612,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         });
     }
 
-    // Notify hierarchy navigation detector
-    const navigationPackage = this.resolveHierarchyPackage(data);
-    if (!data.hierarchy) {
+    // Notify hierarchy navigation detector. Screen identity follows the app windows only
+    // (#9305): AutoMobile's own overlay is removed and the capture attributed to the app behind it,
+    // so showing, paging or dismissing a prototype records no navigation.
+    const appCapture = appWindowsOnly(data);
+    const navigationPackage = this.resolveHierarchyPackage(appCapture);
+    if (!appCapture.hierarchy) {
       logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
     } else if (data.error) {
       logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
@@ -6636,7 +6640,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.ensureBuildContext(navigationPackage);
       }
       this.getHierarchyNavigationDetector().onHierarchyUpdate({
-        ...data,
+        ...appCapture,
         packageName: navigationPackage,
       });
     }

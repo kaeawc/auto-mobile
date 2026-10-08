@@ -5462,7 +5462,8 @@ export class SessionManager {
       awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
-    // Only a heartbeat advances the owner lease; the handler admits one only from the owner.
+    // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
+    // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;

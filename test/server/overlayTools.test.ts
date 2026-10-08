@@ -780,7 +780,7 @@ describe("overlay MCP tool", () => {
   test.each([
     [{ ...spec, root: { type: "unknown" } }, "root.type", "text"],
     [{ ...spec, window: { ...spec.window, opacity: 101 } }, "window.opacity", "100"],
-    [{ ...spec, root: { type: "icon", name: "unknown" } }, "root", "home"],
+    [{ ...spec, root: { type: "icon", name: "unknown" } }, "root", "Unknown overlay icon name"],
     [{ ...spec, root: { ...spec.root, unknown: true } }, "root.unknown", "Unknown property"],
   ])("invalid spec rejected before client call", async (invalid, path, allowed) => {
     const input = { action: "show", spec: invalid };

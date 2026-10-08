@@ -131,7 +131,7 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   resolver?: Pick<import("../../utility/ElementResolver").ElementResolver, "resolve">;
   executeGesture?: GestureExecutor;
   observeScreen?: ObserveScreen;
-  finder?: import("../../../utils/interfaces/ElementTraitQueries").ScrollableElementsQuery;
+  scrollables?: import("../../../utils/interfaces/ElementTraitQueries").ScrollableElementsQuery;
   geometry?: import("../../../utils/interfaces/ElementGeometry").ElementGeometry;
   parser?: import("../../../utils/interfaces/ElementParser").ElementParser;
   accessibilityDetector?: AccessibilityDetector;

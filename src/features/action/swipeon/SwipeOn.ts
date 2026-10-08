@@ -195,7 +195,7 @@ export class SwipeOn extends BaseVisualChange {
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture!: GestureExecutor;
-  private finder!: ScrollableElementsQuery;
+  private scrollables!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
   private accessibilityService!: AndroidCtrlProxyClient;
   private accessibilityDetector!: AccessibilityDetector;
@@ -283,7 +283,7 @@ export class SwipeOn extends BaseVisualChange {
   ) {
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     const parser = dependencies.parser ?? new DefaultElementParser();
-    this.finder = dependencies.finder ?? new DefaultScrollableElementsQuery();
+    this.scrollables = dependencies.scrollables ?? new DefaultScrollableElementsQuery();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
@@ -359,7 +359,7 @@ export class SwipeOn extends BaseVisualChange {
     if (resolutionGeneration !== undefined) {
       completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
     }
-    const scrollables = this.finder.findScrollableElements(observeResult.viewHierarchy);
+    const scrollables = this.scrollables.findScrollableElements(observeResult.viewHierarchy);
     const candidates = this.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
   }
@@ -654,7 +654,7 @@ export class SwipeOn extends BaseVisualChange {
       throw new ActionableError(direction.error ?? "direction is required");
     }
     const scrollables = observation.viewHierarchy
-      ? this.finder.findScrollableElements(observation.viewHierarchy)
+      ? this.scrollables.findScrollableElements(observation.viewHierarchy)
       : [];
     const decision = this.resolveAutoTargetDecision({
       scrollables,
@@ -1487,7 +1487,7 @@ export class SwipeOn extends BaseVisualChange {
 
   private unchangedSwipeWarning(result: SwipeOnResult, previous: ObserveResult | null): string {
     const scrollables = previous?.viewHierarchy
-      ? this.finder.findScrollableElements(previous.viewHierarchy)
+      ? this.scrollables.findScrollableElements(previous.viewHierarchy)
       : [];
     const regions =
       result.element && isTruthyFlag(result.element.scrollable)

@@ -114,6 +114,22 @@ for package in "${IOS_MACOS_PACKAGES[@]}"; do
 done
 echo ""
 
+# The overlay agent's UIKit sources are not a SwiftPM target (a macOS host build cannot import
+# UIKit), so compile the injectable simulator dylib here; its core is tested by swift-test.sh.
+echo -e "${BLUE}Building iOS simulator overlay agent...${NC}"
+if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+    OVERLAY_AGENT_OUT="${PROJECT_ROOT}/scratch/overlay-agent-ci"
+    if "${SCRIPT_DIR}/overlay-agent-build.sh" "${OVERLAY_AGENT_OUT}" 2>&1; then
+        print_status 0 "overlay-agent dylib built successfully"
+    else
+        print_status 1 "overlay-agent dylib build failed"
+        FAILED_PACKAGES+=("overlay-agent dylib")
+    fi
+else
+    print_info "Skipping overlay-agent dylib (no iphonesimulator SDK)"
+fi
+echo ""
+
 # Optional: sign XCTestRunner for iOS releases when credentials are available.
 if [[ "${IOS_SIGNING_ENABLED:-false}" == "true" ]]; then
     echo -e "${BLUE}Signing iOS frameworks for release builds...${NC}"

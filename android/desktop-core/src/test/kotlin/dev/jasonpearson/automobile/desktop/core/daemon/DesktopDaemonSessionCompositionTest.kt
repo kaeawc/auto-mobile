@@ -87,17 +87,67 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
-  fun `a rejected bind result is not retried on later ticks`() = runComposeUiTest {
+  fun `a rejected bind result is retried and stops once acknowledged`() = runComposeUiTest {
     val transport = RecordingDaemonTransport(rejectBindsUntilAttempt = 2)
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
-    setContent { sessionHost(transport, binding) }
+    var state: DesktopDaemonSessionState? = null
+    setContent { state = sessionHost(transport, binding) }
     mainClock.autoAdvance = false
     mainClock.advanceTimeByFrame()
 
     repeat(4) { tick() }
 
-    assertEquals(1, transport.boundDevices().size)
+    assertEquals(2, transport.boundDevices().size)
+    assertEquals("emulator-5554", state?.boundDeviceId)
   }
+
+  @Test
+  fun `an unrelated bind error never enters viewing and recovers on a bounded retry`() =
+    runComposeUiTest {
+      // #10682: device cleanup still running / CtrlProxy resuming is not "held by another session".
+      val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 1 }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      assertEquals(null, state?.viewingDeviceId)
+
+      repeat(4) { tick() }
+
+      assertEquals(listOf("emulator-5554", "emulator-5554"), transport.boundDevices())
+      assertEquals(null, state?.viewingDeviceId)
+      assertEquals(null, state?.bindErrorMessage)
+      assertEquals("emulator-5554", state?.boundDeviceId)
+    }
+
+  @Test
+  fun `a persistent unrelated bind error is surfaced after bounded retries, not as viewing`() =
+    runComposeUiTest {
+      val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+
+      repeat(10) { tick() }
+
+      assertEquals(MAX_BIND_ATTEMPTS, transport.boundDevices().size)
+      assertEquals(null, state?.viewingDeviceId)
+      assertEquals(null, state?.boundDeviceId)
+      assertEquals("Device 'emulator-5554' not found in device pool", state?.bindErrorMessage)
+      // Still registered and heartbeating without the device.
+      assertEquals(true, state?.isRegistered)
+
+      // Retry is one more bounded round.
+      transport.unrelatedBindFailures = 0
+      state.takeControl()
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals("emulator-5554", state?.boundDeviceId)
+      assertEquals(null, state?.bindErrorMessage)
+    }
 
   @Test
   fun `a bind refused because another session holds the device never re-sends it`() =

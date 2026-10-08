@@ -283,7 +283,11 @@ class McpDaemonClient(
     return try {
       decodeToolResponse(json, response, serializer<SetActiveDeviceResult>())
     } catch (e: Exception) {
-      SetActiveDeviceResult(success = false, message = e.message ?: "Failed to set active device")
+      SetActiveDeviceResult(
+        success = false,
+        message = e.message ?: "Failed to set active device",
+        refusal = classifySetActiveDeviceRefusal(json, response),
+      )
     }
   }
 

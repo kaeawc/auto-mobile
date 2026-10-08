@@ -21,6 +21,35 @@ import androidx.compose.ui.unit.sp
  */
 @Composable
 fun DeviceViewingNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier) {
+  PaneSessionNotice(
+    text = "Viewing only: another session controls this device",
+    actionLabel = "Take control",
+    onAction = onTakeControl,
+    modifier = modifier,
+  )
+}
+
+/**
+ * Shown when binding the picked device failed for a reason other than another session holding it
+ * (#10682), after the session loop's bounded retries. [onRetry] makes one more bind attempt.
+ */
+@Composable
+fun DeviceBindErrorNotice(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+  PaneSessionNotice(
+    text = "Could not connect to this device: $message",
+    actionLabel = "Retry",
+    onAction = onRetry,
+    modifier = modifier,
+  )
+}
+
+@Composable
+private fun PaneSessionNotice(
+  text: String,
+  actionLabel: String,
+  onAction: () -> Unit,
+  modifier: Modifier,
+) {
   Row(
     modifier =
       modifier
@@ -29,11 +58,7 @@ fun DeviceViewingNotice(onTakeControl: () -> Unit, modifier: Modifier = Modifier
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(8.dp),
   ) {
-    Text(
-      text = "Viewing only: another session controls this device",
-      color = Color.White.copy(alpha = 0.9f),
-      fontSize = 11.sp,
-    )
-    TextButton(onClick = onTakeControl) { Text("Take control", fontSize = 11.sp) }
+    Text(text = text, color = Color.White.copy(alpha = 0.9f), fontSize = 11.sp)
+    TextButton(onClick = onAction) { Text(actionLabel, fontSize = 11.sp) }
   }
 }

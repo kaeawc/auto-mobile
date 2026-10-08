@@ -103,6 +103,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.McpFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
 import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceBindErrorNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
@@ -2062,6 +2063,14 @@ fun AutoMobileContent(
               // takes it on its own (#10660). Take control is the one explicit bind attempt.
               if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
                 DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
+              }
+              // A bind that failed for another reason is an error, not viewing (#10682).
+              val bindError = desktopSessionState.bindErrorMessage
+              if (activeDeviceId != null && bindError != null) {
+                DeviceBindErrorNotice(
+                  message = bindError,
+                  onRetry = desktopSessionState.requestControl,
+                )
               }
 
               // Why control is unavailable (issue #4531). The policy's reason is surfaced only

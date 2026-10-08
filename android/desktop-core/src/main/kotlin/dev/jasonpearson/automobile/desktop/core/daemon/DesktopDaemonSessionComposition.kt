@@ -27,6 +27,13 @@ import kotlinx.coroutines.withContext
 private val LOG = LoggerFactory.getLogger("DesktopDaemonSessionComposition")
 private const val HEARTBEAT_INTERVAL_MS = 2_000L
 
+/**
+ * Bind attempts per binding before a non-ownership failure is surfaced instead of retried (#10682).
+ * A device still finishing cleanup or a CtrlProxy that is resuming usually succeeds within a few
+ * heartbeat intervals; a device that is gone never does.
+ */
+internal const val MAX_BIND_ATTEMPTS = 3
+
 data class DesktopDaemonSessionBinding(val deviceId: String, val platform: String)
 
 data class DesktopDaemonSessionState(
@@ -42,6 +49,12 @@ data class DesktopDaemonSessionState(
   val viewingDeviceId: String? = null,
   /** Explicit "Take control": exactly one bind attempt for the current binding (#10660). */
   val requestControl: () -> Unit = {},
+  /**
+   * Why binding the picked device failed after [MAX_BIND_ATTEMPTS] attempts, for a failure that is
+   * not another session holding it (#10682): device not found, cleanup still running, a CtrlProxy
+   * resume failure. The pane is not view-only; [requestControl] retries.
+   */
+  val bindErrorMessage: String? = null,
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -101,6 +114,7 @@ fun rememberDesktopDaemonSession(
     }
   var boundDeviceId by remember(session) { mutableStateOf<String?>(null) }
   var viewingDeviceId by remember(session) { mutableStateOf<String?>(null) }
+  var bindErrorMessage by remember(session) { mutableStateOf<String?>(null) }
   // Bumped only by an explicit "Take control" (#10660). It keys the binding effect, so each click
   // restarts it and makes exactly one fresh bind attempt.
   var controlRequests by remember(session) { mutableStateOf(0) }
@@ -130,6 +144,7 @@ fun rememberDesktopDaemonSession(
     val target = binding.value
     boundDeviceId = null
     viewingDeviceId = null
+    bindErrorMessage = null
     if (session == null) {
       boundDeviceId = target?.deviceId
       return@LaunchedEffect
@@ -153,27 +168,47 @@ fun rememberDesktopDaemonSession(
     // heartbeating, and never re-send the bind -- not on later ticks, not after a heartbeat lapse,
     // and not when the holder releases the device. Only a new binding or [requestControl] (both
     // restart this effect) tries again. A transport failure (thrown) is not a refusal and retries.
+    // Only the daemon's ownership refusal counts (#10682); any other failed bind is retried up to
+    // [MAX_BIND_ATTEMPTS] times and then surfaced as [bindErrorMessage], never as viewing.
     var refused = false
+    var failedBinds = 0
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
           if (bindingGeneration.get() != generation) return@LaunchedEffect
           withContext(ioDispatcher) {
-            if (target == null || refused) {
+            if (target == null || refused || failedBinds >= MAX_BIND_ATTEMPTS) {
               session.ensureRegistered()
             } else if (!bindingAcknowledged) {
               val result = session.client.setActiveDevice(target.deviceId, target.platform)
-              if (result.success) {
-                bindingAcknowledged = true
-                session.deviceBound(held = true)
-              } else {
-                refused = true
-                viewingDeviceId = target.deviceId
-                LOG.info(
-                  "Device ${target.deviceId} is held by another session; viewing only: " +
-                    "${result.message}"
-                )
-                session.ensureRegistered()
+              when {
+                result.success -> {
+                  bindingAcknowledged = true
+                  failedBinds = 0
+                  session.deviceBound(held = true)
+                }
+                result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION -> {
+                  refused = true
+                  viewingDeviceId = target.deviceId
+                  LOG.info(
+                    "Device ${target.deviceId} is held by another session; viewing only: " +
+                      "${result.message}"
+                  )
+                  session.ensureRegistered()
+                }
+                else -> {
+                  failedBinds++
+                  val message = result.message ?: "Failed to set active device"
+                  // A bounded transient retry goes through the failure path below (delay, then
+                  // retry the bind); the last attempt surfaces the error and keeps the session
+                  // registered without the device.
+                  check(failedBinds >= MAX_BIND_ATTEMPTS) {
+                    "Binding ${target.deviceId} failed (attempt $failedBinds): $message"
+                  }
+                  LOG.warn("Could not bind ${target.deviceId}: $message")
+                  bindErrorMessage = message
+                  session.ensureRegistered()
+                }
               }
             }
           }
@@ -194,7 +229,7 @@ fun rememberDesktopDaemonSession(
       }
 
       failureLogged = false
-      boundDeviceId = target?.deviceId?.takeUnless { refused }
+      boundDeviceId = target?.deviceId?.takeIf { bindingAcknowledged }
       if (refreshAfterRecovery) {
         refreshAfterRecovery =
           !runCatching { onDaemonRecovered() }
@@ -227,5 +262,6 @@ fun rememberDesktopDaemonSession(
     isRegistered = registered,
     viewingDeviceId = viewingDeviceId,
     requestControl = requestControl,
+    bindErrorMessage = bindErrorMessage,
   )
 }

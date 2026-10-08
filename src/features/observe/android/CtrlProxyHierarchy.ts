@@ -1910,6 +1910,11 @@ export class CtrlProxyHierarchy {
     if (node.recomposition) {
       converted.recomposition = node.recomposition;
     }
+    // Reported text size in px (ExtraRenderingInfo.textSizeInPx, API 30+); the contrast
+    // checker converts to dp with the observation density (#10134).
+    if (typeof node.textSize === "number" && Number.isFinite(node.textSize) && node.textSize > 0) {
+      converted.textSize = node.textSize;
+    }
 
     if (node.bounds) {
       converted.bounds = node.bounds;

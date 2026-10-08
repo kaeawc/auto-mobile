@@ -4,7 +4,9 @@
 #
 #   unit        Hermetic *.test.ts tests, excluding integration and stress.
 #               Files on test/shared-process-allowlist.txt share one process
-#               per shard; the rest run with --isolate (#10583).
+#               per shard; the rest run with --isolate, in sequential
+#               processes of AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE files
+#               (0 = one process) so no isolated process ages (#10583).
 #   changed     Unit tests affected by worktree/ref changes (local feedback).
 #   integration Real-I/O *.integration.test.ts tests.
 #   stress      Explicit test/stress/** tests.
@@ -83,6 +85,12 @@ validate_positive_integer() {
 validate_positive_integer "AUTOMOBILE_UNIT_TEST_WORKERS" "$unit_workers"
 if [[ "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES+x}" == x ]]; then
   validate_positive_integer "AUTOMOBILE_UNIT_TEST_CHUNK_FILES" "$AUTOMOBILE_UNIT_TEST_CHUNK_FILES"
+fi
+# 0 keeps one isolated process per shard; see scripts/lib/bun-unit-groups.sh.
+isolated_chunk_size="$(unit_isolated_chunk_size)"
+if ! [[ "$isolated_chunk_size" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer below 1000000000, got: ${isolated_chunk_size}" >&2
+  exit 2
 fi
 validate_positive_integer "AUTOMOBILE_TEST_TIMEOUT_MS" "$per_test_timeout_ms"
 
@@ -357,10 +365,12 @@ configure_unit_shard_groups() {
   if [[ "$shared_total" -gt "$shard" ]]; then
     AUTOMOBILE_UNIT_SHARED_FILE_COUNT=$(((shared_total - shard + worker_count - 1) / worker_count))
   fi
-  # Chunked shards split inside bun-unit-chunks.sh. An unchunked shard with
-  # shared files runs both groups through bun-unit-groups.sh under the same
-  # watchdog; a shard without shared files keeps the direct invocation.
-  if [[ "$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 && -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" ]]; then
+  # Nightly-chunked shards split inside bun-unit-chunks.sh. Other shards run
+  # their groups (shared process, then fixed-size isolated chunks) through
+  # bun-unit-groups.sh under the same watchdog; with no shared files and an
+  # isolated chunk size of 0 the direct single invocation is kept.
+  if [[ -z "${AUTOMOBILE_UNIT_TEST_CHUNK_FILES:-}" &&
+    ("$AUTOMOBILE_UNIT_SHARED_FILE_COUNT" -gt 0 || "$isolated_chunk_size" -gt 0) ]]; then
     shard_args=(bash "$ROOT/scripts/lib/bun-unit-groups.sh" "$ROOT" "$runner_os"
       "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" "$shard")
   fi

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
 import { AutoTargetSelector } from "../../../../src/features/action/swipeon/AutoTargetSelector";
 import type { AutoTargetSelectorService } from "../../../../src/features/action/swipeon/types";
-import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
+import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { DefaultScrollableElementsQuery } from "../../../../src/features/utility/InteractiveElementQueries";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
@@ -283,12 +283,10 @@ describe("Android unnamed auto-target capture regression", () => {
   });
 
   test("passes the selected unnamed element directly without a selector lookup", async () => {
-    const lookup = spyOn(DefaultElementFinder.prototype, "findElementByText");
-    const idLookup = spyOn(DefaultElementFinder.prototype, "findElementByResourceId");
+    const lookup = spyOn(ElementResolver.prototype, "resolve");
     const result = await harness().action.execute({ direction: "up" });
     expect(result.targetType).toBe("element");
     expect(lookup).not.toHaveBeenCalled();
-    expect(idLookup).not.toHaveBeenCalled();
   });
 
   test("keeps named auto-target and explicit-container coordinates identical", async () => {

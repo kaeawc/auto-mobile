@@ -79,7 +79,7 @@ import {
  * never selected). Emitting a suffix for `A` instead means the id a caller observes
  * for a member of a duplicate group is never the bare form, so the reassigned
  * survivor's bare id can no longer collide with it: the stale selector misses
- * (or, while ≥2 peers remain, `ElementFinder`'s ambiguity guard rejects it)
+ * (or, while ≥2 peers remain, `ElementResolver`'s ambiguity guard rejects it)
  * rather than acting on the wrong node. The bare `s2-<hash>` invariant is now
  * "this content was unique when observed".
  *
@@ -113,7 +113,7 @@ export const STABLE_VIEW_ID_PREFIX = "s2-";
 /**
  * Fixed hex-character width of the content hash this module emits (see the
  * `.slice(0, ...)` in `assign` below). Exported so consumers that need to
- * recognize the producer's exact id shape - e.g. `ElementFinder`'s
+ * recognize the producer's exact id shape - e.g. `ElementResolver`'s
  * synthetic-vs-real-resource-id disambiguation (issue #6218 review) - read it
  * from here rather than guessing/duplicating the width.
  */

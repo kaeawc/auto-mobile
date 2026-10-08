@@ -1,7 +1,6 @@
 /**
  * Guidance messages for synthetic stable view-id (`s2-<hash>`) selectors that
- * cannot safely identify one element. Shared by ElementFinder and
- * ElementResolver so both report the same recovery advice (#10476).
+ * cannot safely identify one element, reported by ElementResolver (#10476).
  */
 
 export function legacyBareStableViewIdMessage(id: string): string {

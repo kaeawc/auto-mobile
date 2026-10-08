@@ -5,9 +5,7 @@ import {
   GENERATED_VIEW_ID_PATTERN,
   STABLE_VIEW_ID_PREFIX,
 } from "../../../../src/features/observe/android/StableNodeIdentity";
-import { DefaultElementFinder } from "../../../../src/features/utility/ElementFinder";
-import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
-import { DefaultTextMatcher } from "../../../../src/features/utility/TextMatcher";
+import { ResolverElementSelector } from "../../../../src/features/utility/ResolverElementSelector";
 import type { ViewHierarchyResult } from "../../../../src/models";
 
 /**
@@ -107,7 +105,7 @@ describe("assignStableViewIds (#3228)", () => {
     );
   });
 
-  test("a label-distinguished id-less row keeps its id across a scroll and resolves through ElementFinder (#6728)", () => {
+  test("a label-distinguished id-less row keeps its id across a scroll and resolves through the selector (#6728)", () => {
     const capture = (labels: string[]) => {
       const rows = labels.map((label, index) =>
         node(
@@ -140,11 +138,11 @@ describe("assignStableViewIds (#3228)", () => {
     expect(observedBobId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
     expect(observedCarolId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
 
-    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
-    const resolved = finder.findElementByResourceId(
+    const resolved = new ResolverElementSelector().selectByResourceId(
       { hierarchy: after.root } as ViewHierarchyResult,
       observedBobId,
-    );
+      { intentAction: "inspect" },
+    ).element;
     expect(resolved?.bounds).toEqual(after.rows[0].bounds);
   });
 
@@ -579,11 +577,11 @@ describe("assignStableViewIds (#3228)", () => {
     expect(after.fields[0]["view-id"]).toBe(observedEmailId);
     expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
 
-    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
-    const resolved = finder.findElementByResourceId(
+    const resolved = new ResolverElementSelector().selectByResourceId(
       { hierarchy: after.root } as ViewHierarchyResult,
       observedPasswordId,
-    );
+      { intentAction: "inspect" },
+    ).element;
     expect(resolved?.bounds).toEqual(after.fields[1].bounds);
   });
 
@@ -649,11 +647,11 @@ describe("assignStableViewIds (#3228)", () => {
     expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
     expect(after.fields[0]["view-id"]).not.toBe(after.fields[1]["view-id"]);
 
-    const finder = new DefaultElementFinder(new DefaultElementParser(), new DefaultTextMatcher());
-    const resolved = finder.findElementByResourceId(
+    const resolved = new ResolverElementSelector().selectByResourceId(
       { hierarchy: after.root } as ViewHierarchyResult,
       observedEmailId,
-    );
+      { intentAction: "inspect" },
+    ).element;
     expect(resolved?.bounds).toEqual(after.fields[0].bounds);
     expect(resolved?.text).toBe("mt@example.com");
   });

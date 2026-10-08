@@ -20,7 +20,7 @@ import {
 
 import scrollCapture from "../../fixtures/observe/diff/scroll-before.json";
 import { assignStableViewIds } from "../../../src/features/observe/android/StableNodeIdentity";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 
 const createTapOnElement = (selector: FakeElementSelector) => {
   return new TapOnElement(
@@ -900,10 +900,10 @@ describe("capture-local synthetic element ids", () => {
     expect(survivorUuid).toBeDefined();
     expect(afterMapping.get(survivorUuid!)).toBe("s2-3340048129449c01");
 
-    const finder = new DefaultElementFinder();
-    expect(finder.findElementByResourceId(before, oldId)).not.toBeNull();
-    expect(finder.findElementByResourceId(after, oldId)).toBeNull();
-    expect(finder.findElementByResourceId(after, "s2-3340048129449c01")).not.toBeNull();
+    const selector = new ResolverElementSelector();
+    expect(selector.selectByResourceId(before, oldId).element).not.toBeNull();
+    expect(selector.selectByResourceId(after, oldId).element).toBeNull();
+    expect(selector.selectByResourceId(after, "s2-3340048129449c01").element).not.toBeNull();
     const tapOn = createDefaultTapOnElement();
     await expect(
       tapOn["handleElementNotFound"]({ action: "tap", elementId: oldId }),

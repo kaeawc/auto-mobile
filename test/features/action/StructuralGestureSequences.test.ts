@@ -17,7 +17,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeGestureExecutor } from "../../fakes/FakeGestureExecutor";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
-import { FakeElementFinder } from "../../fakes/FakeElementFinder";
+import { ScriptedElementLookup } from "../../fakes/ScriptedElementLookup";
 import { FakeScrollElementResolver } from "../../fakes/FakeScrollElementResolver";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeScrollAccessibilityService } from "../../fakes/FakeScrollAccessibilityService";
@@ -390,9 +390,9 @@ describe("gesture request sequences", () => {
         controller.abort();
       }
     };
-    const finder = new FakeElementFinder();
-    const find = finder.findElementByText.bind(finder);
-    finder.findElementByText = (...args) => {
+    const lookup = new ScriptedElementLookup();
+    const find = lookup.findElementByText.bind(lookup);
+    lookup.findElementByText = (...args) => {
       calls.push("find");
       return find(...args);
     };
@@ -404,7 +404,7 @@ describe("gesture request sequences", () => {
         skipAccessibilityAudit: true,
       });
       calls.push("observe");
-      finder.nextElementByText = element;
+      lookup.nextElementByText = element;
       return mode === "missing" ? { ...observation, viewHierarchy: undefined } : observation;
     };
     const proxy = new FakeScrollAccessibilityService();
@@ -418,7 +418,7 @@ describe("gesture request sequences", () => {
           undefined,
         ]);
         calls.push("hierarchy");
-        finder.nextElementByText = element;
+        lookup.nextElementByText = element;
         return mode === "missing" ? null : hierarchy;
       },
     };
@@ -426,7 +426,7 @@ describe("gesture request sequences", () => {
     const scroll = new ScrollUntilVisible({
       device: { ...device, platform },
       timer,
-      resolver: new FakeScrollElementResolver(finder),
+      resolver: new FakeScrollElementResolver(lookup),
       geometry: new FakeElementGeometry(),
       observeScreen: observe,
       accessibilityService: service,

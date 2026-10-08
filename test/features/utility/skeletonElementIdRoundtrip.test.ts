@@ -6,9 +6,7 @@ import { DefaultObserveElementCollector } from "../../../src/features/observe/Ob
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
 import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
 import { parseBounds } from "../../../src/utils/bounds";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import {
   assignStableViewIds,
@@ -27,7 +25,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
  * `ElementResolver`, which previously only ever compared against
  * `resource-id` — so a skeleton-emitted `s-<hash>` id could never match
  * anything, despite the tool docs promising it is "directly usable as a
- * tapOn selector". `ElementFinder` now also matches an `s-`-prefixed
+ * tapOn selector". The resolver now also matches an `s-`-prefixed
  * `elementId` against the node's `view-id` field.
  */
 
@@ -50,8 +48,6 @@ function generatedViewId(seed: string): string {
 }
 
 const parser = new DefaultElementParser();
-const textMatcher = new DefaultTextMatcher();
-const finder = new DefaultElementFinder(parser, textMatcher);
 const selector = new ResolverElementSelector();
 
 describe("skeleton elementId round-trips through tapOn's ElementSelector (issue #6218)", () => {
@@ -164,11 +160,8 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // The shared bare form still cannot select one of the duplicate rows. Its
     // recovery hint must name only selector fields tapOn actually accepts.
-    // ElementFinder's synthetic-id guard, pinned on the finder itself since
-    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
-    // selector does not share this guard.
     const base = idA.split("~")[0];
-    const findBase = () => finder.findElementsByResourceId(viewHierarchy, base);
+    const findBase = () => selector.selectByResourceId(viewHierarchy, base);
     expect(findBase).toThrow(/textAny/i);
     expect(findBase).toThrow(new RegExp(idA));
     expect(findBase).toThrow(new RegExp(idB));
@@ -269,41 +262,6 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!["content-desc"]).toBe("solo-row");
-  });
-
-  test("rejects a detectable legacy bare duplicate id instead of treating it as a current singleton", () => {
-    // Before #6229, a duplicate family's first member was bare and later
-    // members started at -2. The new producer reserves -1 for that first
-    // member, so this missing `-1` shape is an explicit legacy signature. It
-    // must not silently resolve as if the bare id meant unique content.
-    const legacyBase = "s-0123456789abcdef";
-    const rawRoot = {
-      node: [
-        {
-          class: "android.view.ViewGroup",
-          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-          clickable: "true",
-          "view-id": legacyBase,
-        },
-        {
-          class: "android.view.View",
-          bounds: { left: 0, top: 110, right: 100, bottom: 160 },
-          clickable: "true",
-          "view-id": `${legacyBase}-2`,
-        },
-      ],
-    };
-    const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
-
-    // ElementFinder's synthetic-id guard, pinned on the finder itself since
-    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
-    // selector does not share this guard.
-    expect(finder.findElementsByResourceId(viewHierarchy, legacyBase)).toEqual([]);
-    // Container lookup shares the same selector contract and must not resolve
-    // the legacy bare node before the target's ambiguity guard runs.
-    expect(
-      finder.findElementsByResourceId(viewHierarchy, "missing-target", { elementId: legacyBase }),
-    ).toEqual([]);
   });
 
   test("a real bare Compose resource-id shaped like a synthetic id is never misclassified as ambiguous", () => {
@@ -577,10 +535,9 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // real id in c2 legitimately wins - this is existing, intentional
     // behavior (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq)
     // and must be unaffected by this fix.
-    // ElementFinder's synthetic-id guard, pinned on the finder itself since
-    // DefaultElementSelector was retired (#10268); the resolver-backed tapOn
-    // selector does not share this guard.
-    const [result] = finder.findElementsByResourceId(viewHierarchy, idInContainer1);
+    const result = selector.selectByResourceId(viewHierarchy, idInContainer1, {
+      intentAction: "inspect",
+    }).element;
     expect(result?.["content-desc"]).toBe("decoy-node");
   });
 
@@ -745,12 +702,12 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       };
       const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-      const siblings = finder.findClickableSiblingsOfResourceId(viewHierarchy, collidingId);
-      expect(siblings).toHaveLength(1);
-      expect(siblings[0].bounds).toEqual({ left: 0, top: 0, right: 50, bottom: 50 });
+      const sibling = selector.selectClickableSiblingOfResourceId(viewHierarchy, collidingId);
+      expect(sibling.totalMatches).toBe(1);
+      expect(sibling.element?.bounds).toEqual({ left: 0, top: 0, right: 50, bottom: 50 });
     });
 
-    test("the container path (findContainerNode) selects the real resource-id container, not a decoy sharing its view-id", () => {
+    test("the container path (resolveContainer) selects the real resource-id container, not a decoy sharing its view-id", () => {
       const rawRoot = {
         node: [
           {
@@ -767,10 +724,8 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       };
       const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-      const containerNode = finder.findContainerNode(viewHierarchy, { elementId: collidingId });
-      expect(containerNode).not.toBeNull();
-      const parsed = parser.parseNodeBounds(containerNode as never);
-      expect(parsed!.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 300 });
+      const container = selector.resolveContainer(viewHierarchy, { elementId: collidingId });
+      expect(container?.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 300 });
     });
   });
 

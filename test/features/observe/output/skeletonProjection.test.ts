@@ -1457,8 +1457,8 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("the emitted index is verbatim usable by tapOn's own index resolution (ordering contract)", () => {
       // Three rows sharing a resource-id, built through the REAL collector so
-      // provenance.enter is the real DFS counter — the same one
-      // ElementFinder.findElementsByResourceId walks for an explicit index.
+      // provenance.enter is the real DFS counter — the same document order
+      // tapOn's index resolution walks for an explicit index.
       const viewHierarchy = {
         hierarchy: {
           node: {

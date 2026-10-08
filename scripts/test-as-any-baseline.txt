@@ -163,7 +163,6 @@
 3	test/features/telemetry/TelemetryRecorder.test.ts
 95	test/features/utility/DeepLinkManager.chooser.test.ts
 11	test/features/utility/DeepLinkManager.test.ts
-4	test/features/utility/ElementFinder.test.ts
 5	test/features/utility/ElementParser.test.ts
 2	test/features/utility/GetDeepLinks.test.ts
 33	test/features/utility/PostNotification.test.ts

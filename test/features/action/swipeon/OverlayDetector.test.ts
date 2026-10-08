@@ -202,8 +202,8 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     // pass through it. Only object identity to the finder-resolved node must
     // decide this: the popup's look-alike is a different parsed object, so
     // it can never match, and the popup's clickable root remains a detected
-    // overlay. The real container lives in the MAIN hierarchy, which a real
-    // ElementFinder always searches before any window — see
+    // overlay. The real container lives in the MAIN hierarchy, which the
+    // selector lookup always searches before any window — see
     // resolveSelectedContainerNode's main-first precedence.
     const realListNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });
     const hierarchy = {
@@ -231,10 +231,10 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
   });
 
   test("anchors identity to the area-sorted selected match, not the first traversal match, when two `list` nodes share the id (terminal #6128 follow-up)", () => {
-    // Two `list` nodes share the resource-id. The real ElementFinder resolves
-    // the swipe target by AREA-SORTING matches and picking the smallest — here
-    // listB, under cardB — while a first-match traversal (the earlier,
-    // now-removed reliance on finder.findContainerNode) would instead land on
+    // Two `list` nodes share the resource-id. The swipe-target resolution
+    // ranks matches by area and picks the smallest — here listB, under
+    // cardB — while a first-match traversal (the earlier, now-removed
+    // container-node lookup) would instead land on
     // listA, under cardA, which is visited first and is larger.
     //
     // Anchoring ancestor-collection to the wrong node (listA) would exempt
@@ -260,8 +260,8 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       },
     };
 
-    // Mirrors what the real, area-sorted ElementFinder.findElementByResourceId
-    // hands back as the swipe target: the smaller of the two `list` matches
+    // Mirrors what the area-ranked swipe-target resolution hands back as the
+    // swipe target: the smaller of the two `list` matches
     // (listB, area 640,000 vs listA's 1,000,000) — not the first one visited.
     const selectedListElement: Element = {
       bounds: listBBounds,

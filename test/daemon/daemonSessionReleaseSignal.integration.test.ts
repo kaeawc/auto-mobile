@@ -9,6 +9,10 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  SUSPECT_GRACE_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DevicePool } from "../../src/daemon/devicePool";
@@ -80,6 +84,7 @@ describe("Daemon session-release signal wiring", () => {
   });
 
   test("heartbeat monitor persists and broadcasts the diagnostic expiry reason", async () => {
+    const leaseMs = 1_000;
     const db = await createTestDatabase();
     const timer = new FakeTimer();
     const repository = new DeviceSessionRepository(db);
@@ -97,22 +102,22 @@ describe("Daemon session-release signal wiring", () => {
         "emulator-5554",
         "android",
         60_000,
-        1_000,
+        leaseMs,
       );
       sessionManager.recordHeartbeat("heartbeat-expired");
       internals.startHeartbeatMonitor();
 
-      await timer.advanceTimeAsync(10_000);
+      await timer.advanceTimeAsync(leaseMs + SUSPECT_GRACE_MS - 1);
 
-      // The 1s lease has expired, but the 10s suspect grace still reserves the device (#10051).
+      // The lease has expired, but the suspect grace still reserves the device (#10051).
       expect(await repository.getSession("heartbeat-expired")).toMatchObject({
         status: "active",
         release_reason: null,
       });
       expect(emitted).toEqual([]);
 
-      // Drive the next scheduled scan separately so this is not a daemon timer stall.
-      await timer.advanceTimeAsync(10_000);
+      // Drive the next scheduled scans separately so this is not a daemon timer stall.
+      await timer.advanceTimeAsync(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
 
       const persisted = await repository.getSession("heartbeat-expired");
       expect(persisted).toMatchObject({

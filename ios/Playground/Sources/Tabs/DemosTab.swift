@@ -160,6 +160,16 @@ struct DemosTab: View {
 
                 Section("View Hierarchy") {
                     NavigationLink {
+                        NestedSelectionDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Nested Selection",
+                            description: "Two carts with duplicate item ids",
+                            icon: "cart.fill"
+                        )
+                    }
+
+                    NavigationLink {
                         ViewHierarchyDebugDemo()
                     } label: {
                         DemoRow(
@@ -1385,3 +1395,72 @@ struct SegmentedControlView: UIViewRepresentable {
     DemosTab()
         .autoMobileTheme()
 }
+
+// MARK: - Nested Selection Demo
+
+/// Two carts holding rows with the same accessibility identifiers (item_40...item_47), each with a
+/// `quantity` field and a `remove` button, so nested container selection can be verified against
+/// duplicate leaf identifiers. The status line records which cart/item last received an action.
+struct NestedSelectionDemo: View {
+    private static let cartNames = ["cart_A", "cart_B"]
+    private static let itemIds = (40...47).map { "item_\($0)" }
+
+    @State private var rows: [String: [String]] = Dictionary(
+        uniqueKeysWithValues: cartNames.map { ($0, itemIds) }
+    )
+    @State private var quantities: [String: String] = [:]
+    @State private var status = "status: idle"
+
+    var body: some View {
+        ScrollView {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(status)
+                .accessibilityIdentifier("selection_status")
+            HStack {
+                Button("Reverse A") {
+                    rows["cart_A"]?.reverse()
+                    status = "status: reversed cart_A"
+                }
+                .accessibilityIdentifier("reverse_cart_A")
+                Button("Drop A/42") {
+                    rows["cart_A"]?.removeAll { $0 == "item_42" }
+                    status = "status: dropped cart_A/item_42"
+                }
+                .accessibilityIdentifier("drop_cart_A_item_42")
+            }
+            .buttonStyle(.borderedProminent)
+            ForEach(Self.cartNames, id: \.self) { cart in
+                Text(cart)
+                VStack(spacing: 4) {
+                        ForEach(rows[cart] ?? [], id: \.self) { item in
+                            HStack {
+                                TextField(
+                                    "\(item) qty",
+                                    text: Binding(
+                                        get: { quantities["\(cart)/\(item)"] ?? "" },
+                                        set: { quantities["\(cart)/\(item)"] = $0 }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("quantity")
+                                Button("Remove") {
+                                    rows[cart]?.removeAll { $0 == item }
+                                    status = "status: removed \(cart)/\(item)"
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityIdentifier("remove")
+                            }
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier(item)
+                        }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(cart)
+            }
+        }
+        .padding(.horizontal, 12)
+        }
+        .navigationTitle("Nested Selection")
+    }
+}
+

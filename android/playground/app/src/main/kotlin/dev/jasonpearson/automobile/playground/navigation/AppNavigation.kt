@@ -23,6 +23,7 @@ import dev.jasonpearson.automobile.demos.ComposeSemanticLinksDemoScreen
 import dev.jasonpearson.automobile.demos.ContrastDemoScreen
 import dev.jasonpearson.automobile.demos.DemoIndexScreen
 import dev.jasonpearson.automobile.demos.HandledExceptionDemoScreen
+import dev.jasonpearson.automobile.demos.NestedSelectionDemoScreen
 import dev.jasonpearson.automobile.demos.NetworkTestScreen
 import dev.jasonpearson.automobile.demos.PerformanceDetailScreen
 import dev.jasonpearson.automobile.demos.PerformanceListScreen
@@ -153,6 +154,7 @@ fun determineStartDestinationWithDeepLink(
           is DemoTapTargetsDestination,
           is DemoXmlSemanticLinksDestination,
           is DemoComposeSemanticLinksDestination,
+          is DemoNestedSelectionDestination,
           is DemoBugReproDestination,
           is DemoHandledExceptionDestination,
           is DemoNetworkTestDestination,
@@ -291,6 +293,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             is DemoTapTargetsDestination,
             is DemoXmlSemanticLinksDestination,
             is DemoComposeSemanticLinksDestination,
+            is DemoNestedSelectionDestination,
             is DemoBugReproDestination,
             is DemoHandledExceptionDestination,
             is DemoNetworkTestDestination,
@@ -593,6 +596,7 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
               onNavigateToComposeSemanticLinks = {
                 backStack.add(DemoComposeSemanticLinksDestination)
               },
+              onNavigateToNestedSelection = { backStack.add(DemoNestedSelectionDestination) },
               onNavigateToBugRepro = { backStack.add(DemoBugReproDestination) },
               onNavigateToHandledException = {
                 backStack.add(DemoHandledExceptionDestination)
@@ -729,6 +733,15 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
           }
           Box(modifier = Modifier.destinationSemanticModifier<DemoTapTargetsDestination>()) {
             TapTargetsDemoScreen(onNavigateBack = { backStack.popOrGoHome(HomeDestination()) })
+          }
+        }
+
+        entry<DemoNestedSelectionDestination> { destination ->
+          Navigation3Adapter.TrackNavigation(destination)
+          Box(modifier = Modifier.destinationSemanticModifier<DemoNestedSelectionDestination>()) {
+            NestedSelectionDemoScreen(
+              onNavigateBack = { backStack.popOrGoHome(HomeDestination()) },
+            )
           }
         }
 

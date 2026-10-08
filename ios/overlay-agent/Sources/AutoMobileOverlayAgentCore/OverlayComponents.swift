@@ -245,6 +245,24 @@ enum OverlayTime {
     static func label(hour: Int, minute: Int) -> String {
         String(format: "%02d:%02d", hour, minute)
     }
+
+    /// The 12-hour clock face (1...12) of a 24-hour `hour`.
+    static func hour12(of hour: Int) -> Int {
+        let h = hour % 12
+        return h == 0 ? 12 : h
+    }
+
+    static func isPM(hour: Int) -> Bool { hour % 24 >= 12 }
+
+    /// The 24-hour `hour` for a 12-hour face and meridiem.
+    static func hour24(hour12: Int, pm: Bool) -> Int {
+        (hour12 % 12) + (pm ? 12 : 0)
+    }
+
+    /// Accessibility labels of the wheels, naming what each one sets as Android's picker does.
+    static let hourLabel = "Hour"
+    static let minuteLabel = "Minute"
+    static let meridiemLabel = "AM/PM"
 }
 
 /// One accessibility element of an open dialog, in reading order. The icon is decorative and never

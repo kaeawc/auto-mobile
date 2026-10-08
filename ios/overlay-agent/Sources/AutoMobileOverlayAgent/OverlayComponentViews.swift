@@ -92,7 +92,7 @@ struct OverlayChipView: View {
         let isOn = checked ?? false
         let chip = Button { model.activate(.node(node)) } label: {
             HStack(spacing: 8) {
-                if isOn { Image(systemName: "checkmark").accessibilityHidden(true) }
+                if isOn { OverlayGlyph(symbol: "checkmark") }
                 Text(node.label ?? "")
             }
             .font(.subheadline.weight(.medium))
@@ -157,9 +157,8 @@ struct OverlayRadioGroupView: View {
                 let isSelected = option.value == selected
                 Button { model.activate(.option(node, option)) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                        OverlayGlyph(symbol: isSelected ? "largecircle.fill.circle" : "circle")
                             .foregroundColor(isSelected ? colors.primary : colors.contentVariant)
-                            .accessibilityHidden(true)
                         Text(option.label).foregroundColor(colors.authored(style?.color) ?? colors.content)
                     }
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -204,9 +203,8 @@ struct OverlayListItemView: View {
     private func row(isOn: Bool) -> some View {
         HStack(spacing: 16) {
             if let leading = node.leadingIcon {
-                Image(systemName: overlaySymbol(leading))
+                OverlayGlyph(symbol: overlaySymbol(leading))
                     .foregroundColor(colors.authored(style?.color) ?? colors.contentVariant)
-                    .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(node.headline ?? "").foregroundColor(colors.authored(style?.color) ?? colors.content)
@@ -230,9 +228,9 @@ struct OverlayListItemView: View {
         case "switch":
             Toggle("", isOn: .constant(isOn)).labelsHidden().allowsHitTesting(false)
         case "checkbox":
-            Image(systemName: isOn ? "checkmark.square.fill" : "square")
+            OverlayGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
         case "icon":
-            Image(systemName: overlaySymbol(node.trailing?.name)).foregroundColor(colors.contentVariant)
+            OverlayGlyph(symbol: overlaySymbol(node.trailing?.name)).foregroundColor(colors.contentVariant)
         default:
             EmptyView()
         }
@@ -243,6 +241,17 @@ struct OverlayListItemView: View {
 
 /// An icon-only button: standard (default), filled, tonal or outlined. Its label comes from the
 /// node (`contentDescription`, else the icon name) via `IdentifierModifier`.
+/// A decorative or button-internal SF Symbol drawn as a text glyph. A bare `Image(systemName:)`
+/// still surfaces as an image element on iOS 26 even under `accessibilityHidden(true)`; a `Text`
+/// glyph with the symbol inline does not, so the parent control's label stays the only element.
+struct OverlayGlyph: View {
+    let symbol: String
+
+    var body: some View {
+        Text(Image(systemName: symbol)).accessibilityHidden(true)
+    }
+}
+
 struct OverlayIconButtonView: View {
     @Environment(\.overlayPalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
@@ -261,7 +270,7 @@ struct OverlayIconButtonView: View {
             .authored(style?.color) ??
             (variant == "filled" ? colors.onPrimary : variant == "tonal" ? colors.onTonal : colors.content)
         Button { model.activate(.node(node)) } label: {
-            Image(systemName: overlaySymbol(node.icon))
+            OverlayGlyph(symbol: overlaySymbol(node.icon))
                 .font(.system(size: 20))
                 .foregroundColor(tint)
                 .frame(width: 40, height: 40)
@@ -290,7 +299,7 @@ struct OverlayFabView: View {
         }
         Button { model.activate(.node(node)) } label: {
             HStack(spacing: 12) {
-                Image(systemName: overlaySymbol(node.icon)).font(.system(size: side >= 96 ? 36 : 22))
+                OverlayGlyph(symbol: overlaySymbol(node.icon)).font(.system(size: side >= 96 ? 36 : 22))
                 if let label = node.label { Text(label).font(.body.weight(.medium)) }
             }
             .foregroundColor(colors.authored(style?.color) ?? colors.primary)
@@ -326,7 +335,7 @@ struct OverlaySegmentedButtonView: View {
                 if index > 0 { colors.outline.frame(width: 1) }
                 Button { model.activate(.option(node, option)) } label: {
                     HStack(spacing: 4) {
-                        if isSelected { Image(systemName: "checkmark").accessibilityHidden(true) }
+                        if isSelected { OverlayGlyph(symbol: "checkmark") }
                         Text(option.label).lineLimit(1)
                     }
                     .font(.subheadline.weight(.medium))
@@ -401,7 +410,7 @@ struct OverlayTopAppBarView: View {
 
     private func button(_ action: OverlayAppBarAction, identifier: String?) -> some View {
         Button { model.activate(.appBarButton(action)) } label: {
-            Image(systemName: overlaySymbol(action.icon))
+            OverlayGlyph(symbol: overlaySymbol(action.icon))
                 .font(.system(size: 20))
                 .foregroundColor(colors.authored(style?.color) ?? colors.content)
                 .frame(width: 48, height: 48)
@@ -535,35 +544,60 @@ struct OverlayTimePickerView: View {
         let minuteKey = node.minuteKey ?? ""
         let hour = model.state[hourKey]?.intValue ?? 0
         let minute = model.state[minuteKey]?.intValue ?? 0
-        let selection = Binding<Date>(
-            get: { OverlayTime.date(hour: hour, minute: minute) },
-            set: { date in
-                let picked = OverlayTime.components(of: date)
-                model.setTime(
-                    hourKey: hourKey,
-                    minuteKey: minuteKey,
-                    hour: picked.hour,
-                    minute: picked.minute,
-                    then: node.onTap ?? []
-                )
+        // Separate wheels so each carries its own label (hour, minute, AM/PM); a single
+        // `DatePicker` wheel is one unlabelled element to accessibility.
+        HStack(spacing: 0) {
+            wheel(OverlayTime.hourLabel, selection: Binding(
+                get: { use24 ? hour : OverlayTime.hour12(of: hour) },
+                set: { picked in
+                    commit(hour: use24 ? picked : OverlayTime.hour24(hour12: picked, pm: OverlayTime.isPM(hour: hour)), minute: minute)
+                }
+            ), values: use24 ? Array(0..<24) : Array(1...12), format: use24 ? "%02d" : "%d")
+            wheel(OverlayTime.minuteLabel, selection: Binding(
+                get: { minute },
+                set: { commit(hour: hour, minute: $0) }
+            ), values: Array(0..<60), format: "%02d")
+            if !use24 {
+                Picker(OverlayTime.meridiemLabel, selection: Binding(
+                    get: { OverlayTime.isPM(hour: hour) ? 1 : 0 },
+                    set: { commit(hour: OverlayTime.hour24(hour12: OverlayTime.hour12(of: hour), pm: $0 == 1), minute: minute) }
+                )) {
+                    Text("AM").tag(0)
+                    Text("PM").tag(1)
+                }
+                .labelsHidden()
+                .pickerStyle(.wheel)
             }
-        )
-        DatePicker("", selection: selection, displayedComponents: .hourAndMinute)
-            .labelsHidden()
-            .datePickerStyle(.wheel)
-            .environment(\.calendar, OverlayDate.calendar)
-            .environment(\.timeZone, OverlayDate.calendar.timeZone)
-            .environment(\.locale, clockLocale)
-            .accessibilityValue(OverlayTime.label(hour: hour, minute: minute))
+        }
+        .frame(height: 162)
+        .accessibilityElement(children: .contain)
     }
 
-    private var clockLocale: Locale {
+    private func wheel(_ label: String, selection: Binding<Int>, values: [Int], format: String) -> some View {
+        Picker(label, selection: selection) {
+            ForEach(values, id: \.self) { Text(String(format: format, $0)).tag($0) }
+        }
+        .labelsHidden()
+        .pickerStyle(.wheel)
+    }
+
+    private func commit(hour: Int, minute: Int) {
+        model.setTime(
+            hourKey: node.hourKey ?? "",
+            minuteKey: node.minuteKey ?? "",
+            hour: hour,
+            minute: minute,
+            then: node.onTap ?? []
+        )
+    }
+
+    private var use24: Bool {
         switch node.is24Hour {
-        case true?: Locale(identifier: "en_GB")
-        case false?: Locale(identifier: "en_US")
-        case nil: .autoupdatingCurrent
+        case let explicit?: explicit
+        case nil: !(DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .autoupdatingCurrent) ?? "").contains("a")
         }
     }
+
 }
 
 /// A calendar bound to a `YYYY-MM-DD` string key; picking another day binds it.
@@ -647,10 +681,9 @@ struct OverlayDialogView: View {
                 // Decorative, as Android's dialog icon (contentDescription = null). Drawn as a text
                 // glyph: a bare SF Symbol Image still surfaced as an image element on iOS 26 despite
                 // accessibilityHidden.
-                Text(Image(systemName: overlaySymbol(icon, fallback: "info.circle")))
+                OverlayGlyph(symbol: overlaySymbol(icon, fallback: "info.circle"))
                     .font(.title2)
                     .frame(maxWidth: .infinity)
-                    .accessibilityHidden(true)
             }
             let parts = node.dialogParts(title: title, text: text)
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in

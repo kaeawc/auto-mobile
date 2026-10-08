@@ -161,11 +161,9 @@ struct NodeView: View {
         case "image":
             imageView
         case "icon":
-            Image(systemName: sfSymbols[node.name ?? ""] ?? "questionmark.square")
-                .font(.system(size: style?.textSize ?? 24))
-                .foregroundColor(palette.color(style?.color) ?? contentColor)
-                // Decorative unless it has an authored description or is tappable.
-                .accessibilityHidden(accessibilityLabelOverride == nil)
+            // Decorative unless it has an authored description or is tappable; the decorative
+            // case is a text glyph (see `OverlayGlyph`) so no image element is exposed.
+            iconView
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
         case "textField":
@@ -262,6 +260,20 @@ struct NodeView: View {
         interpolateOverlayText(text ?? "", state: model.state, pager: pagerPosition)
     }
 
+    @ViewBuilder
+    private var iconView: some View {
+        let symbol = sfSymbols[node.name ?? ""] ?? "questionmark.square"
+        if accessibilityLabelOverride == nil {
+            OverlayGlyph(symbol: symbol)
+                .font(.system(size: style?.textSize ?? 24))
+                .foregroundColor(palette.color(style?.color) ?? contentColor)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: style?.textSize ?? 24))
+                .foregroundColor(palette.color(style?.color) ?? contentColor)
+        }
+    }
+
     /// Text nodes already read their text, so only an authored description or a tappable icon's
     /// name needs to be applied explicitly.
     private var accessibilityLabelOverride: String? {
@@ -351,8 +363,7 @@ struct NodeView: View {
     private var checkboxView: some View {
         Button(action: toggleBound) {
             HStack(spacing: 8) {
-                Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                    .accessibilityHidden(true)
+                OverlayGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
                 if let label = node.label { Text(label) }
             }
             .frame(minHeight: 44)
@@ -395,7 +406,7 @@ struct NodeView: View {
                 } label: {
                     VStack(spacing: 2) {
                         if let icon = item.icon {
-                            Image(systemName: sfSymbols[icon] ?? "circle")
+                            OverlayGlyph(symbol: sfSymbols[icon] ?? "circle")
                         }
                         Text(item.label).font(.caption)
                     }

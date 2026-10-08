@@ -60,6 +60,11 @@ setup() {
   export BUN_ARGS_FILE
   STUB_RECHECK_INDEX="$(mktemp)"
   export STUB_RECHECK_INDEX
+  # Every unit file runs isolated unless a test writes this shared-process
+  # allow-list (#10583); the committed list must not leak into stubbed lanes.
+  AUTOMOBILE_UNIT_SHARED_ALLOWLIST="$STUB_BIN/shared-process-allowlist.txt"
+  export AUTOMOBILE_UNIT_SHARED_ALLOWLIST
+  : > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
   cat > "$STUB_BIN/nproc" <<'EOF'
 #!/usr/bin/env bash
 if [[ "${STUB_NPROC_FAIL:-}" == "1" ]]; then
@@ -108,6 +113,12 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+# Per-shard behaviour for parallel shard tests (#10644): the hook reads
+# AUTOMOBILE_WATCHDOG_LABEL and may exit; otherwise the stub continues.
+if [[ "$1" == test && -n "${STUB_SHARD_HOOK:-}" ]]; then
+  # shellcheck source=/dev/null
+  source "$STUB_SHARD_HOOK"
+fi
 # Per-invocation exit codes for `bun test` (shard retry tests run one worker,
 # so invocations are sequential): "124 0" times out once, then passes.
 if [[ "$1" == test && -n "${STUB_BUN_EXITS:-}" ]]; then
@@ -135,6 +146,12 @@ if [[ "$1" == test && -n "${STUB_CHUNK_RECORD:-}" ]]; then
   done
   count="$(wc -l < "$STUB_CHUNK_RECORD" | tr -d ' ')"
   if [[ "$count" == "${STUB_CHUNK_FAIL:-}" ]]; then exit 7; fi
+fi
+if [[ "$1" == test && -n "${STUB_GROUP_LABEL_RECORD:-}" ]]; then
+  printf '%s\n' "${AUTOMOBILE_TEST_TIMING_GROUP_LABEL:-none}" >> "$STUB_GROUP_LABEL_RECORD"
+fi
+if [[ "$1" == test && -n "${STUB_SHARED_FAIL:-}" && " $* " != *" --isolate "* ]]; then
+  exit "$STUB_SHARED_FAIL"
 fi
 if [[ "$1" == test && -n "${STUB_BUN_TEST_MODE_FILE:-}" ]]; then
   printf '%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" >> "$STUB_BUN_TEST_MODE_FILE"
@@ -634,7 +651,9 @@ EOF
 
 # Shard retry on infra exits (#10583). One worker keeps invocations sequential.
 run_retry_lane() {
-  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 "$@" bash "$SCRIPT" unit
+  # Isolated chunking is off so each attempt is one `bun test` invocation per group.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 "$@" bash "$SCRIPT" unit
 }
 
 bun_test_invocations() {
@@ -734,6 +753,155 @@ bun_test_invocations() {
   run_retry_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=soon
   [ "$status" -eq 2 ]
   [[ "$output" == *"AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS must be a positive integer"* ]]
+}
+
+# Completion-order reaping (#10644). Three parallel shards: shard 0 is slow
+# (it waits on a file another shard writes, bounded so a regression fails
+# instead of hanging) and shard 2's first attempt exits fast.
+write_completion_order_hook() {
+  cat > "$1" <<'EOF'
+stub_mark="$STUB_HOOK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+echo x >> "$stub_mark.attempts"
+stub_attempt="$(wc -l < "$stub_mark.attempts" | tr -d ' ')"
+stub_wait_for() {
+  local tries=0
+  while [[ ! -e "$1" ]]; do
+    tries=$((tries + 1))
+    if [[ "$tries" -gt 150 ]]; then return 1; fi
+    sleep 0.02
+  done
+}
+case "$AUTOMOBILE_WATCHDOG_LABEL" in
+  "unit shard 0")
+    if stub_wait_for "$STUB_HOOK_DIR/${STUB_SLOW_WAITS_FOR:-shard2-retry-started}"; then
+      echo saw-gate > "$STUB_HOOK_DIR/shard0-result"
+    else
+      echo gate-missing > "$STUB_HOOK_DIR/shard0-result"
+    fi
+    exit "${STUB_SLOW_EXIT:-0}"
+    ;;
+  "unit shard 2")
+    if [[ "$stub_attempt" -eq 1 ]]; then
+      if [[ -n "${STUB_FAST_CLOCK:-}" ]]; then
+        printf '%s\n' "$STUB_FAST_CLOCK" > "$STUB_HOOK_DIR/clock"
+      fi
+      echo "(fail) stub suite > slow test [5001.00ms]"
+      touch "$STUB_HOOK_DIR/shard2-attempt1-done"
+      exit "${STUB_FAST_EXIT:-124}"
+    fi
+    touch "$STUB_HOOK_DIR/shard2-retry-started"
+    exit 0
+    ;;
+esac
+EOF
+}
+
+# Usage: run_completion_order_lane [ENV=VALUE]...; uses $hook and $hook_dir.
+run_completion_order_lane() {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=3 \
+    AUTOMOBILE_UNIT_SHARD_POLL_SECONDS=0.02 \
+    STUB_SHARD_HOOK="$hook" STUB_HOOK_DIR="$hook_dir" "$@" bash "$SCRIPT" unit
+}
+
+reset_completion_order_hook() {
+  hook_dir="$BATS_TEST_TMPDIR/hook"
+  hook="$BATS_TEST_TMPDIR/hook.sh"
+  rm -rf "$hook_dir"
+  mkdir -p "$hook_dir"
+  write_completion_order_hook "$hook"
+  : > "$BUN_ARGS_FILE"
+}
+
+@test "a fast-failing later shard is retried before a slow earlier shard finishes (#10644)" {
+  reset_completion_order_hook
+  run_completion_order_lane
+  [ "$status" -eq 0 ]
+  # Shard 0 was still running when shard 2's retry started; index-order
+  # reaping would leave shard 0 waiting until its bounded wait gave up.
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [ "$(wc -l < "$hook_dir/unit_shard_2.attempts" | tr -d ' ')" -eq 2 ]
+  [ "$(wc -l < "$hook_dir/unit_shard_0.attempts" | tr -d ' ')" -eq 1 ]
+  [[ "$output" == *"RETRY: unit shard 2 hit its 180s wall-clock budget (exit 124)"* ]]
+  [[ "$output" == *"test-ts: unit shard 2 passed on its retry"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=0 attempts=2"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
+  [ -f scratch/test-ts-unit-shards/shard-2.attempt-1.log ]
+  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
+  [ -s scratch/test-ts-unit-shards/shard-2.wall ]
+}
+
+@test "completion-order reaping judges the lane cap at each shard's own reap time (#10644)" {
+  reset_completion_order_hook
+  # Fake lane clock: base 1000 plus whatever the hook last wrote to `clock`.
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+offset=0
+if [[ -f "$STUB_HOOK_DIR/clock" ]]; then offset="$(cat "$STUB_HOOK_DIR/clock")"; fi
+printf '%s\n' "$((1000 + offset))"
+EOF
+  chmod +x "$STUB_BIN/date"
+
+  # A retry needs 180s budget + 60s overhead; at 0s elapsed it fits a 245s cap.
+  run_completion_order_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=245
+  [ "$status" -eq 0 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"test-ts: unit shard 2 passed on its retry"* ]]
+
+  # Shard 2 ends at 10s elapsed: 10 + 180 + 60 > 245, so no retry, and the
+  # slow shard 0 is still reaped and reported.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=245 \
+    STUB_FAST_CLOCK=10 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"test-ts: not retrying unit shard 2 (status 124): a 180s retry at 10s elapsed would pass the 245s lane cap"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+  [ "$(wc -l < "$hook_dir/unit_shard_2.attempts" | tr -d ' ')" -eq 1 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"test-ts: unit shard 1/3 wall="*"s status=0"* ]]
+  [[ "$output" == *"test-ts: unit shard 3/3 wall="*"s status=124"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=124 retried=0"* ]]
+}
+
+@test "completion-order reaping keeps the lane exit status independent of finish order (#10644)" {
+  # A fast ordinary failure, then a slow timeout: 124 wins and both are named.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
+    STUB_FAST_EXIT=7 STUB_SLOW_EXIT=124 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [ "$(cat "$hook_dir/shard0-result")" = saw-gate ]
+  [[ "$output" == *"FAIL: unit shard 2 exited with status 7"* ]]
+  [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=124 retried=0"* ]]
+
+  # A fast timeout, then a slow ordinary failure: still 124.
+  reset_completion_order_hook
+  run_completion_order_lane AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
+    STUB_FAST_EXIT=124 STUB_SLOW_EXIT=7 STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 124 ]
+  [[ "$output" == *"TIMEOUT: unit shard 2 exceeded its wall-clock budget"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+
+  # Only ordinary failures: 1, and neither is retried.
+  reset_completion_order_hook
+  run_completion_order_lane STUB_FAST_EXIT=7 STUB_SLOW_EXIT=3 \
+    STUB_SLOW_WAITS_FOR=shard2-attempt1-done
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: unit shard 2 exited with status 7"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 3"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+}
+
+@test "the shard reap poll interval rejects non-positive values" {
+  for interval in 0 0.0 soon; do
+    : > "$BUN_ARGS_FILE"
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+      AUTOMOBILE_UNIT_SHARD_POLL_SECONDS="$interval" bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_SHARD_POLL_SECONDS must be a positive number of seconds, got: $interval"* ]]
+    [ "$(bun_test_invocations)" -eq 0 ]
+  done
 }
 
 @test "unit shards run the calibration probe at start and end of every attempt next to the JUnit reports" {
@@ -1235,6 +1403,20 @@ EOF
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
   grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
+}
+
+@test "timing gate treats grouping runners and the shared-process allowlist as lane inputs" {
+  for input in scripts/lib/bun-unit-groups.sh scripts/lib/bun-unit-chunks.sh \
+    scripts/test/classify-shared-safe.ts test/shared-process-allowlist.txt; do
+    : > "$BUN_ARGS_FILE"
+    run env \
+      PATH="$STUB_BIN:$PATH" \
+      BUN_TEST_TIMING_BASE_REF=origin/main \
+      TIMING_CHANGED_FILES="$input\n" \
+      bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  done
 }
 
 @test "timing gate accepts successful empty changed shards without JUnit files" {
@@ -2143,6 +2325,213 @@ EOF
     [[ "$output" == *"AUTOMOBILE_UNIT_TEST_CHUNK_FILES must be a positive integer"* ]]
   done
   [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+# Five of the twelve chunk fixtures are allow-listed for shared processes
+# (#10583). Comments, blank lines, CRLF endings and stale entries are ignored.
+write_shared_allowlist() {
+  printf '# shared-process allow-list\n\ntest/fixture01.test.ts\r\ntest/fixture02.test.ts\ntest/fixture05.test.ts\ntest/fixture08.test.ts\ntest/fixture11.test.ts\ntest/deleted.test.ts\n' \
+    > "$AUTOMOBILE_UNIT_SHARED_ALLOWLIST"
+}
+
+fixture_list() {
+  local list="" index
+  for index in "$@"; do list+=" $(printf 'test/fixture%02d.test.ts' "$index")"; done
+  printf '%s' "$list"
+}
+
+@test "unit shards run allow-listed files in one shared process and the rest isolated (#10583)" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  labels="$BATS_TEST_TMPDIR/labels"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$reports" STUB_GROUP_LABEL_RECORD="$labels" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane shared_files=5 isolated_files=7"* ]]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
+  shared="test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile"
+  # Shared files lead the round-robin, so both groups split evenly: 3+2 and 4+3.
+  grep -Fxq "$shared $reports/shard-0-shared.xml$(fixture_list 1 5 11)" "$BUN_ARGS_FILE"
+  grep -Fxq "$isolated $reports/shard-0.xml$(fixture_list 3 6 9)" "$BUN_ARGS_FILE"
+  grep -Fxq "$shared $reports/shard-1-shared.xml$(fixture_list 2 8)" "$BUN_ARGS_FILE"
+  grep -Fxq "$isolated $reports/shard-1.xml$(fixture_list 0 4 7 10)" "$BUN_ARGS_FILE"
+  for report in shard-0-shared shard-0 shard-1-shared shard-1; do
+    [ -s "$reports/$report.xml" ]
+  done
+  # The timing probe names the shared group; isolated files keep their own entries.
+  grep -Fxq "unit shard 0 shared process (3 files)" "$labels"
+  grep -Fxq "unit shard 1 shared process (2 files)" "$labels"
+  [ "$(grep -c '^none$' "$labels")" -eq 2 ]
+  [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=0"* ]]
+}
+
+@test "AUTOMOBILE_UNIT_SHARED_PROCESS=0 runs every unit file isolated as before" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    AUTOMOBILE_UNIT_SHARED_PROCESS=0 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane shared_files=0 isolated_files=12"* ]]
+  expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts"
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  grep -Fxq "$expected$(fixture_list 0 2 4 6 8 10)" "$BUN_ARGS_FILE"
+  grep -Fxq "$expected$(fixture_list 1 3 5 7 9 11)" "$BUN_ARGS_FILE"
+}
+
+@test "a failing shared process fails the shard and lane while its isolated group still runs" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 STUB_SHARED_FAIL=7 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: unit shard 0 shared process exited with status 7"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 2 ]
+  grep -q -- '--isolate.*test/fixture00.test.ts' "$BUN_ARGS_FILE"
+}
+
+@test "chunked shards chunk the shared group without --isolate and never mix the groups" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  labels="$BATS_TEST_TMPDIR/labels"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=2 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" \
+    STUB_GROUP_LABEL_RECORD="$labels" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 7 ]
+  flags="--timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-chunk"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test $flags-0.xml$(fixture_list 1 2)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "test $flags-1.xml$(fixture_list 5 8)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "test $flags-2.xml$(fixture_list 11)" ]
+  [ "$(sed -n 4p "$BUN_ARGS_FILE")" = "test --isolate $flags-3.xml$(fixture_list 0 3)" ]
+  [ "$(sed -n 7p "$BUN_ARGS_FILE")" = "test --isolate $flags-6.xml$(fixture_list 10)" ]
+  [ "$(sed -n 3p "$labels")" = "unit shard 0 shared chunk 2 (1 files)" ]
+  [ "$(sed -n 4p "$labels")" = "none" ]
+}
+
+@test "one watchdog bounds the shared and isolated groups of a shard together" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  # Each group fits the 2s deadline (1.5s); the pair cannot. See the chunk
+  # watchdog test above for the margins.
+  # Retries are off so the shard's single attempt is what the isolated count sees.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -le 1 ]
+  [ -s scratch/test-ts-unit-shards/watchdog-shard-0.txt ]
+}
+
+@test "isolated chunk size splits a shard's isolated group into sequential processes with distinct reports" {
+  stub_chunk_discovery
+  reports="$BATS_TEST_TMPDIR/reports"
+  record="$BATS_TEST_TMPDIR/chunks"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 STUB_CHUNK_RECORD="$record" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit shard 0 isolated chunk 2: 2 of 12 files"* ]]
+  flags="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$flags-0.xml$(fixture_list 0 1 2 3 4)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$flags-1.xml$(fixture_list 5 6 7 8 9)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$flags-2.xml$(fixture_list 10 11)" ]
+  [ ! -e "$reports/shard-0.xml" ]
+  # All chunks share the shard's timing log and watchdog environment.
+  timing="$PWD/scratch/test-ts-unit-shards/timing-shard-0.ndjson"
+  [ "$(grep -Fxc "true|$timing|$timing" "$record")" -eq 3 ]
+  # The timing gate globs *.xml, so every chunk report is read.
+  run "$REAL_BUN" run scripts/lib/junit-testcase-timings.ts "$reports"/*.xml
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <<< "$output")" -eq 3 ]
+}
+
+@test "isolated chunks follow the shared process and never mix the groups" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  reports="$BATS_TEST_TMPDIR/reports"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=3 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 4 ]
+  isolated="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-iso"
+  [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "test --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0-shared.xml$(fixture_list 1 2 5 8 11)" ]
+  [ "$(sed -n 2p "$BUN_ARGS_FILE")" = "$isolated-0.xml$(fixture_list 0 3 4)" ]
+  [ "$(sed -n 3p "$BUN_ARGS_FILE")" = "$isolated-1.xml$(fixture_list 6 7 9)" ]
+  [ "$(sed -n 4p "$BUN_ARGS_FILE")" = "$isolated-2.xml$(fixture_list 10)" ]
+}
+
+@test "isolated chunk size 0 or a group that fits keeps one isolated process and shard-N.xml" {
+  stub_chunk_discovery
+  reports="$BATS_TEST_TMPDIR/reports"
+  # Unset uses the default, which is larger than these twelve files.
+  for setting in unset 0; do
+    : > "$BUN_ARGS_FILE"
+    if [[ "$setting" == unset ]]; then
+      run env -u AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE PATH="$STUB_BIN:$PATH" \
+        AUTOMOBILE_UNIT_TEST_WORKERS=1 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+    else
+      run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+        AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 AUTOMOBILE_UNIT_JUNIT_DIR="$reports" bash "$SCRIPT" unit
+    fi
+    [ "$status" -eq 0 ]
+    [ "$(wc -l < "$BUN_ARGS_FILE")" -eq 1 ]
+    expected="test --isolate --timeout 5000 --no-orphans --preload $PWD/test/setup/fileTimingProbe.ts --reporter junit --reporter-outfile $reports/shard-0.xml$(fixture_list 0 1 2 3 4 5 6 7 8 9 10 11)"
+    [ "$(sed -n 1p "$BUN_ARGS_FILE")" = "$expected" ]
+  done
+}
+
+@test "a failing isolated chunk fails the shard while later chunks still run" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 STUB_CHUNK_RECORD="$record" STUB_CHUNK_FAIL=1 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 1 ]
+  [ "$(wc -l < "$record")" -eq 3 ]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 7"* ]]
+}
+
+@test "isolated chunk size rejects non-integers before invoking Bun" {
+  stub_chunk_discovery
+  for value in '' abc 1.5 -1 05 1000000000 9223372036854775808 99999999999999999999; do
+    run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE="$value" \
+      bash "$SCRIPT" unit
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer"* ]]
+  done
+  [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+@test "one watchdog bounds all isolated chunks of a shard" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  # See the chunk watchdog test above for the margins.
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 STUB_CHUNK_RECORD="$record" \
+    STUB_BUN_SLEEP_SECONDS=1.5 AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 124 ]
+  started=0
+  if [ -e "$record" ]; then started="$(wc -l < "$record" | tr -d ' ')"; fi
+  [ "$started" -lt 3 ]
+}
+
+@test "a retried shard re-runs both its shared and isolated groups (#10583)" {
+  stub_chunk_discovery
+  write_shared_allowlist
+  report_dir="$BATS_TEST_TMPDIR/unit-reports"
+  run_retry_lane STUB_BUN_EXITS="124 0 0 0" AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir"
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 4 ]
+  [ "$(grep -c -- '--isolate' "$BUN_ARGS_FILE")" -eq 2 ]
+  [ "$(grep -vc -- '--isolate' "$BUN_ARGS_FILE")" -eq 2 ]
+  [[ "$output" == *"test-ts: unit shard 0 passed on its retry"* ]]
 }
 
 @test "timing gate summary records ordered samples and both median verdicts" {

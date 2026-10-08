@@ -1,0 +1,58 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "x",
+        "style": {
+          "elevation": 8,
+          "aspectRatio": 1.7777778,
+          "cornerRadius": 12,
+          "background": "#FFFFFF",
+          "gradient": {
+            "type": "linear",
+            "angle": 45,
+            "stops": [
+              {
+                "color": "#FF0000"
+              },
+              {
+                "color": "#8000FF00",
+                "position": 0.6
+              },
+              {
+                "color": "#0000FF"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "type": "text",
+        "text": "x",
+        "style": {
+          "gradient": {
+            "type": "radial",
+            "stops": [
+              {
+                "color": "#000000",
+                "position": 0
+              },
+              {
+                "color": "#FFFFFF",
+                "position": 1
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

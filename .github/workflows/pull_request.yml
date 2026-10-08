@@ -821,7 +821,7 @@ jobs:
   fast-validation:
     timeout-minutes: 20
     name: "Fast Validation"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: [detect-changes, format-check]
     # This required check must always report a result, including auto-chore
     # changes and a failed change-detection job.
@@ -924,7 +924,7 @@ jobs:
           KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
           scripts/all_fast_validate_checks.sh \
-            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
+            --only yaml,lfs-pointers,schema-copy-drift,tool-definitions,ctrl-proxy-project-sources,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,pipefail-grep-q,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,element-resolution-ratchet,test-as-any-ratchet,shared-process-allowlist,dependabot,desktop-core-unified,workflow-assertion-triggers,mkdocs-nav,docs-github-markdown,docs-assets,env-var-docs,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
       - name: "Run offline lychee link check"
@@ -1313,7 +1313,7 @@ jobs:
   bun-audit:
     timeout-minutes: 20
     name: "Bun Security Audit"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
@@ -1624,7 +1624,7 @@ jobs:
 
   memory-leak-detection:
     name: "Memory Leak Detection"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 30
@@ -1654,7 +1654,7 @@ jobs:
   format-check:
     timeout-minutes: 10
     name: "Check Formatting"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.format_changed == 'true'
     steps:
@@ -1675,7 +1675,7 @@ jobs:
 
   ts-code-coverage:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 20
@@ -3507,7 +3507,7 @@ jobs:
   runtime-graph-verification:
     timeout-minutes: 20
     name: "Pinned Runtime Graph"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile-small' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     steps:

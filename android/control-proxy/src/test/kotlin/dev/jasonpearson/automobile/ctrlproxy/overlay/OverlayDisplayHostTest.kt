@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import android.view.WindowManager
 import androidx.compose.ui.platform.ComposeView
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -168,6 +169,46 @@ class OverlayDisplayHostTest {
     assertFalse(host.relayout())
     assertFalse(host.isShowing)
     assertEquals(1, lost)
+  }
+
+  @Test
+  fun `app layer windows use the application overlay type on the default display`() = runTest {
+    assertTrue(host.show(sheet(0).copy(layer = OverlayWindowLayer.APP)))
+    assertEquals(
+      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+      defaultManager.added.single().type,
+    )
+    assertTrue(host.show(sheet(0)))
+    // A window's type cannot change after add: the system layer attaches a fresh window.
+    assertEquals(
+      listOf(
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      ),
+      defaultManager.added.map { it.type },
+    )
+    assertEquals(1, defaultManager.removals)
+    assertTrue(defaultManager.updated.isEmpty())
+  }
+
+  @Test
+  fun `secondary display contexts are created for the requested layer`() = runTest {
+    val inner = displays.connect(2)
+    assertTrue(host.show(sheet(2).copy(layer = OverlayWindowLayer.APP)))
+    assertTrue(host.replace(sheet(2).copy(layer = OverlayWindowLayer.APP)))
+    assertTrue(host.replace(sheet(2)))
+    assertEquals(listOf(OverlayWindowLayer.APP, OverlayWindowLayer.SYSTEM), displays.openedLayers)
+    assertEquals(
+      listOf(
+        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      ),
+      inner.added.map { it.type },
+    )
+    assertEquals(
+      WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+      inner.updated.single().type,
+    )
   }
 
   @Test

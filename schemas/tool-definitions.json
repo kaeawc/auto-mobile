@@ -18127,17 +18127,17 @@
   },
   {
     "name": "prototype",
-    "description": "Show (always a full spec), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.",
+    "description": "Show (always a full spec), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which overlays it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager's page (clamped), while the new spec's state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:\"show\",spec:{id:\"demo\",window:{placement:{type:\"fullscreen\"},opacity:80},root:{type:\"text\",text:\"Hello\"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the overlay stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising overlay_window_options_v1. A device-persistent overlay keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising overlay_persistence_replay_v1 and is refused otherwise.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["show", "dismiss", "status", "awaitEvent"]
+          "enum": ["show", "dismiss", "status", "inspect", "awaitEvent"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. show always renders the whole spec; spec.state is authoritative. window.layer \"app\" and window.persistence \"device\" need a CtrlProxy advertising overlay_window_options_v1.",
           "type": "object",
           "properties": {
             "id": {
@@ -18228,6 +18228,16 @@
                   "minimum": 0,
                   "maximum": 100,
                   "default": 100
+                },
+                "layer": {
+                  "type": "string",
+                  "enum": ["app", "system"],
+                  "description": "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time"
+                },
+                "persistence": {
+                  "type": "string",
+                  "enum": ["session", "device"],
+                  "description": "session (default): dismissed when the last host client disconnects or after the idle timeout. device: stays interactive after USB/adb disconnect and session end, with no idle timeout, until its close control, an explicit dismiss, a replacing show, or the CtrlProxy service stops"
                 }
               },
               "required": ["placement"],
@@ -18416,6 +18426,24 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["decrement"]
+                              },
+                              "key": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                              },
+                              "by": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["type", "key"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["dismiss"]
                               }
                             },
@@ -18576,6 +18604,72 @@
                           },
                           "required": ["width", "color"],
                           "additionalProperties": false
+                        },
+                        "elevation": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "gradient": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["linear"]
+                                },
+                                "angle": {
+                                  "type": "number"
+                                },
+                                "stops": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "color": {
+                                        "type": "string",
+                                        "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                      },
+                                      "position": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      }
+                                    },
+                                    "required": ["color"],
+                                    "additionalProperties": false
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 4
+                                }
+                              },
+                              "required": ["type", "angle", "stops"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["radial"]
+                                },
+                                "stops": {
+                                  "type": "array",
+                                  "items": {
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/gradient/anyOf/0/properties/stops/items"
+                                  },
+                                  "minItems": 2,
+                                  "maxItems": 4
+                                }
+                              },
+                              "required": ["type", "stops"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "aspectRatio": {
+                          "type": "number",
+                          "minimum": 0.000001
                         },
                         "alpha": {
                           "type": "number",
@@ -18925,6 +19019,41 @@
                       "required": ["edges", "types"],
                       "additionalProperties": false
                     },
+                    "repeat": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                }
+                              ]
+                            },
+                            "propertyNames": {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                            }
+                          },
+                          "minItems": 1,
+                          "maxItems": 32
+                        },
+                        "as": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                        }
+                      },
+                      "required": ["items", "as"],
+                      "additionalProperties": false
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["box"]
@@ -18970,6 +19099,9 @@
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
                     },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
+                    },
                     "type": {
                       "type": "string",
                       "enum": ["row"]
@@ -19014,6 +19146,9 @@
                     },
                     "safeAreaPadding": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "repeat": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat"
                     },
                     "type": {
                       "type": "string",
@@ -20126,6 +20261,15 @@
                 "type": "string",
                 "enum": ["show", "dismiss"]
               },
+              "adopted": {
+                "description": "The device reported this overlay through inspect; this host did not show it",
+                "type": "boolean",
+                "const": true
+              },
+              "persistent": {
+                "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+                "type": "boolean"
+              },
               "displayId": {
                 "description": "Android logical display the overlay was shown on; absent for the default display",
                 "type": "integer",
@@ -20216,6 +20360,15 @@
             "lastAction": {
               "type": "string",
               "enum": ["show", "dismiss"]
+            },
+            "adopted": {
+              "description": "The device reported this overlay through inspect; this host did not show it",
+              "type": "boolean",
+              "const": true
+            },
+            "persistent": {
+              "description": "Adopted overlays only: true when the device keeps the overlay after the host disconnects (window.persistence: device), false when it ends with the session",
+              "type": "boolean"
             },
             "displayId": {
               "description": "Android logical display the overlay was shown on; absent for the default display",
@@ -20347,6 +20500,12 @@
         "warning": {
           "description": "show succeeded but needs attention: names what to do about missingAssets, or that display was ignored by a same-id show",
           "type": "string"
+        },
+        "deviceDroppedEvents": {
+          "description": "inspect only: events the device dropped from its offline buffer (200 per device) since CtrlProxy started; a gap in sequences shows which",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "pendingCount": {
           "description": "Unconsumed events, including events excluded by filters or cursor",

@@ -162,6 +162,8 @@ internal class FakeOverlayDisplays(
   val connected = mutableSetOf<Int>()
   val densities = mutableMapOf<Int, Float>()
   val opened = mutableListOf<Int>()
+  /** The window-context layer each [opened] entry was created for, in the same order. */
+  val openedLayers = mutableListOf<OverlayWindowLayer>()
   val managers = mutableMapOf<Int, RecordingOverlayWindowManager>()
 
   fun connect(displayId: Int, density: Float = 2f): RecordingOverlayWindowManager {
@@ -172,9 +174,10 @@ internal class FakeOverlayDisplays(
 
   override fun isAvailable(displayId: Int) = displayId == 0 || displayId in connected
 
-  override fun open(displayId: Int): OverlayDisplayWindow? {
+  override fun open(displayId: Int, layer: OverlayWindowLayer): OverlayDisplayWindow? {
     if (displayId !in connected) return null
     opened += displayId
+    openedLayers += layer
     return OverlayDisplayWindow(context, managers.getValue(displayId)) {
       densities.getValue(displayId)
     }

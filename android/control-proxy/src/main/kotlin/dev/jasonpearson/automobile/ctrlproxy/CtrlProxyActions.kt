@@ -351,6 +351,8 @@ interface CtrlProxyActions {
 
   fun dismissOverlay(requestId: String?, id: String?, all: Boolean?)
 
+  fun inspectOverlays(requestId: String?)
+
   fun putOverlayAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
 
   fun removeOverlayAsset(requestId: String?, id: String)

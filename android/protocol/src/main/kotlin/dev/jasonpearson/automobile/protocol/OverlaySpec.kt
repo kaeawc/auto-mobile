@@ -74,6 +74,25 @@ data class OverlayBorder(
 )
 
 @Serializable
+data class OverlayGradientStop(
+  val color: String,
+  val position: Double? = null,
+)
+
+@Serializable sealed class OverlayGradient
+
+@SerialName("linear")
+@Serializable
+data class OverlayLinearGradient(
+  val angle: Double,
+  val stops: List<OverlayGradientStop>,
+) : OverlayGradient()
+
+@SerialName("radial")
+@Serializable
+data class OverlayRadialGradient(val stops: List<OverlayGradientStop>) : OverlayGradient()
+
+@Serializable
 data class OverlayStyle(
   val width: OverlayDimension? = null,
   val height: OverlayDimension? = null,
@@ -87,6 +106,9 @@ data class OverlayStyle(
   /** A dp number or a Material Shapes token. */
   val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
+  val elevation: Double? = null,
+  val gradient: OverlayGradient? = null,
+  val aspectRatio: Double? = null,
   val alpha: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
@@ -100,6 +122,13 @@ data class OverlayStyle(
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
 )
+
+/**
+ * A literal list template: the container's children are instantiated once per [items] entry, with
+ * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
+ */
+@Serializable
+data class OverlayRepeat(val items: List<Map<String, OverlayScalar>>, val `as`: String)
 
 @Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
 
@@ -175,6 +204,10 @@ data class OverlayToggleAction(val key: String) : OverlayAction()
 @Serializable
 data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
 
+@SerialName("decrement")
+@Serializable
+data class OverlayDecrementAction(val key: String, val by: Double? = null) : OverlayAction()
+
 @SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
 
 @Serializable
@@ -204,6 +237,7 @@ data class OverlayBoxNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("row")
@@ -219,6 +253,7 @@ data class OverlayRowNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("column")
@@ -234,6 +269,7 @@ data class OverlayColumnNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("text")
@@ -556,6 +592,17 @@ data class OverlayBottomSheetNode(
 data class OverlayWindow(
   val placement: OverlayPlacement,
   val opacity: Int = 100,
+  /**
+   * `system` (default when absent) stacks above system UI as an accessibility overlay; `app` stacks
+   * just above apps, below the shade, keyboard and screenshot preview, and needs
+   * SYSTEM_ALERT_WINDOW.
+   */
+  val layer: String? = null,
+  /**
+   * `session` (default when absent) ends the overlay with its host session; `device` keeps it
+   * interactive after the last client disconnects and disables the idle timeout.
+   */
+  val persistence: String? = null,
 )
 
 /**

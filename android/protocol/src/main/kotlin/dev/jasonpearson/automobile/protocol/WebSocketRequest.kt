@@ -461,6 +461,16 @@ data class DismissOverlay(
 ) : WebSocketRequest()
 
 /**
+ * Asks the device which overlays it is showing. Answered by one `overlay_result` carrying
+ * `overlays`. Any events buffered while no host was connected (device-persistent overlays, #10494)
+ * are delivered first, as ordinary `overlay_event` frames. Hosts only send it to a device
+ * advertising `overlay_persistence_replay_v1`.
+ */
+@Serializable
+@SerialName("inspect_overlays")
+data class InspectOverlays(override val requestId: String? = null) : WebSocketRequest()
+
+/**
  * Uploads one overlay image asset, replacing any asset with the same [id]. [dataBase64] is the
  * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one
  * `overlay_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.

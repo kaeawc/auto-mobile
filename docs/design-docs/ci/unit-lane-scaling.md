@@ -149,8 +149,9 @@ is 97.3 s of isolated cost replaced by 17.8–24.3 s shared. That takes the
 suite from **205 s to about 125–130 s (−37 to −39%)**. The same ratio on the
 CI shard would take about 520 s to about 330 s.
 
-**This is not adopted here, because it changes the lane's hermeticity
-contract.**
+**The study did not adopt this, because it changes the lane's hermeticity
+contract. The owner decided on 2026-10-08 to adopt it for tier C; section 5
+describes the change.**
 
 - A Tier C file that passes only because an earlier file in its batch left
   state behind would no longer fail on its own. The nightly randomized lane is
@@ -215,6 +216,115 @@ parent reports that value. It keeps the reap-time measurement only when a
 killed shard wrote no record. The bats test `unit shard wall time is each
 shard's own duration, not its reap time (#10583)` covers it: a slow shard 0 and
 a fast shard 1 must report different walls.
+
+Since #10644 the parent reaps attempts in completion order. It polls the live
+shard pids (`AUTOMOBILE_UNIT_SHARD_POLL_SECONDS`, default 0.2 s, because macOS
+Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
+and its retry window is judged against the lane cap at its own end time. The
+per-shard `.wall` record still excludes the end probe and the poll latency.
+
+## 5. Change made: tier C files share processes
+
+The owner decided on 2026-10-08 to run tier C files in shared processes and
+keep everything else isolated.
+
+- **The list.** `test/shared-process-allowlist.txt` holds the shared files.
+  `bun scripts/test/classify-shared-safe.ts` generates it from the section 2
+  signals plus one more, `moduleState`, which is described below. Fast Validation runs
+  the script with `--check` (`shared-process-allowlist`). The check fails when a listed file
+  gained a tier A or B signal, no longer exists, is excluded, or when the list
+  is unsorted or has duplicates. A new tier C file that is not listed only
+  prints a hint: files that are not listed run isolated.
+- **The runner.** `scripts/test-ts.sh unit` puts the listed files first and
+  then assigns files round-robin, so each shard gets an even share of both groups.
+  Each shard then runs its shared files in one `bun test` process without
+  `--isolate` (`scripts/lib/bun-unit-groups.sh`), followed by its other files
+  in one `--isolate` process. Both use the canonical flags and preloads and
+  run under the shard's single watchdog. JUnit goes to `shard-N-shared.xml` and
+  `shard-N.xml`, and the timing gate already globs `*.xml`. Chunked shards
+  (`AUTOMOBILE_UNIT_TEST_CHUNK_FILES`, nightly macOS) chunk each group
+  separately and never mix them. The changed lane, coverage, explicit file
+  targets and Windows are unchanged. `AUTOMOBILE_UNIT_SHARED_PROCESS=0`
+  restores the all-isolated lane.
+- **Timing probe.** A shared process runs the preloads once. The probe
+  therefore records one entry per shared process, labelled through
+  `AUTOMOBILE_TEST_TIMING_GROUP_LABEL`, for example
+  `unit shard 0 shared process (360 files)`. The watchdog names that label, and
+  the per-file headers in Bun's log name the file.
+- **Leak detection.** The nightly `Node Randomized Unit Tests` job already runs
+  every unit file, including the shared group, in one non-isolated process with
+  `--randomize --seed=<run number>`. It covers the shared group in a new
+  random order every night.
+
+### Verification found leaks that the study's signals miss
+
+The study ran tier C once in a random order. Running the whole group in one
+process under further seeds found three order-dependent failures, each
+bisected to a single earlier file:
+
+| Victim                                  | Polluter                                     | State                                                                                                    |
+| --------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `androidInventoryMixedWorkload.test.ts` | `AndroidEmulatorClient-killIdentity.test.ts` | AdbClient's module-level device-list cache. The victim resets it only in `afterEach`.                    |
+| `androidInventoryReviewFix.test.ts`     | not bisected                                 | Same cache, also reset only in `afterEach`.                                                              |
+| `ObserveCacheRegistry.test.ts`          | `AndroidMultiDisplayActivity.test.ts`        | `ObserveScreen` installs its `cacheStore` with the module-level `setObserveCacheStore`.                  |
+| `BaseVisualChange.uiStability.test.ts`  | `ClearAppData.test.ts`                       | The default window-cache invalidator marks a pending window resolution for `device-123` in a module map. |
+
+The classifier therefore adds a tier B signal, `moduleState`. It matches
+free-function `set…(`/`reset…(` calls, such as `setDeviceToolsDependencies`,
+`setObserveCacheStore` and `resetAdbClientCaches`, and `X.resetForTests()`. It
+does not match methods on fakes or the timer globals. It moved 93 files out of
+the shared group, which catches the first three victims. In the last pair, the
+state is written through a production default collaborator, which a static check of the test file cannot
+see, so both files are in the script's `SHARED_PROCESS_EXCLUSIONS` with the
+reason. That leaves 1,079 shared files, down from 1,174.
+
+With those changes, nine further seeds (3, 7, 8, 11, 12, 13, 14, 15 and
+20261008, which include every seed that had failed) ran the 1,079 shared files
+in one process with 0 failures, in 16–28 s each.
+
+The residual risk is that the shard lists are round-robin over the sorted file
+list. Adding or removing a test file therefore shifts which files share a
+process and in what order. A leak that no seed has hit yet could surface on an
+unrelated PR. The nightly random lane is the detector. A failure there in a
+listed file is fixed by adding the victim or the polluter to the exclusions
+(or fixing its reset), not by re-running.
+
+### Measured result
+
+The run used the same host, the shard contents `test-ts.sh` builds for 3
+shards, and every process run sequentially. `test/daemon/manager.test.ts` was
+skipped (1,923 files).
+
+| Layout                       | Shard 1 | Shard 2 | Shard 3 | Sum of shard time | Failures |
+| ---------------------------- | ------- | ------- | ------- | ----------------- | -------- |
+| Before: all files isolated   | 231.3 s | 203.7 s | 224.6 s | 659.6 s           | 0        |
+| After: 1,079 shared, 844 iso | 112.1 s | 122.0 s | 109.7 s | 343.9 s           | 0        |
+
+Each shard's critical path falls by about 47%. Each shared process took
+5–7 s for its 359–360 files. The isolated per-file cost in a 281–641-file
+process is about 0.36 s locally. That is much higher than the 86 ms of the
+60-file batches in section 1, which suggests long isolated processes slow down
+as they grow (compare #10213).
+
+### Chunking the isolated group
+
+The isolated group of a shard now runs in sequential `bun test --isolate`
+processes of `AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE` files (`0` = one process),
+with JUnit reports `shard-N-iso-K.xml` (`scripts/lib/bun-unit-groups.sh`).
+Measured locally on shard 0's 211 isolated files (4 shards), run
+sequentially, each size twice in opposite order on a loaded machine (load
+35–83), wall seconds:
+
+| Chunk size      | Run 1 | Run 2 |
+| --------------- | ----- | ----- |
+| 0 (one process) | 78.3  | 97.0  |
+| 120             | 51.2  | 49.0  |
+| 60              | 35.6  | 45.2  |
+| 30              | 28.0  | 34.3  |
+
+Smaller chunks were faster at every size measured, so the default is 30. The
+absolute numbers are noisy because other lanes shared the host, but the order
+held in both passes.
 
 ## Summary of the decisions this informs
 

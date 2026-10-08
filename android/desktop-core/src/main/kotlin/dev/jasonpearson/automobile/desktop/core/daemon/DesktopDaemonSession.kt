@@ -42,7 +42,11 @@ class DesktopDaemonSession(
     registration.ensureRegistered()
   }
 
-  fun deviceBound() = registration.deviceBound()
+  fun deviceBound(held: Boolean = true) = registration.deviceBound(held)
+
+  /** Whether the daemon holds a device for this session that a release would free (#10659). */
+  val holdsDevice: Boolean
+    get() = registration.holdsDevice
 
   fun release() {
     if (released.compareAndSet(false, true)) {

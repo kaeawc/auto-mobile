@@ -83,6 +83,28 @@ describe("InMemoryOverlayStatusStore scope bound", () => {
     store.clearSession("a");
     expect(store.status({ sessionUuid: "b", deviceId: "dev" })).toEqual({ overlays: [] });
   });
+
+  test("adopt takes the device report as presence and last known pages and state", () => {
+    const store = new InMemoryOverlayStatusStore(new FakeTimer());
+    const scope = { deviceId: "dev", sessionUuid: "new" };
+    store.adopt(scope, { id: "panel", pages: { pager: 1 }, state: { title: "typed" } });
+    expect(store.status(scope).overlays).toMatchObject([
+      {
+        id: "panel",
+        adopted: true,
+        lastAction: "show",
+        success: true,
+        pages: { pager: 1 },
+        state: { title: "typed" },
+        lastKnown: true,
+      },
+    ]);
+    // The device holds one overlay: a different report replaces the earlier presence.
+    store.adopt(scope, { id: "other", pages: {}, state: {} });
+    expect(store.status(scope).overlays.map((entry) => entry.id)).toEqual(["other"]);
+    store.dismissed(scope, "other");
+    expect(store.status(scope).overlays).toEqual([]);
+  });
 });
 
 describe("InMemoryOverlayStatusStore.shownOnDevice", () => {

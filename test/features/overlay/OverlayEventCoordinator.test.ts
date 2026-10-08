@@ -25,6 +25,20 @@ describe("OverlayEventCoordinator", () => {
   afterEach(() => coordinator.dispose());
   const awaitEvent = (options = {}) => coordinator.awaitEvent(scope, "panel", client, options);
 
+  test("adopting after a replayed terminal event keeps the events the host had queued", async () => {
+    coordinator.show(scope, "panel", client);
+    const tap = event(1);
+    const dismissed = event(2, "panel", "dismissed");
+    // The coordinator's own subscription sees the reconnect replay before the inspect reply.
+    client.emitOverlayEvent(tap);
+    client.emitOverlayEvent(dismissed);
+
+    coordinator.adopt(scope, "panel", client, [tap, dismissed], 0);
+
+    expect((await awaitEvent()).event?.sequence).toBe(1);
+    expect((await awaitEvent({ kind: "dismissed" })).event?.sequence).toBe(2);
+  });
+
   test("accepted events record telemetry once with their owning scope", () => {
     const recorded: { scope: typeof scope; event: ReturnType<typeof event> }[] = [];
     coordinator = new OverlayEventCoordinator(timer, store, {

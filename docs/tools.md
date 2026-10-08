@@ -587,7 +587,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 The Android-only `prototype` tool (formerly `overlay`, which remains a hidden
 deprecated alias for one release) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
-`show`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root) and always renders the whole spec. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
@@ -601,6 +601,36 @@ from the spec's value. `reset: true` starts it fresh instead: pages come from
 the spec and `display` is resolved again. A show with a different id, or with
 nothing on screen, replaces any other overlay as before. A CtrlProxy that
 predates in-place replacement ignores `reset` and always starts fresh.
+
+Two optional window fields need a CtrlProxy advertising
+`overlay_window_options_v1`; an older one is refused before anything is sent.
+`spec.window.layer` is `system` (default; an accessibility overlay above system
+UI) or `app` (an application overlay just above apps, so the notification shade,
+keyboard, toasts and the screenshot flash and preview draw over the prototype,
+and the status and navigation bars draw over a fullscreen one). Before an `app`
+show the daemon runs
+`adb shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow`;
+if the permission is still missing the device fails the show with that command.
+`spec.window.persistence` is `session` (default) or `device`: the overlay stays
+interactive after the last host client disconnects (USB unplugged, adb or the
+daemon gone) and after session end, has no idle timeout, and keeps its uploaded
+assets. `setPage`, `setState`, text fields and the `dismiss` action keep working
+offline. It goes away only through its own close control (the fullscreen dismiss
+row, or a Close button on sheet and floating windows), an explicit `dismiss`, a
+replacing `show`, or the CtrlProxy service stopping. Host-side status and event
+buffers are still cleared on session release.
+
+With no host connected, a persisted overlay's events (tap `emit`s, page changes,
+text input, a close) are kept on the device, the most recent 200, dropping the
+oldest and counting what it dropped. They are delivered, oldest first, when a
+host connects or on `inspect`, and sequences continue from the device's ledger
+with no rewind. `status` is host memory, so after a session release it shows
+nothing; `inspect` asks the device which overlays it is showing and adopts them
+(`adopted: true`, with the last known `pages` and `state`), so `status`,
+`dismiss` and `awaitEvent` work again. It also returns
+`deviceDroppedEvents`. `inspect` needs a CtrlProxy advertising
+`overlay_persistence_replay_v1` and is refused with an error naming the flag
+otherwise.
 
 The `showVariants` and `update` actions were removed (#10489, #10490); calling
 either returns an error naming `show` as the replacement. To present
@@ -2273,6 +2303,15 @@ The mutation queue is keyed per user, so the same file in two users never serial
 resource has no input, so its `run-as` fallback reads the same default user.
 
 ### iOS UserDefaults preferences
+
+For a simulator check with an app that does not embed the SDK, run
+`bash scripts/ios/userdefaults-no-sdk-smoke.sh <booted-simulator-udid>`.
+It installs and removes a disposable probe app, exercises the real container route
+for standard and custom suites, and checks the app's own `UserDefaults` after cold
+relaunch. It covers an absent runner and the old/new SDK-refusal messages injected
+at the transport seam; it does not build or exercise a live CtrlProxy runner.
+Run it on a dedicated simulator. Xcode and the repository's Bun dependencies are
+required.
 
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),
 `key`, and optional `suite`. Unlike `setKeyValue`, these tools reject `name` and

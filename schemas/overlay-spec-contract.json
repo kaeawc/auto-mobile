@@ -318,6 +318,86 @@
         }
       }
     },
+    "gradientStop": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": false
+        },
+        "position": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0,
+            "max": 1
+          },
+          "optional": true
+        }
+      }
+    },
+    "gradient": {
+      "kind": "tagged",
+      "variants": {
+        "linear": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["linear"]
+              },
+              "optional": false
+            },
+            "angle": {
+              "rule": {
+                "kind": "number",
+                "integer": false
+              },
+              "optional": false
+            },
+            "stops": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "gradientStop"
+                },
+                "min": 2,
+                "max": 4
+              },
+              "optional": false
+            }
+          }
+        },
+        "radial": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["radial"]
+              },
+              "optional": false
+            },
+            "stops": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "gradientStop"
+                },
+                "min": 2,
+                "max": 4
+              },
+              "optional": false
+            }
+          }
+        }
+      }
+    },
     "colorValue": {
       "kind": "choice",
       "options": [
@@ -463,6 +543,29 @@
           "rule": {
             "kind": "ref",
             "name": "border"
+          },
+          "optional": true
+        },
+        "elevation": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0
+          },
+          "optional": true
+        },
+        "gradient": {
+          "rule": {
+            "kind": "ref",
+            "name": "gradient"
+          },
+          "optional": true
+        },
+        "aspectRatio": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 1e-6
           },
           "optional": true
         },
@@ -924,6 +1027,31 @@
               "optional": false
             }
           }
+        },
+        "decrement": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["decrement"]
+              },
+              "optional": false
+            },
+            "key": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            },
+            "by": {
+              "rule": {
+                "kind": "number",
+                "integer": false
+              },
+              "optional": true
+            }
+          }
         }
       }
     },
@@ -1024,6 +1152,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -1121,6 +1256,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -1218,6 +1360,13 @@
                 "unique": false
               },
               "optional": false
+            },
+            "repeat": {
+              "rule": {
+                "kind": "ref",
+                "name": "repeat"
+              },
+              "optional": true
             }
           }
         },
@@ -2070,6 +2219,13 @@
               },
               "optional": true
             },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
             "anchor": {
               "rule": {
                 "kind": "ref",
@@ -2164,6 +2320,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
               },
               "optional": true
             },
@@ -3144,6 +3307,20 @@
             "integer": true,
             "min": 0,
             "max": 100
+          },
+          "optional": true
+        },
+        "layer": {
+          "rule": {
+            "kind": "enum",
+            "values": ["app", "system"]
+          },
+          "optional": true
+        },
+        "persistence": {
+          "rule": {
+            "kind": "enum",
+            "values": ["session", "device"]
           },
           "optional": true
         }
@@ -5522,6 +5699,32 @@
               "optional": false
             }
           }
+        }
+      }
+    },
+    "repeat": {
+      "kind": "object",
+      "fields": {
+        "items": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "map",
+              "item": {
+                "kind": "scalar"
+              }
+            },
+            "min": 1,
+            "max": 32,
+            "unique": false
+          },
+          "optional": false
+        },
+        "as": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": false
         }
       }
     }

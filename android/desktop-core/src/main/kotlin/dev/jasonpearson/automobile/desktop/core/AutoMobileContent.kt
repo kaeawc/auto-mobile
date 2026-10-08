@@ -106,6 +106,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
@@ -2057,6 +2058,12 @@ fun AutoMobileContent(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+              // The picked device is held by another session: this pane only views it and never
+              // takes it on its own (#10660). Take control is the one explicit bind attempt.
+              if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
+                DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
+              }
+
               // Why control is unavailable (issue #4531). The policy's reason is surfaced only
               // when no interaction snapshot exists — while a post-input refresh retains one,
               // clicks still actuate the device, so a "blocked" notice would contradict what the

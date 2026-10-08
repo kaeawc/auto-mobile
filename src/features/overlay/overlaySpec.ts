@@ -174,6 +174,26 @@ const borderSchema = z
     color: colorValueSchema,
   })
   .strict();
+const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+const gradientStopSchema = z
+  .object({ color: hexColorSchema, position: z.number().finite().min(0).max(1).optional() })
+  .strict();
+const gradientSchema = z.discriminatedUnion("type", [
+  z
+    .object({
+      type: z.enum(["linear"]),
+      angle: z.number().finite(),
+      stops: z.array(gradientStopSchema).min(2).max(4),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["radial"]),
+      stops: z.array(gradientStopSchema).min(2).max(4),
+    })
+    .strict(),
+]);
+
 /** Material 3 type roles a text node's `textStyle` can name. */
 const TEXT_STYLE_ROLES = [
   "displayLarge",
@@ -205,6 +225,9 @@ const styleSchema = z
     background: colorValueSchema.optional(),
     cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
     border: borderSchema.optional(),
+    elevation: z.number().finite().min(0).optional(),
+    gradient: gradientSchema.optional(),
+    aspectRatio: z.number().finite().min(1e-6).optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
       .enum([
@@ -326,6 +349,13 @@ export const actionSchema = z.discriminatedUnion("type", [
       by: z.number().finite().optional(),
     })
     .strict(),
+  z
+    .object({
+      type: z.enum(["decrement"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      by: z.number().finite().optional(),
+    })
+    .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
 const commonNodeShape = {
@@ -339,9 +369,24 @@ const commonNodeShape = {
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
-const boxBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["box"]) }).strict();
-const rowBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["row"]) }).strict();
-const columnBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["column"]) }).strict();
+// A literal list template: the container's children are instantiated once per item.
+const repeatItemSchema = z.record(
+  keySchema,
+  z.union([z.string(), z.number().finite(), z.boolean()]),
+);
+const repeatSchema = z
+  .object({ items: z.array(repeatItemSchema).min(1).max(32), as: keySchema })
+  .strict();
+const repeatShape = { repeat: repeatSchema.optional() };
+const boxBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["box"]) })
+  .strict();
+const rowBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .strict();
+const columnBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .strict();
 const textBaseSchema = z
   .object({ ...commonNodeShape, type: z.enum(["text"]), text: z.string() })
   .strict();
@@ -561,6 +606,18 @@ const windowSchema = z
   .object({
     placement: placementSchema,
     opacity: z.number().finite().int().min(0).max(100).default(100),
+    layer: z
+      .enum(["app", "system"])
+      .optional()
+      .describe(
+        "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time",
+      ),
+    persistence: z
+      .enum(["session", "device"])
+      .optional()
+      .describe(
+        "session (default): dismissed when the last host client disconnects or after the idle timeout. device: stays interactive after USB/adb disconnect and session end, with no idle timeout, until its close control, an explicit dismiss, a replacing show, or the CtrlProxy service stops",
+      ),
   })
   .strict();
 const themeColorsSchema = z
@@ -643,6 +700,7 @@ export const OVERLAY_ACTION_TYPES = [
   "setState",
   "toggle",
   "increment",
+  "decrement",
   "dismiss",
 ] as const;
 export const OVERLAY_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;

@@ -68,4 +68,25 @@ class CtrlProxyOwnOverlayEventTest {
     )
     assertFalse(shouldSkipOwnOverlayEvent(null, own, null))
   }
+
+  @Test
+  fun `an application-layer overlay window is skipped only while one is showing`() {
+    assertFalse(shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_SYSTEM, false))
+    assertTrue(shouldSkipOwnOverlayEvent(own, own, AccessibilityWindowInfo.TYPE_SYSTEM, true))
+  }
+
+  @Test
+  fun `an application-layer overlay never hides the keyboard or activity events`() {
+    for (type in
+      listOf(
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+        AccessibilityWindowInfo.TYPE_APPLICATION,
+        null,
+      )) {
+      assertFalse("type $type", shouldSkipOwnOverlayEvent(own, own, type, true))
+    }
+    assertFalse(
+      shouldSkipOwnOverlayEvent("com.example.app", own, AccessibilityWindowInfo.TYPE_SYSTEM, true)
+    )
+  }
 }

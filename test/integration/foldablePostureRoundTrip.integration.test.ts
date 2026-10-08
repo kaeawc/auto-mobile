@@ -227,7 +227,10 @@ async function assertFreshTap(sessionUuid: string, current: ObserveResult): Prom
   expect(fresh.x).toBeLessThan(fresh.target.bounds[2]);
   expect(fresh.y).toBeGreaterThanOrEqual(fresh.target.bounds[1]);
   expect(fresh.y).toBeLessThan(fresh.target.bounds[3]);
-  expect((await tapAt(sessionUuid, fresh.x, fresh.y)).success).toBe(true);
+  const result = await tapAt(sessionUuid, fresh.x, fresh.y);
+  // Assert the error first so a failed tap reports why (the nightly lane only printed success).
+  expect(result.error).toBeUndefined();
+  expect(result.success).toBe(true);
 }
 
 describeLane("foldable posture round trips through the daemon", () => {

@@ -1,4 +1,5 @@
-import { describe, expect, test, beforeEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -33,6 +34,9 @@ describe("BaseVisualChange UI stability platform guard", () => {
   }
 
   beforeEach(() => {
+    // A pending window resolution is keyed by the module-level cache store and device id; one an
+    // earlier file left for "device-123" forces a fresh read that this fixture cannot satisfy.
+    resetObserveCacheStore();
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeObserveScreen = new FakeObserveScreen();
@@ -46,6 +50,10 @@ describe("BaseVisualChange UI stability platform guard", () => {
       activityName: "Main",
       layoutSeqSum: 1,
     });
+  });
+
+  afterEach(() => {
+    resetObserveCacheStore();
   });
 
   test("runs gfxinfo UI stability tracking on Android", async () => {

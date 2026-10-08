@@ -7,6 +7,13 @@
 
 SCRIPT="scripts/test-fast.sh"
 
+# The worker math reads the runner's OS and an explicit worker override, so a
+# macOS CI runner (RUNNER_OS=macOS caps workers at 3) must not leak into tests
+# that do not pin them; tests that need RUNNER_OS set it on their own command.
+setup() {
+  unset RUNNER_OS AUTOMOBILE_UNIT_TEST_WORKERS
+}
+
 # Write an executable `nproc` into a fresh temp dir that echoes $2, print the dir.
 _mock_nproc() {
   local dir

@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   runDaemonCommand,
   daemonBuildIdentityStatusLines,
@@ -401,6 +404,11 @@ describe("daemon command characterization with fake I/O", () => {
       const log = spyOn(console, "log").mockImplementation((...args) => {
         events.push(args);
       });
+      // status also lists CtrlProxy forwarding leases from the coordination directory. In the
+      // shared-process lane an earlier file can leave one there, so read an empty directory.
+      const coordinationDir = mkdtempSync(join(tmpdir(), "daemon-status-coord-"));
+      const previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
+      process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
       try {
         await runDaemonCommand("status", [], {}, Manager);
         if (!running) {
@@ -433,6 +441,12 @@ describe("daemon command characterization with fake I/O", () => {
         expect(String(events[15])).toContain("--daemon restart' to stop them.");
       } finally {
         log.mockRestore();
+        if (previousCoordinationDir === undefined) {
+          delete process.env.AUTOMOBILE_COORDINATION_DIR;
+        } else {
+          process.env.AUTOMOBILE_COORDINATION_DIR = previousCoordinationDir;
+        }
+        rmSync(coordinationDir, { recursive: true, force: true });
       }
     },
   );

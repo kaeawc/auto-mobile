@@ -103,6 +103,9 @@ describe("executePlan toolResults capture (#10090)", () => {
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
     registerInteractionTools();
+    // The captures carry no failure observation. In the shared-process lane an earlier file can
+    // leave the real observe tool registered, and the failed plan would then observe a real device.
+    ToolRegistry.unregister("observe");
   });
   afterAll(() => restoreSuiteTools());
 

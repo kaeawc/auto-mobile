@@ -4091,7 +4091,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val success = executeGlobalAction(action)
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_global_action") {
-      webSocketServer?.broadcast(
+      webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.GlobalActionResult(
           timestamp = System.currentTimeMillis(),
           requestId = requestId,
@@ -4111,7 +4111,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val foreground = getForegroundActivity()
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_device_info") {
-      webSocketServer?.broadcast(
+      webSocketServer.broadcast(
         dev.jasonpearson.automobile.protocol.DeviceInfoResult(
           timestamp = System.currentTimeMillis(),
           requestId = requestId,

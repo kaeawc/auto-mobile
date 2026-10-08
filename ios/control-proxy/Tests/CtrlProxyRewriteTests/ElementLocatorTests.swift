@@ -1714,6 +1714,148 @@ final class ElementLocatorTests: XCTestCase {
         )
     }
 
+    private struct FocusAttributeNode {
+        var hasKeyboardFocus: Bool?
+        var frame: CGRect = .zero
+        var children: [FocusAttributeNode] = []
+    }
+
+    private func capturedFocus(_ root: FocusAttributeNode) -> CapturedKeyboardFocus {
+        ElementLocator.capturedKeyboardFocus(
+            root,
+            hasKeyboardFocus: { $0.hasKeyboardFocus },
+            frame: { $0.frame },
+            children: { $0.children }
+        )
+    }
+
+    func testCapturedKeyboardFocus_unavailableWhenTheCaptureLacksTheAttribute() {
+        let focused = FocusAttributeNode(hasKeyboardFocus: true, frame: CGRect(x: 1, y: 2, width: 3, height: 4))
+        XCTAssertEqual(capturedFocus(FocusAttributeNode(children: [focused])), .unavailable)
+    }
+
+    func testCapturedKeyboardFocus_notFocusedWhenNoDescendantHasFocus() {
+        let root = FocusAttributeNode(hasKeyboardFocus: false, children: [
+            FocusAttributeNode(hasKeyboardFocus: false, children: [FocusAttributeNode(hasKeyboardFocus: nil)]),
+        ])
+        XCTAssertEqual(capturedFocus(root), .notFocused)
+    }
+
+    func testCapturedKeyboardFocus_returnsFirstFocusedDescendantInPreOrder() {
+        let nested = CGRect(x: 0, y: 10, width: 100, height: 20)
+        let sibling = CGRect(x: 0, y: 40, width: 100, height: 20)
+        let root = FocusAttributeNode(
+            hasKeyboardFocus: true,
+            frame: CGRect(x: 0, y: 0, width: 400, height: 800),
+            children: [
+                FocusAttributeNode(hasKeyboardFocus: false, children: [
+                    FocusAttributeNode(hasKeyboardFocus: true, frame: nested),
+                ]),
+                FocusAttributeNode(hasKeyboardFocus: true, frame: sibling),
+            ]
+        )
+        // The root is the application, which the live descendants query never matches.
+        XCTAssertEqual(capturedFocus(root), .focused(nested))
+    }
+
+    func testResolveKeyboardFocus_capturedAttributeIsAuthoritativeLikeLiveQuery() {
+        let frame = CGRect(x: 10, y: 20, width: 100, height: 40)
+        let other = CGRect(x: 10, y: 80, width: 100, height: 40)
+        for (nodeFrame, isTextInput, snapshotHasFocus) in [
+            (frame, true, false), (other, true, true), (frame, false, true), (other, false, false),
+        ] {
+            XCTAssertEqual(
+                ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: nodeFrame, isTextInput: isTextInput, snapshotHasFocus: snapshotHasFocus,
+                    keyboardFocus: KeyboardFocus(frame: frame, source: .capturedAttribute)
+                ),
+                ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: nodeFrame, isTextInput: isTextInput, snapshotHasFocus: snapshotHasFocus,
+                    keyboardFocus: KeyboardFocus(frame: frame, source: .liveQuery)
+                )
+            )
+        }
+    }
+
+    /// A node of the captured XCUI snapshots in test/fixtures/ios/keyboard-modes.
+    private struct CapturedSnapshotNode: Decodable {
+        let elementType: UInt
+        let frame: [Double]
+        let hasFocus: Bool
+        let hasKeyboardFocus: Bool?
+        let children: [CapturedSnapshotNode]?
+
+        var rect: CGRect { CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3]) }
+        var nodes: [CapturedSnapshotNode] { children ?? [] }
+    }
+
+    private func loadKeyboardModeCapture(_ mode: String) throws -> CapturedSnapshotNode {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let url = repoRoot.appendingPathComponent("test/fixtures/ios/keyboard-modes/\(mode).xcui-snapshot.json")
+        return try JSONDecoder().decode(CapturedSnapshotNode.self, from: Data(contentsOf: url))
+    }
+
+    // Real captures from an iPhone 17 simulator, iOS 26.5 (issue #9290). In both modes the
+    // focused Email field reports hasFocus false and only the hasKeyboardFocus attribute marks
+    // it, so the focus decision falls through to the captured attribute.
+    func testCapturedKeyboardModes_focusedFieldKeepsFocusFromTheCapture() throws {
+        let textInputTypes: Set<UInt> = [
+            XCUIElement.ElementType.textField.rawValue,
+            XCUIElement.ElementType.secureTextField.rawValue,
+            XCUIElement.ElementType.searchField.rawValue,
+            XCUIElement.ElementType.textView.rawValue,
+        ]
+        let keyboardType = XCUIElement.ElementType.keyboard.rawValue
+        let emailFrame = CGRect(x: 32, y: 223.33333333333331, width: 338, height: 22)
+        for mode in ["software-docked", "hardware-keyboard"] {
+            let root = try loadKeyboardModeCapture(mode)
+            let inputs = ElementLocator.collectTextInputNodes(
+                root,
+                isTextInput: { textInputTypes.contains($0.elementType) },
+                frame: { $0.rect },
+                children: { $0.nodes }
+            )
+            XCTAssertEqual(inputs.count, 2, mode)
+            var springBoardQueries = 0
+            func springBoardKeyboard() -> Bool {
+                springBoardQueries += 1
+                return false
+            }
+            let decision = ElementLocator.keyboardFocusDecision(
+                textInputCandidates: inputs.map { (frame: $0.rect, hasFocus: $0.hasFocus) },
+                keyboardVisibleInSnapshot: ElementLocator.keyboardVisibleInSnapshot(
+                    root,
+                    isKeyboard: { $0.elementType == keyboardType },
+                    frame: { $0.rect },
+                    children: { $0.nodes }
+                ),
+                keyboardVisibleInSpringBoard: springBoardKeyboard()
+            )
+            XCTAssertEqual(decision, .liveQuery, mode)
+            XCTAssertEqual(springBoardQueries, 0, "\(mode): the keyboard is in the app tree")
+
+            let captured = ElementLocator.capturedKeyboardFocus(
+                root,
+                hasKeyboardFocus: { $0.hasKeyboardFocus },
+                frame: { $0.rect },
+                children: { $0.nodes }
+            )
+            XCTAssertEqual(captured, .focused(emailFrame), mode)
+            let focus = KeyboardFocus(frame: emailFrame, source: .capturedAttribute)
+            let focusedInputs = inputs.filter {
+                ElementLocator.resolveKeyboardFocus(
+                    nodeFrame: $0.rect, isTextInput: true, snapshotHasFocus: $0.hasFocus, keyboardFocus: focus
+                )
+            }
+            XCTAssertEqual(focusedInputs.map(\.rect), [emailFrame], mode)
+        }
+    }
+
     // Scalar logic tests, not captured device snapshots (issue #9248).
     func testResolveKeyboardFocus_snapshotPreservesFocusedWrapper() {
         let frame = CGRect(x: 10, y: 20, width: 100, height: 40)

@@ -50,7 +50,13 @@ final class FakeProcessTable: ProcessTable {
         return ProcessGeneration(pid: Int32(bitPattern: words[5]), pidVersion: Int32(bitPattern: words[7]))
     }
 
+    /// Runs on every token lookup, to interleave work with an in-flight attribution.
+    var onTokenLookup: (() -> Void)?
+    private(set) var tokenLookups = 0
+
     func process(auditToken: Data) -> ProcessRecord? {
+        tokenLookups += 1
+        onTokenLookup?()
         guard !failTokenLookups,
               let generation = generation(auditToken: auditToken),
               let entry = live[generation.pid],

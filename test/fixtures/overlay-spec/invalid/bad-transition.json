@@ -1,0 +1,8 @@
+{
+  "spec": {
+    "id": "transition",
+    "window": { "placement": { "type": "fullscreen" } },
+    "root": { "type": "text", "text": "x", "transition": "spin" }
+  },
+  "expectedPath": "root.transition"
+}

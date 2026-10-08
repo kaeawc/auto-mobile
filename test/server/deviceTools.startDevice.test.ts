@@ -1081,12 +1081,19 @@ describe("startDevice handler", () => {
     const start = callStartDevice({ platform: "android" });
     await waitForReadiness;
     expect(pool.getIdleDevices()).toEqual([]);
-    await expect(pool.assignDeviceToSession("competing-session", "android")).rejects.toThrow(
-      /Timed out waiting for device/,
+    // Observe and release as the competitor times out: auto-advance would otherwise
+    // run fake time on to startDevice's own request deadline.
+    const competing = await pool.assignDeviceToSession("competing-session", "android").then(
+      () => ({ error: undefined as unknown, sessionId: undefined as string | null | undefined }),
+      (error: unknown) => {
+        const sessionId = pool.getDevice(androidDevice.deviceId)?.sessionId;
+        releaseReadiness();
+        return { error, sessionId };
+      },
     );
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+    expect((competing.error as Error).message).toMatch(/Timed out waiting for device/);
+    expect(competing.sessionId).toBeNull();
 
-    releaseReadiness();
     const result = await start;
     expect(result.runtime.session.sessionUuid).toBe("session-1");
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
@@ -3396,6 +3403,75 @@ describe("startDevice handler", () => {
       }),
     ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("stale-session");
+  });
+
+  // #10603: an emulator discovered while its console could not answer `avd name`
+  // is pooled as `Unknown (<serial>)` with no avdName. A later boot resolution
+  // that reads the real AVD name must acquire it and upgrade the pooled label.
+  it("acquires a discovered emulator pooled under the unknown-name placeholder", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    const placeholder = { ...androidDevice, name: `Unknown (${androidDevice.deviceId})` };
+    fakeDeviceUtils.setBootedDevices("android", [placeholder]);
+    await pool.initializeWithDevices([placeholder]);
+    const incarnation = pool.getDevice(androidDevice.deviceId)?.incarnation;
+    expect(pool.getDevice(androidDevice.deviceId)?.avdName).toBeUndefined();
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    });
+
+    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+      name: androidDevice.name,
+      incarnation,
+    });
+  });
+
+  it("still rejects a resolved name that contradicts the AVD the pool started", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    const placeholder = { ...androidDevice, name: `Unknown (${androidDevice.deviceId})` };
+    fakeDeviceUtils.setBootedDevices("android", [placeholder]);
+    await pool.addDevice(placeholder, {
+      name: "Other_AVD",
+      platform: "android",
+      isRunning: false,
+      source: "local",
+    });
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    await expect(
+      callStartDevice({
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+      }),
+    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+      name: placeholder.name,
+      avdName: "Other_AVD",
+      sessionId: null,
+    });
   });
 
   it("tolerates a renamed physical iOS device instead of reporting a stale pool identity", async () => {

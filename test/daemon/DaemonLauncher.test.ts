@@ -7,6 +7,7 @@ import { dirname, join, win32 } from "node:path";
 import { DaemonLauncher, isDaemonEntryScriptPath } from "../../src/daemon/DaemonLauncher";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 describe("DaemonLauncher", () => {
   test("matches only the active absolute source entry point", () => {
@@ -342,7 +343,8 @@ describe("DaemonLauncher", () => {
         settled = true;
       });
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    // Microtasks only: a real turn would let auto-advance escalate to SIGKILL.
+    await drainUntil(() => spawner.process.signals.length > 0, { description: "SIGTERM" });
     expect(spawner.process.signals).toEqual(["SIGTERM"]);
     expect(settled).toBe(false);
 

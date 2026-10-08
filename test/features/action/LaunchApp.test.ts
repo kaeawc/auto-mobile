@@ -32,8 +32,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeInstalledAppsProvider } from "../../fakes/FakeInstalledAppsProvider";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
-import type { FakeTimer } from "../../fakes/FakeTimer";
-import { MicrotaskPumpFakeTimer } from "../../fakes/MicrotaskPumpFakeTimer";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
@@ -101,7 +100,7 @@ describe("LaunchApp", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeObserveScreen = new FakeObserveScreen();
-    fakeTimer = new MicrotaskPumpFakeTimer();
+    fakeTimer = new FakeTimer();
     fakeWindow = new FakeWindow();
 
     fakeObserveScreen.setObserveResult(createObserveResult());

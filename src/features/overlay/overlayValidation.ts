@@ -433,6 +433,42 @@ function pagerErrors(context: Context): OverlayValidationError | undefined {
   }
   return undefined;
 }
+function radioGroupErrors(
+  value: Record<string, unknown>,
+  path: string,
+  stored: unknown,
+): OverlayValidationError | undefined {
+  if (typeof stored !== "string") {
+    return fail(`${path}.stateKey`, "Radio group requires a string state key");
+  }
+  const values = new Set<unknown>();
+  for (const [index, option] of (Array.isArray(value.options) ? value.options : []).entries()) {
+    const optionValue = object(option)?.value;
+    if (values.has(optionValue)) {
+      return fail(`${path}.options[${index}].value`, "Duplicate radio option value");
+    }
+    values.add(optionValue);
+  }
+  return undefined;
+}
+/** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
+function listItemBindingErrors(
+  context: Context,
+  data: Record<string, unknown>,
+): OverlayValidationError | undefined {
+  const state = object(data.state) ?? {};
+  for (const { value, path } of context.nodes) {
+    const trailing = value.type === "listItem" ? object(value.trailing) : undefined;
+    if (
+      trailing &&
+      typeof trailing.stateKey === "string" &&
+      typeof state[trailing.stateKey] !== "boolean"
+    ) {
+      return fail(`${path}.trailing.stateKey`, "Toggle control requires a boolean state key");
+    }
+  }
+  return undefined;
+}
 function stepFitsRange(step: number, range: number): boolean {
   const count = range / step;
   return step > 0 && count >= 1 && Math.abs(count - Math.round(count)) < 1e-9;
@@ -487,6 +523,9 @@ function componentBindingErrors(
   }
   if (value.type === "slider") {
     return sliderErrors(value, path, stored);
+  }
+  if (value.type === "radioGroup") {
+    return radioGroupErrors(value, path, stored);
   }
   return value.type === "chip" ? chipErrors(value, path, stored) : undefined;
 }
@@ -573,6 +612,7 @@ function validateValue(value: unknown): OverlayValidationResult {
     repeatErrors(value) ??
     pagerErrors(context) ??
     bindingErrors(context, object(value) ?? {}) ??
+    listItemBindingErrors(context, object(value) ?? {}) ??
     sheetBindingErrors(context, object(value) ?? {}) ??
     stateActionErrors(context, object(value) ?? {});
   if (error) {

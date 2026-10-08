@@ -488,9 +488,14 @@ describe("SetUIState", () => {
         expect(
           detect.mock.calls.some(([element]) => element["resource-id"] === "field-first"),
         ).toBe(false);
-        expect(result.success).toBe(!sharedId);
-        expect(fakeInput.getCallCount()).toBe(sharedId ? 0 : 1);
-        expect(fakeClear.getCallCount()).toBe(sharedId ? 0 : 1);
+        // The resolver matches "Second" on the field that owns that label, so a label ID
+        // shared with the first field no longer matters (#10269): field-second is typed into.
+        expect(
+          detect.mock.calls.some(([element]) => element["resource-id"] === "field-second"),
+        ).toBe(true);
+        expect(result.success).toBe(true);
+        expect(fakeInput.getCallCount()).toBe(1);
+        expect(fakeClear.getCallCount()).toBe(1);
       },
     );
 
@@ -3579,5 +3584,55 @@ describe("SetUIState stale synthetic selector errors", () => {
       "Element id 's2-3340048129449c01-2' is stale; re-observe and use the id from the new observation.",
     );
     expect(results[1].error).toBe('Element not found: elementId="example:id/missing"');
+  });
+});
+
+// #10269: SetUIState's by-text and by-ID lookups run on the resolver. Each case is a
+// difference measured against the retired ElementFinder path on a real capture.
+describe("SetUIState resolver lookups on captured hierarchies (#10269)", () => {
+  const findOn = (platform: "android" | "ios", path: string, selector: Record<string, string>) => {
+    const capture: ObserveResult = JSON.parse(
+      readFileSync(new URL(`../../fixtures/${path}`, import.meta.url), "utf8"),
+    );
+    const action = new SetUIState({ name: "capture", deviceId: "capture", platform }, null, {});
+    return action["findElement"](
+      {
+        ...selector,
+        screenSizeOptions: {
+          observationScreenSize: capture.screenSize,
+          display: capture.viewHierarchy,
+        },
+      },
+      capture.viewHierarchy,
+    );
+  };
+
+  test("a label selects the clickable control that owns it, not the inert label", () => {
+    // The finder returned the "Show password" label at [902,1725,965,1788].
+    expect(
+      findOn("android", "android-focus/playground-text-field-pre-tap.json", {
+        text: "Show password",
+      })?.bounds,
+    ).toEqual({ left: 871, top: 1694, right: 997, bottom: 1820 });
+  });
+
+  test("keyboard toolbar labels are not form targets", () => {
+    // The finder returned Gboard's toolbar "Clipboard" button at [460,1517,620,1633].
+    expect(
+      findOn("android", "android-ime-window/playground-gboard-api36.json", { text: "Clipboard" }),
+    ).toBeNull();
+    // The finder returned Gboard's "Settings" button; the app's Settings tab is the match.
+    expect(
+      findOn("android", "observe/diff/text-input-empty.json", { text: "Settings" })?.bounds,
+    ).toEqual({ left: 826, top: 2127, right: 1080, bottom: 2337 });
+  });
+
+  test("an off-screen iOS view is not found by its ID", () => {
+    // The finder returned the minimized keyboard's assistant bar below the 874pt screen.
+    expect(
+      findOn("ios", "observe-output/ios-keyboard-states/ios-keyboard-minimized.raw.json", {
+        elementId: "SystemInputAssistantView",
+      }),
+    ).toBeNull();
   });
 });

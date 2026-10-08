@@ -16,6 +16,7 @@ import type {
 
 class FakeSdkCapabilitiesReader implements SdkCapabilitiesReader {
   readonly calls: string[] = [];
+  readonly userIds: (number | undefined)[] = [];
   failure?: Error;
   result: SdkCapabilitiesResult = {
     status: "available",
@@ -25,8 +26,9 @@ class FakeSdkCapabilitiesReader implements SdkCapabilitiesReader {
       policy: { captureHeaders: false, captureBodies: false, allowMutations: false },
     },
   };
-  async getSdkCapabilities(packageName: string): Promise<SdkCapabilitiesResult> {
+  async getSdkCapabilities(packageName: string, userId?: number): Promise<SdkCapabilitiesResult> {
     this.calls.push(packageName);
+    this.userIds.push(userId);
     if (this.failure) {
       throw this.failure;
     }
@@ -47,9 +49,19 @@ describe("sdkCapabilityResources", () => {
     ResourceRegistry.clearResources();
   });
 
+  // A fake ADB with no foreground app by default, so no test reaches a real device.
   function setup(devices: BootedDevice[], dependencies: SdkCapabilityResourceDependencies) {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], devices));
-    registerSdkCapabilityResources(dependencies);
+    registerSdkCapabilityResources({
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      ...dependencies,
+    });
+  }
+
+  function foregroundAdb(packageName: string, userId: number) {
+    const adb = new FakeAdbExecutor();
+    adb.setForegroundApp({ packageName, userId });
+    return new FakeAdbClientFactory(adb);
   }
 
   async function read(uri: string) {
@@ -77,6 +89,7 @@ describe("sdkCapabilityResources", () => {
     setup([android], { createReader: () => reader });
     const body = await read("automobile:devices/emulator-5554/sdk/capabilities?appId=com.example");
     expect(reader.calls).toEqual(["com.example"]);
+    expect(reader.userIds).toEqual([undefined]);
     expect(body).toMatchObject({
       schemaVersion: 1,
       deviceId: "emulator-5554",
@@ -92,15 +105,36 @@ describe("sdkCapabilityResources", () => {
     setup([android], { createReader: () => reader, adbFactory: new FakeAdbClientFactory(adb) });
     const body = await read("automobile:devices/emulator-5554/sdk/capabilities");
     expect(reader.calls).toEqual(["com.foreground"]);
+    expect(reader.userIds).toEqual([0]);
     expect(body.appId).toBe("com.foreground");
+  });
+
+  test("forwards the foreground app's work-profile user", async () => {
+    const reader = new FakeSdkCapabilitiesReader();
+    setup([android], { createReader: () => reader, adbFactory: foregroundAdb("com.work", 10) });
+    await read("automobile:devices/emulator-5554/sdk/capabilities");
+    expect(reader.calls).toEqual(["com.work"]);
+    expect(reader.userIds).toEqual([10]);
+  });
+
+  test("an explicit app id in the foreground uses the foreground user", async () => {
+    const reader = new FakeSdkCapabilitiesReader();
+    setup([android], { createReader: () => reader, adbFactory: foregroundAdb("com.work", 10) });
+    await read("automobile:devices/emulator-5554/sdk/capabilities?appId=com.work");
+    expect(reader.userIds).toEqual([10]);
+  });
+
+  test("an explicit app id that is not in the foreground sends no user", async () => {
+    const reader = new FakeSdkCapabilitiesReader();
+    setup([android], { createReader: () => reader, adbFactory: foregroundAdb("com.other", 10) });
+    await read("automobile:devices/emulator-5554/sdk/capabilities?appId=com.example");
+    expect(reader.calls).toEqual(["com.example"]);
+    expect(reader.userIds).toEqual([undefined]);
   });
 
   test("without an app or foreground app reports NO_APP without reading", async () => {
     const reader = new FakeSdkCapabilitiesReader();
-    setup([android], {
-      createReader: () => reader,
-      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
-    });
+    setup([android], { createReader: () => reader });
     const body = await read("automobile:devices/emulator-5554/sdk/capabilities");
     expect(reader.calls).toEqual([]);
     expect(body.result).toEqual({ status: "unavailable", reason: "NO_APP" });

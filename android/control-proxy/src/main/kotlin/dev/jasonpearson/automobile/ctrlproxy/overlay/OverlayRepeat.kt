@@ -13,8 +13,10 @@ import dev.jasonpearson.automobile.protocol.OverlayCondition
 import dev.jasonpearson.automobile.protocol.OverlayEmitAction
 import dev.jasonpearson.automobile.protocol.OverlayIconNode
 import dev.jasonpearson.automobile.protocol.OverlayImageNode
+import dev.jasonpearson.automobile.protocol.OverlayListItemNode
 import dev.jasonpearson.automobile.protocol.OverlayNode
 import dev.jasonpearson.automobile.protocol.OverlayPagerNode
+import dev.jasonpearson.automobile.protocol.OverlayRadioGroupNode
 import dev.jasonpearson.automobile.protocol.OverlayRepeat
 import dev.jasonpearson.automobile.protocol.OverlayRepeatSegment
 import dev.jasonpearson.automobile.protocol.OverlayRepeatTemplate
@@ -152,6 +154,9 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
     is OverlayButtonNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlaySliderNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayChipNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayRadioGroupNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayListItemNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
   }
 }
 

@@ -225,6 +225,51 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         // MARK: - View Hierarchy
 
+        /// Find keyboard focus in the captured tree from the `hasKeyboardFocus` attribute, without IPC.
+        private static func capturedKeyboardFocus(_ snapshot: XCUIElementSnapshot) -> CapturedKeyboardFocus {
+            capturedKeyboardFocus(
+                snapshot,
+                hasKeyboardFocus: { capturedHasKeyboardFocus($0) },
+                frame: { $0.frame },
+                children: { $0.children }
+            )
+        }
+
+        /// `XCUIElementSnapshot` does not declare `hasKeyboardFocus`, but the captured object
+        /// answers it by key-value coding without a remote call. Nil when it does not.
+        private static func capturedHasKeyboardFocus(_ snapshot: XCUIElementSnapshot) -> Bool? {
+            do {
+                return try catchingObjCException { () -> Bool? in
+                    ((snapshot as? NSObject)?.value(forKey: "hasKeyboardFocus") as? NSNumber)?.boolValue
+                }
+            } catch {
+                // An undefined-key exception means this capture does not carry the attribute;
+                // the caller falls back to the live query.
+                return nil
+            }
+        }
+
+        /// Live `hasKeyboardFocus` query, used only when the capture does not carry the attribute.
+        /// Each remote call can block for about 90 s once the app is suspended, and `state`
+        /// can still report foreground then, so this path is a fallback (issue #9290).
+        private func liveKeyboardFocus(in app: XCUIApplication) -> KeyboardFocus? {
+            do {
+                return try catchingObjCException { () -> KeyboardFocus? in
+                    guard app.state == .runningForeground else { return nil }
+                    let focused = app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                        .firstMatch
+                    // A snapshot of a missing match waits about 2 s; `exists` does not.
+                    guard focused.exists else { return nil }
+                    return try KeyboardFocus(frame: focused.snapshot().frame, source: .liveQuery)
+                }
+            } catch {
+                // Missing focus safely falls back to snapshot.hasFocus when building the hierarchy.
+                logger.debug("Keyboard focus snapshot unavailable: \(error)")
+                return nil
+            }
+        }
+
         /// Detect a usable keyboard in the captured tree without additional IPC.
         private static func keyboardVisibleInSnapshot(_ snapshot: XCUIElementSnapshot) -> Bool {
             keyboardVisibleInSnapshot(
@@ -287,21 +332,17 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                         case let .useSnapshotFrame(frame):
                             focus = KeyboardFocus(frame: frame, source: .snapshot)
                         case .liveQuery:
-                            do {
-                                focus = try catchingObjCException { () -> KeyboardFocus? in
-                                    guard freshApp.state == .runningForeground else { return nil }
-                                    let focused = freshApp.descendants(matching: .any)
-                                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                                        .firstMatch
-                                    // A missing firstMatch snapshot can wait for ~60 s after backgrounding.
-                                    guard focused.exists else { return nil }
-                                    // Resolve the frame once after the no-wait existence check.
-                                    return try KeyboardFocus(frame: focused.snapshot().frame, source: .liveQuery)
-                                }
-                            } catch {
-                                // Missing focus safely falls back to snapshot.hasFocus when building the hierarchy.
-                                logger.debug("Keyboard focus snapshot unavailable: \(error)")
+                            // Read the attribute the live predicate tests from the capture first: it
+                            // costs no IPC and cannot block on an app that backgrounds after the
+                            // snapshot (issue #9290).
+                            switch Self.capturedKeyboardFocus(snap) {
+                            case let .focused(frame):
+                                focus = KeyboardFocus(frame: frame, source: .capturedAttribute)
+                            case .notFocused:
                                 focus = nil
+                            case .unavailable:
+                                self.logger.debug("Snapshot lacks hasKeyboardFocus; querying keyboard focus live")
+                                focus = self.liveKeyboardFocus(in: freshApp)
                             }
                         }
                         return (snap, typedInputs, focus, UIScreen.main.bounds)

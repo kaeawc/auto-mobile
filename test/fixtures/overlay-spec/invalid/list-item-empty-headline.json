@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "listItem",
+          "headline": ""
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].headline"
+}

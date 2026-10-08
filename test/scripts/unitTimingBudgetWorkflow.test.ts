@@ -37,7 +37,13 @@ describe("unit timing validator workflow budgets", () => {
       for (const lane of priorLanes) {
         const wall = Number(lane.env?.AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS);
         expect(Number.isInteger(wall) && wall > 0).toBe(true);
-        priorSeconds += wall;
+        // A timed-out or signalled shard is retried once (#10583), so the lane
+        // can run up to its cap: 2 x (wall + 60s attempt overhead) by default.
+        const laneCap = Number(
+          lane.env?.AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS ?? 2 * (wall + 60),
+        );
+        expect(Number.isInteger(laneCap) && laneCap >= wall).toBe(true);
+        priorSeconds += laneCap;
       }
       // The combined main job has no artifact download; reserve two minutes.
       // Standalone/prepush jobs reserve three. Include the unit lane's full

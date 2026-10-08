@@ -28,6 +28,11 @@ import { linkWindowRoots } from "../linkWindowRoots";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
+  HostForwardClientConnectionProbe,
+  NoForwardClientConnectionProbe,
+  type ForwardClientConnectionProbe,
+} from "./CtrlProxyForwardClientProbe";
+import {
   BootedDevice,
   ImeAction,
   ViewHierarchyResult,
@@ -1410,27 +1415,41 @@ function describeCtrlProxyForwardingLeaseConflict(
   );
 }
 
+/** What the host TCP table says about who uses a set of CtrlProxy forwards. */
+type ForwardClientEvidence = { clientPidsByPort: Map<number, number[]> } | { probeFailure: string };
+
 /**
  * Actionable message for CtrlProxy forwards on a device that no process in this
- * coordination directory created (issue #10690). They usually belong to a
- * daemon with a different `AUTOMOBILE_COORDINATION_DIR`, whose lease this
- * process cannot see, so removing them would break that daemon's connection.
+ * coordination directory created and that another process may still use (issue
+ * #10690). `evidence` says why the forward was judged live: connected client
+ * PIDs, or a host TCP-table read that failed and so cannot rule a client out.
  */
 function describeForeignCtrlProxyForwards(
   deviceId: string,
   ports: number[],
   ownershipDirectory: string | undefined,
+  evidence: { clientPids: number[] } | { probeFailure: string },
 ): string {
   const listed = ports.map((port) => `tcp:${port}`).join(", ");
   const removal = ports
     .map((port) => `\`adb -s ${deviceId} forward --remove tcp:${port}\``)
     .join(", ");
   const domain = ownershipDirectory === undefined ? "" : ` (records in ${ownershipDirectory})`;
+  const unrecorded =
+    `its CtrlProxy forward ${listed} was not created by this daemon (PID ${process.pid}) or ` +
+    `any daemon sharing its coordination directory${domain}`;
+  if ("clientPids" in evidence) {
+    const pids = evidence.clientPids.join(", ");
+    return (
+      `${deviceId} is driven by another AutoMobile daemon: ${unrecorded}, and PID ${pids} ` +
+      `holds a connection to it, so it was left in place. An older AutoMobile release or a ` +
+      `daemon started with a different AUTOMOBILE_COORDINATION_DIR is the usual owner; stop ` +
+      `it (\`kill ${evidence.clientPids[0]}\`) or use another device.`
+    );
+  }
   return (
-    `${deviceId} is driven by another AutoMobile daemon: its CtrlProxy forward ${listed} was not ` +
-    `created by this daemon (PID ${process.pid}) or any daemon sharing its coordination ` +
-    `directory${domain}, so it was left in place. A daemon started with a different ` +
-    `AUTOMOBILE_COORDINATION_DIR is the usual owner; stop it or use another device. ` +
+    `${deviceId} may be driven by another AutoMobile daemon: ${unrecorded}, and its host ` +
+    `connections could not be checked (${evidence.probeFailure}), so it was left in place. ` +
     `If no other AutoMobile daemon uses this device, remove the stale forward with ` +
     `${removal} and retry.`
   );
@@ -1536,7 +1555,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private portForwardingSetup: boolean = false;
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
+  /**
+   * @internal Host TCP-table reader deciding whether an unrecorded forward is
+   * still in use (#10690). Tests replace it; production reads lsof/netstat.
+   */
+  forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
+  private static readonly FORWARD_CLIENT_PROBES = 2;
+  private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS = 1_000;
   private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
+  /** Set when shutdown released this client's lease before its close finished. */
+  private forwardLeaseForceReleased: boolean = false;
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
@@ -1978,6 +2006,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           `releasing forwarding leases anyway`,
       );
       for (const client of clients) {
+        // A close still stuck on adb must not later remove a forward that a
+        // successor daemon creates on the freed lease and port (#10690).
+        client.forwardLeaseForceReleased = true;
         client.ctrlProxyForwardLease.release();
       }
     }
@@ -2246,6 +2277,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       idGenerator,
       transientObserver,
     );
+    // Unit tests never read the real host's TCP table.
+    client.forwardClientProbe = new NoForwardClientConnectionProbe();
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
     // the production getInstance path.
@@ -5185,6 +5218,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
     let stdout: string;
+    const listedAt = this.timer.now();
     try {
       const result = await this.adb.execute(["forward", "--list"], { signal });
       stdout = result.stdout;
@@ -5196,31 +5230,69 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       throw error;
     }
 
+    const listedPorts = this.listedCtrlProxyForwardPorts(stdout);
+    this.pruneStaleCtrlProxyForwardRecords(listedPorts, listedAt);
     const livePorts = new Set(
       [...AndroidCtrlProxyClient.instances.values(), ...AndroidCtrlProxyClient.activeObservers]
         .filter((client) => client.device.deviceId === this.device.deviceId && !client.closed)
         .map((client) => client.localPort),
     );
-    const orphanedPorts = new Set<number>();
-    const foreignPorts = new Set<number>();
+    const listed = [...listedPorts];
+    // No record in this coordination directory: possibly another daemon's (#10690).
+    const unrecordedPorts = listed.filter((port) => !this.ownsCtrlProxyPortForward(port));
+    const orphanedPorts = listed.filter(
+      (port) => this.ownsCtrlProxyPortForward(port) && !livePorts.has(port),
+    );
+
+    await this.reclaimRecordedOrphanForwards(orphanedPorts, signal);
+    if (unrecordedPorts.length > 0) {
+      await this.resolveUnrecordedCtrlProxyForwards(unrecordedPorts, signal);
+    }
+  }
+
+  /** Host ports of this device's forwards to the CtrlProxy device port. */
+  private listedCtrlProxyForwardPorts(stdout: string): Set<number> {
+    const ports = new Set<number>();
     for (const line of stdout.split(/\r?\n/)) {
       const forward = this.parseOwnPortForward(line);
       if (!forward || forward.remote !== `tcp:${PortManager.DEVICE_PORT}`) {
         continue;
       }
       const port = this.localPortFromForward(forward.local);
-      if (port === null) {
-        continue;
-      }
-      if (!this.ownsCtrlProxyPortForward(port)) {
-        // No record in this coordination directory: another daemon created it (#10690).
-        foreignPorts.add(port);
-      } else if (!livePorts.has(port)) {
-        orphanedPorts.add(port);
+      if (port !== null) {
+        ports.add(port);
       }
     }
+    return ports;
+  }
 
-    for (const port of orphanedPorts) {
+  /**
+   * Remove forwards recorded in this coordination directory that no live
+   * client of this process uses: a crashed daemon's leftovers. A record alone
+   * is not proof (#10690): after an ADB restart the same serial and host port
+   * can be forwarded again by a daemon this process cannot see, and the record
+   * outlives the forward it described. A forward another process is connected
+   * to is therefore left alone and its stale record dropped. When the host
+   * connections cannot be read, the pruned record is the best evidence left.
+   */
+  private async reclaimRecordedOrphanForwards(
+    ports: number[],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (ports.length === 0) {
+      return;
+    }
+    const evidence = await this.findForeignForwardClients(ports, 1, signal);
+    const clients = "clientPidsByPort" in evidence ? evidence.clientPidsByPort : new Map();
+    const contested = ports.filter((port) => clients.has(port));
+    for (const port of contested) {
+      logger.warn(
+        `[CTRL_PROXY] Dropping CtrlProxy forward record for ${this.device.deviceId} tcp:${port}: ` +
+          `PID ${clients.get(port)?.join(", ")} is connected to it`,
+      );
+      this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
+    }
+    for (const port of ports.filter((candidate) => !clients.has(candidate))) {
       logger.info(
         `[CTRL_PROXY] Reclaiming orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
       );
@@ -5230,42 +5302,125 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       }
     }
-
-    if (foreignPorts.size > 0) {
-      await this.resolveUnrecordedCtrlProxyForwards([...foreignPorts], signal);
+    if (contested.length > 0) {
+      this.throwForeignCtrlProxyForwards(contested, { clientPidsByPort: clients });
     }
   }
 
   /**
-   * No live daemon holds a lease for this device, so unrecorded forwards are
-   * leftovers from an older daemon (upgrade path): record and remove them (#10690).
+   * Decide whether unrecorded CtrlProxy forwards are still in use (#10690). A
+   * daemon of any release, in any coordination directory, keeps a WebSocket
+   * open to its forward's host port, so a client connection from another
+   * process means the forward is live and must be left alone. Two probes a
+   * moment apart cover a client caught between reconnects. With no client on
+   * either probe, the forward is a leftover (a stopped older daemon, or a
+   * crash) and is removed. A failed probe cannot rule a client out, so it
+   * refuses rather than risk removing a live forward.
    */
   private async resolveUnrecordedCtrlProxyForwards(
     ports: number[],
     signal?: AbortSignal,
   ): Promise<void> {
-    const liveOwnerPid = this.ctrlProxyForwardLease.liveForeignOwnerPid?.();
-    if (liveOwnerPid !== undefined) {
-      throw new CtrlProxyForwardingLeaseConflictError(
-        describeForeignCtrlProxyForwards(
-          this.device.deviceId,
-          ports,
-          this.ctrlProxyForwardLease.ownershipDirectory?.(),
-        ),
-        liveOwnerPid,
-      );
+    const evidence = await this.findForeignForwardClients(
+      ports,
+      AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
+      signal,
+    );
+    if ("probeFailure" in evidence || evidence.clientPidsByPort.size > 0) {
+      this.throwForeignCtrlProxyForwards(ports, evidence);
     }
     for (const port of ports) {
       logger.warn(
         `[CTRL_PROXY] Reclaiming legacy/unrecorded CtrlProxy forward on ${this.device.deviceId} ` +
-          `tcp:${port}: no live daemon owns it`,
+          `tcp:${port}: no other process is connected to it`,
       );
-      this.ctrlProxyForwardLease.recordOwnedForward?.(port);
-      if (!(await this.removeCtrlProxyPortForward(port, signal))) {
+      // Removed without writing a record first, so a failed removal cannot
+      // leave a record claiming another daemon's forward (#10690).
+      if (!(await this.removeCtrlProxyPortForward(port, signal, { reclaimUnrecorded: true }))) {
         throw new Error(
           `Failed to reclaim unrecorded CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
         );
       }
+    }
+  }
+
+  private throwForeignCtrlProxyForwards(ports: number[], evidence: ForwardClientEvidence): never {
+    const clientPids =
+      "clientPidsByPort" in evidence
+        ? [...new Set([...evidence.clientPidsByPort.values()].flat())]
+        : [];
+    throw new CtrlProxyForwardingLeaseConflictError(
+      describeForeignCtrlProxyForwards(
+        this.device.deviceId,
+        ports,
+        this.ctrlProxyForwardLease.ownershipDirectory?.(),
+        "probeFailure" in evidence ? evidence : { clientPids },
+      ),
+      clientPids[0],
+    );
+  }
+
+  /**
+   * Other processes' client connections to each of `ports`, unioned over
+   * `probes` reads spaced {@link FORWARD_CLIENT_REPROBE_INTERVAL_MS} apart.
+   */
+  private async findForeignForwardClients(
+    ports: number[],
+    probes: number,
+    signal?: AbortSignal,
+  ): Promise<ForwardClientEvidence> {
+    const clientPidsByPort = new Map<number, number[]>();
+    try {
+      for (let probe = 0; probe < probes; probe++) {
+        if (probe > 0) {
+          await this.timer.sleep(AndroidCtrlProxyClient.FORWARD_CLIENT_REPROBE_INTERVAL_MS);
+        }
+        for (const [port, pids] of await this.probeForwardClientsOnce(ports, signal)) {
+          clientPidsByPort.set(port, [
+            ...new Set([...(clientPidsByPort.get(port) ?? []), ...pids]),
+          ]);
+        }
+      }
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Could not read host connections to CtrlProxy forwards on ` +
+          `${this.device.deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+      return { probeFailure: errorMessage(error) };
+    }
+    return { clientPidsByPort };
+  }
+
+  /** Other processes' client connections to each of `ports` with any, read once. */
+  private async probeForwardClientsOnce(
+    ports: number[],
+    signal?: AbortSignal,
+  ): Promise<Array<[number, number[]]>> {
+    const perPort = await Promise.all(
+      ports.map(async (port): Promise<[number, number[]]> => {
+        const pids = await this.forwardClientProbe.findClientPids(port, signal);
+        return [port, pids.filter((pid) => pid !== process.pid)];
+      }),
+    );
+    return perPort.filter(([, pids]) => pids.length > 0);
+  }
+
+  /**
+   * Drop this device's forward records whose forward is no longer listed (#10690).
+   * Only records written before the listing started are judged: a forward
+   * recorded later may have been created after the listing was taken.
+   */
+  private pruneStaleCtrlProxyForwardRecords(listedPorts: Set<number>, listedAt: number): void {
+    for (const record of this.ctrlProxyForwardLease.recordedForwards?.() ?? []) {
+      if (listedPorts.has(record.localPort) || record.createdAt >= listedAt) {
+        continue;
+      }
+      logger.info(
+        `[CTRL_PROXY] Dropping stale CtrlProxy forward record for ${this.device.deviceId} ` +
+          `tcp:${record.localPort}: ADB no longer lists the forward`,
+      );
+      this.ctrlProxyForwardLease.forgetOwnedForward?.(record.localPort);
     }
   }
 
@@ -5286,14 +5441,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * @returns `true` when no matching forward remains; `false` when adb failed
    * to establish that state.
    */
-  private async removeCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
+  private async removeCtrlProxyPortForward(
+    port: number,
+    signal?: AbortSignal,
+    options: { reclaimUnrecorded?: boolean } = {},
+  ): Promise<boolean> {
     try {
       const expectedLocal = `tcp:${port}`;
       if (!(await this.hasCtrlProxyPortForward(port, signal))) {
         this.markCtrlProxyPortForwardGone(port);
         return true;
       }
-      if (!this.ownsCtrlProxyPortForward(port)) {
+      if (this.forwardLeaseForceReleased) {
+        // Shutdown gave this client's lease away while its close was stuck; a
+        // successor may already own a forward on this port (#10690).
+        logger.warn(
+          `[CTRL_PROXY] Leaving CtrlProxy forward on ${this.device.deviceId} tcp:${port} in place: ` +
+            `this client's forwarding lease was released before its close finished`,
+        );
+        return false;
+      }
+      if (options.reclaimUnrecorded !== true && !this.ownsCtrlProxyPortForward(port)) {
         // Never remove or replace another daemon's forward (#10690).
         logger.warn(
           `[CTRL_PROXY] Leaving CtrlProxy forward on ${this.device.deviceId} tcp:${port} in place: ` +
@@ -5333,7 +5501,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private markCtrlProxyPortForwardGone(port: number): void {
     PortManager.clearQuarantine(port);
-    this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
+    if (!this.forwardLeaseForceReleased) {
+      // After a forced release the record on this port may be a successor's.
+      this.ctrlProxyForwardLease.forgetOwnedForward?.(port);
+    }
   }
 
   private async hasCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {

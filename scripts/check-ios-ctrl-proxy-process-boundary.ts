@@ -12,6 +12,10 @@ const EXCEPTIONS = new Map<string, string>([
     "src/features/performance/PerformanceMonitor.ts",
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],
+  [
+    "src/features/observe/android/CtrlProxyForwardClientProbe.ts",
+    "Reads host TCP connections to an Android ADB forward; never touches the iOS runner.",
+  ],
 ]);
 
 export function repositoryPath(file: string): string {

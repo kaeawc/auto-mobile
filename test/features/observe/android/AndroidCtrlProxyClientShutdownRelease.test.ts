@@ -26,11 +26,18 @@ function result(stdout: string): ExecResult {
 class ForwardAdb extends FakeAdbExecutor {
   removed = false;
   hangRemove = false;
+  /** While set, `forward --list` waits for this gate; the listing then reports `listAfterGate`. */
+  listGate: Promise<void> | null = null;
+  listAfterGate: string | null = null;
   constructor(private readonly row: string) {
     super();
   }
   override async executeCommand(command: string): Promise<ExecResult> {
     if (command === "forward --list") {
+      if (this.listGate) {
+        await this.listGate;
+        return result(this.listAfterGate ?? "");
+      }
       return result(this.removed ? "" : this.row);
     }
     if (command.startsWith("forward --remove")) {
@@ -134,6 +141,46 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
     // The record stays so the next daemon can still tell the forward was ours.
     expect(existsSync(recordFile())).toBe(true);
   });
+
+  for (const successorForwardListed of [true, false]) {
+    test(`a close still stuck after the bound neither removes nor forgets a successor's forward (listed: ${successorForwardListed})`, async () => {
+      const adb = new ForwardAdb(`${DEVICE.deviceId} tcp:${PORT} tcp:8765\n`);
+      let openGate = (): void => {};
+      adb.listGate = new Promise<void>((resolve) => {
+        openGate = resolve;
+      });
+      heldClient(adb, true);
+
+      const release = AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(timer, BOUND_MS);
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      timer.advanceTime(BOUND_MS);
+      await release;
+      expect(existsSync(lockFile())).toBe(false);
+
+      // A successor daemon in the same directory takes the lease and forwards the same port.
+      const successor = new FileCtrlProxyForwardLease(DEVICE.deviceId, {
+        lockDir: () => dir,
+        ownerSocketPath: () => undefined,
+        timer,
+      });
+      expect(successor.tryAcquire()).toBe(true);
+      successor.recordOwnedForward(PORT);
+
+      // The stuck close's adb listing finally answers.
+      adb.listAfterGate = successorForwardListed ? `${DEVICE.deviceId} tcp:${PORT} tcp:8765\n` : "";
+      openGate();
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
+
+      expect(adb.executedRemovals).toEqual([]);
+      expect(existsSync(recordFile())).toBe(true);
+      expect(successor.ownsForward(PORT)).toBe(true);
+      successor.release();
+    });
+  }
 
   test("leaves an unrecorded forward alone but still releases the lease", async () => {
     const adb = new ForwardAdb(`${DEVICE.deviceId} tcp:${PORT} tcp:8765\n`);

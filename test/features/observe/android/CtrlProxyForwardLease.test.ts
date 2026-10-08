@@ -286,20 +286,34 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
-  test("reports only a live foreign lease owner as evidence of another daemon (#10690)", () => {
-    const probe = new FakeOwnerProbe({ kind: "unreachable", detail: "unused" });
-    const mine = lease(probe);
-    expect(mine.liveForeignOwnerPid()).toBeUndefined();
+  test("lists this device's forward records with when they were written (#10690)", () => {
+    const own = lease(new FakeOwnerProbe({ kind: "unreachable", detail: "unused" }));
+    own.recordOwnedForward(8769);
+    timer.advanceTime(5);
+    own.fork().recordOwnedForward!(52001);
+    // Another device's record and the lease lock itself are not this device's records.
+    new FileCtrlProxyForwardLease("emulator-5602", {
+      lockDir: () => dir,
+      timer,
+    }).recordOwnedForward(8770);
+    expect(own.tryAcquire()).toBe(true);
+    // A torn record still lists, with no time, so the sweep can prune it.
+    writeFileSync(join(dir, ctrlProxyOwnedForwardFileName(DEVICE, 8771)), "{");
 
-    const owner = foreignOwner();
-    expect(mine.liveForeignOwnerPid()).toBe(FOREIGN_PID);
-    expect(owner.liveForeignOwnerPid()).toBeUndefined();
-    owner.release();
-    expect(mine.liveForeignOwnerPid()).toBeUndefined();
+    expect(own.recordedForwards().sort((a, b) => a.localPort - b.localPort)).toEqual([
+      { localPort: 8769, createdAt: 100_000 },
+      { localPort: 8771, createdAt: 0 },
+      { localPort: 52001, createdAt: 100_005 },
+    ]);
+    own.release();
+  });
 
-    // A lock naming a dead pid is not evidence.
-    writeFileSync(join(dir, ctrlProxyForwardLeaseFileName(DEVICE)), "2000000000\n");
-    expect(mine.liveForeignOwnerPid()).toBeUndefined();
+  test("lists no records when the coordination directory cannot be read", () => {
+    const missing = new FileCtrlProxyForwardLease(DEVICE, {
+      lockDir: () => join(dir, "missing"),
+      timer,
+    });
+    expect(missing.recordedForwards()).toEqual([]);
   });
 
   test("forks share forward records, and records stay out of the lease listing", () => {

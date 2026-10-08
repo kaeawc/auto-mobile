@@ -18003,7 +18003,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\"), optional state, root. window.opacity is 0-100, default 100.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge), optional state, root. window.opacity is 0-100, default 100.",
           "type": "object",
           "properties": {
             "id": {
@@ -18120,6 +18120,31 @@
                   },
                   "additionalProperties": false,
                   "minProperties": 1
+                },
+                "typography": {
+                  "type": "object",
+                  "properties": {
+                    "scale": {
+                      "type": "number",
+                      "minimum": 0.75,
+                      "maximum": 1.5
+                    },
+                    "fontFamily": {
+                      "type": "string",
+                      "enum": ["sans", "serif", "mono"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "shapes": {
+                  "type": "object",
+                  "properties": {
+                    "corner": {
+                      "type": "string",
+                      "enum": ["none", "small", "medium", "large", "full"]
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false,
@@ -18431,6 +18456,26 @@
                               "required": ["asset"],
                               "additionalProperties": false
                             }
+                          ]
+                        },
+                        "textStyle": {
+                          "type": "string",
+                          "enum": [
+                            "displayLarge",
+                            "displayMedium",
+                            "displaySmall",
+                            "headlineLarge",
+                            "headlineMedium",
+                            "headlineSmall",
+                            "titleLarge",
+                            "titleMedium",
+                            "titleSmall",
+                            "bodyLarge",
+                            "bodyMedium",
+                            "bodySmall",
+                            "labelLarge",
+                            "labelMedium",
+                            "labelSmall"
                           ]
                         }
                       },
@@ -18895,45 +18940,11 @@
                       "enum": ["icon"]
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "variant": {
                       "type": "string",
-                      "enum": [
-                        "home",
-                        "search",
-                        "settings",
-                        "person",
-                        "favorite",
-                        "add",
-                        "close",
-                        "check",
-                        "arrow_back",
-                        "arrow_forward",
-                        "chevron_left",
-                        "chevron_right",
-                        "menu",
-                        "more_vert",
-                        "share",
-                        "edit",
-                        "delete",
-                        "info",
-                        "warning",
-                        "notifications",
-                        "star",
-                        "shopping_cart",
-                        "help",
-                        "refresh",
-                        "done",
-                        "cancel",
-                        "play_arrow",
-                        "pause",
-                        "stop",
-                        "mail",
-                        "phone",
-                        "location_on",
-                        "calendar_today",
-                        "visibility",
-                        "lock",
-                        "logout"
-                      ]
+                      "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                     }
                   },
                   "required": ["type", "name"],
@@ -19272,45 +19283,7 @@
                             "minLength": 1
                           },
                           "icon": {
-                            "type": "string",
-                            "enum": [
-                              "home",
-                              "search",
-                              "settings",
-                              "person",
-                              "favorite",
-                              "add",
-                              "close",
-                              "check",
-                              "arrow_back",
-                              "arrow_forward",
-                              "chevron_left",
-                              "chevron_right",
-                              "menu",
-                              "more_vert",
-                              "share",
-                              "edit",
-                              "delete",
-                              "info",
-                              "warning",
-                              "notifications",
-                              "star",
-                              "shopping_cart",
-                              "help",
-                              "refresh",
-                              "done",
-                              "cancel",
-                              "play_arrow",
-                              "pause",
-                              "stop",
-                              "mail",
-                              "phone",
-                              "location_on",
-                              "calendar_today",
-                              "visibility",
-                              "lock",
-                              "logout"
-                            ]
+                            "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                           },
                           "image": {
                             "type": "string",
@@ -19817,6 +19790,26 @@
                                 "additionalProperties": false
                               }
                             ]
+                          },
+                          "textStyle": {
+                            "type": "string",
+                            "enum": [
+                              "displayLarge",
+                              "displayMedium",
+                              "displaySmall",
+                              "headlineLarge",
+                              "headlineMedium",
+                              "headlineSmall",
+                              "titleLarge",
+                              "titleMedium",
+                              "titleSmall",
+                              "bodyLarge",
+                              "bodyMedium",
+                              "bodySmall",
+                              "labelLarge",
+                              "labelMedium",
+                              "labelSmall"
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -20290,45 +20283,11 @@
                         "enum": ["icon"]
                       },
                       "name": {
+                        "type": "string"
+                      },
+                      "variant": {
                         "type": "string",
-                        "enum": [
-                          "home",
-                          "search",
-                          "settings",
-                          "person",
-                          "favorite",
-                          "add",
-                          "close",
-                          "check",
-                          "arrow_back",
-                          "arrow_forward",
-                          "chevron_left",
-                          "chevron_right",
-                          "menu",
-                          "more_vert",
-                          "share",
-                          "edit",
-                          "delete",
-                          "info",
-                          "warning",
-                          "notifications",
-                          "star",
-                          "shopping_cart",
-                          "help",
-                          "refresh",
-                          "done",
-                          "cancel",
-                          "play_arrow",
-                          "pause",
-                          "stop",
-                          "mail",
-                          "phone",
-                          "location_on",
-                          "calendar_today",
-                          "visibility",
-                          "lock",
-                          "logout"
-                        ]
+                        "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                       }
                     },
                     "required": ["type", "name"],
@@ -20667,45 +20626,7 @@
                               "minLength": 1
                             },
                             "icon": {
-                              "type": "string",
-                              "enum": [
-                                "home",
-                                "search",
-                                "settings",
-                                "person",
-                                "favorite",
-                                "add",
-                                "close",
-                                "check",
-                                "arrow_back",
-                                "arrow_forward",
-                                "chevron_left",
-                                "chevron_right",
-                                "menu",
-                                "more_vert",
-                                "share",
-                                "edit",
-                                "delete",
-                                "info",
-                                "warning",
-                                "notifications",
-                                "star",
-                                "shopping_cart",
-                                "help",
-                                "refresh",
-                                "done",
-                                "cancel",
-                                "play_arrow",
-                                "pause",
-                                "stop",
-                                "mail",
-                                "phone",
-                                "location_on",
-                                "calendar_today",
-                                "visibility",
-                                "lock",
-                                "logout"
-                              ]
+                              "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                             },
                             "image": {
                               "type": "string",

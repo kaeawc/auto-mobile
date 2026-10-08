@@ -23,6 +23,13 @@ const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(() =>
 const overlayJsonSchema = z.custom<OverlayJson>(
   (value) => jsonValueSchema.safeParse(value).success,
 );
+// Icon names are the closed list of Material icons the Android renderer bundles
+// (androidx material-icons-extended); the shared contract is the single source.
+const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
+const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
+  message: "Unknown overlay icon name",
+});
+const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
 const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 const offsetSchema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
 const boundsSchema = z
@@ -114,6 +121,24 @@ const borderSchema = z
     color: z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
   })
   .strict();
+/** Material 3 type roles a text node's `textStyle` can name. */
+const TEXT_STYLE_ROLES = [
+  "displayLarge",
+  "displayMedium",
+  "displaySmall",
+  "headlineLarge",
+  "headlineMedium",
+  "headlineSmall",
+  "titleLarge",
+  "titleMedium",
+  "titleSmall",
+  "bodyLarge",
+  "bodyMedium",
+  "bodySmall",
+  "labelLarge",
+  "labelMedium",
+  "labelSmall",
+] as const;
 const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
@@ -162,52 +187,14 @@ const styleSchema = z
         z.object({ asset: z.string().min(1) }).strict(),
       ])
       .optional(),
+    textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();
 const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
 const itemSchema = z
   .object({
     label: z.string().min(1),
-    icon: z
-      .enum([
-        "home",
-        "search",
-        "settings",
-        "person",
-        "favorite",
-        "add",
-        "close",
-        "check",
-        "arrow_back",
-        "arrow_forward",
-        "chevron_left",
-        "chevron_right",
-        "menu",
-        "more_vert",
-        "share",
-        "edit",
-        "delete",
-        "info",
-        "warning",
-        "notifications",
-        "star",
-        "shopping_cart",
-        "help",
-        "refresh",
-        "done",
-        "cancel",
-        "play_arrow",
-        "pause",
-        "stop",
-        "mail",
-        "phone",
-        "location_on",
-        "calendar_today",
-        "visibility",
-        "lock",
-        "logout",
-      ])
-      .optional(),
+    icon: iconNameSchema.optional(),
     image: z.string().min(1).optional(),
   })
   .strict();
@@ -322,44 +309,8 @@ const iconBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["icon"]),
-    name: z.enum([
-      "home",
-      "search",
-      "settings",
-      "person",
-      "favorite",
-      "add",
-      "close",
-      "check",
-      "arrow_back",
-      "arrow_forward",
-      "chevron_left",
-      "chevron_right",
-      "menu",
-      "more_vert",
-      "share",
-      "edit",
-      "delete",
-      "info",
-      "warning",
-      "notifications",
-      "star",
-      "shopping_cart",
-      "help",
-      "refresh",
-      "done",
-      "cancel",
-      "play_arrow",
-      "pause",
-      "stop",
-      "mail",
-      "phone",
-      "location_on",
-      "calendar_today",
-      "visibility",
-      "lock",
-      "logout",
-    ]),
+    name: iconNameSchema,
+    variant: iconVariantSchema.optional(),
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
@@ -497,10 +448,25 @@ const themeColorsSchema = z
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);
+const themeTypographySchema = z
+  .object({
+    scale: z.number().finite().min(0.75).max(1.5).optional(),
+    fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeShapesSchema = z
+  .object({
+    corner: z.enum(["none", "small", "medium", "large", "full"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const themeSchema = z
   .object({
     mode: z.enum(["light", "dark", "system"]).optional(),
     colors: themeColorsSchema.optional(),
+    typography: themeTypographySchema.optional(),
+    shapes: themeShapesSchema.optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0);

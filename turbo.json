@@ -66,7 +66,8 @@
         "ios/auto-mobile-sdk/Sources/**",
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/network-filter/Packaging/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -103,7 +104,8 @@
         "ios/auto-mobile-sdk/Sources/**",
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/network-filter/Packaging/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -165,7 +167,8 @@
         "ios/auto-mobile-sdk/Sources/**",
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/network-filter/Packaging/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -265,7 +268,8 @@
         "ios/auto-mobile-sdk/Sources/**",
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/network-filter/Packaging/**"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

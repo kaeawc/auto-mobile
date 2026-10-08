@@ -18,6 +18,8 @@ data class OverlayRenderStyle(
   val verticalAlignment: Alignment.Vertical,
   val fontWeight: FontWeight,
   val fontFamily: FontFamily,
+  /** Font asset id when `fontFamily` is `{asset}`; [fontFamily] is then only the fallback. */
+  val fontAsset: String? = null,
   val textAlign: TextAlign,
 )
 
@@ -287,12 +289,8 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
     FontWeight(style.fontWeight ?: 400),
-    when (style.fontFamily) {
-      "sansSerif" -> FontFamily.SansSerif
-      "serif" -> FontFamily.Serif
-      "monospace" -> FontFamily.Monospace
-      else -> FontFamily.Default
-    },
+    builtInFontFamily(style.fontFamily),
+    (style.fontFamily as? OverlayFontFamily.Asset)?.id,
     when (style.textAlign) {
       "center" -> TextAlign.Center
       "end" -> TextAlign.End
@@ -300,6 +298,14 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
       else -> TextAlign.Start
     },
   )
+
+private fun builtInFontFamily(family: OverlayFontFamily?): FontFamily =
+  when ((family as? OverlayFontFamily.Named)?.name) {
+    "sansSerif" -> FontFamily.SansSerif
+    "serif" -> FontFamily.Serif
+    "monospace" -> FontFamily.Monospace
+    else -> FontFamily.Default
+  }
 
 private fun overlayAlignment(value: String?): Alignment =
   when (value) {

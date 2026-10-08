@@ -228,7 +228,12 @@ const styleSchema = z
     color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
-    fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
+    fontFamily: z
+      .union([
+        z.enum(["default", "sansSerif", "serif", "monospace"]),
+        z.object({ asset: z.string().min(1) }).strict(),
+      ])
+      .optional(),
     textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();

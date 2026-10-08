@@ -96,7 +96,7 @@ data class OverlayStyle(
   val color: String? = null,
   val textAlign: String? = null,
   val maxLines: Int? = null,
-  val fontFamily: String? = null,
+  val fontFamily: OverlayFontFamily? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
 )

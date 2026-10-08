@@ -656,7 +656,7 @@ display. The one missing-asset re-send goes to the same resolved display without
 display inventory. `update` with `assets` stays on the display the overlay is already on.
 
 `show`, `showVariants`, and `update` with a `spec`, accept `assets`: an array of `{ id, path }`
-or `{ id, observation }` that uploads images before the overlay is sent, so no
+or `{ id, observation }` that uploads images (or, with `path`, TTF/OTF fonts) before the overlay is sent, so no
 separate upload step is needed. `path` is an absolute path the daemon can read
 (relative paths are rejected); `observation` is an
 `automobile:observation/{deviceId}/{observationId}/screenshot` URI (the
@@ -665,8 +665,10 @@ as reading that resource does: the observation must still be its device's
 current one, a capture still in flight is awaited, and no session ownership is
 needed because the resource itself needs none. Each entry has exactly one of
 the two. The type is detected from the bytes' signature and must be PNG, JPEG
-or WebP, up to 4 MiB per asset, 16 MiB and 32 assets per call, with unique ids.
-Image nodes reference an `id` (`image.asset`; nav items use `image`); the spec
+or WebP, up to 4 MiB per asset, or a TrueType/OpenType font (`.ttf`/`.otf`,
+`path` only), up to 2 MiB per font; 16 MiB and 32 assets per call in total, with
+unique ids. Image nodes reference an `id` (`image.asset`; nav items use `image`);
+`style.fontFamily: {"asset": "<id>"}` references an uploaded font; the spec
 never carries paths or bytes. Every file is read and checked first, so an
 unreadable file, unsupported format or exceeded cap fails the call with nothing
 sent. Uploads then run one at a time. Any failure (a device refusal, an old

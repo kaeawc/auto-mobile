@@ -48,6 +48,7 @@ val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
 internal fun OverlayRuntimeContent(
   runtime: OverlayRuntime,
   images: OverlayImageCache? = null,
+  fonts: OverlayFontCache? = null,
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
@@ -65,6 +66,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayFontCache provides fonts,
         LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(
@@ -165,7 +167,9 @@ private fun RenderOverlayNodeContent(
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        fontFamily = if (role == null || source.fontFamily != null) node.style.fontFamily else null,
+        fontFamily =
+          if (role == null || source.fontFamily != null) rememberOverlayFontFamily(node.style)
+          else null,
         textAlign = node.style.textAlign,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,

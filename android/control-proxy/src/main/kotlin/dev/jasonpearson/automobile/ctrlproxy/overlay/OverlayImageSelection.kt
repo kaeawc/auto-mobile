@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import androidx.compose.ui.layout.ContentScale
 import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
+import dev.jasonpearson.automobile.protocol.OverlayFontFamily
 import dev.jasonpearson.automobile.protocol.OverlayImageNode
 import dev.jasonpearson.automobile.protocol.OverlayItem
 import dev.jasonpearson.automobile.protocol.OverlayNode
@@ -44,14 +45,22 @@ fun overlayContentScale(name: String): ContentScale =
     else -> ContentScale.Fit
   }
 
+/** Font asset ids a node's own `style` and `styleWhen` entries name, in order. */
+private fun overlayFontAssetReferences(node: OverlayNode): List<String> =
+  (listOfNotNull(node.style) + node.styleWhen.orEmpty().map { it.style }).mapNotNull {
+    (it.fontFamily as? OverlayFontFamily.Asset)?.id
+  }
+
 /**
  * Every asset id the tree references, in first-use order without repeats: `image` nodes and the
  * `image` of `tabBar` and `bottomNav` items. Covers nodes that are currently hidden or on another
- * pager page, because those can be revealed without another `show`.
+ * pager page, because those can be revealed without another `show`. Font assets named by
+ * `style.fontFamily: {asset}` (also inside `styleWhen`) are included.
  */
 fun overlayAssetReferences(root: OverlayNode): List<String> {
   val ids = LinkedHashSet<String>()
   fun visit(node: OverlayNode) {
+    overlayFontAssetReferences(node).forEach { ids += it }
     when (node) {
       is OverlayImageNode -> ids += node.asset
       is OverlayTabBarNode -> node.items.mapNotNullTo(ids) { it.image }

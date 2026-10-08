@@ -2,11 +2,12 @@
 #
 # Guards the "required status check" gate wiring in pull_request.yml (PR #3860).
 #
-# ios-build-gate / codeql-gate / shell-tests-gate are always() roll-up jobs that
-# report STABLE context names so their families' deterministic build/scan legs
-# can be promoted to required checks without the matrix-skip footgun (a gated-out
+# ide-plugin-gate / ios-build-gate / shell-tests-gate are always() roll-up jobs
+# that report STABLE context names ("IDE Plugin", "iOS Build", "Shell Tests") that
+# the green-main ruleset requires, without the matrix-skip footgun (a gated-out
 # matrix job reports its literal "(${{ ... }})" name, which would hang a required
-# check as "Expected").
+# check as "Expected"). Non-required roll-ups were removed: each cost a runner
+# slot per PR without blocking a merge.
 #
 # These gates roll up NAMED jobs, so their completeness depends on humans keeping
 # each gate's `needs:` in sync. The required-checks config lives in GitHub's
@@ -40,13 +41,11 @@ wiring_requires_yq() {
 @test "required gate jobs exist with stable context names" {
   wiring_requires_yq
   local job expected
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ide-plugin-gate ios-build-gate shell-tests-gate; do
     case "$job" in
+      ide-plugin-gate) expected="IDE Plugin" ;;
       ios-build-gate) expected="iOS Build" ;;
-      codeql-gate) expected="CodeQL" ;;
       shell-tests-gate) expected="Shell Tests" ;;
-      node-tests-gate) expected="Node Tests" ;;
-      runtime-graph-gate) expected="Pinned Runtime Graph Gate" ;;
     esac
     run yq -r ".jobs.\"${job}\".name" "$WF"
     [ "$status" -eq 0 ]
@@ -58,7 +57,7 @@ wiring_requires_yq() {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate shell-tests-gate; do
     run yq -r ".jobs.\"${job}\".if" "$WF"
     [ "$status" -eq 0 ]
     [[ "$output" == "always() &&"* ]]
@@ -87,7 +86,7 @@ wiring_requires_yq() {
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate shell-tests-gate; do
     run yq -r "
       .jobs.\"${job}\".steps[]
       | select(.name == \"Check results\")
@@ -97,12 +96,6 @@ wiring_requires_yq() {
     printf '%s\n' "$output" | grep -Fqx '  if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then'
     printf '%s\n' "$output" | grep -Fqx '  exit 1'
   done
-}
-
-@test "codeql-gate rolls up codeql-node" {
-  block="$(job_block codeql-gate)"
-  [[ "$block" == *"- codeql-node"* ]]
-  [[ "$block" == *"needs.codeql-node.result"* ]]
 }
 
 @test "shell-tests-gate rolls up unit and integration BATS jobs" {
@@ -118,80 +111,6 @@ wiring_requires_yq() {
   [[ -n "$block" ]]
   [[ "$block" == *":junit-runner:compileTestKotlin"* ]]
   [[ "$block" == *":playground:app:compileDebugUnitTestKotlin"* ]]
-}
-
-@test "node-tests-gate rolls up complete unit, timing-budget, and host integration lanes" {
-  block="$(job_block node-tests-gate)"
-  [[ "$block" == *"- node-unit-tests"* ]]
-  [[ "$block" == *"needs.node-unit-tests.result"* ]]
-  [[ "$block" == *"- node-unit-timing-budget"* ]]
-  [[ "$block" == *"needs.node-unit-timing-budget.result"* ]]
-  [[ "$block" == *"- node-host-integration-tests"* ]]
-  [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
-}
-
-@test "advisory roll-ups warn without weakening their hard dependencies" {
-  local ios android node webrtc ios_hard_results ios_advisory_results android_hard_results android_advisory_results node_hard_results node_advisory_results webrtc_hard_results webrtc_advisory_results
-  ios="$(job_block ios-gate)"
-  android="$(job_block android-gate)"
-  node="$(job_block node-tests-gate)"
-  webrtc="$(job_block webrtc-gate)"
-
-  for block in "$ios" "$android" "$node" "$webrtc"; do
-    [[ "$block" == *"hard_results"* ]]
-    [[ "$block" == *"advisory_results"* ]]
-    [[ "$block" == *'::warning::'*'advisory: '*' lane failed; classify with scripts/ci/classify-failure.sh <run-id>'* ]]
-  done
-
-  ios_hard_results="${ios#*hard_results=(}"
-  ios_hard_results="${ios_hard_results%%$'\n          )'*}"
-  ios_advisory_results="${ios#*advisory_results=(}"
-  ios_advisory_results="${ios_advisory_results%%$'\n          )'*}"
-  [[ "$ios_hard_results" == *'"ios-build-gate='* ]]
-  [[ "$ios_hard_results" == *'"ios-playground-tests='* ]]
-  [[ "$ios_advisory_results" != *'"ios-xctest-runner-simulator-tests='* ]]
-  [[ "$ios_advisory_results" != *'"ios-build-gate='* ]]
-  [[ "$ios_advisory_results" != *'"ios-playground-tests='* ]]
-  [[ "$ios_hard_results" != *'"ios-xctest-runner-simulator-tests='* ]]
-  android_hard_results="${android#*hard_results=(}"
-  android_hard_results="${android_hard_results%%$'\n          )'*}"
-  android_advisory_results="${android#*advisory_results=(}"
-  android_advisory_results="${android_advisory_results%%$'\n          )'*}"
-  [[ "$android_hard_results" == *'"build-android-control-proxy='* ]]
-  [[ "$android_hard_results" == *'"android-emulator-compile-smoke='* ]]
-  [[ "$android_advisory_results" == *'"junit-runner-emulator-tests='* ]]
-  [[ "$android_advisory_results" != *'"build-android-control-proxy='* ]]
-  [[ "$android_advisory_results" != *'"android-emulator-compile-smoke='* ]]
-  [[ "$android_hard_results" != *'"junit-runner-emulator-tests='* ]]
-  node_hard_results="${node#*hard_results=(}"
-  node_hard_results="${node_hard_results%%$'\n          )'*}"
-  node_advisory_results="${node#*advisory_results=(}"
-  node_advisory_results="${node_advisory_results%%$'\n          )'*}"
-  [[ "$node_hard_results" == *'"node-unit-tests='* ]]
-  [[ "$node_hard_results" == *'"node-host-integration-tests='* ]]
-  [[ "$node_advisory_results" == *'"node-unit-timing-budget='* ]]
-  webrtc_hard_results="${webrtc#*hard_results=(}"
-  webrtc_hard_results="${webrtc_hard_results%%$'\n          )'*}"
-  webrtc_advisory_results="${webrtc#*advisory_results=(}"
-  webrtc_advisory_results="${webrtc_advisory_results%%$'\n          )'*}"
-  [[ "$webrtc_hard_results" == *'"detect-changes='* ]]
-  [[ "$webrtc_hard_results" == *'"webrtc-integration-test='* ]]
-  [[ "$webrtc_advisory_results" == *'"android-device-webrtc='* ]]
-  [[ "$webrtc_advisory_results" == *'"ios-device-webrtc='* ]]
-  [[ "$webrtc_advisory_results" != *'"webrtc-integration-test='* ]]
-}
-
-@test "advisory loops tolerate empty result maps under bash strict mode" {
-  wiring_requires_yq
-  local gate script tmpfile
-  for gate in ios-gate android-gate node-tests-gate webrtc-gate; do
-    script="$(yq -r ".jobs.\"${gate}\".steps[] | select(.name == \"Check results\") | .run" "$WF" | sed -E 's/\$\{\{ needs\.[A-Za-z0-9_-]+\.result \}\}/success/g')"
-    tmpfile="$BATS_TEST_TMPDIR/${gate}.sh"
-    printf '%s\n' "$script" >"$tmpfile"
-    run /bin/bash -u -e -o pipefail "$tmpfile"
-    [ "$status" -eq 0 ]
-    [[ "$output" != *"bad array subscript"* ]]
-  done
 }
 
 @test "portable PR matrices leave macOS coverage to nightly" {
@@ -357,31 +276,6 @@ wiring_requires_yq() {
   done
 }
 
-@test "webrtc-gate rolls up publisher and device coverage" {
-  local block
-  block="$(job_block webrtc-gate)"
-  for job in webrtc-integration-test android-device-webrtc ios-device-webrtc; do
-    [[ "$block" == *"- $job"* ]]
-    [[ "$block" == *"needs.$job.result"* ]]
-  done
-}
-
-@test "runtime-graph-gate rolls up runtime-graph-verification (#5421)" {
-  wiring_requires_yq
-  run yq -r '.jobs."runtime-graph-gate".needs[]' "$WF"
-  [ "$status" -eq 0 ]
-  [[ $'\n'"$output"$'\n' == *$'\nruntime-graph-verification\n'* ]]
-
-  run yq -r '
-    .jobs."runtime-graph-gate".steps[]
-    | select(.name == "Check results")
-    | .run
-  ' "$WF"
-  [ "$status" -eq 0 ]
-  printf '%s\n' "$output" \
-    | grep -Fqx '  [runtime-graph-verification]="${{ needs.runtime-graph-verification.result }}"'
-}
-
 @test "runtime-graph-verification runs the clean-room pinned-graph check exactly once (#5421)" {
   # The heavy pack+install verification must live in its own required-able job
   # and NOT be duplicated back into the benchmarks job (it was extracted from
@@ -431,13 +325,26 @@ wiring_requires_yq() {
   [[ $'\n'"$output"$'\n' == *$'\n.github/actions/setup-auto-mobile-npm-package/**\n'* ]]
 }
 
-@test "ios-gate reuses ios-build-gate so build-leg membership is declared once" {
-  # The broad non-required "iOS" gate must not re-list the build jobs (that would
-  # double the drift surface); it depends on ios-build-gate instead.
-  block="$(job_block ios-gate)"
-  [[ -n "$block" ]]
-  [[ "$block" == *"- ios-build-gate"* ]]
-  [[ "$block" == *"needs.ios-build-gate.result"* ]]
-  [[ "$block" != *"- ios-swift-packages"* ]]
-  [[ "$block" != *"- ios-xcode-build"* ]]
+@test "non-required roll-up gates stay removed (runner-slot budget)" {
+  # Each roll-up costs a runner slot (plus queue time) per PR. Only names the
+  # green-main ruleset requires may have a gate; these were advisory and removed.
+  local job
+  for job in ios-gate android-gate codeql-gate node-tests-gate webrtc-gate runtime-graph-gate; do
+    [[ -z "$(job_block "$job")" ]]
+  done
+  wiring_requires_yq
+  run yq -r '.jobs[].name' "$WF"
+  [ "$status" -eq 0 ]
+  local name
+  for name in "iOS" "Android" "CodeQL" "Node Tests" "WebRTC" "Pinned Runtime Graph Gate"; do
+    [[ $'\n'"$output"$'\n' != *$'\n'"$name"$'\n'* ]]
+  done
+}
+
+@test "ide-plugin-gate rolls up the IDE plugin build and unit tests" {
+  block="$(job_block ide-plugin-gate)"
+  [[ "$block" == *"- build-ide-plugin"* ]]
+  [[ "$block" == *"needs.build-ide-plugin.result"* ]]
+  [[ "$block" == *"- ide-plugin-unit-tests"* ]]
+  [[ "$block" == *"needs.ide-plugin-unit-tests.result"* ]]
 }

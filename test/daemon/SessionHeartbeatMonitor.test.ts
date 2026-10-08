@@ -191,7 +191,8 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      timer.advanceTime(30_000);
+      // The owner gets its own lease plus the suspect grace to come back.
+      timer.advanceTime(30_000 + SUSPECT_GRACE_MS);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
@@ -223,9 +224,9 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      // Judged only on the owner timeout (the default lease), never the 5 s pre-first-heartbeat
-      // grace: kept through the lease, reaped one millisecond after it.
-      timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS - 1);
+      // Judged only on the owner window (the default lease plus the suspect grace), never the 5 s
+      // pre-first-heartbeat grace: kept through the window, reaped just after it.
+      timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS - 1);
       await monitor.tick();
       expect(reaped).toEqual([]);
 

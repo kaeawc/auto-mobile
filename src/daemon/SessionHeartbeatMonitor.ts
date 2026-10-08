@@ -8,7 +8,10 @@ import {
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
-import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "./sessionLivenessWindows";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  SUSPECT_GRACE_MS,
+} from "./sessionLivenessWindows";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -354,8 +357,11 @@ export class SessionHeartbeatMonitor {
     if (session.ownership !== "awaiting-owner") {
       return undefined;
     }
+    // A returning owner gets the budget a live owner gets: the lease plus the suspect grace.
+    // The release is terminal, and a proxy reconnecting to a restarted daemon must first find
+    // the socket and then deliver a heartbeat on its own cadence.
     const awaitingOwnerSince = session.awaitingOwnerSince ?? now;
-    return now - awaitingOwnerSince > session.heartbeatTimeoutMs
+    return now - awaitingOwnerSince > session.heartbeatTimeoutMs + SUSPECT_GRACE_MS
       ? "rehydration-owner-timeout"
       : undefined;
   }

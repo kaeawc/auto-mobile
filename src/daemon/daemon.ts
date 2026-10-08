@@ -2508,6 +2508,8 @@ export class Daemon {
    * Start periodic heartbeat checks to cancel stale sessions
    */
   private startHeartbeatMonitor(): void {
+    // Owners can reconnect only now that the control socket accepts connections.
+    this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
       (sessionId) => this.hasActiveSessionExecution(sessionId),

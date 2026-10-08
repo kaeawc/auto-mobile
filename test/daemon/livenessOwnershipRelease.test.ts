@@ -316,7 +316,7 @@ describe("deliberate liveness ownership release", () => {
     session.awaitingOwnerSince = timer.now();
     session.hasReceivedHeartbeat = false;
     await release();
-    timer.advanceTime(LEASE);
+    timer.advanceTime(LEASE + SUSPECT_GRACE_MS);
     await monitor.tick();
     expect(reaped).toEqual([]);
     timer.advanceTime(1);

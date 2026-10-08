@@ -6081,6 +6081,25 @@ export class SessionManager {
   }
 
   /**
+   * Start every rehydrated session's owner-reconnect window now (#10051 follow-up). Rehydration
+   * runs early in daemon startup, before iOS services, the control socket and the heartbeat
+   * monitor, and no owner can reconnect until the socket accepts connections, so the window is
+   * measured from when the daemon is ready to hear from owners rather than from rehydration.
+   * Returns how many sessions were restarted.
+   */
+  startRehydratedOwnerWindows(): number {
+    const now = this.timer.now();
+    let restarted = 0;
+    for (const session of this.sessions.values()) {
+      if (session.ownership === "awaiting-owner" && session.awaitingOwnerSince !== undefined) {
+        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, now);
+        restarted++;
+      }
+    }
+    return restarted;
+  }
+
+  /**
    * Do not hold the daemon's own stall against any session (#10051).
    *
    * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot

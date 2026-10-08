@@ -3292,7 +3292,7 @@ describe("SessionManager", () => {
             fakeTimer,
             { graceMs: 20_000 },
           );
-          fakeTimer.advanceTime(991);
+          fakeTimer.advanceTime(991 + SUSPECT_GRACE_MS);
           await monitor.tick();
           expect(reaped).toEqual(["rehydration-owner-timeout"]);
         } finally {

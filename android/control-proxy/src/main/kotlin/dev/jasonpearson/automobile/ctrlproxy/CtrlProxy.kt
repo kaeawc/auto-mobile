@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
@@ -2506,6 +2507,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * seam so the continuation loop ([GestureStreamSession]) stays framework-free and unit-tested.
    * Requires API 26+ (the `willContinue` constructor and `continueStroke`); the caller guards.
    */
+  @TargetApi(Build.VERSION_CODES.O)
   private inner class AccessibilityStrokeDispatcher :
     StrokeDispatcher<GestureDescription.StrokeDescription> {
     override fun initialStroke(segment: GestureSegment): GestureDescription.StrokeDescription =
@@ -2793,7 +2795,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           ) {
             InsertTextSnapshot(
               node.text?.toString(),
-              node.isShowingHintText,
+              node.isShowingHintTextCompat(),
               node.textSelectionStart,
               node.textSelectionEnd,
             )
@@ -5569,7 +5571,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (rememberedInsert?.first != nodeKey()) rememberedInsert = null
         return InsertTextSnapshot(
           targetNode.text?.toString(),
-          targetNode.isShowingHintText,
+          targetNode.isShowingHintTextCompat(),
           targetNode.textSelectionStart,
           targetNode.textSelectionEnd,
         )
@@ -5737,7 +5739,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           return null
         return InsertTextSnapshot(
           targetNode.text?.toString(),
-          targetNode.isShowingHintText,
+          targetNode.isShowingHintTextCompat(),
           targetNode.textSelectionStart,
           targetNode.textSelectionEnd,
         )
@@ -5799,7 +5801,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (afterSetText != null)
           InsertTextSnapshot(
             targetNode.text?.toString(),
-            targetNode.isShowingHintText,
+            targetNode.isShowingHintTextCompat(),
             targetNode.textSelectionStart,
             targetNode.textSelectionEnd,
           )
@@ -6088,7 +6090,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val plan =
         planSelectAll(
           text?.length ?: 0,
-          focusedNode.isShowingHintText,
+          focusedNode.isShowingHintTextCompat(),
           focusedNode.textSelectionStart,
           focusedNode.textSelectionEnd,
         )
@@ -9237,3 +9239,7 @@ internal data class ImeFocusCandidate(
 
 internal fun isImeFocusCandidate(row: ImeFocusCandidate): Boolean =
   row.isEditable && row.isFocusable && row.isVisibleToUser && row.isEnabled
+
+/** `isShowingHintText` is API 26+; older platforms cannot report it, so treat the text as real. */
+private fun AccessibilityNodeInfo.isShowingHintTextCompat(): Boolean =
+  Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isShowingHintText

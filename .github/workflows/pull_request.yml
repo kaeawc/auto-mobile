@@ -3804,6 +3804,13 @@ jobs:
         continue-on-error: true
         run: bash scripts/webrtc/explain-device-results.sh ios
 
+      # A helper that dies mid-stream (SIGTRAP, #7604) leaves its faulting frame
+      # only in a macOS crash report; ship it with the device artifacts.
+      - name: "Collect screen-capture-helper crash reports"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/webrtc/collect-helper-crash-reports.sh scratch/webrtc-device-integration
+
       - name: "Upload WebRTC device artifacts"
         if: always()
         continue-on-error: true

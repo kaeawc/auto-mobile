@@ -235,7 +235,7 @@ final class SimulatorHighlightHost {
                 reply(requestId: request.requestId, error: nil)
             } catch { reply(requestId: request.requestId, error: String(describing: error)) }
         } catch {
-            FileHandle.standardError.write(Data("error: invalid highlight command: \(error)\n".utf8))
+            DescriptorWrite.writeDiagnostic("error: invalid highlight command: \(error)\n")
         }
     }
 

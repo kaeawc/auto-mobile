@@ -35,7 +35,7 @@ _ = NSApplication.shared
 // MARK: - Logging
 
 func logError(_ message: String) {
-    FileHandle.standardError.write(Data("\(message)\n".utf8))
+    DescriptorWrite.writeDiagnostic("\(message)\n")
 }
 
 func logScreenRecordingPermissionRequired() {

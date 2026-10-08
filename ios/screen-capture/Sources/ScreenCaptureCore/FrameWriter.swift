@@ -375,25 +375,12 @@ public final class FileHandleFrameSink: FrameSink {
 
     public func write(_ data: Data) {
         guard !stateLock.withLock({ outputClosed }) else { return }
-        data.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return }
-            var offset = 0
-            while offset < bytes.count {
-                let written = Darwin.write(handle.fileDescriptor, base.advanced(by: offset), bytes.count - offset)
-                if written > 0 {
-                    offset += written
-                } else if written == -1 && errno == EINTR {
-                    continue
-                } else {
-                    let shouldNotify = stateLock.withLock { () -> Bool in
-                        if outputClosed { return false }
-                        outputClosed = true
-                        return true
-                    }
-                    if shouldNotify { onOutputClosed() }
-                    return
-                }
-            }
+        guard !DescriptorWrite.writeAll(data, toFileDescriptor: handle.fileDescriptor) else { return }
+        let shouldNotify = stateLock.withLock { () -> Bool in
+            if outputClosed { return false }
+            outputClosed = true
+            return true
         }
+        if shouldNotify { onOutputClosed() }
     }
 }

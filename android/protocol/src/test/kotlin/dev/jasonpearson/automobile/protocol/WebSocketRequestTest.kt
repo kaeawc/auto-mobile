@@ -742,6 +742,14 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `inspect overlays round trips a byte identical shared literal`() {
+    val literal = """{"type":"inspect_overlays","requestId":"r8"}"""
+    val request = json.decodeFromString<WebSocketRequest>(literal)
+    assertEquals(literal, json.encodeToString(request))
+    assertEquals("r8", assertIs<InspectOverlays>(request).requestId)
+  }
+
+  @Test
   fun `overlay asset requests round trip byte identical shared literals`() {
     val put =
       """{"type":"put_overlay_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""

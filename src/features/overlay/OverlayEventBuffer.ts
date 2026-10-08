@@ -36,6 +36,16 @@ export class OverlayEventBuffer {
     return true;
   }
 
+  /**
+   * Raises the high-water mark to a sequence the device reported without sending the events, so a
+   * later duplicate at or below it is rejected and status shows where the ledger stands.
+   */
+  advanceTo(sequence: number): void {
+    if (this.lastSequence === undefined || sequence > this.lastSequence) {
+      this.lastSequence = sequence;
+    }
+  }
+
   take(filter: OverlayEventFilter): OverlayEvent | undefined {
     const index = this.events.findIndex(
       (event) =>

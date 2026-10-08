@@ -123,6 +123,25 @@ Root fills the entire window, including behind system bars and cutouts; ordinary
 style constraints apply to its content. A floating/sheet root fills that smaller
 window, not the entire display. No display selection is defined here (#9308).
 
+Optional `layer` (#10496) is `system` (default) or `app`. `system` is
+`TYPE_ACCESSIBILITY_OVERLAY`, above system UI including SystemUI's screenshot
+flash and preview. `app` is `TYPE_APPLICATION_OVERLAY`, just above apps: the
+shade, keyboard, toasts, system dialogs and the screenshot preview draw over the
+prototype, the status and navigation bars draw over a fullscreen one (safe-area
+padding matters more), and the keyboard covers its text fields like a real app's.
+Non-default displays create their window context with the matching type. `app`
+needs SYSTEM_ALERT_WINDOW; the host grants it with
+`adb shell appops set dev.jasonpearson.automobile.ctrlproxy SYSTEM_ALERT_WINDOW allow`
+before the show, and the device refuses the show with that command when it is
+still missing. Application overlays are not trusted for touch pass-through on
+Android 12+, so gestures dispatched through an `app` overlay can be blocked as
+untrusted touches.
+
+Optional `persistence` (#10494) is `session` (default) or `device`. See
+Lifecycle and safety. Both fields are honoured only by a CtrlProxy that advertises
+`overlay_window_options_v1`; the request decoder ignores unknown spec fields, so
+the host refuses them for an older device instead of sending them.
+
 ## Common node properties
 
 Every node has required `type`. All other common properties are optional:
@@ -642,6 +661,27 @@ the spec, including modal sheets and `window.opacity: 0`. The authored content
 viewport excludes the host row; relative sheet detents use that remaining height.
 Spec opacity continues
 to apply to authored content and scrims; it cannot fade the safety control.
+
+A `persistence: "device"` overlay outlives its host session: it is not dismissed
+when the last client disconnects (including a show queued after that edge), it
+has no idle TTL, and its uploaded assets are kept until it is dismissed. Because
+nobody may be connected to remove it, sheet and floating windows also carry an
+opaque “Close” control drawn above the authored content, and spec opacity fades
+only the content. It ends through that control or the fullscreen dismiss row
+(`user`), `dismiss_overlay` (`agent`), a replacing show, or service
+unbind/destroy (`teardown`). Keyguard hiding is unchanged.
+
+Events a persisted overlay emits while no client is connected (checked per event
+against the live client count) go to a bounded ring in `OverlayController`
+(`OverlayOfflineEventBuffer`, 200 events, oldest dropped and counted). The ring
+is flushed under the controller mutex, so order is preserved: when a client
+connects (`onClientConnected`), before the next live event, and before an
+`inspect_overlays` reply. Session-scoped overlays never use it. `inspect_overlays`
+returns one `overlay_result` with `overlays` (`id`, `persistent`, `state`,
+`pages`, `lastSequence`) and `droppedEvents`, the cumulative count dropped from
+the ring. The host adopts the report into its status store and event buffers,
+because the host clears both on session release. Both behaviours are advertised
+as `overlay_persistence_replay_v1`; a host refuses `inspect` without it.
 
 Every dismissal emits one `overlay_event` with `kind: "dismissed"`, null `name`,
 and `payload: {"reason": "user|agent|disconnect|ttl|teardown"}` (one reason string).

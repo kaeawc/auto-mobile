@@ -1226,6 +1226,13 @@ class CtrlProxyMessageHandlerTest {
     }
 
   @Test
+  fun `dispatch inspect overlays request`() = runTest {
+    dispatch("""{"type":"inspect_overlays","requestId":"i"}""")
+    assertEquals("inspectOverlays", lastCall.first)
+    assertEquals(listOf<Any?>("i"), lastCall.second)
+  }
+
+  @Test
   fun `dispatch typed overlay asset requests`() = runTest {
     dispatch(
       """{"type":"put_overlay_asset","requestId":"p","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""

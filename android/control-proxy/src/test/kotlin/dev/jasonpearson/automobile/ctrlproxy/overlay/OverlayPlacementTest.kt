@@ -81,6 +81,22 @@ class OverlayPlacementTest {
   }
 
   @Test
+  fun `a non-focusable app-layer window stays below the keyboard until a text field needs focus`() {
+    placements().forEach { placement ->
+      val idle =
+        interactiveOverlayLayoutParams(placement, false, 2.5f, 30, OverlayWindowLayer.APP).flags
+      assertTrue(idle and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+      assertTrue(idle and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
+      val typing =
+        interactiveOverlayLayoutParams(placement, true, 2.5f, 30, OverlayWindowLayer.APP).flags
+      assertFalse(typing and LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+      assertFalse(typing and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
+      // The system layer is untouched.
+      assertFalse(build(placement).flags and LayoutParams.FLAG_ALT_FOCUSABLE_IM != 0)
+    }
+  }
+
+  @Test
   fun `accessibility type is pinned across placements and cutout API branches`() {
     val expected = mapOf(27 to 0, 28 to 1, 29 to 1, 30 to 3, 36 to 3)
     expected.forEach { (sdk, cutout) ->

@@ -100,6 +100,7 @@ import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlaySpec
+import dev.jasonpearson.automobile.protocol.OverlayStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -394,19 +395,24 @@ internal data class AccessibilityEventWork(
 }
 
 /**
- * True only for an event from CtrlProxy's own accessibility-overlay window (the highlight overlay
- * or the interactive overlay). CtrlProxy's package also owns the CtrlProxy keyboard
- * (`TYPE_INPUT_METHOD`) and `MainActivity` (`TYPE_APPLICATION`), whose events must still advance
- * `frameContext` and refresh the hierarchy, so they are never skipped. Fails open: an unknown
- * window type ([windowType] null) is processed, because handling one extra event is safe while
- * dropping a keyboard event leaves stale key coordinates passing the staleness check.
+ * True only for an event from CtrlProxy's own overlay window: an accessibility-overlay window (the
+ * highlight overlay or the interactive overlay) or, while an application-layer interactive overlay
+ * is up ([appLayerShowing]), a `TYPE_SYSTEM` window, which is how the system reports that layer.
+ * CtrlProxy's package also owns the CtrlProxy keyboard (`TYPE_INPUT_METHOD`) and `MainActivity`
+ * (`TYPE_APPLICATION`), whose events must still advance `frameContext` and refresh the hierarchy,
+ * so they are never skipped. Fails open: an unknown window type ([windowType] null) is processed,
+ * because handling one extra event is safe while dropping a keyboard event leaves stale key
+ * coordinates passing the staleness check.
  */
 internal fun shouldSkipOwnOverlayEvent(
   eventPackage: String?,
   ownPackage: String,
   windowType: Int?,
+  appLayerShowing: Boolean = false,
 ): Boolean =
-  eventPackage == ownPackage && windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+  eventPackage == ownPackage &&
+    (windowType == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY ||
+      (appLayerShowing && windowType == AccessibilityWindowInfo.TYPE_SYSTEM))
 
 /**
  * Window type of the window [event] came from, or null when it cannot be determined (no source
@@ -1085,6 +1091,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           resultBroadcaster.guard(requestId, "overlay_result") {
             webSocketServer.broadcastWithPerf { _ ->
               overlayResultFrame(requestId, success, error, missingAssets)
+            }
+          }
+        }
+      }
+
+      override suspend fun sendOverlayStatus(
+        requestId: String?,
+        overlays: List<OverlayStatusEntry>,
+        droppedEvents: Long,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "overlay_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              overlayStatusFrame(requestId, overlays, droppedEvents)
             }
           }
         }
@@ -1795,6 +1815,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             clearAssets = { overlayAssets.clear() },
             hasAsset = { overlayAssets.lookup(it) != null },
             images = overlayImages,
+            // The host grants this appop before showing a window.layer "app" overlay.
+            appLayerPermitted = {
+              Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && Settings.canDrawOverlays(this)
+            },
+            packageName = packageName,
             fonts = overlayFonts,
           )
         // Service start: drop anything a previous process left in the cache directory.
@@ -2023,6 +2048,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientCountChanged = { count, session ->
               serviceScope.launch { overlays.onClientCountChanged(count, session) }
             },
+            onClientConnected = { serviceScope.launch { overlays.onClientConnected() } },
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -3169,6 +3195,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     launchRequestScope(requestId) { overlayController.dismiss(requestId, id, all) }
   }
 
+  override fun inspectOverlays(requestId: String?) {
+    launchRequestScope(requestId) { overlayController.inspect(requestId) }
+  }
+
   override fun putOverlayAsset(
     requestId: String?,
     id: String,
@@ -3471,7 +3501,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // and feeding the hierarchy push. The window type is resolved only for own-package events.
     val eventPackage = event.packageName?.toString()
     val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
-    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType)) return
+    val appLayerShowing = ::overlayController.isInitialized && overlayController.isAppLayerShowing
+    if (shouldSkipOwnOverlayEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
     // A window appearing in an app is the cheapest sign its process (re)started; an open storage
     // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
     // for every package without a subscription, so this is free on the hot path.

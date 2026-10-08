@@ -16,6 +16,7 @@ export type AndroidOverlayClient = Pick<
   AndroidCtrlProxyClient,
   | "requestShowOverlay"
   | "requestUpdateOverlay"
+  | "requestInspectOverlays"
   | "requestDismissOverlay"
   | "requestPutOverlayAsset"
   | "requestRemoveOverlayAsset"
@@ -24,7 +25,7 @@ export type AndroidOverlayClient = Pick<
 >;
 
 /**
- * Forwards every call to CtrlProxy unchanged. `update` and `supportsCommand` are Android-only
+ * Forwards every call to CtrlProxy unchanged. `update`, `inspect` and `supportsCommand` are Android-only
  * extras outside the shared interface: CtrlProxy still has `update_overlay`, and display
  * targeting is gated on a CtrlProxy capability.
  */
@@ -37,6 +38,10 @@ export class AndroidOverlayTransport implements OverlayTransport {
 
   update(update: OverlayUpdate, timeoutMs?: number): Promise<OverlayResult> {
     return this.client.requestUpdateOverlay(update, timeoutMs);
+  }
+
+  inspect(timeoutMs?: number): Promise<OverlayResult> {
+    return this.client.requestInspectOverlays(timeoutMs);
   }
 
   dismiss(target: OverlayDismiss, timeoutMs?: number): Promise<OverlayResult> {

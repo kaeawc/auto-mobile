@@ -436,6 +436,9 @@ function bindingErrors(
     if (value.type === "textField" && typeof stored !== "string") {
       return fail(`${path}.stateKey`, "Text field requires a string state key");
     }
+    if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
+      return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
+    }
     if (value.type !== "tabBar" && value.type !== "bottomNav") {
       continue;
     }

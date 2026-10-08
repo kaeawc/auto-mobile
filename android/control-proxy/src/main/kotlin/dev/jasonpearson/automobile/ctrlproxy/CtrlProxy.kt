@@ -3179,12 +3179,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override fun getSdkCapabilities(requestId: String?, packageName: String) {
+  override fun getSdkCapabilities(requestId: String?, packageName: String, userId: Int?) {
     asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
       val state =
         dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
           this@CtrlProxy,
           packageName,
+          userId,
         )
       resultBroadcaster.guard(requestId, "sdk_capabilities") {
         webSocketServer.broadcast(

@@ -128,3 +128,39 @@ describe("observe waitFor with layer (#9305)", () => {
     expect(outcome.matched).toBe(matched);
   });
 });
+
+describe("observe layer screenshot (#9305)", () => {
+  const withScreenshot = (result: ObserveResult): ObserveResult => ({
+    ...result,
+    screenshotCaptureAttempted: true,
+    screenshotPath: "/tmp/observe-layer.png",
+  });
+
+  const structured = (response: unknown): Record<string, unknown> =>
+    (response as { structuredContent: Record<string, unknown> }).structuredContent;
+
+  test('"app" with an overlay showing marks the screenshot as including the overlay', async () => {
+    const response = await observe(withScreenshot(observationOf(capturedOverlayHierarchy())), {
+      layer: "app",
+    });
+    expect(structured(response).screenshotIncludesOverlay).toBe(true);
+  });
+
+  test.each([
+    ["no layer", observationOf(capturedOverlayHierarchy()), {}],
+    ['"overlay"', observationOf(capturedOverlayHierarchy()), { layer: "overlay" }],
+    [
+      '"app" with no overlay showing',
+      observationOf(capturedTwoWindowHierarchy()),
+      { layer: "app" },
+    ],
+  ] as const)("%s leaves the screenshot unmarked", async (_, result, args) => {
+    const response = await observe(withScreenshot(result), args);
+    expect(structured(response).screenshotIncludesOverlay).toBeUndefined();
+  });
+
+  test('"app" without a screenshot leaves the result unmarked', async () => {
+    const response = await observe(observationOf(capturedOverlayHierarchy()), { layer: "app" });
+    expect(structured(response).screenshotIncludesOverlay).toBeUndefined();
+  });
+});

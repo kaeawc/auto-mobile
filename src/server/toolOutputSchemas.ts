@@ -888,6 +888,7 @@ const observationScreenshotOutputFields = {
   screenshotImageSize: screenshotRasterFields.imageSize.optional(),
   screenshotPixelsPerNativeUnit: screenshotRasterFields.pixelsPerNativeUnit.optional(),
   screenshotScaleProvenance: screenshotRasterFields.scaleProvenance.optional(),
+  screenshotIncludesOverlay: z.boolean().optional(),
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),

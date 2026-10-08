@@ -5,6 +5,7 @@ import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
 import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
   AccessibilityHierarchy,
+  AccessibilityNode,
   HierarchyDelegateContext,
 } from "../../src/features/observe/android/types";
 import { DefaultObserveElementCollector } from "../../src/features/observe/ObserveElementCollector";
@@ -111,6 +112,82 @@ export const PROTOTYPE_CAPTURE = {
   floatingOverlayWindowId: 170,
   appPackage: "dev.jasonpearson.automobile.playground",
 } as const;
+
+/** The unconverted CtrlProxy wire capture of the floating prototype over "Elevated" (window 170). */
+export function floatingCoverWireCapture(): AccessibilityHierarchy {
+  return JSON.parse(floatingCoverCapture.rawViewHierarchy.json) as AccessibilityHierarchy;
+}
+
+/** The unconverted CtrlProxy wire capture of the `window.layer: "app"` prototype (window 174). */
+export function appLayerOverlayWireCapture(): AccessibilityHierarchy {
+  return JSON.parse(appLayerCapture.rawViewHierarchy.json) as AccessibilityHierarchy;
+}
+
+function wireRoots(capture: AccessibilityHierarchy): AccessibilityNode[] {
+  const roots = capture.hierarchy.node;
+  return roots === undefined ? [] : Array.isArray(roots) ? roots : [roots];
+}
+
+/** The window root CtrlProxy stamped with `windowId` in a wire capture. */
+export function wireWindowRoot(
+  capture: AccessibilityHierarchy,
+  windowId: number,
+): AccessibilityNode {
+  const root = wireRoots(capture).find((node) => node.windowId === windowId);
+  if (!root) {
+    throw new Error(`capture has no window root ${windowId}`);
+  }
+  return root;
+}
+
+/**
+ * A wire capture with one window removed (its entry and its root), which is the same screen as it
+ * was before that window was shown. Every other node is the captured one.
+ */
+export function withoutWireWindow(
+  capture: AccessibilityHierarchy,
+  windowId: number,
+): AccessibilityHierarchy {
+  return {
+    ...capture,
+    hierarchy: {
+      ...capture.hierarchy,
+      node: wireRoots(capture).filter((node) => node.windowId !== windowId),
+    },
+    windows: capture.windows?.filter((window) => window.id !== windowId),
+  };
+}
+
+/**
+ * The captured Recents overview's raw wire capture with window 252 relabelled as the CtrlProxy
+ * overlay, the wire counterpart of `capturedOverlayHierarchy`. Unlike the Playground captures,
+ * whose screen fingerprint is the SDK's `navigation.*` id, its fingerprint covers every node.
+ */
+export function launcherWireWithOverlay(): AccessibilityHierarchy {
+  const wire = JSON.parse(capture.rawViewHierarchy.json) as AccessibilityHierarchy;
+  return {
+    ...wire,
+    windows: wire.windows?.map((window) =>
+      window.id === OVERLAY_CAPTURE.overlayWindowId
+        ? {
+            ...window,
+            type: ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY,
+            packageName: CTRL_PROXY_PACKAGE,
+          }
+        : window,
+    ),
+  };
+}
+
+/** `launcherWireWithOverlay` with the overlay showing the captured floating prototype's content. */
+export function launcherWireWithPagedOverlay(): AccessibilityHierarchy {
+  const wire = launcherWireWithOverlay();
+  wireWindowRoot(wire, OVERLAY_CAPTURE.overlayWindowId).node = wireWindowRoot(
+    floatingCoverWireCapture(),
+    PROTOTYPE_CAPTURE.floatingOverlayWindowId,
+  ).node;
+  return wire;
+}
 
 /** `window.layer: "app"` prototype (a TYPE_SYSTEM window without overlay metadata) over the Playground. */
 export function capturedAppLayerOverlayHierarchy(): ViewHierarchyResult {

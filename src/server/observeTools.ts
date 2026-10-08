@@ -94,6 +94,7 @@ import {
   resolverSelectionStrategySchema,
 } from "./elementSelectorSchemas";
 import {
+  hasOwnOverlay,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
   scopeObserveResultToLayer,
@@ -2153,7 +2154,23 @@ function layerScopedObserveResult(
   if (requireOverlay && result.viewHierarchy) {
     scopeHierarchyForSelector(result.viewHierarchy, layer);
   }
-  return scopeObserveResultToLayer(result, layer, platform);
+  const scoped = scopeObserveResultToLayer(result, layer, platform);
+  return layer === "app" && carriesScreenshot(result) && hasOwnOverlay(result.viewHierarchy)
+    ? { ...scoped, screenshotIncludesOverlay: true }
+    : scoped;
+}
+
+/**
+ * Whether the observation carries a screenshot or crop. Neither the Android CtrlProxy nor the iOS
+ * overlay agent can hide its overlay window for a capture, so a `layer: "app"` screenshot still
+ * shows the overlay and `observe` says so instead of implying an app-only image (issue #9305).
+ */
+function carriesScreenshot(result: ObserveResult): boolean {
+  return (
+    result.screenshotCaptureAttempted === true ||
+    result.screenshotPath !== undefined ||
+    result.crop !== undefined
+  );
 }
 
 function recordObservationBackStack(result: ObserveResult, sessionUuid?: string): void {

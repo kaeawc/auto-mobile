@@ -7,7 +7,10 @@ import {
   ObserveElementCollector,
 } from "../../../src/features/observe/ObserveElementCollector";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import {
+  DefaultClickableElementsQuery,
+  DefaultScrollableElementsQuery,
+} from "../../../src/features/utility/InteractiveElementQueries";
 import {
   loadAndroidHomeObserve,
   loadIosFractionalObserve,
@@ -66,15 +69,14 @@ const expectBuilderPreservesLegacyFixtureElements = (
   platform: "android" | "ios",
 ): void => {
   const parser = new DefaultElementParser();
-  const finder = new DefaultElementFinder(parser);
   const mediaClassifier = new IdentifyMediaViews(parser);
   const flattenedEntries = parser.flattenViewHierarchy(viewHierarchy, {
     includeWindows: true,
     windowOrder: "topmost-first",
   });
   const expected = {
-    clickable: finder.findClickableElements(viewHierarchy),
-    scrollable: finder.findScrollableElements(viewHierarchy),
+    clickable: new DefaultClickableElementsQuery(parser).findClickableElements(viewHierarchy),
+    scrollable: new DefaultScrollableElementsQuery(parser).findScrollableElements(viewHierarchy),
     text: flattenedEntries
       .filter((entry) => typeof entry.text === "string" && entry.text.trim().length > 0)
       .map((entry) => entry.element),

@@ -63,6 +63,14 @@ export interface ReleaseChecksumEntry {
    * predate it degrade to "overlay agent unavailable for this build".
    */
   overlayAgentSha256?: string;
+  /**
+   * SHA-256 of the signed, notarized universal macOS Network Filter app archive
+   * (`automobile-network-filter-macos-universal.zip`, packed with
+   * `ditto -c -k --keepParent` so the nested system extension keeps its
+   * signature). Optional so releases predating its delivery stay valid; filled
+   * by release automation (scripts/generate-release-constants.sh), never by hand.
+   */
+  networkFilterSha256?: string;
 }
 
 /**
@@ -902,6 +910,9 @@ export const VIDEO_SERVER_JAR_FILENAME = "automobile-video.jar";
 /** Fixed GitHub Release asset for the signed universal macOS capture helper. */
 export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-macos-universal.zip";
 
+/** Fixed GitHub Release asset for the signed, notarized macOS Network Filter app. */
+export const NETWORK_FILTER_ARCHIVE_FILENAME = "automobile-network-filter-macos-universal.zip";
+
 /**
  * video-server jar download URL honoring `AUTOMOBILE_VERSION` +
  * `AUTOMOBILE_ASSET_BASE_URL`, mirroring `resolveApkUrl`/`resolveIpaUrl`.
@@ -974,6 +985,27 @@ export function resolveScreenCaptureHelperChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
+}
+
+/** Download URL for the signed macOS Network Filter app archive. */
+export function resolveNetworkFilterUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    NETWORK_FILTER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected archive SHA-256 for the selected Network Filter release (empty if unknown). */
+export function resolveNetworkFilterChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.networkFilterSha256 ?? "";
 }
 
 /**

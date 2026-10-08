@@ -14,7 +14,9 @@ public enum ProbeReadbackStartupState {
 
 @objc
 public protocol ProbeBridge {
-    func snapshot(version: Int, reply: @escaping (Data?, String?) -> Void)
+    /// `managedSimulators` is a JSON array of `ManagedSimulator`: the only
+    /// simulators the provider may attribute flows to.
+    func snapshot(version: Int, managedSimulators: Data, reply: @escaping (Data?, String?) -> Void)
 }
 
 public final class ProbeService: NSObject, ProbeBridge {
@@ -44,9 +46,15 @@ public final class ProbeService: NSObject, ProbeBridge {
         return true
     }
 
-    public func snapshot(version: Int, reply: @escaping (Data?, String?) -> Void) {
+    public func snapshot(version: Int, managedSimulators: Data, reply: @escaping (Data?, String?) -> Void) {
         guard version == IdentityProbe.version else {
             reply(nil, "Unsupported identity-probe protocol version")
+            return
+        }
+        guard let simulators = try? JSONDecoder().decode([ManagedSimulator].self, from: managedSimulators),
+              simulators.count <= ManagedSimulator.maximumCount
+        else {
+            reply(nil, "Invalid managed simulator configuration")
             return
         }
         lock.lock()
@@ -58,7 +66,7 @@ public final class ProbeService: NSObject, ProbeBridge {
             return
         }
         do {
-            let data = try JSONEncoder().encode(probe.snapshot())
+            let data = try JSONEncoder().encode(probe.snapshot(managedSimulators: simulators))
             lock.lock()
             let current = active && revision == generation
             lock.unlock()

@@ -1,0 +1,993 @@
+{
+  "description": "Shared #6231 coordination schedule-feasibility cases. Consumed by test/utils/plan/PlanValidatorScheduleFeasibility.test.ts (daemon PlanValidator) and the Kotlin CoordinationScheduleFeasibilityTest (TestPlanValidator); both must reach expected.valid and, when invalid, produce expected.message exactly.",
+  "cases": [
+    {
+      "name": "rejects an AB-BA cross-lock cycle between two barrier locks",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at barrier lock \"X\" (step 0; 1/2 arrived: A); device \"B\" waits at barrier lock \"Y\" (step 2; 1/2 arrived: B). Locks involved: \"X\", \"Y\". Generations released before the stall: none. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "rejects a three-device cycle X -> Y -> Z",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Z",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "Z",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at barrier lock \"X\" (step 0; 1/2 arrived: A); device \"B\" waits at barrier lock \"Y\" (step 2; 1/2 arrived: B); device \"C\" waits at barrier lock \"Z\" (step 4; 1/2 arrived: C). Locks involved: \"X\", \"Y\", \"Z\". Generations released before the stall: none. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "rejects a cycle that only forms after an earlier shared generation completes",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "start",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "start",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "tapOn",
+            "params": {
+              "device": "A",
+              "text": "Next"
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at barrier lock \"X\" (step 3; 1/2 arrived: A); device \"B\" waits at barrier lock \"Y\" (step 5; 1/2 arrived: B). Locks involved: \"X\", \"Y\". Generations released before the stall: \"start\" {A, B}. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "an optional step on an unrelated lock does not mask an AB-BA cycle",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C", "D"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "Z",
+              "deviceCount": 2
+            },
+            "optional": true
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "D",
+              "lock": "Z",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at barrier lock \"X\" (step 0; 1/2 arrived: A); device \"B\" waits at barrier lock \"Y\" (step 2; 1/2 arrived: B). Locks involved: \"X\", \"Y\". Generations released before the stall: none. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "rejects seven independent AB-BA pairs, each analyzed within budget",
+      "plan": {
+        "name": "Feasibility",
+        "devices": [
+          "A0",
+          "B0",
+          "A1",
+          "B1",
+          "A2",
+          "B2",
+          "A3",
+          "B3",
+          "A4",
+          "B4",
+          "A5",
+          "B5",
+          "A6",
+          "B6"
+        ],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A0",
+              "lock": "X0",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A0",
+              "lock": "Y0",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B0",
+              "lock": "Y0",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B0",
+              "lock": "X0",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A1",
+              "lock": "X1",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A1",
+              "lock": "Y1",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B1",
+              "lock": "Y1",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B1",
+              "lock": "X1",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A2",
+              "lock": "X2",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A2",
+              "lock": "Y2",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B2",
+              "lock": "Y2",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B2",
+              "lock": "X2",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A3",
+              "lock": "X3",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A3",
+              "lock": "Y3",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B3",
+              "lock": "Y3",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B3",
+              "lock": "X3",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A4",
+              "lock": "X4",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A4",
+              "lock": "Y4",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B4",
+              "lock": "Y4",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B4",
+              "lock": "X4",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A5",
+              "lock": "X5",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A5",
+              "lock": "Y5",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B5",
+              "lock": "Y5",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B5",
+              "lock": "X5",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A6",
+              "lock": "X6",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A6",
+              "lock": "Y6",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B6",
+              "lock": "Y6",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B6",
+              "lock": "X6",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A0\" waits at barrier lock \"X0\" (step 0; 1/2 arrived: A0); device \"B0\" waits at barrier lock \"Y0\" (step 2; 1/2 arrived: B0). Locks involved: \"X0\", \"Y0\". Generations released before the stall: none. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "rejects a criticalSection and a barrier visited in opposite orders",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "cs",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "tapOn",
+                  "params": {
+                    "device": "A",
+                    "text": "Next"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "sync",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "sync",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "cs",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "tapOn",
+                  "params": {
+                    "device": "B",
+                    "text": "Next"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at criticalSection lock \"cs\" (step 0; 1/2 arrived: A); device \"B\" waits at barrier lock \"sync\" (step 2; 1/2 arrived: B). Locks involved: \"cs\", \"sync\". Generations released before the stall: none. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "rejects a generation stranded behind another lock (a finished track cannot arrive again)",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier/criticalSection coordination can never complete: under every possible arrival order at least one device track deadlocks. One reachable stall: device \"A\" waits at barrier lock \"X\" (step 1; 1/2 arrived: A); device \"B\" waits at barrier lock \"Y\" (step 2; 1/2 arrived: B). Locks involved: \"X\", \"Y\". Generations released before the stall: \"X\" {A, C}. Tracks already finished (cannot arrive again): C. Each device's track runs sequentially, so a device blocked at one lock never reaches the later lock its peers are waiting at. Reorder the coordination steps so devices visit shared locks in a consistent order, or add the arrivals the stalled locks are missing."
+      }
+    },
+    {
+      "name": "accepts devices visiting shared locks in the same order",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts slack on a lock that breaks an apparent AB-BA cycle",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts timing-dependent stranding (A,A / B,B / C / D with deviceCount 3 completes under some orders)",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C", "D"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "D",
+              "lock": "X",
+              "deviceCount": 3
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts timing-dependent stranding (A,B,A,C with deviceCount 2 completes under some orders)",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts opposite orders on independent locks with disjoint participants",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B", "C", "D"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "D",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y2",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "C",
+              "lock": "Y2",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts when an optional coordination step opts the component out of the check",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 2
+            },
+            "optional": true
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "Y",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "accepts when a criticalSection with nested coordination sub-steps opts the component out of the check",
+      "plan": {
+        "name": "Feasibility",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "cs",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "barrier",
+                  "params": {
+                    "device": "A",
+                    "lock": "inner",
+                    "deviceCount": 1
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "sync",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "sync",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "cs",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "tapOn",
+                  "params": {
+                    "device": "B",
+                    "text": "Next"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    }
+  ]
+}

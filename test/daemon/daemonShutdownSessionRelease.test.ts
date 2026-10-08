@@ -1,6 +1,7 @@
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { Session, SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
@@ -1215,6 +1216,41 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       closeDatabaseSpy.mockRestore();
       loggerCloseSpy.mockRestore();
       cleanupDaemonFilesSpy.mockRestore();
+    }
+  });
+
+  test("stop releases CtrlProxy forwarding leases, bounded, before closing the database", async () => {
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const events: string[] = [];
+    const releaseSpy = spyOn(
+      AndroidCtrlProxyClient,
+      "releaseForwardLeasesForShutdown",
+    ).mockImplementation(async () => {
+      events.push("releaseLeases");
+    });
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      events.push("closeDatabase");
+    });
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    const cleanupFilesSpy = spyOn(daemonFilesModule, "cleanupDaemonFiles").mockResolvedValue(
+      undefined,
+    );
+    try {
+      await daemon.stop();
+
+      expect(releaseSpy).toHaveBeenCalledWith(timer, 3_000);
+      expect(events).toEqual(["releaseLeases", "closeDatabase"]);
+    } finally {
+      releaseSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+      cleanupFilesSpy.mockRestore();
     }
   });
 });

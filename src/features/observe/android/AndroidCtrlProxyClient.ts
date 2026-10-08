@@ -1935,6 +1935,55 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Graceful daemon stop: close every client this process holds (removing the
+   * forwards it recorded, never unrecorded ones) and release its forwarding
+   * leases, so the next daemon need not reclaim them. Bounded by `timeoutMs`:
+   * a hung adb must not block shutdown, so on timeout the leases are released
+   * anyway while the recorded forward stays on disk for the next daemon.
+   */
+  public static async releaseForwardLeasesForShutdown(
+    timer: Timer,
+    timeoutMs: number,
+  ): Promise<void> {
+    const clients = new Set<AndroidCtrlProxyClient>([
+      ...AndroidCtrlProxyClient.instances.values(),
+      ...AndroidCtrlProxyClient.activeObservers,
+    ]);
+    if (clients.size === 0) {
+      return;
+    }
+    AndroidCtrlProxyClient.instances.clear();
+    const closes = [...clients].map((client) =>
+      client.close().catch((error) => {
+        logger.warn(
+          `[CTRL_PROXY] Failed to close CtrlProxy client for ${client.device.deviceId} during shutdown: ${errorMessage(error)}`,
+          error,
+        );
+      }),
+    );
+    const timedOut = Symbol("ctrlproxy shutdown release timeout");
+    try {
+      await raceWithDeadline(Promise.all(closes), {
+        timer,
+        timeoutMs,
+        label: "CtrlProxy forward lease shutdown release",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      logger.warn(
+        `[CTRL_PROXY] Timed out after ${timeoutMs}ms removing CtrlProxy forwards during shutdown; ` +
+          `releasing forwarding leases anyway`,
+      );
+      for (const client of clients) {
+        client.ctrlProxyForwardLease.release();
+      }
+    }
+  }
+
+  /**
    * Evict this client before its asynchronous close can complete. Its port is
    * held so a replacement client cannot share an ADB forward with late cleanup.
    */

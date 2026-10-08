@@ -295,6 +295,8 @@ const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
+// Bound on removing recorded CtrlProxy forwards and releasing forwarding leases at stop.
+const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
 // shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
@@ -3940,15 +3942,7 @@ export class Daemon {
               deviceDisconnectMonitor,
             ),
         },
-        {
-          name: "ADB missing-device subscription",
-          run: () => {
-            if (this.unsubscribeAdbMissingDevice) {
-              this.unsubscribeAdbMissingDevice();
-              this.unsubscribeAdbMissingDevice = null;
-            }
-          },
-        },
+        { name: "ADB missing-device subscription", run: () => this.unsubscribeAdbMissing() },
         {
           // Stop the session cleanup interval before the DB drain below. It is the one
           // best-effort DB writer that fires on its own timer rather than an external
@@ -4008,6 +4002,7 @@ export class Daemon {
             );
           },
         },
+        { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
         {
           // Session release broadcasts must be written while subscribed proxy
           // sockets are still connected; closing first degrades the exact
@@ -4060,6 +4055,19 @@ export class Daemon {
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
       ],
       (message, error) => logger.warn(message, error),
+    );
+  }
+
+  private unsubscribeAdbMissing(): void {
+    this.unsubscribeAdbMissingDevice?.();
+    this.unsubscribeAdbMissingDevice = null;
+  }
+
+  /** Remove the forwards this daemon recorded and release its forwarding leases, bounded. */
+  private releaseForwardLeases(): Promise<void> {
+    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(
+      this.timer,
+      CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS,
     );
   }
 

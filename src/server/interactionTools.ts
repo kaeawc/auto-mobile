@@ -2522,6 +2522,23 @@ export function resetSetPostureFactory(): void {
   setPostureFactory = (device) => new SetPosture(device);
 }
 
+export function formatSetPostureMessage(result: SetPostureOutput): string {
+  if ("status" in result) {
+    return result.message;
+  }
+  const message =
+    result.hingeAngle !== undefined
+      ? result.observedHingeAngle === undefined
+        ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
+        : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
+          ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
+          : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
+      : `Set device posture to ${result.posture}`;
+  return result.keyguardDismissed
+    ? `${message}; dismissed the swipe keyguard the change raised (the device was unlocked and has no lock credential)`
+    : message;
+}
+
 export async function setPostureHandler(
   device: BootedDevice,
   args: {
@@ -2552,17 +2569,7 @@ export async function setPostureHandler(
             signal,
           })
         : await action.execute(args.posture!, args.displayPreset, signal);
-    const message =
-      "status" in result
-        ? result.message
-        : result.hingeAngle !== undefined
-          ? result.observedHingeAngle === undefined
-            ? `Requested hinge angle ${result.hingeAngle} degrees; the resulting angle could not be verified (posture ${result.posture})`
-            : Math.abs(result.observedHingeAngle - result.hingeAngle) > 1
-              ? `Requested hinge angle ${result.hingeAngle} degrees; the device reports ${result.observedHingeAngle} degrees (posture ${result.posture})`
-              : `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
-          : `Set device posture to ${result.posture}`;
-    return createStructuredToolResponse({ message, ...result });
+    return createStructuredToolResponse({ message: formatSetPostureMessage(result), ...result });
   } catch (error) {
     throw toActionableError(error, "Failed to set device posture");
   }

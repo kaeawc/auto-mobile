@@ -28937,6 +28937,10 @@
         "locked": {
           "type": "boolean"
         },
+        "keyguardDismissed": {
+          "type": "boolean",
+          "const": true
+        },
         "warnings": {
           "type": "array",
           "items": {

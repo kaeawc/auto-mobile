@@ -407,6 +407,23 @@ class DevicePickerViewModelTest {
   }
 
   @Test
+  fun `a reused serial with a new boot epoch drops the old selection`() = testScope.runTest {
+    val client = fake()
+    fun epochEntry(epoch: String) =
+      bootedEntry("Pixel 8", "emulator-5554")
+        .replace("\"deviceSessionUuid\":null", "\"deviceSessionUuid\":\"$epoch\"")
+    client.bootedDevicesResponse = bootedResponse(epochEntry("epoch-a"))
+    val vm = vm(client)
+    vm.onAction(DevicePickerAction.ToggleSelect("emulator-5554"))
+    vm.onAction(DevicePickerAction.SilentRefresh)
+    assertEquals(setOf("android:emulator-5554"), content(vm).selectedIds)
+
+    client.bootedDevicesResponse = bootedResponse(epochEntry("epoch-b"))
+    vm.onAction(DevicePickerAction.SilentRefresh)
+    assertTrue(content(vm).selectedIds.isEmpty())
+  }
+
+  @Test
   fun `observe selected clears the observed devices from the selection`() = testScope.runTest {
     val vm =
       DevicePickerViewModel(fake(), FakeDeviceBootController(), this, UnconfinedTestDispatcher())

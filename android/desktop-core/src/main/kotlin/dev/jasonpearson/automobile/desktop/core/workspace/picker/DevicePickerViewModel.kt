@@ -133,6 +133,13 @@ class DevicePickerViewModel(
   // name heuristic in buildPickerDevices.
   private var bootedImageRuntimeIds: Map<Platform, Map<String, String>> = emptyMap()
 
+  // Boot-epoch identity (deviceSessionUuid) per uiKey, recorded when a selected or attributed
+  // device is seen booted. A reused serial keeps the same uiKey, so membership alone cannot tell
+  // the
+  // new device from the old one; a changed epoch at the same key drops that key's selection and
+  // attribution (#4881). Devices without an epoch (older daemons) keep the bare-key behavior.
+  private var trackedEpochs: Map<String, String> = emptyMap()
+
   // Source ids whose boot coroutine is still running (bootController.boot has not returned). The
   // serialization guard in bootingIds must survive against THIS set, not only the live device list:
   // once the daemon exposes the started device under its runtime serial but before boot() returns,
@@ -407,12 +414,38 @@ class DevicePickerViewModel(
     // same-named card hides the source image, so the guard must not be dropped mid-boot (#4881).
     bootingIds = bootingIds.filter { it in shutdownIds || it in inFlightBootIds }.toSet()
     bootErrors = bootErrors.filterKeys { it in shutdownIds }
-    selectedIds = selectedIds intersect bootedIds
+    val reusedKeys = reusedSerialKeys(devices)
+    selectedIds = (selectedIds intersect bootedIds) - reusedKeys
     // Keep only attributions whose runtime device is still booted (drop killed/replaced ids).
     bootedImageRuntimeIds = bootedImageRuntimeIds.mapValues { (platform, mappings) ->
-      mappings.filterValues { "${platform.name.lowercase()}:$it" in bootedIds }
+      mappings.filterValues {
+        val key = "${platform.name.lowercase()}:$it"
+        key in bootedIds && key !in reusedKeys
+      }
     }
+    val attributedKeys = bootedImageRuntimeIds.flatMap { (platform, m) ->
+      m.values.map { "${platform.name.lowercase()}:$it" }
+    }
+    val tracked = selectedIds + attributedKeys
+    trackedEpochs =
+      devices
+        .filter { it.state == DeviceState.Booted && it.uiKey in tracked }
+        .mapNotNull { d -> d.deviceSessionUuid?.let { d.uiKey to it } }
+        .toMap()
   }
+
+  /**
+   * Keys of booted devices whose boot epoch differs from the one recorded for the same key: the
+   * serial was reused by a different device, so its old selection/attribution must not carry over.
+   */
+  private fun reusedSerialKeys(devices: List<PickerDevice>): Set<String> =
+    devices
+      .filter { d ->
+        val recorded = trackedEpochs[d.uiKey]
+        d.state == DeviceState.Booted && recorded != null && d.deviceSessionUuid != recorded
+      }
+      .map { it.uiKey }
+      .toSet()
 
   /** Reflect the persistent state onto the live Content (no device reload). */
   private fun syncState() {
@@ -546,6 +579,7 @@ class DevicePickerViewModel(
     val deviceId = device.uiKey
     if (device.state != DeviceState.Booted) return
     selectedIds = selectedIds.toggle(deviceId)
+    device.deviceSessionUuid?.let { trackedEpochs = trackedEpochs + (deviceId to it) }
     syncState()
   }
 

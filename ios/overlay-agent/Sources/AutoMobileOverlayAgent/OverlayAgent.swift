@@ -36,6 +36,8 @@ final class OverlayAgent {
     private var window: PassthroughWindow?
     private var server: OverlayServer?
     private var sceneObserver: NSObjectProtocol?
+    /// App windows' own `accessibilityElementsHidden` while a fullscreen overlay covers them.
+    private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
 
     func boot() {
         let environment = ProcessInfo.processInfo.environment
@@ -76,14 +78,25 @@ final class OverlayAgent {
     /// chrome above the overlay. Floating and sheet overlays leave the app reachable.
     func updateAppAccessibility() {
         let covering = model.spec?.window.placement.type == "fullscreen" && window?.isHidden == false
-        for case let appWindow in window?.windowScene?.windows ?? [] where appWindow !== window {
-            if appWindow.accessibilityElementsHidden != covering {
-                appWindow.accessibilityElementsHidden = covering
-            }
-            if covering {
+        let appWindows = (window?.windowScene?.windows ?? []).filter { $0 !== window }
+        if covering {
+            for appWindow in appWindows {
+                // Remember the app's own value once, so uncovering restores rather than exposes.
+                let key = ObjectIdentifier(appWindow)
+                if hiddenBeforeCovering[key] == nil {
+                    hiddenBeforeCovering[key] = appWindow.accessibilityElementsHidden
+                }
+                appWindow.accessibilityElementsHidden = true
                 // A focused app field would keep the keyboard up and take hardware typing.
                 appWindow.endEditing(true)
             }
+        } else {
+            for appWindow in appWindows {
+                if let previous = hiddenBeforeCovering[ObjectIdentifier(appWindow)] {
+                    appWindow.accessibilityElementsHidden = previous
+                }
+            }
+            hiddenBeforeCovering = [:]
         }
         UIAccessibility.post(notification: .screenChanged, argument: nil)
     }
@@ -158,11 +171,10 @@ final class OverlayAgent {
                       let data = Data(base64Encoded: base64),
                       let image = UIImage(data: data)
                 else { return result(false, "Asset must carry an id and a base64 PNG, JPEG or WebP image") }
-                model.assets[id] = image
-                model.objectWillChange.send()
+                model.putAsset(id, image)
                 result(true)
             case "remove_overlay_asset":
-                if let id = message["id"] as? String { model.assets[id] = nil }
+                if let id = message["id"] as? String { model.removeAsset(id) }
                 result(true)
             case "get_overlay_status":
                 result(true, extra: ["status": model.status()])

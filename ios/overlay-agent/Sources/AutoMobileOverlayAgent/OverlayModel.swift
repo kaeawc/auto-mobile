@@ -38,11 +38,27 @@ final class OverlayModel: ObservableObject {
         var counts: [String: Int] = [:]
         spec.root.collectPagers(into: &counts)
         pageCounts = counts
-        pages = counts.mapValues { _ in 0 }.merging(pages.filter { counts[$0.key] != nil }) { _, kept in kept }
-        if let authored = spec.state {
-            state.merge(authored) { _, new in new }
+        // Like the Android runtime: a replacement brings its own state, and a pager that survives
+        // keeps its position clamped to the new page count.
+        let previous = pages
+        pages = counts.mapValues { _ in 0 }
+        for (pager, pageCount) in counts {
+            pages[pager] = min(max(previous[pager] ?? 0, 0), max(pageCount - 1, 0))
         }
+        state = spec.state ?? [:]
         self.spec = spec
+    }
+
+    /// Asset changes must redraw: `assets` is not published, so notify observers explicitly.
+    func putAsset(_ id: String, _ image: UIImage) {
+        objectWillChange.send()
+        assets[id] = image
+    }
+
+    func removeAsset(_ id: String) {
+        guard assets[id] != nil else { return }
+        objectWillChange.send()
+        assets[id] = nil
     }
 
     func mergeState(_ values: [String: JSONValue]) {

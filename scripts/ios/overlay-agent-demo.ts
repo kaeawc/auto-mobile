@@ -23,14 +23,32 @@ const REPO = join(import.meta.dir, "..", "..");
 
 type Message = Record<string, unknown>;
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
+interface Waiter {
+  resolve: (message: Message) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 class AgentConnection {
   private buffer = "";
-  private waiters = new Map<string, (message: Message) => void>();
+  private waiters = new Map<string, Waiter>();
   private nextId = 1;
+  private closedError: Error | undefined;
   onEvent: (event: Message) => void = (event) => console.log("event", JSON.stringify(event));
+  /** Called once when the agent goes away, so event waits settle too. */
+  onClosed: (error: Error) => void = () => {};
 
   private constructor(private readonly socket: Socket) {
     socket.setEncoding("utf8");
+    // The injected app can exit or crash at any time; settle everything still waiting.
+    socket.on("error", (error) =>
+      this.fail(new Error(`Overlay agent connection failed: ${error.message}`)),
+    );
+    socket.on("close", () =>
+      this.fail(new Error("Overlay agent closed the connection (app exited?)")),
+    );
     socket.on("data", (chunk: string) => {
       this.buffer += chunk;
       let newline = this.buffer.indexOf("\n");
@@ -61,7 +79,8 @@ class AgentConnection {
     const waiter = requestId === undefined ? undefined : this.waiters.get(requestId);
     if (waiter !== undefined && requestId !== undefined) {
       this.waiters.delete(requestId);
-      waiter(message);
+      clearTimeout(waiter.timeout);
+      waiter.resolve(message);
     } else if (message.type === "overlay_event") {
       this.onEvent(message);
     } else {
@@ -70,11 +89,31 @@ class AgentConnection {
   }
 
   request(type: string, body: Message = {}): Promise<Message> {
+    if (this.closedError !== undefined) {
+      return Promise.reject(this.closedError);
+    }
     const requestId = `r${this.nextId++}`;
-    return new Promise((resolve) => {
-      this.waiters.set(requestId, resolve);
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.waiters.delete(requestId);
+        reject(new Error(`Overlay agent did not answer ${type} within ${REQUEST_TIMEOUT_MS} ms`));
+      }, REQUEST_TIMEOUT_MS);
+      this.waiters.set(requestId, { resolve, reject, timeout });
       this.socket.write(`${JSON.stringify({ type, requestId, ...body })}\n`);
     });
+  }
+
+  private fail(error: Error): void {
+    if (this.closedError !== undefined) {
+      return;
+    }
+    this.closedError = error;
+    for (const waiter of this.waiters.values()) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
+    this.waiters.clear();
+    this.onClosed(error);
   }
 
   close(): void {
@@ -195,7 +234,8 @@ async function variants(agent: AgentConnection, screenshotUdid?: string): Promis
   const spec = composeVariantCarousel({ id: "variants-demo", variants: list });
   console.log("show", JSON.stringify(await agent.request("show_overlay", { spec })));
   console.log("Swipe or tap ◀ ▶ in the simulator, then tap ✓ to pick. Waiting...");
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    agent.onClosed = reject;
     agent.onEvent = (event) => {
       console.log("event", JSON.stringify(event));
       if ((event.kind === "emit" && event.name === "selected") || event.kind === "dismissed") {
@@ -358,7 +398,9 @@ async function main(): Promise<void> {
         break;
       case "events":
         console.log("Listening for overlay events (Ctrl-C to stop)...");
-        await new Promise(() => {});
+        await new Promise<void>((_resolve, reject) => {
+          agent.onClosed = reject;
+        });
         break;
       default:
         console.log(JSON.stringify(await agent.request("get_overlay_status"), null, 2));

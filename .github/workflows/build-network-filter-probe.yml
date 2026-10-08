@@ -110,7 +110,7 @@ jobs:
             echo "The signed probe build did not produce the app bundle" >&2
             exit 1
           fi
-          ./scripts/ci/verify-network-filter-requirement.sh "${app}"
+          bash ./scripts/ci/verify-network-filter-requirement.sh "${app}"
 
       - name: "Stage notarized probe archive"
         run: |

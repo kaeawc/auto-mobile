@@ -420,9 +420,10 @@ class OverlayController(
   /**
    * A host connected: hand it the events a device-persistent overlay buffered while it was away.
    */
-  suspend fun onClientConnected() = signal(retryDisconnect = false) {
-    replayOfflineEvents()
-  }
+  suspend fun onClientConnected() =
+    signal(retryDisconnect = false) {
+      replayOfflineEvents()
+    }
 
   /** Local override until a daemon/tool TTL field exists; no new protocol field is invented. */
   suspend fun setIdleTtlMillis(millis: Long) = mutex.withLock {

@@ -76,6 +76,15 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
 
   /** Find the text range for an error in the file */
   private fun findTextRange(file: PsiFile, error: TestPlanValidationError): TextRange {
+    // Prefer the element at the error's path (steps[N].tool -> that step's tool value), the same
+    // location the inspection uses, so the two markers agree and neither lands on another step.
+    val located = (file as? YAMLFile)?.let { TestPlanErrorLocator.locate(it, error.field) }
+    if (located != null) {
+      val start = located.element.textRange.startOffset
+      val inElement = located.rangeInElement ?: TextRange(0, located.element.textLength)
+      return inElement.shiftRight(start)
+    }
+
     val document = file.viewProvider.document ?: return TextRange(0, 0)
 
     // If we have line/column information, use it

@@ -10,7 +10,6 @@ import dev.jasonpearson.automobile.validation.TestPlanValidator
 import dev.jasonpearson.automobile.validation.ValidationError as TestPlanValidationError
 import dev.jasonpearson.automobile.validation.ValidationSeverity
 import org.jetbrains.yaml.psi.YAMLFile
-import org.jetbrains.yaml.psi.YAMLKeyValue
 
 /**
  * Inspection that validates AutoMobile test plan YAML files against the schema. Can be run via Code
@@ -54,62 +53,44 @@ class TestPlanInspection : LocalInspectionTool() {
 
         // Register problems
         for (error in result.errors) {
-          val target = findTargetElement(file, error) ?: element
-          val highlightType =
-            when (error.severity) {
-              ValidationSeverity.ERROR -> ProblemHighlightType.ERROR
-              ValidationSeverity.WARNING -> ProblemHighlightType.WARNING
-            }
-
-          val quickFixes = TestPlanQuickFixFactory.createQuickFixes(error)
-
-          if (quickFixes.isNotEmpty()) {
-            holder.registerProblem(target, error.message, highlightType, *quickFixes.toTypedArray())
-          } else {
-            holder.registerProblem(target, error.message, highlightType)
-          }
+          registerError(holder, element, file, error)
         }
       }
     }
   }
 
-  /** Find the PSI element that corresponds to the validation error */
-  private fun findTargetElement(file: YAMLFile, error: TestPlanValidationError): PsiElement? {
-    // For tool name errors, try to find the specific tool value element
-    if (error.message.contains("Unknown tool")) {
-      val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
-      val toolName = toolMatch?.groupValues?.getOrNull(1)
-      if (toolName != null) {
-        // Find the 'tool' key and then get its value
-        val toolKeyValue = findKeyValue(file, "tool")
-        if (toolKeyValue != null) {
-          // Get the value element (the tool name itself)
-          return toolKeyValue.value
-        }
+  /**
+   * Registers [error] on the element at its path. A path that no longer matches the document is
+   * reported on the file's first line with no quick fix, and an absent key is reported on the
+   * nearest existing ancestor with no quick fix, rather than guessing which entry to edit.
+   */
+  private fun registerError(
+    holder: ProblemsHolder,
+    fileElement: PsiElement,
+    file: YAMLFile,
+    error: TestPlanValidationError,
+  ) {
+    val highlightType =
+      when (error.severity) {
+        ValidationSeverity.ERROR -> ProblemHighlightType.ERROR
+        ValidationSeverity.WARNING -> ProblemHighlightType.WARNING
       }
+    val location = TestPlanErrorLocator.locate(file, error.field)
+    if (location == null) {
+      val range = TestPlanErrorLocator.fileLevelRange(fileElement)
+      holder.registerProblem(fileElement, error.message, highlightType, range)
+      return
     }
 
-    // Try to find the element by field name
-    val fieldName = error.field.substringAfterLast('.').substringAfterLast(']')
-
-    // Search for YAML key-value pairs that match the field name
-    return findKeyValue(file, fieldName)
-  }
-
-  /** Recursively search for a YAML key-value pair with the given key */
-  private fun findKeyValue(element: PsiElement, key: String): YAMLKeyValue? {
-    if (element is YAMLKeyValue && element.keyText == key) {
-      return element
-    }
-
-    for (child in element.children) {
-      val found = findKeyValue(child, key)
-      if (found != null) {
-        return found
-      }
-    }
-
-    return null
+    val quickFixes =
+      if (location.exact) TestPlanQuickFixFactory.createQuickFixes(error) else emptyList()
+    holder.registerProblem(
+      location.element,
+      error.message,
+      highlightType,
+      location.rangeInElement,
+      *quickFixes.toTypedArray(),
+    )
   }
 
   override fun getDisplayName(): String = "AutoMobile Test Plan Validation"

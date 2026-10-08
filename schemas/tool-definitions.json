@@ -20741,6 +20741,11 @@
                     },
                     "action": {
                       "$ref": "#/properties/spec/properties/root/anyOf/23/properties/confirm"
+                    },
+                    "durationMs": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 600000
                     }
                   },
                   "required": ["type", "openWhen", "text"],

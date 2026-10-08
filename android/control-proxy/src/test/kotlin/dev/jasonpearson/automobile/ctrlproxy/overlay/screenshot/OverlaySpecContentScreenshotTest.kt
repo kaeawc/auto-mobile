@@ -99,6 +99,31 @@ class OverlaySpecContentScreenshotTest {
   fun styleWhen() =
     overlayScreenshotTest("style_when", validOverlayFixture("style-when"))
 
+  /**
+   * Top app bar, icon button, FAB, segmented button, badge, progress, dialog, snackbar and pickers.
+   */
+  @Test
+  fun materialAppBarDialogPickers() =
+    overlayScreenshotTest(
+      "material_app_bar_dialog_pickers",
+      validOverlayFixture("material-app-bar-dialog-pickers"),
+      pending = true,
+    )
+
+  /** Shadow colour, offset, per-corner radii and the text polish styles (#10441). */
+  @Test
+  fun stylePolish() =
+    overlayScreenshotTest("style_polish", validOverlayFixture("style-polish"), pending = true)
+
+  /** Component labels, titles and button actions bound from repeat items. */
+  @Test
+  fun repeatComponentLabels() =
+    overlayScreenshotTest(
+      "repeat_component_labels",
+      validOverlayFixture("repeat-component-labels"),
+      pending = true,
+    )
+
   /** A list template expanded with repeat. */
   @Test
   fun repeatTemplate() =

@@ -144,6 +144,10 @@ class ImeCommitDriver(
       return false
     }
 
+    private fun remainingMs(): Long =
+      if (deadlineMs >= Long.MAX_VALUE - settleWaitMs) Long.MAX_VALUE
+      else deadlineMs + settleWaitMs - sink.nowMs()
+
     private fun waitForEditor(delayMs: Long, next: () -> Unit) {
       settleWaitMs += delayMs
       sink.postDelayed(delayMs) { if (canContinue()) next() }
@@ -152,10 +156,7 @@ class ImeCommitDriver(
     fun commitSegment(index: Int) {
       if (!canContinue()) return
       if (index == segments.size) {
-        complete(
-          if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
-          else failure("Input connection lost while syncing editor state"),
-        )
+        syncAfterDispatch(isCancelled, ::remainingMs)
         return
       }
       commitUnits(index, splitGraphemes(segments[index].text), 0)
@@ -262,10 +263,42 @@ class ImeCommitDriver(
         return
       }
     }
-    complete(
-      if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
-      else failure("Input connection lost while syncing editor state"),
+    syncAfterDispatch(
+      isCancelled,
+      remainingMs = {
+        if (deadlineMs == Long.MAX_VALUE) Long.MAX_VALUE else deadlineMs - sink.nowMs()
+      },
     )
+  }
+
+  /**
+   * Every unit has been dispatched; only the quiescence barrier remains. Under load the editor can
+   * take longer than one bounded sync round-trip to drain the queued ops, or the connection can be
+   * re-bound right after the last unit (#10799). Each attempt re-reads the current connection, so a
+   * bounded retry turns that transient loss into a confirmed commit. The retry never starts unless
+   * a whole sync round-trip still fits before the request deadline.
+   */
+  private fun syncAfterDispatch(
+    isCancelled: () -> Boolean,
+    remainingMs: () -> Long,
+    attempt: Int = 0,
+  ) {
+    if (completed) return
+    if (sink.syncEditorState()) {
+      complete(ImeCommitResult(success = true, error = null))
+      return
+    }
+    val canRetry =
+      attempt < SYNC_RETRY_ATTEMPTS &&
+        !isCancelled() &&
+        remainingMs() >= SYNC_RETRY_DELAY_MS + SYNC_RETRY_RESERVE_MS
+    if (!canRetry) {
+      complete(failure(SYNC_LOST_ERROR))
+      return
+    }
+    sink.postDelayed(SYNC_RETRY_DELAY_MS) {
+      syncAfterDispatch(isCancelled, remainingMs, attempt + 1)
+    }
   }
 
   /** Called by the shell on onFinishInput / idle-deadline; restores if priorImeId is non-null. */
@@ -295,6 +328,16 @@ class ImeCommitDriver(
 
     private val INLINE_FORMAT_SPAN =
       Regex("```|`[^`\n]+`|\\*\\*[^*\n]+\\*\\*|~~[^~\n]+~~|\\*[^*\n]+\\*|_[^_\n]+_|~[^~\n]+~")
+    /**
+     * Emitted only after every unit was dispatched; the host re-reads the editor on this error
+     * (#10799).
+     */
+    const val SYNC_LOST_ERROR = "Input connection lost while syncing editor state"
+    const val SYNC_RETRY_ATTEMPTS = 2
+    const val SYNC_RETRY_DELAY_MS = 100L
+    // One sync round-trip blocks for at most CtrlProxyIme's 2s sync timeout; keep a margin so a
+    // retry cannot outlive the request deadline the host is waiting on.
+    const val SYNC_RETRY_RESERVE_MS = 2_500L
     const val POLL_INTERVAL_MS = 40L
     const val MAX_POLL_ATTEMPTS = 12
     // Realistic typing pause: let an autoformatting editor react to punctuation and separators.

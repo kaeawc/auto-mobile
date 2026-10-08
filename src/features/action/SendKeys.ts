@@ -60,6 +60,7 @@ import {
   passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
+  confirmImeCommitAfterSyncLoss,
   withImeFailure,
   type ImeFailureDiagnostic,
 } from "./imeFailureDiagnostics";
@@ -1834,6 +1835,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       );
       progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       progress.result = result;
+      const syncConfirmed = await this.confirmImeCommitAfterSyncLoss(
+        result,
+        text,
+        routing,
+        operation,
+      );
+      // Identity means the sync-loss read-back did not apply or could not confirm the text.
+      if (syncConfirmed !== result) {
+        return {
+          outcome: { ...this.withTextWarnings(syncConfirmed, [clearWarning]), resolvedMode: mode },
+          safeToRestore: progress.safeToRestore,
+        };
+      }
       if (result.success && mode === "ime" && text.length > 0) {
         const verifiedResult = await this.verifyImeCommit(result, text, routing, operation);
         return {
@@ -1897,8 +1911,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     routing: ImeCommitRouting,
     operation: SendKeysOperation,
   ): Promise<TextActionResult> {
+    return verifyImeCommitResult(result, text, this.imeReadBack(text, routing, operation));
+  }
+
+  /** The device dispatched every unit but lost its sync barrier: re-read the editor (#10799). */
+  private confirmImeCommitAfterSyncLoss(
+    result: TextActionResult,
+    text: string,
+    routing: ImeCommitRouting,
+    operation: SendKeysOperation,
+  ): Promise<TextActionResult> {
+    return confirmImeCommitAfterSyncLoss(result, text, this.imeReadBack(text, routing, operation));
+  }
+
+  private imeReadBack(
+    text: string,
+    routing: ImeCommitRouting,
+    operation: SendKeysOperation,
+  ): Parameters<typeof verifyImeCommitResult>[2] {
     const { signal, display } = routing;
-    return verifyImeCommitResult(result, text, {
+    return {
       timer: this.timer,
       settleMs: IME_COMMIT_READ_BACK_SETTLE_MS,
       observe: () =>
@@ -1917,7 +1949,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       passwordField: routing.passwordField,
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
       isPasswordField: focusedFieldIsPassword,
-    });
+    };
   }
 
   private imeReadBackLacksRequiredFocus(

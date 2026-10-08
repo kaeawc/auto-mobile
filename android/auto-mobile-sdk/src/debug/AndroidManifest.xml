@@ -30,5 +30,10 @@
       android:name="dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider"
       android:authorities="${applicationId}.automobile.keystore"
       android:exported="true" />
+
+    <provider
+      android:name="dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilitiesProvider"
+      android:authorities="${applicationId}.automobile.capabilities"
+      android:exported="true" />
   </application>
 </manifest>

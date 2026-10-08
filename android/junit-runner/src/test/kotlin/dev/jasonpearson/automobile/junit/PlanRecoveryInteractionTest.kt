@@ -153,6 +153,18 @@ class PlanRecoveryInteractionTest {
   }
 
   @Test
+  fun `recovery and the resumed plan reuse the failed attempt's session`() {
+    daemon.cannedFailure = failedPayload { it }
+    val result = executeSimplePlan()
+
+    assertTrue(result.success)
+    val failedAttemptSession = daemon.sessionUuidArgs[0]
+    assertNotNull(failedAttemptSession)
+    assertEquals(failedAttemptSession, recordingAgent.contexts.single().sessionUuid)
+    assertEquals(failedAttemptSession, daemon.sessionUuidArgs[1])
+  }
+
+  @Test
   fun `a multi-device failure pins the label's mapped device id`() {
     daemon.cannedFailure = failedPayload { payload ->
       payload.with(
@@ -334,6 +346,7 @@ private class PlanInteractionDaemon : DaemonToolClient {
   val sentPlans = mutableListOf<List<Map<*, *>>>()
   val startSteps = mutableListOf<Int>()
   val deviceIdArgs = mutableListOf<String?>()
+  val sessionUuidArgs = mutableListOf<String?>()
   private var calls = 0
   override var sessionUuid: String = "plan-interaction-session"
 
@@ -356,6 +369,7 @@ private class PlanInteractionDaemon : DaemonToolClient {
     val startStep = arguments["startStep"]?.jsonPrimitive?.content?.toInt() ?: 0
     startSteps.add(startStep)
     deviceIdArgs.add((arguments["deviceId"] as? JsonPrimitive)?.contentOrNull)
+    sessionUuidArgs.add((arguments["sessionUuid"] as? JsonPrimitive)?.contentOrNull)
     val steps = decodeSteps(arguments)
     sentPlans.add(steps)
 

@@ -8,6 +8,11 @@ data class FailedStepContext(
   val succeededSteps: List<SucceededStepSummary>,
   val planContent: String,
   val deviceId: String?,
+  /**
+   * The `sessionUuid` of the failed `executePlan` attempt. Recovery tool calls and the resumed plan
+   * reuse it so the device holder stays one session (#10783); null when unknown.
+   */
+  val sessionUuid: String? = null,
 )
 
 /** Summary of a step that completed successfully before the failure. */

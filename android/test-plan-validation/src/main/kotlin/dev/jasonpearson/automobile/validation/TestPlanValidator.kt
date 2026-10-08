@@ -928,14 +928,31 @@ object TestPlanValidator {
     return d.isFinite() && d == kotlin.math.floor(d)
   }
 
-  /** Renders a number the way JS `String(n)` does for the integer and simple-fraction cases. */
+  /** Renders a number the way ECMAScript `Number::toString` does (shortest digits, JS exponent). */
   private fun jsNumberString(value: Number): String {
     val d = value.toDouble()
-    return if (d.isFinite() && d == kotlin.math.floor(d) && kotlin.math.abs(d) < 1e21) {
-      java.math.BigDecimal(d).toBigInteger().toString()
-    } else {
-      d.toString()
-    }
+    if (d.isNaN()) return "NaN"
+    if (d.isInfinite()) return if (d > 0) "Infinity" else "-Infinity"
+    if (d == 0.0) return "0"
+    val sign = if (d < 0) "-" else ""
+    // Double.toString yields the shortest round-tripping digits; re-layout them per ECMAScript.
+    val decimal = java.math.BigDecimal(kotlin.math.abs(d).toString()).stripTrailingZeros()
+    val digits = decimal.unscaledValue().toString()
+    val k = digits.length
+    // The value is 0.<digits> x 10^n.
+    val n = k - decimal.scale()
+    val body =
+      when {
+        n in k..21 -> digits + "0".repeat(n - k)
+        n in 1..21 -> digits.substring(0, n) + "." + digits.substring(n)
+        n in -5..0 -> "0." + "0".repeat(-n) + digits
+        else -> {
+          val exponent = n - 1
+          val mantissa = if (k == 1) digits else digits[0] + "." + digits.substring(1)
+          mantissa + "e" + (if (exponent < 0) "-" else "+") + kotlin.math.abs(exponent)
+        }
+      }
+    return sign + body
   }
 
   private fun coordinationFieldPresent(step: Map<*, *>, field: String): Boolean {

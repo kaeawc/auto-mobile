@@ -628,6 +628,64 @@
         "valid": false,
         "message": "criticalSection lock \"L\" has inconsistent deviceCount values: step 1 deviceCount=2, step 2 deviceCount=3. All steps sharing a lock must declare the same deviceCount."
       }
+    },
+    {
+      "name": "formats a small fractional deviceCount like ECMAScript",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 0.0001
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got 0.0001."
+      }
+    },
+    {
+      "name": "formats an exponent-range deviceCount like ECMAScript",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 1e-7
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got 1e-7."
+      }
     }
   ]
 }

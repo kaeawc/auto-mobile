@@ -14,8 +14,9 @@ at runtime, and network isolation still require native integration evidence.
   Controller output distinguishes `installation_required`, `approval_required`,
   `unavailable`, and `ready`. Ready means the allow-only provider replied over
   authenticated XPC, not that any traffic behavior has been verified.
-- Version 1 read-only Codable/XPC snapshots. Both peers require an Apple-signed
-  executable with the expected bundle identifier and their own signing team.
+- Version 2 read-only Codable/XPC snapshots (version 1 payloads still decode).
+  Both peers require an Apple-signed executable with the expected bundle
+  identifier and their own signing team.
 - New socket flows always receive `allow()`. The callback copies audit tokens
   into a lock-protected history of at most 128 entries. It never resolves process
   metadata, reads payloads, records network addresses, pauses, or drops a flow.
@@ -23,6 +24,34 @@ at runtime, and network isolation still require native integration evidence.
   source-process code metadata. Complete audit tokens retain process generation;
   bundle identifiers and PIDs are not interpreted as simulator identity.
   Missing/malformed tokens and failed metadata lookup remain unattributed.
+- Per-simulator attribution (#10589) runs at snapshot time, never in the flow
+  callback. `SimulatorFlowResolver` maps each flow's audit tokens to one
+  simulator (device set and UDID), app executable and process generation (pid
+  plus pid version, never the pid alone), through a fakeable `ProcessTable`
+  (`DarwinProcessTable` uses `proc_pidpath_audittoken`, `proc_pidinfo`
+  `PROC_PIDTBSDINFO`, `KERN_PROCARGS2`, and libbsm's `audit_token_to_pid` and
+  `audit_token_to_pidversion`). Each flow reports `attribution`
+  (`attributed`, `unattributed`, `conflicting`), `method` (`executable_path`,
+  `launchd_sim_ancestor`, `unattributed`), `simulator`, `app`, and a `reason`
+  when it is not attributed:
+  - App processes: the UDID comes from an executable under
+    `<deviceSet>/<UDID>/data/Containers/Bundle/Application/`.
+  - Runtime-hosted helpers (`nsurlsessiond`, WebKit networking) share one path
+    per runtime, so the resolver walks the parent chain to that simulator's
+    `launchd_sim` and reads the device path from its arguments. A parent that
+    started after its child (a reused pid) stops the walk.
+  - Delegated flows attribute through `sourceAppAuditToken`. If the app and
+    process tokens resolve to different simulators the flow is `conflicting`.
+  - Only simulators the host names are selectable:
+    `network-filter-controller status|snapshot --managed <device-set-path> <udid>`
+    (repeatable). Device-set paths are resolved with `realpath` because the
+    kernel reports executable paths with symlinks resolved. The default device
+    set is never assumed. Native Mac processes, unmanaged simulators and every
+    lookup failure are reported `unattributed` and allowed.
+  These methods are hypotheses until the signed run in #10263 confirms them,
+  including whether the sandboxed provider may read other processes' paths and
+  `launchd_sim` arguments, and whether `launchd_sim` names a custom device set in
+  the same (realpath) form the host passes.
 - Restart discards the diagnostic history. There is no persisted impairment,
   delayed flow verdict, control-channel bypass, or target-app instrumentation.
 
@@ -87,6 +116,25 @@ distinct exit code: `0` ready, `3` approval required in System Settings, `4`
 the extension installs only after a macOS restart, `1` any other non-ready
 state (#6897). The controller executable itself exits `0` for both pending
 approval states, so scripts should call the wrapper rather than the executable.
+
+AutoMobile can do the download, verification, copy and activation itself, but
+only when asked (#10588). It never installs on daemon start or from
+`setDeviceState`:
+
+```bash
+auto-mobile --ios-network-filter install            # download, verify, copy, activate
+auto-mobile --ios-network-filter install --upgrade  # replace a differing installed copy
+auto-mobile --ios-network-filter status             # read-only controller status
+```
+
+`install` checks the release zip's SHA-256 against `networkFilterSha256` in
+the release checksum registry and fails closed when this version has no entry.
+It then runs `codesign --verify --deep --strict` and checks the bundle
+identifiers and a Developer ID team shared by the app and its provider (pin
+one with `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`) before it copies the app to
+`/Applications`. Set `AUTOMOBILE_NETWORK_FILTER_APP_PATH` to a locally built,
+signed `.app` to skip the download. The exit codes match the `activate` wrapper
+above. `auto-mobile --cli doctor` reports the same states.
 
 Initial extension and filter approval require macOS interaction. A timeout is an
 uncertain installation result: inspect `status` and System Settings before

@@ -8,6 +8,13 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.serializer
 
 /**
+ * The child's output pipe closed (the server exited or was destroyed). Distinct from an unreadable
+ * response so the client can tell "the server is gone, restart it" from "the server is confused".
+ */
+internal class StdioClosedException(message: String, cause: Throwable? = null) :
+  McpConnectionException(message, cause)
+
+/**
  * Owns the single blocking read of one MCP stdio child's output pipe and routes each response line
  * to the request that is waiting for its JSON-RPC id (#10142 review).
  *
@@ -29,7 +36,7 @@ internal class StdioResponsePump(
   private val pending = ConcurrentHashMap<String, CompletableFuture<JsonRpcResponse>>()
 
   /** Set once the pipe is closed or unreadable; requests registered afterwards fail immediately. */
-  @Volatile private var closedWith: McpConnectionException? = null
+  @Volatile private var closedWith: StdioClosedException? = null
 
   fun start() {
     Thread(::pump, threadName).apply { isDaemon = true }.start()
@@ -53,11 +60,11 @@ internal class StdioResponsePump(
     val failure =
       try {
         readUntilClosed()
-        McpConnectionException("MCP stdio closed")
+        StdioClosedException("MCP stdio closed")
       } catch (e: Exception) {
         // A closed or broken pipe (child exit, client destroy) or an unexpected reader fault ends
         // the pump; every waiter receives it as a typed failure instead of hanging.
-        McpConnectionException("MCP stdio closed: ${e.message}", e)
+        StdioClosedException("MCP stdio closed: ${e.message}", e)
       }
     closedWith = failure
     pending.values.forEach { it.completeExceptionally(failure) }

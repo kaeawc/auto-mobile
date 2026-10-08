@@ -23,6 +23,13 @@ const jsonValueSchema: z.ZodType<OverlayJson> = z.lazy(() =>
 const overlayJsonSchema = z.custom<OverlayJson>(
   (value) => jsonValueSchema.safeParse(value).success,
 );
+// Icon names are the closed list of Material icons the Android renderer bundles
+// (androidx material-icons-extended); the shared contract is the single source.
+const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
+const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
+  message: "Unknown overlay icon name",
+});
+const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
 const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 const offsetSchema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
 const boundsSchema = z
@@ -108,22 +115,95 @@ const paddingSchema = z
     end: z.number().finite().min(0).optional(),
   })
   .strict();
+/** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
+const COLOR_ROLES = [
+  "primary",
+  "onPrimary",
+  "primaryContainer",
+  "onPrimaryContainer",
+  "inversePrimary",
+  "secondary",
+  "onSecondary",
+  "secondaryContainer",
+  "onSecondaryContainer",
+  "tertiary",
+  "onTertiary",
+  "tertiaryContainer",
+  "onTertiaryContainer",
+  "background",
+  "onBackground",
+  "surface",
+  "onSurface",
+  "surfaceVariant",
+  "onSurfaceVariant",
+  "surfaceTint",
+  "inverseSurface",
+  "inverseOnSurface",
+  "error",
+  "onError",
+  "errorContainer",
+  "onErrorContainer",
+  "outline",
+  "outlineVariant",
+  "scrim",
+  "surfaceBright",
+  "surfaceDim",
+  "surfaceContainer",
+  "surfaceContainerHigh",
+  "surfaceContainerHighest",
+  "surfaceContainerLow",
+  "surfaceContainerLowest",
+] as const;
+/** Material 3 Shapes steps a `cornerRadius` can name instead of a dp number. */
+const CORNER_RADIUS_TOKENS = [
+  "none",
+  "extraSmall",
+  "small",
+  "medium",
+  "large",
+  "extraLarge",
+  "full",
+] as const;
+const colorValueSchema = z.union([
+  z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+  z.enum(COLOR_ROLES),
+]);
 const borderSchema = z
   .object({
     width: z.number().finite().min(0),
-    color: z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+    color: colorValueSchema,
   })
   .strict();
+/** Material 3 type roles a text node's `textStyle` can name. */
+const TEXT_STYLE_ROLES = [
+  "displayLarge",
+  "displayMedium",
+  "displaySmall",
+  "headlineLarge",
+  "headlineMedium",
+  "headlineSmall",
+  "titleLarge",
+  "titleMedium",
+  "titleSmall",
+  "bodyLarge",
+  "bodyMedium",
+  "bodySmall",
+  "labelLarge",
+  "labelMedium",
+  "labelSmall",
+] as const;
 const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
     height: dimensionSchema.optional(),
+    weight: z.number().finite().min(1e-6).optional(),
+    minWidth: z.number().finite().min(0).optional(),
+    maxWidth: z.number().finite().min(0).optional(),
+    minHeight: z.number().finite().min(0).optional(),
+    maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
-    background: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
-    cornerRadius: z.number().finite().min(0).optional(),
+    background: colorValueSchema.optional(),
+    cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
     border: borderSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
@@ -145,58 +225,18 @@ const styleSchema = z
     spacing: z.number().finite().min(0).optional(),
     textSize: z.number().finite().min(1e-6).optional(),
     fontWeight: z.number().finite().int().min(100).max(900).optional(),
-    color: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
+    color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
+    textStyle: z.enum(TEXT_STYLE_ROLES).optional(),
   })
   .strict();
+const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
 const itemSchema = z
   .object({
     label: z.string().min(1),
-    icon: z
-      .enum([
-        "home",
-        "search",
-        "settings",
-        "person",
-        "favorite",
-        "add",
-        "close",
-        "check",
-        "arrow_back",
-        "arrow_forward",
-        "chevron_left",
-        "chevron_right",
-        "menu",
-        "more_vert",
-        "share",
-        "edit",
-        "delete",
-        "info",
-        "warning",
-        "notifications",
-        "star",
-        "shopping_cart",
-        "help",
-        "refresh",
-        "done",
-        "cancel",
-        "play_arrow",
-        "pause",
-        "stop",
-        "mail",
-        "phone",
-        "location_on",
-        "calendar_today",
-        "visibility",
-        "lock",
-        "logout",
-      ])
-      .optional(),
+    icon: iconNameSchema.optional(),
     image: z.string().min(1).optional(),
   })
   .strict();
@@ -288,6 +328,7 @@ const commonNodeShape = {
   testTag: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
+  styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -310,44 +351,8 @@ const iconBaseSchema = z
   .object({
     ...commonNodeShape,
     type: z.enum(["icon"]),
-    name: z.enum([
-      "home",
-      "search",
-      "settings",
-      "person",
-      "favorite",
-      "add",
-      "close",
-      "check",
-      "arrow_back",
-      "arrow_forward",
-      "chevron_left",
-      "chevron_right",
-      "menu",
-      "more_vert",
-      "share",
-      "edit",
-      "delete",
-      "info",
-      "warning",
-      "notifications",
-      "star",
-      "shopping_cart",
-      "help",
-      "refresh",
-      "done",
-      "cancel",
-      "play_arrow",
-      "pause",
-      "stop",
-      "mail",
-      "phone",
-      "location_on",
-      "calendar_today",
-      "visibility",
-      "lock",
-      "logout",
-    ]),
+    name: iconNameSchema,
+    variant: iconVariantSchema.optional(),
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
@@ -381,6 +386,36 @@ const buttonBaseSchema = z
     type: z.enum(["button"]),
     label: z.string().min(1),
     variant: z.enum(["filled", "outlined", "text"]).optional(),
+  })
+  .strict();
+const sliderBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["slider"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+    min: z.number().finite(),
+    max: z.number().finite(),
+    step: z.number().finite().optional(),
+  })
+  .strict();
+const chipBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["chip"]),
+    label: z.string().min(1),
+    variant: z.enum(["assist", "filter"]).optional(),
+    stateKey: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/)
+      .optional(),
+  })
+  .strict();
+const cardBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["card"]),
+    variant: z.enum(["filled", "elevated", "outlined"]).optional(),
   })
   .strict();
 const scrollBaseSchema = z
@@ -444,6 +479,9 @@ export type OverlayNode =
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
+  | z.infer<typeof sliderBaseSchema>
+  | z.infer<typeof chipBaseSchema>
+  | (z.infer<typeof cardBaseSchema> & { children: OverlayNode[] })
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -462,6 +500,9 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     switchBaseSchema,
     checkboxBaseSchema,
     buttonBaseSchema,
+    sliderBaseSchema,
+    chipBaseSchema,
+    cardBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(0) }),
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -475,10 +516,43 @@ const windowSchema = z
     opacity: z.number().finite().int().min(0).max(100).default(100),
   })
   .strict();
+const themeColorsSchema = z
+  .object({
+    seed: z
+      .string()
+      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
+      .optional(),
+    source: z.enum(["device"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeTypographySchema = z
+  .object({
+    scale: z.number().finite().min(0.75).max(1.5).optional(),
+    fontFamily: z.enum(["sans", "serif", "mono"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeShapesSchema = z
+  .object({
+    corner: z.enum(["none", "small", "medium", "large", "full"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeSchema = z
+  .object({
+    mode: z.enum(["light", "dark", "system"]).optional(),
+    colors: themeColorsSchema.optional(),
+    typography: themeTypographySchema.optional(),
+    shapes: themeShapesSchema.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
     window: windowSchema,
+    theme: themeSchema.optional(),
     state: z
       .custom<Record<string, string | number | boolean>>(
         (value) =>
@@ -505,6 +579,9 @@ export const OVERLAY_NODE_TYPES = [
   "switch",
   "checkbox",
   "button",
+  "slider",
+  "chip",
+  "card",
   "scroll",
   "pager",
   "tabBar",

@@ -3,20 +3,10 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models";
 import type { ElementFinder } from "../../src/utils/interfaces/ElementFinder";
 
 export class FakeElementFinder implements ElementFinder {
-  nextElementsByText: Element[] = [];
   nextElementByText: Element | null = null;
-  nextElementsByResourceId: Element[] = [];
   nextElementByResourceId: Element | null = null;
   nextContainerNode: ViewHierarchyNode | null = null;
   nextHasContainer: boolean = false;
-  nextScrollableElements: Element[] = [];
-  nextScrollableContainer: Element | null = null;
-  nextClickableElements: Element[] = [];
-  nextClickableElementsInContainer: Element[] = [];
-  nextClickableParentsContainingText: Element[] = [];
-  nextClickableSiblingsOfText: Element[] = [];
-  nextClickableSiblingsOfResourceId: Element[] = [];
-  nextFocusedTextInput: Element | null = null;
 
   lastFindByTextArgs?: {
     text: string;
@@ -25,17 +15,6 @@ export class FakeElementFinder implements ElementFinder {
     caseSensitive?: boolean;
   };
   lastFindByResourceIdArgs?: { resourceId: string; container?: any; partialMatch?: boolean };
-
-  findElementsByText(
-    _viewHierarchy: ViewHierarchyResult,
-    text: string,
-    container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean,
-    caseSensitive?: boolean,
-  ): Element[] {
-    this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
-    return this.nextElementsByText;
-  }
 
   findElementByText(
     _viewHierarchy: ViewHierarchyResult,
@@ -46,16 +25,6 @@ export class FakeElementFinder implements ElementFinder {
   ): Element | null {
     this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
     return this.nextElementByText;
-  }
-
-  findElementsByResourceId(
-    _viewHierarchy: ViewHierarchyResult,
-    resourceId: string,
-    container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean,
-  ): Element[] {
-    this.lastFindByResourceIdArgs = { resourceId, container, partialMatch };
-    return this.nextElementsByResourceId;
   }
 
   findElementByResourceId(
@@ -80,58 +49,5 @@ export class FakeElementFinder implements ElementFinder {
     _container?: { elementId?: string; text?: string },
   ): boolean {
     return this.nextHasContainer;
-  }
-
-  findScrollableElements(_viewHierarchy: ViewHierarchyResult): Element[] {
-    return this.nextScrollableElements;
-  }
-
-  findScrollableContainer(_viewHierarchy: ViewHierarchyResult): Element | null {
-    return this.nextScrollableContainer;
-  }
-
-  findClickableElements(_viewHierarchy: ViewHierarchyResult): Element[] {
-    return this.nextClickableElements;
-  }
-
-  findClickableElementsInContainer(
-    _viewHierarchy: ViewHierarchyResult,
-    _container?: { elementId?: string; text?: string } | null,
-    _scrollableContainer?: boolean,
-  ): Element[] {
-    return this.nextClickableElementsInContainer;
-  }
-
-  findClickableParentsContainingText(
-    _viewHierarchy: ViewHierarchyResult,
-    _text: string,
-    _container?: { elementId?: string; text?: string } | null,
-    _fuzzyMatch?: boolean,
-    _caseSensitive?: boolean,
-  ): Element[] {
-    return this.nextClickableParentsContainingText;
-  }
-
-  findClickableSiblingsOfText(
-    _viewHierarchy: ViewHierarchyResult,
-    _text: string,
-    _container?: { elementId?: string; text?: string } | null,
-    _fuzzyMatch?: boolean,
-    _caseSensitive?: boolean,
-  ): Element[] {
-    return this.nextClickableSiblingsOfText;
-  }
-
-  findClickableSiblingsOfResourceId(
-    _viewHierarchy: ViewHierarchyResult,
-    _resourceId: string,
-    _container?: { elementId?: string; text?: string } | null,
-    _partialMatch?: boolean,
-  ): Element[] {
-    return this.nextClickableSiblingsOfResourceId;
-  }
-
-  findFocusedTextInput(_viewHierarchy: ViewHierarchyResult): Element | null {
-    return this.nextFocusedTextInput;
   }
 }

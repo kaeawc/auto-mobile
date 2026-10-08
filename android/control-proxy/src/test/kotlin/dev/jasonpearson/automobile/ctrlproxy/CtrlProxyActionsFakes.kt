@@ -180,6 +180,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun discoverKeystore(requestId: String?, packageName: String) {}
 
+  override fun getSdkCapabilities(requestId: String?, packageName: String) {}
+
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) {}
 
   override fun getDataStore(
@@ -543,6 +545,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun discoverKeystore(requestId: String?, packageName: String) =
     record("discoverKeystore", requestId, packageName)
+
+  override fun getSdkCapabilities(requestId: String?, packageName: String) =
+    record("getSdkCapabilities", requestId, packageName)
 
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
     record("listDataStores", requestId, packageName, adapterName)

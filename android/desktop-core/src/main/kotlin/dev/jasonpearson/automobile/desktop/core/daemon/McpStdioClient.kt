@@ -2,11 +2,15 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -32,6 +36,8 @@ class McpStdioClient(
   // The awaited read is an interruptible wait on the response pump's future and enforces the
   // deadline itself, so the default runs it on the caller's thread.
   private val responseReader: StdioResponseReader = StdioResponseReader { read, _ -> read.call() },
+  restartPolicy: StdioRestartPolicy = StdioRestartPolicy(),
+  private val nowNanos: () -> Long = System::nanoTime,
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command
@@ -39,9 +45,17 @@ class McpStdioClient(
 
   private val ioLock = Any()
   private var process: Process? = null
+  private var processStartedAtNanos = 0L
   private var writer: BufferedWriter? = null
   private var pump: StdioResponsePump? = null
   private var initialized = false
+
+  /**
+   * The start-and-`initialize` handshake in progress, if any. Callers that arrive while it runs
+   * wait on it instead of starting a second child or sending a second `initialize`.
+   */
+  private var initialization: CompletableFuture<Unit>? = null
+  private val restartGuard = StdioRestartGuard(restartPolicy, nowNanos)
 
   override fun ping() {
     ensureInitialized()
@@ -439,32 +453,92 @@ class McpStdioClient(
       writer = null
       pump = null
       initialized = false
+      // A handshake still running on another thread fails when its pipe closes; a caller arriving
+      // after close() must start afresh rather than join it.
+      initialization = null
     }
   }
 
+  /**
+   * Makes sure a started, initialized child is available. A child that has exited is replaced here,
+   * on the next request after the exit: the new child is started and `initialize`d exactly once
+   * however many callers arrive together (one leader, the rest wait on its handshake).
+   */
   private fun ensureInitialized(deadline: StatusRequestDeadline? = null) {
+    val claim = claimInitialization(deadline) ?: return
+    if (claim.leader) {
+      initializeAsLeader(claim.flight, deadline)
+    } else {
+      awaitLeader(claim.flight, deadline)
+    }
+  }
+
+  private class InitializationClaim(val flight: CompletableFuture<Unit>, val leader: Boolean)
+
+  /** Null when a live, initialized child is already available. */
+  private fun claimInitialization(deadline: StatusRequestDeadline?): InitializationClaim? =
     synchronized(ioLock) {
       deadline?.remainingTimeoutMs()
-      if (initialized) {
-        return
+      reapIfExited()
+      val inProgress = initialization
+      when {
+        inProgress != null -> InitializationClaim(inProgress, leader = false)
+        initialized -> null
+        else -> {
+          assertRestartAllowed()
+          startProcess()
+          val flight = CompletableFuture<Unit>()
+          initialization = flight
+          InitializationClaim(flight, leader = true)
+        }
       }
-      ensureProcessStarted()
     }
 
-    val response =
-      sendRequest(
-        "initialize",
-        buildInitializeParams(),
-        deadline = deadline,
-      )
-    val result =
-      response.result?.jsonObject
-        ?: throw McpConnectionException("Initialize response missing result")
-    negotiateProtocolVersion(result)
-    synchronized(ioLock) {
-      initialized = true
+  private fun initializeAsLeader(
+    flight: CompletableFuture<Unit>,
+    deadline: StatusRequestDeadline?,
+  ) {
+    try {
+      val response =
+        sendRequest(
+          "initialize",
+          buildInitializeParams(),
+          deadline = deadline,
+        )
+      val result =
+        response.result?.jsonObject
+          ?: throw McpConnectionException("Initialize response missing result")
+      negotiateProtocolVersion(result)
+      synchronized(ioLock) {
+        if (process == null) {
+          throw serverNotRunning("initialize")
+        }
+        initialized = true
+      }
+      sendNotification("notifications/initialized", deadline = deadline)
+      flight.complete(Unit)
+    } catch (e: Exception) {
+      flight.completeExceptionally(e)
+      throw e
+    } finally {
+      synchronized(ioLock) {
+        if (initialization === flight) {
+          initialization = null
+        }
+      }
     }
-    sendNotification("notifications/initialized", deadline = deadline)
+  }
+
+  private fun awaitLeader(flight: CompletableFuture<Unit>, deadline: StatusRequestDeadline?) {
+    val timeoutMs = deadline?.remainingTimeoutMs()
+    try {
+      if (timeoutMs == null) flight.get() else flight.get(timeoutMs, TimeUnit.MILLISECONDS)
+    } catch (e: ExecutionException) {
+      val cause = e.cause
+      throw McpConnectionException(cause?.message ?: "MCP stdio initialize failed", cause ?: e)
+    } catch (_: TimeoutException) {
+      throw McpConnectionException("MCP stdio request 'initialize' timed out after ${timeoutMs}ms")
+    }
   }
 
   private fun sendNotification(
@@ -501,38 +575,66 @@ class McpStdioClient(
     expectResponse: Boolean,
     deadline: StatusRequestDeadline? = null,
   ): JsonRpcResponse {
-    val expectedId = request.id?.jsonPrimitive?.content
     val timeoutMs: Long?
-    val currentProcess: Process
-    val pending: PendingResponse?
-    // The lock covers starting the process and writing the request only. The wait for the reply
-    // happens outside it, so a caller that is cancelled or past its deadline never pins the lock.
+    val dispatched: DispatchedRequest
+    // The lock covers writing the request only. The wait for the reply happens outside it, so a
+    // caller that is cancelled or past its deadline never pins the lock.
     synchronized(ioLock) {
       timeoutMs = deadline?.remainingTimeoutMs()
-      ensureProcessStarted()
-      currentProcess = process ?: throw McpConnectionException("MCP stdio process unavailable")
-      val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
-      val currentPump = pump ?: throw McpConnectionException("MCP stdio reader unavailable")
-      pending =
-        if (expectResponse && expectedId != null) {
-          PendingResponse(expectedId, currentPump)
-        } else {
-          null
-        }
-      try {
-        val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
-        currentWriter.write(requestBody)
-        currentWriter.newLine()
-        currentWriter.flush()
-      } catch (e: Exception) {
-        pending?.abandon()
-        throw e
-      }
+      dispatched = dispatch(request, expectResponse)
     }
-    if (pending == null) {
-      return JsonRpcResponse(jsonrpc = "2.0")
-    }
+    val pending = dispatched.pending ?: return JsonRpcResponse(jsonrpc = "2.0")
+    return awaitReply(request, pending, dispatched.process, timeoutMs)
+  }
 
+  private class DispatchedRequest(val process: Process, val pending: PendingResponse?)
+
+  /**
+   * Writes [request] to the running child. Must hold [ioLock]. A request is only ever written to a
+   * child that has completed `initialize` (or is being asked to), and never starts a child itself:
+   * starting is [claimInitialization]'s job, so a child that vanished since the caller's
+   * `ensureInitialized` produces a clear error instead of a silently uninitialized replacement.
+   */
+  private fun dispatch(request: JsonRpcRequest, expectResponse: Boolean): DispatchedRequest {
+    if (reapIfExited()) {
+      throw McpConnectionException(
+        "MCP stdio server '$command' exited before '${request.method}' was sent; " +
+          "the next request starts a new server"
+      )
+    }
+    if (request.method != "initialize" && !initialized) {
+      throw serverNotRunning(request.method)
+    }
+    val currentProcess = process ?: throw serverNotRunning(request.method)
+    val currentWriter = writer ?: throw serverNotRunning(request.method)
+    val currentPump = pump ?: throw serverNotRunning(request.method)
+    val expectedId = request.id?.jsonPrimitive?.content
+    val pending =
+      if (expectResponse && expectedId != null) PendingResponse(expectedId, currentPump) else null
+    try {
+      val requestBody = json.encodeToString(serializer<JsonRpcRequest>(), request)
+      currentWriter.write(requestBody)
+      currentWriter.newLine()
+      currentWriter.flush()
+    } catch (e: IOException) {
+      // A closed pipe means the child is gone; drop it so the next request starts a new one.
+      pending?.abandon()
+      retireProcess(currentProcess, unexpected = true)
+      terminateProcessTree(currentProcess)
+      throw serverExited(request.method, e)
+    } catch (e: Exception) {
+      pending?.abandon()
+      throw e
+    }
+    return DispatchedRequest(currentProcess, pending)
+  }
+
+  private fun awaitReply(
+    request: JsonRpcRequest,
+    pending: PendingResponse,
+    currentProcess: Process,
+    timeoutMs: Long?,
+  ): JsonRpcResponse {
     try {
       val read = Callable { awaitResponse(pending, request.method, timeoutMs) }
       return responseReader.read(read, timeoutMs)
@@ -544,9 +646,17 @@ class McpStdioClient(
       throw McpConnectionException(
         "MCP stdio request '${request.method}' timed out after ${timeoutMs}ms"
       )
-    } catch (e: java.util.concurrent.ExecutionException) {
+    } catch (e: ExecutionException) {
       pending.abandon()
-      throw (e.cause as? Exception ?: e)
+      val cause = e.cause
+      if (cause is StdioClosedException) {
+        // The pipe closed under an in-flight request: the child exited. Its outcome is unknown, so
+        // fail it (never replay it); the next request starts a new child.
+        synchronized(ioLock) { retireProcess(currentProcess, unexpected = true) }
+        terminateProcessTree(currentProcess)
+        throw serverExited(request.method, cause)
+      }
+      throw (cause as? Exception ?: e)
     } catch (e: Exception) {
       // Includes InterruptedException from a cancelled caller: stop waiting for this reply and
       // leave the server running; the late reply is dropped by id.
@@ -572,17 +682,65 @@ class McpStdioClient(
     return response
   }
 
+  /** Kills a wedged child on purpose. Not an unexpected exit, so it does not feed the throttle. */
   private fun discardProcess(currentProcess: Process) {
-    synchronized(ioLock) {
-      if (process === currentProcess) {
-        process = null
-        writer = null
-        pump = null
-        initialized = false
-      }
-    }
+    synchronized(ioLock) { retireProcess(currentProcess, unexpected = false) }
     terminateProcessTree(currentProcess)
   }
+
+  /**
+   * Forgets [current] so the next request starts a new child. Must hold [ioLock]. Does nothing when
+   * [current] was already replaced, so a death seen by several threads is counted once.
+   */
+  private fun retireProcess(current: Process, unexpected: Boolean) {
+    if (process !== current) {
+      return
+    }
+    if (unexpected) {
+      restartGuard.recordExit(processStartedAtNanos)
+    }
+    process = null
+    writer = null
+    pump = null
+    initialized = false
+  }
+
+  /**
+   * Retires a child that has exited since the last request. Must hold [ioLock]. Returns whether one
+   * was retired.
+   */
+  private fun reapIfExited(): Boolean {
+    val current = process ?: return false
+    if (current.isAlive) {
+      return false
+    }
+    retireProcess(current, unexpected = true)
+    return true
+  }
+
+  private fun assertRestartAllowed() {
+    val waitMs = restartGuard.remainingCoolDownMs()
+    if (waitMs > 0) {
+      throw McpConnectionException(
+        "MCP stdio server '$command' exited ${restartGuard.consecutiveQuickExits} times in a row " +
+          "right after starting, so it is not being restarted for another " +
+          "${(waitMs + 999) / 1000}s. Run the command in a terminal to see why it fails."
+      )
+    }
+  }
+
+  private fun serverNotRunning(method: String) =
+    McpConnectionException(
+      "MCP stdio server '$command' is not running, so '$method' was not sent; " +
+        "the next request starts a new server"
+    )
+
+  private fun serverExited(method: String, cause: Throwable) =
+    McpConnectionException(
+      "MCP stdio server '$command' exited while '$method' was pending. The request was not " +
+        "retried because its outcome is unknown; the next request starts a new server",
+      cause,
+    )
 
   private class PendingResponse(private val id: String, private val pump: StdioResponsePump) {
     val future = pump.register(id)
@@ -601,7 +759,8 @@ class McpStdioClient(
     currentProcess.destroyForcibly()
   }
 
-  private fun ensureProcessStarted() {
+  /** Starts the child unless one is running. Must hold [ioLock]. */
+  private fun startProcess() {
     if (process != null) {
       return
     }
@@ -611,8 +770,18 @@ class McpStdioClient(
       throw McpConnectionException("MCP stdio command is empty")
     }
 
-    val newProcess = processStarter(commandParts)
+    val newProcess =
+      try {
+        processStarter(commandParts)
+      } catch (e: IOException) {
+        restartGuard.recordExit(startedAtNanos = null)
+        throw McpConnectionException(
+          "MCP stdio command '$command' could not be started: ${e.message}",
+          e,
+        )
+      }
     process = newProcess
+    processStartedAtNanos = nowNanos()
     val newReader = BufferedReader(InputStreamReader(newProcess.inputStream))
     writer = BufferedWriter(OutputStreamWriter(newProcess.outputStream))
     pump = StdioResponsePump(newReader, json).also { it.start() }

@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "v": 3
+    },
+    "root": {
+      "type": "card",
+      "children": [
+        {
+          "type": "slider",
+          "stateKey": "v",
+          "min": 0,
+          "max": 1
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].stateKey"
+}

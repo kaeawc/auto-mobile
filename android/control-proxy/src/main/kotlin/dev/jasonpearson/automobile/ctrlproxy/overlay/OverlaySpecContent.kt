@@ -28,11 +28,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
@@ -68,7 +71,10 @@ internal fun OverlayRuntimeContent(
         LocalOverlayImageCache provides images,
         LocalOverlayMotion provides motion,
       ) {
-        OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
+        OverlaySpecContent(
+          mapOverlaySpec(snapshot.spec, snapshot.pages).root,
+          snapshot.spec.theme,
+        ) { interaction ->
           queue.trySend(interaction)
         }
       }
@@ -78,8 +84,12 @@ internal fun OverlayRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  OverlayTheme(root) {
+fun OverlaySpecContent(
+  root: OverlayRenderNode,
+  theme: OverlaySpecTheme? = null,
+  interact: (OverlayInteraction) -> Unit = {},
+) {
+  OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact)
       modalOverlaySheets(root).forEach { node ->
@@ -92,18 +102,24 @@ fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -
 }
 
 @Composable
-private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
+private fun RenderOverlayNode(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+) {
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    // The row/column weight rides on the animated container: it is the Row/Column's direct child.
     AnimatedVisibility(
       visible = node.visible,
+      modifier = parentModifier,
       enter = fadeIn() + expandIn(),
       exit = fadeOut() + shrinkOut(),
     ) {
       RenderOverlayNodeContent(node, interact)
     }
   } else if (node.visible) {
-    RenderOverlayNodeContent(node, interact)
+    RenderOverlayNodeContent(node, interact, parentModifier)
   }
 }
 
@@ -111,8 +127,9 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
 private fun RenderOverlayNodeContent(
   node: OverlayRenderNode,
   interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
 ) {
-  val modifier = overlayNodeModifier(node, interact)
+  val modifier = parentModifier.then(overlayNodeModifier(node, interact))
   when (node.role) {
     "box" ->
       Box(modifier, contentAlignment = node.style.alignment) {
@@ -124,7 +141,7 @@ private fun RenderOverlayNodeContent(
         horizontalArrangement = overlayHorizontalArrangement(node.style.source),
         verticalAlignment = node.style.verticalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, rowWeight(it)) }
       }
     "column" ->
       Column(
@@ -132,27 +149,49 @@ private fun RenderOverlayNodeContent(
         verticalArrangement = overlayVerticalArrangement(node.style.source),
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
-        node.children.forEach { RenderOverlayNode(it, interact) }
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
       }
-    "text" ->
+    "text" -> {
+      val source = node.style.source
+      val role = overlayTextRole(MaterialTheme.typography, source.textStyle)
+      // A styled text node with no colour of its own reads as on-surface text, not black.
+      val textColor =
+        if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
+        else overlayThemedColor(node.style.color, source.color) ?: node.style.color
       Text(
         node.text,
         modifier,
-        color = node.style.color,
+        color = textColor,
         // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
-        fontSize = (node.style.source.textSize ?: 14.0).toFloat().sp,
-        fontWeight = node.style.fontWeight,
-        fontFamily = node.style.fontFamily,
+        // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+        fontSize =
+          source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+        fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+        fontFamily = if (role == null || source.fontFamily != null) node.style.fontFamily else null,
         textAlign = node.style.textAlign,
-        maxLines = node.style.source.maxLines ?: Int.MAX_VALUE,
+        maxLines = source.maxLines ?: Int.MAX_VALUE,
+        style = role ?: LocalTextStyle.current,
       )
+    }
     "icon" -> {
-      val icon = overlayIcon(node.iconName)
+      val icon = overlayIcon(node.iconName, (node.source as? OverlayIconNode)?.variant)
       if (icon != null)
-        Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
+        Icon(
+          icon,
+          contentDescription = null,
+          modifier = modifier,
+          tint =
+            (overlayThemedColor(node.style.color, node.style.source.color) ?: node.style.color)
+              .takeOrElse { LocalContentColor.current },
+        )
       else
         Box(
-          modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
+          modifier
+            .defaultMinSize(24.dp, 24.dp)
+            .background(
+              overlayThemedColor(node.style.background, node.style.source.background)
+                ?: Color.LightGray
+            )
         )
     }
     "image" -> OverlayImageContent(node, modifier)
@@ -173,6 +212,12 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "slider" -> RenderOverlaySlider(node, modifier, interact)
+    "chip" -> RenderOverlayChip(node, modifier, interact)
+    "card" ->
+      RenderOverlayCard(node, modifier) {
+        node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
+      }
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -342,7 +387,10 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(node.style.background ?: MaterialTheme.colorScheme.surface)
+        .background(
+          overlayThemedColor(node.style.background, node.style.source.background)
+            ?: MaterialTheme.colorScheme.surface
+        )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
             onDragStart = { drag = 0.0 },
@@ -372,7 +420,7 @@ private fun RenderOverlaySheet(
             .size(32.dp, 4.dp)
             .background(Color.Gray, RoundedCornerShape(2.dp))
         )
-      node.children.forEach { RenderOverlayNode(it, interact) }
+      node.children.forEach { RenderOverlayNode(it, interact, columnWeight(it)) }
     }
   }
 }
@@ -396,11 +444,16 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.width, horizontal = true)
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
-  val shape = RoundedCornerShape((style.cornerRadius ?: 0.0).toFloat().dp)
+  modifier = sizeConstraintModifier(modifier, style)
+  val shape =
+    overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
-  node.style.background?.let { modifier = modifier.background(it, shape) }
+  overlayThemedColor(node.style.background, style.background)?.let {
+    modifier = modifier.background(it, shape)
+  }
   style.border?.let {
-    modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
+    val borderColor = overlayThemedColor(node.style.borderColor, it.color)
+    modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
@@ -458,7 +511,8 @@ private fun overlayNodeModifier(
   return modifier
 }
 
-private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")
+private val SEMANTICS_FREE_CONTAINERS =
+  setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
 
 /**
  * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
@@ -496,3 +550,28 @@ private fun dimensionModifier(
     OverlayDimension.Wrap,
     null -> if (horizontal) modifier.wrapContentWidth() else modifier.wrapContentHeight()
   }
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
+private fun RowScope.rowWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Child `weight` takes the remaining main-axis space; only meaningful inside a Column. */
+private fun ColumnScope.columnWeight(child: OverlayRenderNode): Modifier =
+  child.style.source.weight?.let { Modifier.weight(it.toFloat()) } ?: Modifier
+
+/** Applied after width/height so `fill` and `dp` are clamped by the authored min/max. */
+private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Modifier =
+  if (
+    style.minWidth == null &&
+      style.maxWidth == null &&
+      style.minHeight == null &&
+      style.maxHeight == null
+  )
+    modifier
+  else
+    modifier.sizeIn(
+      minWidth = style.minWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      minHeight = style.minHeight?.toFloat()?.dp ?: Dp.Unspecified,
+      maxWidth = style.maxWidth?.toFloat()?.dp ?: Dp.Unspecified,
+      maxHeight = style.maxHeight?.toFloat()?.dp ?: Dp.Unspecified,
+    )

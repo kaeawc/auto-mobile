@@ -37,6 +37,8 @@ data class OverlayRenderNode(
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
+  /** The bound number of a `slider`; 0 for every other role. */
+  val sliderValue: Double = 0.0,
 )
 
 data class OverlayRenderModel(
@@ -44,6 +46,7 @@ data class OverlayRenderModel(
   val opacityPercent: Int,
   val root: OverlayRenderNode,
   val hasTextField: Boolean = false,
+  val theme: OverlaySpecTheme? = null,
   val motion: String? = null,
 ) {
   fun request() =
@@ -52,7 +55,7 @@ data class OverlayRenderModel(
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
     ) {
-      OverlaySpecContent(root)
+      OverlaySpecContent(root, theme = theme)
     }
 }
 
@@ -80,6 +83,7 @@ private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
     is OverlayRowNode -> node.children
     is OverlayColumnNode -> node.children
     is OverlayPagerNode -> node.children
+    is OverlayCardNode -> node.children
     else -> emptyList()
   }
 
@@ -91,6 +95,7 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
+    spec.theme,
     spec.motion,
   )
 }
@@ -113,6 +118,9 @@ private fun mapOverlayNode(
           "pageCount" to OverlayScalar.Numeric(context.second.toDouble()),
         )
   requireOverlayRenderSizes(node.style, path)
+  node.styleWhen?.forEachIndexed { index, entry ->
+    requireOverlayRenderSizes(entry.style, "$path.styleWhen[$index]")
+  }
   val role =
     when (node) {
       is OverlayBoxNode -> "box"
@@ -126,6 +134,9 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> "switch"
       is OverlayCheckboxNode -> "checkbox"
       is OverlayButtonNode -> "button"
+      is OverlaySliderNode -> "slider"
+      is OverlayChipNode -> "chip"
+      is OverlayCardNode -> "card"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -139,6 +150,8 @@ private fun mapOverlayNode(
       is OverlaySwitchNode -> node.label.orEmpty()
       is OverlayCheckboxNode -> node.label.orEmpty()
       is OverlayButtonNode -> node.label
+      is OverlaySliderNode -> node.label.orEmpty()
+      is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
       else -> ""
     }
@@ -174,7 +187,7 @@ private fun mapOverlayNode(
     text,
     node.testTag,
     node.visibleWhen?.holds(localState) ?: true,
-    mapOverlayStyle(node.style ?: OverlayStyle()),
+    mapOverlayStyle(resolveOverlayStyle(node.style, node.styleWhen, localState)),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,
     children,
@@ -187,6 +200,9 @@ private fun mapOverlayNode(
     } ?: false,
     checked =
       overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
+    sliderValue =
+      (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
+        ?: 0.0,
   )
 }
 
@@ -256,12 +272,17 @@ fun overlayColor(value: String): Color {
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
 
+/** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
+private fun overlayHexColor(value: String?): Color? =
+  value?.takeIf { it.startsWith("#") }?.let(::overlayColor)
+
 fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
   OverlayRenderStyle(
     style,
-    style.background?.let(::overlayColor),
-    style.border?.color?.let(::overlayColor),
-    style.color?.let(::overlayColor) ?: Color.Black,
+    overlayHexColor(style.background),
+    overlayHexColor(style.border?.color),
+    // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
+    overlayHexColor(style.color) ?: Color.Unspecified,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
@@ -322,11 +343,16 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
     mapOf(
       "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
       "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
+      "weight" to style.weight,
+      "minWidth" to style.minWidth,
+      "maxWidth" to style.maxWidth,
+      "minHeight" to style.minHeight,
+      "maxHeight" to style.maxHeight,
       "padding.top" to style.padding?.top,
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,
       "padding.end" to style.padding?.end,
-      "cornerRadius" to style.cornerRadius,
+      "cornerRadius" to (style.cornerRadius as? OverlayCornerRadius.Dp)?.dp,
       "border.width" to style.border?.width,
       "spacing" to style.spacing,
       "textSize" to style.textSize,

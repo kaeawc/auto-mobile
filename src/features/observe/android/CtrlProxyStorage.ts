@@ -11,6 +11,11 @@ import {
   keystoreDiscoverySchema,
   type KeystoreDiscoveryState,
 } from "../../storage/keystoreDiscovery";
+import {
+  parseSdkCapabilitiesState,
+  sdkCapabilitiesUnavailable,
+  type SdkCapabilitiesResult,
+} from "../../sdk/sdkCapabilities";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
@@ -244,6 +249,42 @@ export class CtrlProxyStorage {
       return keystoreDiscoverySchema.parse((await pending).state);
     } catch (error) {
       throw toActionableError(error, "Failed to discover Android Keystore capabilities");
+    }
+  }
+
+  /**
+   * Reads the app SDK's capability and capture-policy snapshot (issue #5191). Resolves to a typed
+   * `unavailable` result, never an empty capability set, when CtrlProxy, the SDK, or the response
+   * cannot supply a snapshot.
+   */
+  async getSdkCapabilities(packageName: string, timeoutMs = 5000): Promise<SdkCapabilitiesResult> {
+    try {
+      if (!(await this.context.ensureConnected())) {
+        return sdkCapabilitiesUnavailable("CTRLPROXY_UNREACHABLE");
+      }
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return sdkCapabilitiesUnavailable("CTRLPROXY_UNREACHABLE");
+      }
+      // Optional commands require an advertised capability, including on the first read.
+      const commands = await this.context.getSupportedCommands?.();
+      if (commands?.includes("get_sdk_capabilities") !== true) {
+        return sdkCapabilitiesUnavailable("CTRLPROXY_UNSUPPORTED");
+      }
+      const requestId = this.context.requestManager.generateId("get_sdk_capabilities");
+      const pending = this.context.requestManager.register<{ state: unknown }>(
+        requestId,
+        "get_sdk_capabilities",
+        timeoutMs,
+        () => ({ state: { outcome: "unavailable", reason: "REQUEST_TIMEOUT" } }),
+      );
+      ws.send(
+        serializeCtrlProxyRequest(ctrlProxyRequests.getSdkCapabilities({ requestId, packageName })),
+      );
+      return parseSdkCapabilitiesState((await pending).state);
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] getSdkCapabilities failed: ${errorMessage(error)}`, error);
+      return sdkCapabilitiesUnavailable("CTRLPROXY_UNREACHABLE");
     }
   }
 

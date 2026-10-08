@@ -396,6 +396,7 @@ launch_unit_shard() {
   fi
 
   (
+    shard_started="$(date +%s)"
     timing_log="$shard_root/timing-shard-${shard}.ndjson"
     # These exports intentionally belong to the unit-shard subshell.
     # shellcheck disable=SC2030
@@ -445,6 +446,10 @@ launch_unit_shard() {
       ${shard_args[@]+"${shard_args[@]}"} \
         ${shard_files[@]+"${shard_files[@]}"} || shard_status=$?
     fi
+    # The parent reaps shards in index order, so its clock would report every
+    # shard as finishing with the slowest earlier one (#10583). Record this
+    # attempt's own test wall time before the end probe and timing summary.
+    printf '%s\n' "$(($(date +%s) - shard_started))" > "$shard_root/shard-${shard}.wall"
     run_runner_calibration "$calibration_file" "$calibration_label end"
     if [[ -s "$timing_log" ]]; then
       bun "$ROOT/scripts/lib/test-file-timings.ts" summary "$timing_log" || true
@@ -501,11 +506,20 @@ retry_unit_shard() {
   if [[ -f "$shard_root/timing-shard-${shard}.ndjson" ]]; then
     mv "$shard_root/timing-shard-${shard}.ndjson" "$shard_root/timing-shard-${shard}.attempt-1.ndjson"
   fi
-  # A killed attempt can leave a partial report; the retry writes a fresh one.
+  rm -f "$shard_root/shard-${shard}.wall"
+  # A killed attempt can leave partial reports: the shard's own report and any
+  # per-chunk reports (shard-N-iso-K.xml). Match exact names, never shard-N*,
+  # which would also delete shard-N0.xml of another shard.
   if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
-    rm -f "$AUTOMOBILE_UNIT_JUNIT_DIR/shard-${shard}.xml"
+    rm -f "$AUTOMOBILE_UNIT_JUNIT_DIR/shard-${shard}.xml" \
+      "$AUTOMOBILE_UNIT_JUNIT_DIR/shard-${shard}-"*.xml
+  fi
+  # Re-derive the shard groups (#10619) so the retry runs the same file set.
+  if declare -F configure_unit_shard_groups > /dev/null; then
+    configure_unit_shard_groups
   fi
   shard_attempts[shard]=2
+  shard_starts[shard]="$(date +%s)"
   launch_unit_shard "$shard" 2
 }
 
@@ -518,6 +532,13 @@ finish_unit_shard() {
     suffix=" after a retry"
   fi
   shard_elapsed_seconds[shard]=$(($(date +%s) - shard_starts[shard]))
+  # A killed shard writes no record; keep the reap-time upper bound for it.
+  if [[ -f "$shard_root/shard-${shard}.wall" ]]; then
+    shard_wall_record="$(< "$shard_root/shard-${shard}.wall")"
+    if [[ "$shard_wall_record" =~ ^[0-9]+$ ]]; then
+      shard_elapsed_seconds[shard]="$shard_wall_record"
+    fi
+  fi
   shard_statuses[shard]="$status"
   if [[ "$status" -eq 124 ]]; then
     printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
@@ -540,6 +561,7 @@ run_unit_shards() {
   local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
   local file index shard shard_number worker_count rc shard_status report_name
   local lane_start lane_elapsed physical_cores lane_cap="" attempts_note
+  local shard_wall_record
   local test_files=()
   local shard_files=()
   local pids=()

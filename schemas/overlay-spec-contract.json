@@ -311,11 +311,75 @@
         },
         "color": {
           "rule": {
-            "kind": "color"
+            "kind": "ref",
+            "name": "colorValue"
           },
           "optional": false
         }
       }
+    },
+    "colorValue": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "color"
+        },
+        {
+          "kind": "enum",
+          "values": [
+            "primary",
+            "onPrimary",
+            "primaryContainer",
+            "onPrimaryContainer",
+            "inversePrimary",
+            "secondary",
+            "onSecondary",
+            "secondaryContainer",
+            "onSecondaryContainer",
+            "tertiary",
+            "onTertiary",
+            "tertiaryContainer",
+            "onTertiaryContainer",
+            "background",
+            "onBackground",
+            "surface",
+            "onSurface",
+            "surfaceVariant",
+            "onSurfaceVariant",
+            "surfaceTint",
+            "inverseSurface",
+            "inverseOnSurface",
+            "error",
+            "onError",
+            "errorContainer",
+            "onErrorContainer",
+            "outline",
+            "outlineVariant",
+            "scrim",
+            "surfaceBright",
+            "surfaceDim",
+            "surfaceContainer",
+            "surfaceContainerHigh",
+            "surfaceContainerHighest",
+            "surfaceContainerLow",
+            "surfaceContainerLowest"
+          ]
+        }
+      ]
+    },
+    "cornerRadius": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "number",
+          "integer": false,
+          "min": 0
+        },
+        {
+          "kind": "enum",
+          "values": ["none", "extraSmall", "small", "medium", "large", "extraLarge", "full"]
+        }
+      ]
     },
     "style": {
       "kind": "object",
@@ -383,15 +447,15 @@
         },
         "background": {
           "rule": {
-            "kind": "color"
+            "kind": "ref",
+            "name": "colorValue"
           },
           "optional": true
         },
         "cornerRadius": {
           "rule": {
-            "kind": "number",
-            "integer": false,
-            "min": 0
+            "kind": "ref",
+            "name": "cornerRadius"
           },
           "optional": true
         },
@@ -462,7 +526,8 @@
         },
         "color": {
           "rule": {
-            "kind": "color"
+            "kind": "ref",
+            "name": "colorValue"
           },
           "optional": true
         },

@@ -100,8 +100,13 @@ A text node's `style.textStyle` names a Material 3 type role (`displayLarge` …
 in all) and so follows the theme's scale and family. It supplies size, weight and family; an
 explicit `textSize`, `fontWeight` or `fontFamily` on the same node still wins. Plain text
 without `textStyle` keeps its authored 14 sp default and is not scaled; it takes the theme's
-`typography.fontFamily` only when it names no `fontFamily` of its own. Colour tokens and
-`cornerRadius` tokens are a later slice (#10438).
+`typography.fontFamily` only when it names no `fontFamily` of its own.
+
+A text node with no `color` draws in the theme's content colour (`onSurface`). A `cornerRadius` token maps to the
+theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill. A
+role-valued `background` does not take part in inferring the overlay's light/dark
+theme from authored backgrounds (it would be circular); set `theme.mode` or
+`colors.seed` for that.
 
 ## Windows
 
@@ -219,9 +224,9 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
 | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
-| `background`, `color`                            | Strict hex color.                                                                                                            |
-| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
-| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                               |
+| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                   |
+| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                              |
 | `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
 | `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
 | `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
@@ -232,8 +237,14 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
 | `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
-Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
-No short hex, named colors, CSS functions, or separate color opacity. Style
+Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
+of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
+`primaryContainer`, `secondary`, `tertiary`, `background`, `surface`, `onSurface`,
+`surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
+steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
+of the scheme, 36 in all). A role resolves against the overlay's active theme
+(`theme.mode`, `colors.seed`, device colour), so it follows light/dark and the
+seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
 Start/end use layout direction, including RTL.

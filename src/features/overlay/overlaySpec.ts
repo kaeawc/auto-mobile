@@ -115,10 +115,63 @@ const paddingSchema = z
     end: z.number().finite().min(0).optional(),
   })
   .strict();
+/** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
+const COLOR_ROLES = [
+  "primary",
+  "onPrimary",
+  "primaryContainer",
+  "onPrimaryContainer",
+  "inversePrimary",
+  "secondary",
+  "onSecondary",
+  "secondaryContainer",
+  "onSecondaryContainer",
+  "tertiary",
+  "onTertiary",
+  "tertiaryContainer",
+  "onTertiaryContainer",
+  "background",
+  "onBackground",
+  "surface",
+  "onSurface",
+  "surfaceVariant",
+  "onSurfaceVariant",
+  "surfaceTint",
+  "inverseSurface",
+  "inverseOnSurface",
+  "error",
+  "onError",
+  "errorContainer",
+  "onErrorContainer",
+  "outline",
+  "outlineVariant",
+  "scrim",
+  "surfaceBright",
+  "surfaceDim",
+  "surfaceContainer",
+  "surfaceContainerHigh",
+  "surfaceContainerHighest",
+  "surfaceContainerLow",
+  "surfaceContainerLowest",
+] as const;
+/** Material 3 Shapes steps a `cornerRadius` can name instead of a dp number. */
+const CORNER_RADIUS_TOKENS = [
+  "none",
+  "extraSmall",
+  "small",
+  "medium",
+  "large",
+  "extraLarge",
+  "full",
+] as const;
+const colorValueSchema = z.union([
+  z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+  z.enum(COLOR_ROLES),
+]);
 const borderSchema = z
   .object({
     width: z.number().finite().min(0),
-    color: z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/),
+    color: colorValueSchema,
   })
   .strict();
 /** Material 3 type roles a text node's `textStyle` can name. */
@@ -149,11 +202,8 @@ const styleSchema = z
     minHeight: z.number().finite().min(0).optional(),
     maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
-    background: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
-    cornerRadius: z.number().finite().min(0).optional(),
+    background: colorValueSchema.optional(),
+    cornerRadius: z.union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS)]).optional(),
     border: borderSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     alignment: z
@@ -175,10 +225,7 @@ const styleSchema = z
     spacing: z.number().finite().min(0).optional(),
     textSize: z.number().finite().min(1e-6).optional(),
     fontWeight: z.number().finite().int().min(100).max(900).optional(),
-    color: z
-      .string()
-      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
-      .optional(),
+    color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),

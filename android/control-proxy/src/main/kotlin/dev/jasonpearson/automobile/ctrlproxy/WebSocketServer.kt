@@ -328,6 +328,9 @@ class WebSocketServer(
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
     // reply when this flag is present, so an older runner never costs them a timeout.
     add("network_mock_rules_report_v1")
+    // get_sdk_capabilities honours userId (work or secondary profile). Hosts omit the field for a
+    // service lacking this flag, which would otherwise read the app instance of its own user.
+    add("sdk_capabilities_user_id_v1")
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
     // show_overlay honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the overlay would silently land on the default display.

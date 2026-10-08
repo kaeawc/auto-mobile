@@ -17,6 +17,7 @@ import {
   WebSocketState,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { DefaultRetryExecutor } from "../../../../src/utils/retry/RetryExecutor";
 import { FakeScreenshotBackoffScheduler } from "../../../fakes/FakeScreenshotBackoffScheduler";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
@@ -304,15 +305,17 @@ describe("IOSCtrlProxyClient", function () {
     });
   };
 
+  // The socket helpers wait on microtasks, not real turns: auto-advance fires a
+  // pending request deadline whenever the test yields the event loop.
   const waitForSocket = async (
     getSocket: () => FakeWebSocket | null,
   ): Promise<FakeWebSocket | null> => {
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 100; attempt++) {
       const socket = getSocket();
       if (socket) {
         return socket;
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.resolve();
     }
     return getSocket();
   };
@@ -324,12 +327,31 @@ describe("IOSCtrlProxyClient", function () {
     if (!socket) {
       return;
     }
-    for (let attempt = 0; attempt < 10; attempt++) {
+    for (let attempt = 0; attempt < 100; attempt++) {
       if (commandPayloads(socket).length >= minCount) {
         return;
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.resolve();
     }
+  };
+
+  /**
+   * Wait (microtasks only) for the first `type` message sent at or after index `from`.
+   * Matching by type keeps a connect-time probe (e.g. get_sdk_capabilities) that lands
+   * in the same window from being answered in place of the request under test.
+   */
+  const waitForSentRequest = async (
+    socket: CapturingWebSocket,
+    type: string,
+    from: number,
+  ): Promise<{ requestId: string }> => {
+    const find = () =>
+      socket.sentMessages
+        .slice(from)
+        .map((message) => JSON.parse(message) as { type?: string; requestId: string })
+        .find((message) => message.type === type);
+    await drainUntil(() => find() !== undefined, { description: `a sent ${type}` });
+    return find()!;
   };
 
   const syncMessageTypes = new Set([
@@ -4199,10 +4221,12 @@ describe("IOSCtrlProxyClient", function () {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
-        // Macrotask flush: ensure the request is registered before the port change.
-        await new Promise((resolve) => setImmediate(resolve));
-
         const requestManager = testClient["getRequestManager"]();
+        // Ensure the request is registered before the port change. Microtasks only:
+        // a real turn would let auto-advance expire the handshake wait first.
+        await drainUntil(() => requestManager.getPendingCount() > 0, {
+          description: "the drag request to register",
+        });
         const cancel = spyOn(requestManager, "cancelAll");
         // Precondition: the request is genuinely in-flight before the port change.
         expect(requestManager.getPendingCount()).toBeGreaterThan(0);
@@ -4384,8 +4408,11 @@ describe("IOSCtrlProxyClient", function () {
           client.invalidateCache();
           const sentBefore = socket.sentMessages.length;
           const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
-          await waitForSentMessages(socket, sentBefore + 1);
-          const request = JSON.parse(socket.sentMessages.at(-1)!) as { requestId: string };
+          const request = await waitForSentRequest(
+            socket,
+            "request_hierarchy_if_stale",
+            sentBefore,
+          );
           const refreshed = { ...current, updatedAt: current.updatedAt + i };
           socket.simulateMessage(
             JSON.stringify({
@@ -4559,8 +4586,7 @@ describe("IOSCtrlProxyClient", function () {
         client.invalidateCache();
         const sentBefore = socket.sentMessages.length;
         const pending = client.requestHierarchySync(undefined, false, undefined, 1000);
-        await waitForSentMessages(socket, sentBefore + 1);
-        const request = JSON.parse(socket.sentMessages.at(-1)!) as { requestId: string };
+        const request = await waitForSentRequest(socket, "request_hierarchy_if_stale", sentBefore);
         socket.simulateMessage(
           JSON.stringify({
             type: "hierarchy_update",
@@ -4957,7 +4983,7 @@ describe("IOSCtrlProxyClient", function () {
 
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        await flushPromises();
+        await flushMicrotasks();
 
         socket!.simulateMessage(
           JSON.stringify({

@@ -94,7 +94,38 @@ fi
 if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
+# Runner calibration (#10583): fake the probe so shard tests stay fast and
+# deterministic; the validator's `slowdown` summary runs the real module.
+if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
+  if [[ "$2" == probe ]]; then
+    if [[ -n "${STUB_PROBE_RECORD:-}" ]]; then
+      printf '%s|%s\n' "$4" "$3" >> "$STUB_PROBE_RECORD"
+    fi
+    if [[ -n "${STUB_PROBE_EXIT:-}" ]]; then exit "$STUB_PROBE_EXIT"; fi
+    printf '%s\t%s\t25\n' "$4" "${STUB_PROBE_MS:-10}" >> "$3"
+    exit 0
+  fi
+  exec "$REAL_BUN" "$@"
+fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+# Per-invocation exit codes for `bun test` (shard retry tests run one worker,
+# so invocations are sequential): "124 0" times out once, then passes.
+if [[ "$1" == test && -n "${STUB_BUN_EXITS:-}" ]]; then
+  attempt="$(grep -c '^test ' "$BUN_ARGS_FILE")"
+  read -r -a stub_exits <<< "$STUB_BUN_EXITS"
+  code="${stub_exits[$((attempt - 1))]:-0}"
+  if [[ "$code" == sigkill ]]; then
+    kill -KILL "$$"
+  fi
+  if [[ "$code" != 0 ]]; then
+    echo "(fail) stub suite > slow test [5001.00ms]"
+    if [[ -n "${STUB_STALE_REPORT_DIR:-}" ]]; then
+      : > "$STUB_STALE_REPORT_DIR/shard-0-iso-1.xml"
+      : > "$STUB_STALE_REPORT_DIR/shard-10.xml"
+    fi
+    exit "$code"
+  fi
+fi
 if [[ "$1" == test && -n "${STUB_CHUNK_RECORD:-}" ]]; then
   printf '%s|%s|%s\n' "${AUTOMOBILE_TEST_MODE:-unset}" "${AUTOMOBILE_TEST_TIMING_LOG:-}" "${AUTOMOBILE_WATCHDOG_TIMING_LOG:-}" >> "$STUB_CHUNK_RECORD"
   for arg in "$@"; do
@@ -601,6 +632,135 @@ EOF
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=1"* ]]
 }
 
+# Shard retry on infra exits (#10583). One worker keeps invocations sequential.
+run_retry_lane() {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 "$@" bash "$SCRIPT" unit
+}
+
+bun_test_invocations() {
+  grep -c '^test ' "$BUN_ARGS_FILE" || true
+}
+
+@test "a shard that hits its wall budget is retried once and can pass" {
+  report_dir="$BATS_TEST_TMPDIR/unit-reports"
+  run_retry_lane STUB_BUN_EXITS="124 0" AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir"
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RETRY: unit shard 0 hit its 180s wall-clock budget (exit 124) after "*"retrying once with the same budget (attempt 1 logged 1 failing test line(s)"* ]]
+  [[ "$output" == *"test-ts: unit shard 0 passed on its retry"* ]]
+  [[ "$output" == *"test-ts: unit shard 1/1 wall="*"s status=0 attempts=2"* ]]
+  [[ "$output" == *"test-ts: unit shards total wall="*"s status=0 retried=1"* ]]
+  [[ "$output" == *"==> TypeScript unit shard 1/1 (attempt 1 of 2, retried)"* ]]
+  [ -f scratch/test-ts-unit-shards/shard-0.attempt-1.log ]
+  [ -s "$report_dir/shard-0.xml" ]
+}
+
+@test "a shard retry deletes that shard's stale reports but not another shard's" {
+  report_dir="$BATS_TEST_TMPDIR/unit-reports"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_STALE_REPORT_DIR="$report_dir" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir"
+  [ "$status" -eq 0 ]
+  [ ! -e "$report_dir/shard-0-iso-1.xml" ]
+  [ -e "$report_dir/shard-10.xml" ]
+  [ -s "$report_dir/shard-0.xml" ]
+}
+
+@test "a shard that times out twice fails the lane with 124 after exactly one retry" {
+  run_retry_lane STUB_BUN_EXITS="124 124 0"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"TIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry"* ]]
+  [[ "$output" == *"status=124 attempts=2"* ]]
+}
+
+@test "a shard killed by a signal is retried once" {
+  run_retry_lane STUB_BUN_EXITS="sigkill 0"
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RETRY: unit shard 0 was killed by signal 9 (exit 137) after "* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="143 143"
+  [ "$status" -eq 1 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 143 after a retry"* ]]
+}
+
+@test "an ordinary test failure is never retried" {
+  run_retry_lane STUB_BUN_EXITS="1 0"
+  [ "$status" -eq 1 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" != *"RETRY:"* ]]
+  [[ "$output" == *"FAIL: unit shard 0 exited with status 1"* ]]
+  [[ "$output" != *"after a retry"* ]]
+  [[ "$output" == *"retried=0"* ]]
+}
+
+@test "a shard retry emits a GitHub warning annotation and a step summary line only under Actions" {
+  summary="$BATS_TEST_TMPDIR/step-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 0" GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"::warning title=Unit shard retried (infra exit)::unit shard 0 hit its 180s wall-clock budget (exit 124)"* ]]
+  grep -q 'Unit shard 0 hit its 180s wall-clock budget (exit 124).*retried once' "$summary"
+
+  : > "$BUN_ARGS_FILE"
+  run env -u GITHUB_ACTIONS -u GITHUB_STEP_SUMMARY PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_UNIT_TEST_WORKERS=1 STUB_BUN_EXITS="124 0" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"::warning"* ]]
+}
+
+@test "shard retry can be disabled and rejects values other than 0 or 1" {
+  run_retry_lane STUB_BUN_EXITS="124 0" AUTOMOBILE_UNIT_SHARD_RETRIES=0
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" != *"RETRY:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane AUTOMOBILE_UNIT_SHARD_RETRIES=2
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_UNIT_SHARD_RETRIES must be 0 or 1, got: 2"* ]]
+  [ "$(bun_test_invocations)" -eq 0 ]
+}
+
+@test "a retry that would pass the lane cap is skipped and the lane fails" {
+  # 180s budget + 60s overhead cannot fit a 200s lane cap.
+  run_retry_lane STUB_BUN_EXITS="124 0" AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=200
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"test-ts: not retrying unit shard 0 (status 124): a 180s retry at "*"s elapsed would pass the 200s lane cap"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS=soon
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS must be a positive integer"* ]]
+}
+
+@test "unit shards run the calibration probe at start and end of every attempt next to the JUnit reports" {
+  report_dir="$BATS_TEST_TMPDIR/unit-reports"
+  probes="$BATS_TEST_TMPDIR/probes"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_RECORD="$probes" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$probes")" = "unit shard 0 attempt 1 start|$report_dir/calibration-unit-shard-0.tsv
+unit shard 0 attempt 1 end|$report_dir/calibration-unit-shard-0.tsv
+unit shard 0 attempt 2 start|$report_dir/calibration-unit-shard-0.tsv
+unit shard 0 attempt 2 end|$report_dir/calibration-unit-shard-0.tsv" ]
+  [ "$(wc -l < "$report_dir/calibration-unit-shard-0.tsv" | tr -d ' ')" -eq 4 ]
+}
+
+@test "the calibration probe is skippable and its failure never fails a shard" {
+  probes="$BATS_TEST_TMPDIR/probes"
+  run_retry_lane STUB_PROBE_RECORD="$probes" AUTOMOBILE_RUNNER_CALIBRATION=0
+  [ "$status" -eq 0 ]
+  [ ! -e "$probes" ]
+  [ ! -e scratch/test-ts-unit-shards/calibration-unit-shard-0.tsv ]
+
+  run_retry_lane STUB_PROBE_EXIT=3
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"runner calibration probe failed (unit shard 0 attempt 1 start); continuing without this sample"* ]]
+}
+
 @test "unit shard wall time is each shard's own duration, not its reap time (#10583)" {
   # Deterministic per-shard clock: `date +%s` is a fixed base plus the offset the
   # stub bun wrote for the calling shard's label, so nothing really sleeps.
@@ -1000,8 +1160,9 @@ exit 77
 EOF
   chmod +x "$STUB_BIN/timeout"
 
+  # Retry disabled: this pins one watchdog firing, not the retry policy.
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
-    STUB_BUN_SLEEP_SECONDS=5 \
+    STUB_BUN_SLEEP_SECONDS=5 AUTOMOBILE_UNIT_SHARD_RETRIES=0 \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=1 bash "$SCRIPT" unit
   [ "$status" -eq 124 ]
   [ -s "scratch/test-ts-unit-shards/watchdog-shard-0.txt" ]
@@ -1928,6 +2089,18 @@ EOF
   [ "$(wc -l <<< "$output")" -eq 3 ]
 }
 
+@test "chunked shards skip the calibration probe so the shared chunk deadline holds" {
+  stub_chunk_discovery
+  record="$BATS_TEST_TMPDIR/chunks"
+  probes="$BATS_TEST_TMPDIR/probes"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+    AUTOMOBILE_UNIT_TEST_CHUNK_FILES=5 STUB_CHUNK_RECORD="$record" \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=600 STUB_PROBE_RECORD="$probes" \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/reports" bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ ! -e "$probes" ]
+}
+
 @test "a failing chunk fails the shard and lane while later chunks still run" {
   stub_chunk_discovery
   record="$BATS_TEST_TMPDIR/chunks"
@@ -2146,5 +2319,143 @@ EOF
     BUN_TEST_TIMING_STALL_MIN_OFFENDERS="$threshold" run_timing_gate_with_recheck_times "0.010"
     [ "$status" -eq 2 ]
     [[ "$output" == *"BUN_TEST_TIMING_STALL_MIN_OFFENDERS must be a positive integer without leading zeros"* ]]
+  done
+}
+
+# Runner calibration (#10583): shard probes scale the first-sample budget.
+seed_calibration() {
+  printf 'unit shard 0 attempt 1 start\t%s\t25\n' "$1" > "$report_dir/calibration-unit-shard-0.tsv"
+}
+
+run_calibrated_timing_gate() {
+  run env PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' "$@" \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+}
+
+@test "timing gate scales the first-sample budget by the worst shard calibration slowdown" {
+  seed_outlier_report
+  seed_calibration 75
+  printf 'unit shard 1 attempt 1 end\t30\t25\n' > "$report_dir/calibration-unit-shard-1.tsv"
+  run_calibrated_timing_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Runner calibration: slowdown 3.00x; first-sample budget 300.00ms (x3.00, cap 4x); isolated rechecks still enforce 100ms."* ]]
+  [[ "$output" != *"Runner starved"* ]]
+  [ ! -s "$BUN_ARGS_FILE" ]
+}
+
+@test "timing gate caps the calibration multiplier and still enforces the isolated median" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite slow 0.900
+  seed_calibration 250
+  run_calibrated_timing_gate STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"slowdown 10.00x; first-sample budget 400.00ms (x4.00, cap 4x)"* ]]
+  [[ "$output" == *"Runner starved (slowdown above 4x)"* ]]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 200.00ms of 3 isolated runs)"* ]]
+}
+
+@test "timing gate reports unverified offenders on a starved runner as infra warnings" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite slow 0.900
+  seed_calibration 250
+  run_calibrated_timing_gate GITHUB_ACTIONS=true \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Infra warning (starved runner): could not verify suite.slow within the 1s recheck budget (first sample 900.00ms"* ]]
+  [[ "$output" == *"::warning title=Unit timing budget (starved runner)::WARN: suite.slow | WARN (infra: starved runner; could not verify within the recheck budget) | first sample: 900.00ms"* ]]
+  [[ "$output" != *"::error::"* ]]
+  grep -Fq '## Infra warnings (starved runner)' "$report_dir/unit-timing-budget-summary.md"
+  grep -Fq 'Overall verdict: PASS' "$report_dir/unit-timing-budget-summary.md"
+
+  # Below the infra threshold the same unverified offender still fails closed.
+  seed_calibration 75
+  run_calibrated_timing_gate \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 BUN_TEST_TIMING_FAKE_ELAPSED_SECONDS=1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Could not verify within the 1s recheck budget: suite.slow"* ]]
+}
+
+@test "timing gate reports an unrecheckable offender on a starved runner as an infra warning" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  # File-less testcase: nothing to re-run, so only the starved first sample exists.
+  {
+    printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+    printf '<testsuites name="bun test" tests="1" failures="0" skipped="0" time="0.9">\n'
+    printf '  <testsuite name="suite" tests="1" failures="0" skipped="0" time="0" hostname="mac.lan">\n'
+    printf '    <testcase name="slow" classname="suite" time="0.900" line="1" assertions="1" />\n'
+    printf '  </testsuite>\n'
+    printf '</testsuites>\n'
+  } > "$report_dir/shard-0.xml"
+  seed_calibration 250
+  run_calibrated_timing_gate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Infra warning (starved runner): suite.slow exceeded 100ms on its only sample (900.00ms) and cannot be re-run."* ]]
+  grep -Fq 'WARN (infra: starved runner; not re-runnable)' "$report_dir/unit-timing-budget-summary.md"
+}
+
+@test "timing gate scopes the first-sample budget to the sample's own shard and final attempt" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite fast 0.010
+  write_junit_report "$report_dir/shard-1.xml" "$OFFENDER_FILE" suite slow 0.200
+  # Shard 0 is starved (3x) on its discarded attempt 1 only; shard 1 is healthy.
+  printf 'unit shard 0 attempt 1 start\t75\t25\nunit shard 0 attempt 2 start\t25\t25\n' \
+    > "$report_dir/calibration-unit-shard-0.tsv"
+  printf 'unit shard 1 attempt 1 start\t25\t25\n' > "$report_dir/calibration-unit-shard-1.tsv"
+  run_calibrated_timing_gate STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Test exceeded 100ms: suite.slow (median 200.00ms of 3 isolated runs)"* ]]
+
+  # The same sample on a shard that itself measured 3x gets the scaled budget.
+  printf 'unit shard 1 attempt 1 start\t75\t25\n' > "$report_dir/calibration-unit-shard-1.tsv"
+  rm -f "$STUB_RECHECK_INDEX"
+  run_calibrated_timing_gate STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Test exceeded"* ]]
+}
+
+@test "timing gate keeps a partially rechecked file fail-closed on a starved runner" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  write_junit_report "$report_dir/shard-0.xml" "$OFFENDER_FILE" suite slow 0.900
+  seed_calibration 250
+  # Deterministic clock: one second elapses per isolated recheck run.
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+runs=0
+if [[ -f "$STUB_RECHECK_INDEX" ]]; then runs="$(cat "$STUB_RECHECK_INDEX")"; fi
+printf '%s\n' "$((1000 + runs))"
+EOF
+  chmod +x "$STUB_BIN/date"
+  run_calibrated_timing_gate STUB_RECHECK_INDEX="$STUB_RECHECK_INDEX" \
+    BUN_TEST_TIMING_RECHECK_BUDGET_SECONDS=1 STUB_RECHECK_TIMES="0.200 0.200 0.200"
+  [ "$status" -eq 1 ]
+  [ "$(cat "$STUB_RECHECK_INDEX")" -eq 1 ]
+  [[ "$output" == *"Could not verify within the 1s recheck budget: suite.slow"* ]]
+  [[ "$output" != *"Infra warning"* ]]
+}
+
+@test "timing gate slowdown override disables scaling and calibration settings are validated" {
+  seed_outlier_report
+  seed_calibration 75
+  run_calibrated_timing_gate BUN_TEST_TIMING_SLOWDOWN=1 STUB_RECHECK_TIMES="0.010 0.010 0.010"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"first-sample budget 100.00ms (x1.00, cap 4x)"* ]]
+  [[ "$output" == *"Recheck cleared suite.slow"* ]]
+
+  run_calibrated_timing_gate BUN_TEST_TIMING_SLOWDOWN=fast
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"BUN_TEST_TIMING_SLOWDOWN must be a non-negative decimal (got 'fast')."* ]]
+
+  for name in BUN_TEST_TIMING_MAX_SLOWDOWN BUN_TEST_TIMING_INFRA_SLOWDOWN; do
+    run_calibrated_timing_gate "$name=0"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"$name must be a positive integer without leading zeros"* ]]
   done
 }

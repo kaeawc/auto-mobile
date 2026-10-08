@@ -528,9 +528,9 @@ describe("ToolExecutionContext", () => {
       false,
       controller.signal,
     );
-    // The fake timer's auto-advance dispatch runs on a macrotask (setImmediate),
-    // so waiting for the microtask-scheduled `firstSetupDone` here is
-    // guaranteed to land before the retry sleep's fake deadline fires.
+    // The fake timer's auto-advance fires the retry sleep only once the microtask
+    // queue goes quiet, so waiting for the microtask-scheduled `firstSetupDone`
+    // here is guaranteed to land before the retry sleep's fake deadline fires.
     await firstSetupDone;
     controller.abort(new Error("caller cancelled during retry sleep"));
     await expect(context).rejects.toThrow("caller cancelled during retry sleep");

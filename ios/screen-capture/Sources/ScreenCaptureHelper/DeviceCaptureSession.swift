@@ -45,7 +45,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         writer: FrameWriter,
         encode: CommandLineOptions.EncodeSettings? = nil,
         diagnosticSink: @escaping (String) -> Void = { line in
-            FileHandle.standardError.write(Data(line.utf8))
+            DescriptorWrite.writeDiagnostic(line)
         },
         onFatalError: @escaping (Error) -> Void
     ) {

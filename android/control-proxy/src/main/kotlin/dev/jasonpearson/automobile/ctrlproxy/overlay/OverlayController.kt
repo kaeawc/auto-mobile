@@ -73,6 +73,8 @@ class OverlayController(
   private val packageName: String = DEFAULT_CTRL_PROXY_PACKAGE,
   /** Events a device-persistent overlay produced while no host was connected. */
   private val offlineEvents: OverlayOfflineEventBuffer = OverlayOfflineEventBuffer(),
+  /** Loaded custom fonts the rendered overlay draws `fontFamily: {asset}` text with. */
+  private val fonts: OverlayFontCache? = null,
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -210,7 +212,9 @@ class OverlayController(
         darkTheme = overlayHostDark(mappedSpec),
         onHostDismiss = { interact(runtime, OverlayInteraction.HostDismiss) },
         content = {
-          OverlayRuntimeContent(runtime, images) { interaction -> interact(runtime, interaction) }
+          OverlayRuntimeContent(runtime, images, fonts) { interaction ->
+            interact(runtime, interaction)
+          }
         },
       )
     val blocked = lifecycle.isBlocked()

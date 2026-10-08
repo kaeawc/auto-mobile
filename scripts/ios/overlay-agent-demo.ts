@@ -8,121 +8,61 @@
  *   bun scripts/ios/overlay-agent-demo.ts sheet                     bottom sheet with a text field
  *   bun scripts/ios/overlay-agent-demo.ts status | dismiss | events
  *
- * Specs go through the same validator and showVariants composer as the Android path.
+ * Specs go through the same validator and showVariants composer as the Android path. `launch`
+ * passes a host-chosen port and a fresh auth token to the agent (#10566) and saves both to
+ * scratch/overlay-agent/session.json for the other commands.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { connect, type Socket } from "node:net";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  connectOverlayAgent,
+  createOverlayAgentLaunchConfig,
+  NodeOverlayAgentConnector,
+  type OverlayAgentClient,
+} from "../../src/features/overlay/ios/overlayAgentClient";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
 import { composeVariantCarousel } from "../../src/features/overlay/overlayVariants";
-import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 
 const PORT = Number(process.env.AUTOMOBILE_OVERLAY_PORT ?? 8771);
 const REPO = join(import.meta.dir, "..", "..");
+const AGENT_DIR = join(REPO, "scratch", "overlay-agent");
+/** Port and per-launch token written by `launch` and read by every other command. */
+const SESSION_FILE = join(AGENT_DIR, "session.json");
 
-type Message = Record<string, unknown>;
-
-const REQUEST_TIMEOUT_MS = 15_000;
-
-interface Waiter {
-  resolve: (message: Message) => void;
-  reject: (error: Error) => void;
-  timeout: NodeJS.Timeout;
+async function openAgent(): Promise<OverlayAgentClient> {
+  let session: { port: number; token: string };
+  try {
+    session = JSON.parse(readFileSync(SESSION_FILE, "utf8")) as { port: number; token: string };
+  } catch (error) {
+    throw new Error(`No overlay agent session at ${SESSION_FILE}; run the launch command first.`, {
+      cause: error,
+    });
+  }
+  const agent = await connectOverlayAgent({
+    ...session,
+    connector: new NodeOverlayAgentConnector(),
+  });
+  console.log("agent", JSON.stringify(agent.handshake));
+  return agent;
 }
 
-class AgentConnection {
-  private buffer = "";
-  private waiters = new Map<string, Waiter>();
-  private nextId = 1;
-  private closedError: Error | undefined;
-  onEvent: (event: Message) => void = (event) => console.log("event", JSON.stringify(event));
-  /** Called once when the agent goes away, so event waits settle too. */
-  onClosed: (error: Error) => void = () => {};
-
-  private constructor(
-    private readonly socket: Socket,
-    private readonly timer: Timer = defaultTimer,
-  ) {
-    socket.setEncoding("utf8");
-    // The injected app can exit or crash at any time; settle everything still waiting.
-    socket.on("error", (error) =>
-      this.fail(new Error(`Overlay agent connection failed: ${error.message}`)),
-    );
-    socket.on("close", () =>
-      this.fail(new Error("Overlay agent closed the connection (app exited?)")),
-    );
-    socket.on("data", (chunk: string) => {
-      this.buffer += chunk;
-      let newline = this.buffer.indexOf("\n");
-      while (newline >= 0) {
-        const message = JSON.parse(this.buffer.slice(0, newline)) as Message;
-        this.buffer = this.buffer.slice(newline + 1);
-        this.dispatch(message);
-        newline = this.buffer.indexOf("\n");
+/** Resolves when `done` matches an event; rejects when the agent goes away. */
+function waitForEvent(
+  agent: OverlayAgentClient,
+  done: (event: Record<string, unknown>) => boolean,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    agent.onClosed(reject);
+    agent.onEvent((event) => {
+      console.log("event", JSON.stringify(event));
+      if (done(event)) {
+        resolve();
       }
     });
-  }
-
-  static open(): Promise<AgentConnection> {
-    return new Promise((resolve, reject) => {
-      const socket = connect(PORT, "127.0.0.1", () => resolve(new AgentConnection(socket)));
-      socket.once("error", (error) =>
-        reject(
-          new Error(
-            `Overlay agent is not listening on 127.0.0.1:${PORT}. Run the launch command first. (${error.message})`,
-          ),
-        ),
-      );
-    });
-  }
-
-  private dispatch(message: Message): void {
-    const requestId = typeof message.requestId === "string" ? message.requestId : undefined;
-    const waiter = requestId === undefined ? undefined : this.waiters.get(requestId);
-    if (waiter !== undefined && requestId !== undefined) {
-      this.waiters.delete(requestId);
-      this.timer.clearTimeout(waiter.timeout);
-      waiter.resolve(message);
-    } else if (message.type === "overlay_event") {
-      this.onEvent(message);
-    } else {
-      console.log("unmatched", JSON.stringify(message));
-    }
-  }
-
-  request(type: string, body: Message = {}): Promise<Message> {
-    if (this.closedError !== undefined) {
-      return Promise.reject(this.closedError);
-    }
-    const requestId = `r${this.nextId++}`;
-    return new Promise((resolve, reject) => {
-      const timeout = this.timer.setTimeout(() => {
-        this.waiters.delete(requestId);
-        reject(new Error(`Overlay agent did not answer ${type} within ${REQUEST_TIMEOUT_MS} ms`));
-      }, REQUEST_TIMEOUT_MS);
-      this.waiters.set(requestId, { resolve, reject, timeout });
-      this.socket.write(`${JSON.stringify({ type, requestId, ...body })}\n`);
-    });
-  }
-
-  private fail(error: Error): void {
-    if (this.closedError !== undefined) {
-      return;
-    }
-    this.closedError = error;
-    for (const waiter of this.waiters.values()) {
-      this.timer.clearTimeout(waiter.timeout);
-      waiter.reject(error);
-    }
-    this.waiters.clear();
-    this.onClosed(error);
-  }
-
-  close(): void {
-    this.socket.end();
-  }
+  });
 }
 
 function validated(spec: unknown): OverlaySpec {
@@ -203,7 +143,7 @@ function card(id: string, title: string, body: string, background: string, accen
 }
 
 function screenshotBase64(udid: string): string {
-  const path = join(REPO, "scratch", "overlay-agent", "variant-screenshot.png");
+  const path = join(AGENT_DIR, "variant-screenshot.png");
   const shot = spawnSync("xcrun", ["simctl", "io", udid, "screenshot", path]);
   if (shot.status !== 0) {
     throw new Error(`simctl screenshot failed: ${shot.stderr.toString()}`);
@@ -211,7 +151,7 @@ function screenshotBase64(udid: string): string {
   return readFileSync(path).toString("base64");
 }
 
-async function variants(agent: AgentConnection, screenshotUdid?: string): Promise<void> {
+async function variants(agent: OverlayAgentClient, screenshotUdid?: string): Promise<void> {
   const list: Array<Record<string, unknown>> = [
     {
       label: "Calm",
@@ -238,15 +178,10 @@ async function variants(agent: AgentConnection, screenshotUdid?: string): Promis
   const spec = composeVariantCarousel({ id: "variants-demo", variants: list });
   console.log("show", JSON.stringify(await agent.request("show_overlay", { spec })));
   console.log("Swipe or tap ◀ ▶ in the simulator, then tap ✓ to pick. Waiting...");
-  await new Promise<void>((resolve, reject) => {
-    agent.onClosed = reject;
-    agent.onEvent = (event) => {
-      console.log("event", JSON.stringify(event));
-      if ((event.kind === "emit" && event.name === "selected") || event.kind === "dismissed") {
-        resolve();
-      }
-    };
-  });
+  await waitForEvent(
+    agent,
+    (event) => (event.kind === "emit" && event.name === "selected") || event.kind === "dismissed",
+  );
 }
 
 const floatingSpec = () =>
@@ -354,7 +289,12 @@ const sheetSpec = () =>
   });
 
 function launch(udid: string, bundleId: string): void {
-  const dylib = join(REPO, "scratch", "overlay-agent", "AutoMobileOverlayAgent.dylib");
+  const dylib = join(AGENT_DIR, "AutoMobileOverlayAgent.dylib");
+  const config = createOverlayAgentLaunchConfig(PORT, defaultIdGenerator);
+  mkdirSync(AGENT_DIR, { recursive: true });
+  writeFileSync(SESSION_FILE, JSON.stringify({ port: config.port, token: config.token }), {
+    mode: 0o600,
+  });
   const result = spawnSync(
     "xcrun",
     ["simctl", "launch", "--terminate-running-process", udid, bundleId],
@@ -362,7 +302,7 @@ function launch(udid: string, bundleId: string): void {
       env: {
         ...process.env,
         SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: dylib,
-        SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: String(PORT),
+        ...config.simctlEnvironment,
       },
       encoding: "utf8",
     },
@@ -383,7 +323,7 @@ async function main(): Promise<void> {
     launch(udid, bundleId);
     return;
   }
-  const agent = await AgentConnection.open();
+  const agent = await openAgent();
   try {
     switch (command) {
       case "variants": {
@@ -402,9 +342,7 @@ async function main(): Promise<void> {
         break;
       case "events":
         console.log("Listening for overlay events (Ctrl-C to stop)...");
-        await new Promise<void>((_resolve, reject) => {
-          agent.onClosed = reject;
-        });
+        await waitForEvent(agent, () => false);
         break;
       default:
         console.log(JSON.stringify(await agent.request("get_overlay_status"), null, 2));

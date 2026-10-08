@@ -54,7 +54,8 @@ export interface OverlayAssetRequestOptions {
 /** Matches the device's offline ring (OVERLAY_OFFLINE_EVENT_CAPACITY in CtrlProxy). */
 const STAGED_OVERLAY_EVENT_CAPACITY = 200;
 
-const overlayEventSchema = z.object({
+/** Decodes one `overlay_event` push; shared by CtrlProxy and the iOS overlay agent transport. */
+export const overlayEventSchema = z.object({
   type: z.literal("overlay_event"),
   timestamp: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   id: z.string().min(1),

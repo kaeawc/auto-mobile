@@ -31,6 +31,8 @@ class OverlayAssetDirectory(private val directory: File) : OverlayAssetFiles {
     fileFor(name).delete()
   }
 
+  override fun file(name: String): File = fileFor(name)
+
   override fun deleteAll() {
     directory.listFiles()?.forEach { it.delete() }
   }

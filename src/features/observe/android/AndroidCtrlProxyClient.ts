@@ -3479,8 +3479,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.storage.discoverKeystore(packageName);
   }
 
-  async getSdkCapabilities(packageName: string) {
-    return this.storage.getSdkCapabilities(packageName);
+  async getSdkCapabilities(packageName: string, userId?: number) {
+    return this.storage.getSdkCapabilities(packageName, userId);
   }
 
   async listDataStores(

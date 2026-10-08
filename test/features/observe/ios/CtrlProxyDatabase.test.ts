@@ -51,15 +51,17 @@ describe("CtrlProxyDatabase (iOS)", function () {
     await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
+  // The socket helpers wait on microtasks, not real turns: auto-advance fires a
+  // pending request deadline whenever the test yields the event loop.
   const waitForSocket = async (
     getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 100; i += 1) {
       const socket = getSocket();
       if (socket) {
         return socket;
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.resolve();
     }
     return getSocket();
   };
@@ -71,11 +73,11 @@ describe("CtrlProxyDatabase (iOS)", function () {
     if (!socket) {
       return;
     }
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 100; i += 1) {
       if (commandPayloads(socket).length >= minCount) {
         return;
       }
-      await new Promise((resolve) => setImmediate(resolve));
+      await Promise.resolve();
     }
   };
 

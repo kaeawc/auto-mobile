@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.OverlayAssetContract
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.Executor
 
@@ -18,11 +19,15 @@ interface OverlayAssetFiles {
   fun delete(name: String)
 
   fun deleteAll()
+
+  /** The file backing [name] for loaders that need a path (fonts); null when there is none. */
+  fun file(name: String): File? = null
 }
 
 /** Caps and allowed types, defaulting to the contract shared with the TypeScript host. */
 data class OverlayAssetLimits(
   val maxAssetBytes: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_BYTES,
+  val maxFontBytes: Int = OverlayAssetContract.MAX_OVERLAY_FONT_ASSET_BYTES,
   val maxCount: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_COUNT,
   val maxTotalBytes: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_TOTAL_BYTES,
   val maxIdLength: Int = OverlayAssetContract.MAX_OVERLAY_ASSET_ID_LENGTH,
@@ -55,6 +60,9 @@ interface OverlayAssetSource {
 
   /** Call off the main thread. Null when unknown, or when the OS evicted the file. */
   fun read(id: String): ByteArray?
+
+  /** The stored file for [id] (fonts load from a path); null when unknown or not file-backed. */
+  fun file(id: String): File? = null
 
   /** Replaces the single registered listener; null unregisters. */
   fun setChangeListener(listener: OverlayAssetChangeListener?)
@@ -355,6 +363,16 @@ class OverlayAssetStore(
     }
   }
 
+  /** The stored file for [id], or null when unknown, not file-backed, or no longer on disk. */
+  override fun file(id: String): File? {
+    val fileName =
+      locked { changes ->
+        dropStaleSessionLocked(changes)
+        entries[id]?.fileName
+      } ?: return null
+    return files.file(fileName)?.takeIf { it.isFile }
+  }
+
   private fun rejectionFor(
     id: String,
     mimeType: String,
@@ -372,18 +390,22 @@ class OverlayAssetStore(
           "Unsupported overlay asset MIME type; use one of ${limits.mimeTypes.sorted()}.",
         )
       bytes.isEmpty() -> rejected(OverlayAssetRejection.EMPTY, "Overlay asset has no data.")
-      bytes.size > limits.maxAssetBytes ->
+      bytes.size > maxBytesFor(mimeType) ->
         rejected(
           OverlayAssetRejection.TOO_LARGE,
-          "Overlay asset is ${bytes.size} bytes; the limit is ${limits.maxAssetBytes}.",
+          "Overlay asset is ${bytes.size} bytes; the limit is ${maxBytesFor(mimeType)}.",
         )
       !matchesSignature(mimeType, bytes) ->
         rejected(
           OverlayAssetRejection.CONTENT_MISMATCH,
-          "Overlay asset bytes are not a valid $mimeType image.",
+          "Overlay asset bytes are not a valid $mimeType ${if (isFontMimeType(mimeType)) "font" else "image"}.",
         )
       else -> null
     }
+
+  private fun maxBytesFor(mimeType: String) =
+    if (isFontMimeType(mimeType)) minOf(limits.maxFontBytes, limits.maxAssetBytes)
+    else limits.maxAssetBytes
 
   private fun rejected(reason: OverlayAssetRejection, message: String) =
     OverlayAssetPutResult.Rejected(reason, message)
@@ -399,8 +421,20 @@ internal fun matchesSignature(mimeType: String, bytes: ByteArray): Boolean =
     "image/png" -> bytes.startsWith(PNG_SIGNATURE)
     "image/jpeg" -> bytes.startsWith(JPEG_SIGNATURE)
     "image/webp" -> bytes.startsWith(RIFF_SIGNATURE) && bytes.matchesAt(8, WEBP_SIGNATURE)
+    // Both font types may carry either outline flavour, so accept any sfnt version tag.
+    "font/ttf",
+    "font/otf" -> SFNT_SIGNATURES.any { bytes.startsWith(it) }
     else -> false
   }
+
+internal fun isFontMimeType(mimeType: String) = mimeType == "font/ttf" || mimeType == "font/otf"
+
+private val SFNT_SIGNATURES =
+  listOf(
+    intArrayOf(0x00, 0x01, 0x00, 0x00),
+    intArrayOf(0x4F, 0x54, 0x54, 0x4F), // 'OTTO'
+    intArrayOf(0x74, 0x72, 0x75, 0x65), // 'true'
+  )
 
 private val PNG_SIGNATURE = intArrayOf(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
 private val JPEG_SIGNATURE = intArrayOf(0xFF, 0xD8, 0xFF)

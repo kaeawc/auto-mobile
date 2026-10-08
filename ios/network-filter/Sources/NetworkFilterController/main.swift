@@ -3,13 +3,6 @@ import NetworkExtension
 import NetworkFilterCore
 import SystemExtensions
 
-private struct ControllerResult: Encodable {
-    let version = IdentityProbe.version
-    let state: String
-    let detail: String
-    var snapshot: ProbeSnapshot?
-}
-
 private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     private var connection: NSXPCConnection?
     private var request: OSSystemExtensionRequest?
@@ -21,11 +14,13 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     /// Simulators the host manages; only these can be attributed. `activate`
     /// reads back with none, so every flow is reported unattributed.
     private var managedSimulators: [ManagedSimulator] = []
+    /// `apply`, `reset` or `renew`; `nil` for the read-only commands.
+    private var ruleCommand: NetworkRuleCommand?
 
     func run() {
         DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
             finish(
-                "unavailable",
+                .unavailable,
                 "Operation timed out; installation may have completed. Run status to reconcile.",
                 code: 1
             )
@@ -34,7 +29,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         case "activate":
             guard ProbeSigning.peerRequirement(identifier: ProbeSigning.providerIdentifier) != nil else {
                 finish(
-                    "installation_required",
+                    .installationRequired,
                     "Run the provisioned, Developer ID signed app from /Applications.",
                     code: 1
                 )
@@ -53,14 +48,28 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                     canonicalize: canonicalDeviceSetPath
                 )
             } catch {
-                finish("unavailable", "\(error)", code: 2)
+                finish(.unavailable, "\(error)", code: 2)
+                return
+            }
+            readSnapshot()
+        case let .some(name) where NetworkRuleCommandKind(rawValue: name) != nil:
+            do {
+                ruleCommand = try NetworkRuleArguments.parse(
+                    NetworkRuleCommandKind(rawValue: name) ?? .reset,
+                    Array(CommandLine.arguments.dropFirst(2)),
+                    canonicalize: canonicalDeviceSetPath
+                )
+            } catch {
+                finish(.unavailable, "\(error)", code: 2)
                 return
             }
             readSnapshot()
         default:
             finish(
-                "unavailable",
-                "Usage: network-filter-controller activate|status|snapshot [--managed <device-set-path> <udid>]...",
+                .unavailable,
+                "Usage: network-filter-controller \(ControllerContract.commands.joined(separator: "|"))"
+                    + " [--managed <device-set-path> <udid>]... (status|snapshot)"
+                    + " | apply|reset|renew \(NetworkRuleArguments.usage)",
                 code: 2
             )
         }
@@ -68,7 +77,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
 
     func requestNeedsUserApproval(_: OSSystemExtensionRequest) {
         finish(
-            "approval_required",
+            .approvalRequired,
             "Approve AutoMobile Network Identity Probe in System Settings, then run activate again."
         )
     }
@@ -84,18 +93,18 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     }
 
     func request(_: OSSystemExtensionRequest, didFailWithError error: Error) {
-        finish("unavailable", error.localizedDescription, code: 1)
+        finish(.unavailable, error.localizedDescription, code: 1)
     }
 
     func request(_: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
         guard result == .completed else {
-            finish("approval_required", "Extension installation will finish after restarting macOS.")
+            finish(.approvalRequired, "Extension installation will finish after restarting macOS.")
             return
         }
         let manager = NEFilterManager.shared()
         manager.loadFromPreferences { [self] error in
             if let error {
-                finish("unavailable", error.localizedDescription, code: 1)
+                finish(.unavailable, error.localizedDescription, code: 1)
                 return
             }
             // Only the containing app's own NEFilterManager configuration is
@@ -105,14 +114,14 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             configuration.filterPackets = false
             configuration.filterDataProviderBundleIdentifier = ProbeSigning.providerIdentifier
             manager.providerConfiguration = configuration
-            manager.localizedDescription = "AutoMobile Network Identity Probe (allow only)"
+            manager.localizedDescription = "AutoMobile Network Identity Probe (leased per-app offline)"
             manager.isEnabled = true
             manager.saveToPreferences { [self] error in
                 if let error {
                     let nsError = error as NSError
                     let state = nsError.domain == NEFilterErrorDomain &&
                         nsError.code == NEFilterManagerError.configurationPermissionDenied.rawValue
-                        ? "approval_required" : "unavailable"
+                        ? ControllerState.approvalRequired : .unavailable
                     finish(state, error.localizedDescription, code: 1)
                     return
                 }
@@ -128,7 +137,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
               let serviceName = Bundle.main.object(forInfoDictionaryKey: "ProbeMachServiceName") as? String
         else {
             finish(
-                "installation_required",
+                .installationRequired,
                 "A signed containing app and provider provisioning profiles are required.",
                 code: 1
             )
@@ -151,20 +160,24 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         guard let service = proxy as? ProbeBridge else {
             guard claimOutcome(generation) else { return }
             connection.invalidate()
-            finish("unavailable", "Provider bridge is unavailable", code: 1)
+            finish(.unavailable, "Provider bridge is unavailable", code: 1)
+            return
+        }
+        if let ruleCommand {
+            send(ruleCommand, to: service, generation: generation, connection: connection)
             return
         }
         guard let managed = try? JSONEncoder().encode(managedSimulators) else {
             guard claimOutcome(generation) else { return }
             connection.invalidate()
-            finish("unavailable", "Unable to encode managed simulators", code: 1)
+            finish(.unavailable, "Unable to encode managed simulators", code: 1)
             return
         }
         service.snapshot(version: IdentityProbe.version, managedSimulators: managed) { [self] data, error in
             guard claimOutcome(generation) else { return }
             guard error == nil, let data,
                   let snapshot = try? JSONDecoder().decode(ProbeSnapshot.self, from: data),
-                  snapshot.version == IdentityProbe.version, snapshot.mode == "allow_only"
+                  snapshot.version == IdentityProbe.version, IdentityProbe.modes.contains(snapshot.mode)
             else {
                 retryOrFinish(
                     .readback(error),
@@ -174,17 +187,48 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                 return
             }
             finish(
-                "ready",
-                "Allow-only provider replied; traffic isolation and shaping remain unverified.",
+                .ready,
+                "Provider replied; per-app offline isolation is unverified until the signed run (#10263).",
                 snapshot: snapshot
             )
+        }
+    }
+
+    /// Rule commands are idempotent per revision, so retrying one after a
+    /// startup race cannot apply it twice. Only a decoded `NetworkRuleResult`
+    /// is definitive; every other ending is `unavailable` with no `rule`, and
+    /// the host reconciles with `status`.
+    private func send(
+        _ command: NetworkRuleCommand,
+        to service: ProbeBridge,
+        generation: UInt64,
+        connection: NSXPCConnection
+    ) {
+        guard let encoded = try? JSONEncoder().encode(command) else {
+            guard claimOutcome(generation) else { return }
+            connection.invalidate()
+            finish(.unavailable, "Unable to encode the network rule command", code: 1)
+            return
+        }
+        service.rule(version: IdentityProbe.version, command: encoded) { [self] data, error in
+            guard claimOutcome(generation) else { return }
+            guard error == nil, let data, let result = try? JSONDecoder().decode(NetworkRuleResult.self, from: data)
+            else {
+                retryOrFinish(
+                    .readback(error),
+                    connection: connection,
+                    detail: error ?? "Provider returned an incompatible rule result"
+                )
+                return
+            }
+            finish(.ready, "Provider answered \(command.kind.rawValue): \(result.outcome.rawValue).", rule: result)
         }
     }
 
     private func retryOrFinish(_ failure: ProbeStartupFailure, connection: NSXPCConnection, detail: String) {
         connection.invalidate()
         guard retries.scheduleRetry(after: failure, { [self] in readSnapshot() }) else {
-            finish("unavailable", detail, code: 1)
+            finish(.unavailable, detail, code: 1)
             return
         }
     }
@@ -207,13 +251,19 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         return true
     }
 
-    private func finish(_ state: String, _ detail: String, code: Int32 = 0, snapshot: ProbeSnapshot? = nil) {
+    private func finish(
+        _ state: ControllerState,
+        _ detail: String,
+        code: Int32 = 0,
+        snapshot: ProbeSnapshot? = nil,
+        rule: NetworkRuleResult? = nil
+    ) {
         outputLock.lock()
         defer { outputLock.unlock() }
         guard !finished else { return }
         finished = true
-        let result = ControllerResult(state: state, detail: detail, snapshot: snapshot)
-        if let data = try? JSONEncoder().encode(result) {
+        let result = ControllerResult(state: state, detail: detail, snapshot: snapshot, rule: rule)
+        if let data = try? result.encodedLine() {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([10]))
         }

@@ -19,7 +19,7 @@ import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger
 import { decodeSdkEventBatches, type DecodedSdkEvent } from "./decodeSdkEventBatches";
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
-import { IosRunnerBusyError } from "./runnerErrorCodes";
+import { IosRunnerBusyError, IosRunnerStalledError } from "./runnerErrorCodes";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
@@ -2937,8 +2937,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   /**
    * Trigger CtrlProxy restart through the manager.
-   * This is called when repeated WebSocket connection failures indicate
-   * that the CtrlProxy process may have crashed.
+   * Connection failures or a stalled native command observed by normal
+   * hierarchy reads can require recovery even when the socket remains healthy.
    */
   private triggerServiceRestart(): void {
     if (
@@ -3032,7 +3032,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     resolve?.(stable);
   }
 
-  /** Start a restart for this observed transport failure, subject to the manager budget. */
+  /** Start runner recovery for this observed failure, subject to the manager budget. */
   public ensureRecoveryStarted(): void {
     this.triggerServiceRestart();
   }
@@ -3113,7 +3113,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     });
     this.lastDeniedRestartState = undefined;
     logger.info(
-      `[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`,
+      `[IOSCtrlProxyClient] Triggering CtrlProxy restart (consecutive connection failures: ${this.consecutiveConnectionFailures})`,
     );
     try {
       const withinRecoveryBudget = <T>(operation: Promise<T>, phase: string): Promise<T> =>
@@ -3122,7 +3122,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           timeoutMs: budget.timeRemainingMs(),
           label: `iOS CtrlProxy ${phase} for ${this.device.deviceId}`,
         });
-      // WebSocket failures are authoritative even when HTTP /health still responds.
+      // Transport failures and command stalls can coexist with a healthy /health response.
       await withinRecoveryBudget(manager.forceRestart({ joinInFlightStart: true }), "restart");
       this.restartAcceptsReplacement = true;
       this.syncPortFromManager(manager);
@@ -3392,7 +3392,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   ): boolean {
     if (decoded) {
       if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
-        this.requestManager.reject(decoded.requestId, new IosRunnerBusyError(decoded.errorMessage));
+        // Diagnostic/observer requests share this decoder and must never change
+        // runner lifecycle. Normal hierarchy observation owns bounded recovery.
+        this.requestManager.reject(
+          decoded.requestId,
+          decoded.runnerStalled
+            ? new IosRunnerStalledError(decoded.errorMessage)
+            : new IosRunnerBusyError(decoded.errorMessage),
+        );
         return true;
       }
       if (decoded.errorMessage !== undefined) {

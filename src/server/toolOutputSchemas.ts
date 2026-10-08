@@ -562,6 +562,7 @@ export const freshnessSchema = z
     unavailableReason: z
       .enum([
         "runner_not_running",
+        "runner_stalled",
         "connection_lost",
         "simulator_not_booted",
         "request_timed_out",

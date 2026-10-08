@@ -71,3 +71,10 @@ export function isRunnerGestureOutcomeUnknown(failure: {
  * the refusal is a definite non-execution and safe to retry, unlike a lost or late reply.
  */
 export class IosRunnerBusyError extends ActionableError {}
+
+/**
+ * A launch/link command is still blocking the serial runner queue after its grace period.
+ * The refused request never ran, but the earlier blocking action's outcome remains unknown.
+ * Normal observation owns recovery; diagnostic reads and actions must not restart or replay.
+ */
+export class IosRunnerStalledError extends IosRunnerBusyError {}

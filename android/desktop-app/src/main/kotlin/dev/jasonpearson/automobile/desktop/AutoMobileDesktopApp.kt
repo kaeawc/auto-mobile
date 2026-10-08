@@ -313,10 +313,9 @@ fun AutoMobileDesktopApp(
   // Bind the focused device only: setActiveDevice allocates the device to this session. Other
   // observed devices remain unowned, so their stream subscriptions use the daemon's unowned-device
   // authorization path. The shared hook heartbeats and re-registers this binding after restarts.
-  val focusedColumn =
-    (workspaceState as? WorkspaceUiState.Content)?.let { content ->
-      content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
-    }
+  // A pane that took focus only because the focused pane closed binds nothing until the user
+  // focuses or drives it (#10697), so closing a pane releases its device without grabbing another.
+  val focusedColumn = (workspaceState as? WorkspaceUiState.Content)?.sessionBindingColumn
   val focusedBinding = focusedColumn?.let {
     DesktopDaemonSessionBinding(it.deviceId, it.platform.wireName())
   }
@@ -634,8 +633,14 @@ fun AutoMobileDesktopApp(
                       focused && desktopSessionState.idleReleasedDeviceId == column.deviceId
                     val onUserInteraction = desktopSessionState.onUserInteraction
                     val columnControlClientProvider =
-                      remember(workspaceControlClientProvider, onUserInteraction, column.deviceId) {
+                      remember(
+                        workspaceControlClientProvider,
+                        workspaceViewModel,
+                        onUserInteraction,
+                        column.deviceId,
+                      ) {
                         val provider: () -> AutoMobileClient? = {
+                          workspaceViewModel.onUserInteraction(column.deviceId)
                           onUserInteraction(column.deviceId)
                           workspaceControlClientProvider()
                         }

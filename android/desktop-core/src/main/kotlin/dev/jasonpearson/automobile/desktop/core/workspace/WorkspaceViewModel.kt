@@ -24,7 +24,23 @@ sealed interface WorkspaceUiState {
   data class Content(
     val columns: List<DeviceColumn>,
     val focusedDeviceId: String?,
-  ) : WorkspaceUiState
+    /**
+     * The focus fell to [focusedDeviceId] because the focused pane closed, not because the user
+     * picked it (#10697). The pane shows and drives its device, but the desktop session must not
+     * bind (allocate) it until the user focuses it or interacts with it: binding on a close would
+     * take a device an agent just released without anyone choosing it. See [sessionBindingColumn].
+     */
+    val focusAwaitsInteraction: Boolean = false,
+  ) : WorkspaceUiState {
+    /**
+     * The column the desktop daemon session should bind: the focused one, unless the focus is still
+     * [focusAwaitsInteraction] (#10697). `null` means "bind nothing", which releases a device the
+     * session held for a pane that closed.
+     */
+    val sessionBindingColumn: DeviceColumn?
+      get() =
+        if (focusAwaitsInteraction) null else columns.firstOrNull { it.deviceId == focusedDeviceId }
+  }
 }
 
 /** Actions the workspace can dispatch. Downstream behavior (streams, facets) lands in later PRs. */
@@ -131,6 +147,7 @@ class WorkspaceViewModel(
    */
   private fun pressDeviceButton(deviceId: String, button: DeviceButton) {
     val column = columnFor(deviceId) ?: return
+    onUserInteraction(deviceId)
     scope.launch {
       try {
         controlExecutor.pressButton(deviceId, column.platform, button)
@@ -252,10 +269,15 @@ class WorkspaceViewModel(
       if (remaining.isEmpty()) {
         WorkspaceUiState.Empty
       } else {
-        val focus =
-          if (content.focusedDeviceId == deviceId) remaining.first().deviceId
-          else content.focusedDeviceId
-        WorkspaceUiState.Content(remaining, focusedDeviceId = focus)
+        val closedFocused = content.focusedDeviceId == deviceId
+        val focus = if (closedFocused) remaining.first().deviceId else content.focusedDeviceId
+        WorkspaceUiState.Content(
+          remaining,
+          focusedDeviceId = focus,
+          // Auto-focus after a close is not a user pick (#10697): it waits for a focus click or
+          // input before the session binds it. Closing an unfocused pane keeps the current state.
+          focusAwaitsInteraction = closedFocused || content.focusAwaitsInteraction,
+        )
       }
     }
   }
@@ -270,6 +292,7 @@ class WorkspaceViewModel(
   private fun runControl(deviceId: String, control: EmulatorControl) {
     val content = _state.value as? WorkspaceUiState.Content ?: return
     val column = content.columns.firstOrNull { it.deviceId == deviceId } ?: return
+    onUserInteraction(deviceId)
     val orientation =
       if (control == EmulatorControl.Rotate) column.orientation.toggled() else column.orientation
     if (control == EmulatorControl.Rotate) {
@@ -288,7 +311,25 @@ class WorkspaceViewModel(
 
   private fun focus(deviceId: String) {
     _state.update { current ->
-      (current as? WorkspaceUiState.Content)?.copy(focusedDeviceId = deviceId) ?: current
+      (current as? WorkspaceUiState.Content)?.copy(
+        focusedDeviceId = deviceId,
+        focusAwaitsInteraction = false,
+      ) ?: current
+    }
+  }
+
+  /**
+   * The user drove [deviceId] (a tap, key or button on its pane). An auto-focused pane (#10697)
+   * becomes a user pick, so the desktop session binds it; otherwise a no-op. Safe from any thread.
+   */
+  fun onUserInteraction(deviceId: String) {
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      if (content.focusAwaitsInteraction && content.focusedDeviceId == deviceId) {
+        content.copy(focusAwaitsInteraction = false)
+      } else {
+        current
+      }
     }
   }
 

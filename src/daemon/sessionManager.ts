@@ -6269,29 +6269,31 @@ export class SessionManager {
   }
 
   /**
-   * Do not hold the daemon's own stall against any session (#10051).
+   * Do not hold the daemon's own stall, or the host's sleep, against an owner's lease (#10051,
+   * #10699).
    *
-   * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
-   * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
-   * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
-   * time is not counted against the owner while time the owner genuinely missed before the stall
-   * still is. A stall at least as long as the session's idle window is sleep, not a hiccup, and
-   * is not forgiven (host sleep counts toward idle). Returns how many sessions were extended.
+   * Called by the heartbeat monitor, which tells the two apart by the wall clock running ahead of
+   * the monotonic one rather than by length:
+   *
+   * - `lostMs`: the daemon's event loop stalled while the host was awake. Owners kept
+   *   heartbeating and calling, but the daemon could not hear them, so the lease AND the idle
+   *   deadline move forward by exactly that interval, whatever its length.
+   * - `sleptMs`: the host was suspended. Nothing ran, owners included, so the lease moves forward
+   *   by it, but the idle deadline does not: host sleep counts toward the idle window (owner
+   *   policy, #10661).
+   *
+   * Nothing moves past `resumedAt`, so time an owner genuinely missed before the gap still counts.
+   * CLI sessions keep their own wall-clock idle policy. Returns how many sessions were extended.
    */
-  forgiveDaemonStall(resumedAt: number, lostMs: number): number {
+  forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0): number {
+    const leaseLostMs = lostMs + sleptMs;
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
         continue;
       }
-      // Idle time is wall-clock, host sleep included: a stall that alone outlasts the window
-      // (timeout plus suspect grace) is idleness the owner did not use, not a hiccup to forgive.
-      // Judged here so the monitor tick and every lazy lookup reach the same verdict.
-      if (lostMs >= session.sessionTimeoutMs + suspectGraceMsFor(session)) {
-        continue;
-      }
       const leaseStart = effectiveLastHeartbeat(session);
-      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
+      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + leaseLostMs));
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
       session.expiresAt = Math.max(
@@ -6301,7 +6303,7 @@ export class SessionManager {
       if (session.awaitingOwnerSince !== undefined) {
         session.awaitingOwnerSince = Math.max(
           session.awaitingOwnerSince,
-          Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+          Math.min(session.awaitingOwnerSince + leaseLostMs, resumedAt),
         );
       }
       forgiven++;

@@ -164,21 +164,32 @@ export interface BoundSessionLoss {
 const IDLE_EXPIRY_LOSS_REASONS: ReadonlySet<string> = new Set([
   "lazy-expiry",
   "cleanup-expired",
-  "heartbeat-timeout",
   "cli-idle-timeout",
 ]);
+
+/** The owner stopped heartbeating: its liveness lease lapsed, whatever its tool activity. */
+const HEARTBEAT_TIMEOUT_LOSS_REASON = "heartbeat-timeout";
 
 /**
  * The owner-facing message for a lost bound session. An idle expiry says so, including that the
  * wall-clock window keeps running while the host sleeps, so a call after a long sleep gets an
- * explanation and a next step rather than a bare "no longer active".
+ * explanation and a next step rather than a bare "no longer active". A heartbeat timeout is not
+ * idleness: the daemon stopped hearing the owner's liveness heartbeats on an awake host, and host
+ * sleep never lapses a lease (#10699), so that message says so instead.
  */
 export function boundSessionLossMessage(failure: BoundSessionLoss): string {
   const base = `Device session ${failure.sessionUuid} is no longer active (${failure.reason}). `;
+  const next = "Acquire a new device session before continuing.";
+  if (failure.reason === HEARTBEAT_TIMEOUT_LOSS_REASON) {
+    return (
+      `${base}The daemon stopped receiving this session's liveness heartbeats, so it released ` +
+      `the device; check that the client process holding the session is still running. ${next}`
+    );
+  }
   return IDLE_EXPIRY_LOSS_REASONS.has(failure.reason)
     ? `${base}The session was released after sitting idle past its window; time the host spent ` +
-        "asleep counts toward that window. Acquire a new device session before continuing."
-    : `${base}Acquire a new device session before continuing.`;
+        `asleep counts toward that window. ${next}`
+    : `${base}${next}`;
 }
 
 function hasSessionReleaseSnapshotFields(

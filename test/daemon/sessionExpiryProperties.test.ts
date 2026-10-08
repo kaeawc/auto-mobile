@@ -31,8 +31,9 @@ import {
 //
 // #10661 (host sleep counts toward the idle window on every expiry path) landed in PR #10679,
 // #10656 (heartbeats prove liveness only and never extend the idle deadline) in PR #10681, and
-// #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, so
-// every property here is enforced except the known failures. A property a tracked bug still
+// #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, and
+// #10699 (host sleep is told from a daemon stall by the wall clock outrunning the monotonic one,
+// not by length) with its fix, so every property here is enforced except the known failures. A property a tracked bug still
 // violates is registered with `knownFailure`: it runs on every CI pass and succeeds only while a
 // seed still produces a counterexample (an inverted assertion naming the issue), so the bug stays
 // visible and cannot be silently skipped. The PR that fixes the bug flips it to enforced.
@@ -121,7 +122,7 @@ const LATE_TICKS_ONLY: ScheduleProfile = {
   allowIdleGaps: true,
 };
 
-/** Host sleeps shorter than the idle window, which the daemon cannot tell from a stall (#10699). */
+/** Host sleeps shorter than the idle window; the monotonic clock tells them from a stall (#10699). */
 const SHORT_SLEEPS: ScheduleProfile = {
   horizonWindows: 5,
   discontinuityChance: 0.1,
@@ -477,17 +478,15 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     exitedOwnerReleased,
   );
 
-  knownFailure(
-    "#10699",
-    "a sleep shorter than the window is forgiven as a stall, so the idle release lands late",
+  propertyTests(
+    "#10699: a sleep shorter than the window counts toward idle, so wake past the window plus grace releases at the first judgement",
     9_100,
     SHORT_SLEEPS,
     idleReleasedDespiteHeartbeats,
   );
 
-  knownFailure(
-    "#10699",
-    "a long daemon-only stall releases a heartbeating owner whose tool activity is within the window plus the stall",
+  propertyTests(
+    "#10699: a long daemon-only stall never releases a heartbeating owner whose tool activity is within the window plus the stall",
     9_200,
     LONG_STALLS,
     stallNeverReleasesActiveSession,

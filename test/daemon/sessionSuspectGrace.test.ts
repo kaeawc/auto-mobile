@@ -299,18 +299,35 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(reaped).toEqual([{ sessionId: SESSION, reason: "heartbeat-timeout" }]);
     });
 
-    test("a stall that alone outlasts the idle window is host sleep and counts as idle (#10661)", async () => {
+    test("host sleep that outlasts the idle window counts as idle (#10661)", async () => {
       monitor.start();
-      timer.setCurrentTime(timer.now() + 120_000);
+      timer.simulateHostSleep(120_000);
 
       await monitor.tick();
 
       expect(sessionManager.getSession(SESSION)).toBeNull();
     });
 
+    test("a daemon stall longer than the idle window is still a stall, not sleep (#10699)", async () => {
+      const original = sessionManager.getSession(SESSION)!;
+      const expiresAt = original.expiresAt;
+      monitor.start();
+      // The host stayed awake (both clocks ran 120s) while the daemon's event loop was blocked:
+      // the owner's heartbeat was queued behind the stall, not missing.
+      timer.setCurrentTime(timer.now() + 120_000);
+
+      expect((await heartbeat(OWNER)).success).toBe(true);
+      await monitor.tick();
+
+      expect(reaped).toEqual([]);
+      expect(sessionManager.getSession(SESSION)).toBe(original);
+      // The idle deadline moved by exactly the stalled interval (all but the scheduled scan).
+      expect(original.expiresAt).toBe(expiresAt + 120_000 - SCAN_MS);
+    });
+
     test("an owner heartbeat that wins the race after a sleep gets the same verdict as the monitor (#10661)", async () => {
       monitor.start();
-      timer.setCurrentTime(timer.now() + 120_000);
+      timer.simulateHostSleep(120_000);
 
       const result = await heartbeat(OWNER);
 
@@ -332,6 +349,52 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
       expect(reaped).toEqual([]);
       expect(sessionManager.getSession(SESSION)).toBe(original);
+    });
+
+    test("host sleep shorter than the idle window still counts toward it, never granting a fresh window (#10699)", async () => {
+      // The issue's probe: 60s window, last tool call at 1s, the host sleeps from 40s. Every sleep
+      // length releases at the first judgement past the window plus grace from the last tool call
+      // (at wake, when wake is already past it), so a shorter sleep never holds the device longer.
+      const releaseAfterToolMs = 60_000 + SUSPECT_GRACE_MS;
+      for (const sleepMs of [15_000, 50_000, 65_000, 75_000, 79_000, 81_000, 200_000]) {
+        timer = new FakeTimer();
+        sessionManager.stopCleanupTimer();
+        sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+        const sleeper = monitorFor(sessionManager);
+        await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+        expect((await heartbeat(OWNER, true)).success).toBe(true);
+        sleeper.start();
+        const scanAndBeat = async (): Promise<void> => {
+          if (sessionManager.getSession(SESSION)) {
+            await heartbeat(OWNER);
+          }
+          await sleeper.tick();
+        };
+        timer.setCurrentTime(1_000);
+        await sessionManager.getOrCreateSession(SESSION);
+        for (let at = SCAN_MS; at <= 40_000; at += SCAN_MS) {
+          timer.setCurrentTime(at);
+          await scanAndBeat();
+        }
+
+        timer.simulateHostSleep(sleepMs);
+        const wakeAt = timer.now();
+        let releasedAt: number | undefined;
+        for (let at = wakeAt; releasedAt === undefined && at < wakeAt + 120_000; at += SCAN_MS) {
+          timer.setCurrentTime(at);
+          await scanAndBeat();
+          releasedAt = sessionManager.getSession(SESSION) ? undefined : at;
+        }
+
+        const due = 1_000 + releaseAfterToolMs;
+        // Kept until the window plus grace, released at the first judgement past it.
+        expect({ sleepMs, releasedAt }).toEqual({
+          sleepMs,
+          releasedAt:
+            wakeAt > due ? wakeAt : wakeAt + Math.ceil((due + 1 - wakeAt) / SCAN_MS) * SCAN_MS,
+        });
+        await sleeper.stop();
+      }
     });
 
     test("stall forgiveness is applied once when a lookup and the tick both notice it (#10661)", async () => {

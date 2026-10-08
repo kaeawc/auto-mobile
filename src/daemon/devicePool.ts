@@ -7119,6 +7119,18 @@ export class DevicePool {
     return this.runtimeIdentity.describesPooledRuntime(expected);
   }
 
+  /**
+   * Whether `pooled` and a resolved runtime can be the same device. The single
+   * predicate the pool's own matching and the public `startDevice` validator
+   * (`validatePooledDeviceMapping`) share, so the two cannot drift (#10603).
+   */
+  matchesRuntimeIdentity(
+    pooled: PooledDevice,
+    expected: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+  ): boolean {
+    return this.runtimeIdentity.matchesRuntimeIdentity(pooled, expected);
+  }
+
   isPooledIdentityUnresolved(deviceId: string): boolean {
     return this.runtimeIdentity.isPooledIdentityUnresolved(deviceId);
   }

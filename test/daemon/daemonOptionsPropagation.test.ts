@@ -419,7 +419,8 @@ describe("reuse-critical drift guard", () => {
     // observe-scope flags propagate to an already-running daemon. Spec-driven, so
     // a new output-reduction flag is covered automatically; this pins that.
     for (const spec of OUTPUT_REDUCTION_FLAG_SPECS.filter(
-      ({ field }) => field !== "toolResultsNoStructuredContent",
+      ({ field }) =>
+        field !== "toolResultsNoStructuredContent" && field !== "actionsCompactMetadata",
     )) {
       expect(STARTUP_OPTION_DEFICIT_KEYS).toContain(spec.field);
     }
@@ -431,6 +432,7 @@ describe("reuse-critical drift guard", () => {
       "enabledTools",
       "disabledTools",
       "toolResultsNoStructuredContent",
+      "actionsCompactMetadata",
     ]);
     expect(
       daemonProcessOptions({
@@ -438,6 +440,7 @@ describe("reuse-critical drift guard", () => {
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],
         toolResultsNoStructuredContent: true,
+        actionsCompactMetadata: false,
       }),
     ).toEqual({
       debug: true,
@@ -450,6 +453,7 @@ describe("reuse-critical drift guard", () => {
         enabledTools: ["clipboard"],
         disabledTools: ["observe"],
         toolResultsNoStructuredContent: true,
+        actionsCompactMetadata: false,
       }),
     ).toEqual({ debug: true });
   });
@@ -459,12 +463,14 @@ describe("reuse-critical drift guard", () => {
       "AUTOMOBILE_ENABLED_TOOLS",
       "AUTOMOBILE_DISABLED_TOOLS",
       "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
+      "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
     ]);
     expect(
       daemonProcessEnvironment({
         AUTOMOBILE_ENABLED_TOOLS: "observe",
         AUTOMOBILE_DISABLED_TOOLS: "tapOn",
         AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT: "1",
+        AUTOMOBILE_ACTIONS_COMPACT_METADATA: "0",
         AUTOMOBILE_DEBUG: "1",
       }),
     ).toEqual({ AUTOMOBILE_DEBUG: "1" });
@@ -518,15 +524,16 @@ describe("compact metadata tri-state startup", () => {
       );
       expect(parseDaemonArgs(managerArgs, {}).actionsCompactMetadata).toBe(explicit);
       expect(parseDaemonArgs(args, env).actionsCompactMetadata).toBe(explicit);
+      // Connection-scoped (#10377): never a restart reason, never merged into a restart.
       for (const runningValue of [true, false, undefined]) {
         const running = { actionsCompactMetadata: runningValue } satisfies DaemonOptions;
-        expect(startupOptionDeficits(startOptions, running).length > 0).toBe(
-          explicit !== undefined && explicit !== (runningValue ?? true),
+        expect(startupOptionDeficits(startOptions, running)).toEqual([]);
+        expect(mergeDaemonOptions(running, startOptions)).not.toHaveProperty(
+          "actionsCompactMetadata",
         );
-        const merged = mergeDaemonOptions(running, startOptions);
-        expect(merged.actionsCompactMetadata).toBe(explicit ?? runningValue);
       }
-      expect(startupOptionDeficits(startOptions, undefined).length > 0).toBe(explicit === false);
+      expect(startupOptionDeficits(startOptions, undefined)).toEqual([]);
+      expect(daemonProcessOptions(startOptions)).not.toHaveProperty("actionsCompactMetadata");
     },
   );
 
@@ -539,6 +546,6 @@ describe("compact metadata tri-state startup", () => {
     }
     expect(startupOptionDeficits({ toolResultsNoStructuredContent: true }, {})).toEqual([]);
     expect(REUSE_CRITICAL_OPTION_KEYS).not.toContain("actionsCompactMetadata");
-    expect(STARTUP_OPTION_DEFICIT_KEYS).toContain("actionsCompactMetadata");
+    expect(STARTUP_OPTION_DEFICIT_KEYS).not.toContain("actionsCompactMetadata");
   });
 });

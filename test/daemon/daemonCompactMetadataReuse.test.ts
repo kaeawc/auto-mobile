@@ -28,23 +28,19 @@ function presentationClient(profileUuid: string): FakeDaemonClient {
 }
 
 describe("compact metadata daemon reuse", () => {
+  // #10377: the opt-out is connection-scoped, so no preference restarts the shared daemon.
   test.each<{ running: DaemonOptions; requested: boolean | undefined }>([
     { running: {}, requested: undefined },
-    { running: {}, requested: true }, // Main treats an unrecorded running value as on.
+    { running: {}, requested: true },
     { running: {}, requested: false },
     { running: { actionsCompactMetadata: true }, requested: false },
     { running: { actionsCompactMetadata: false }, requested: true },
     { running: { actionsCompactMetadata: false }, requested: undefined },
   ])(
-    "tri-state preference $requested respects startup policy with $running",
+    "preference $requested is relayed per connection without restarting $running",
     async ({ running, requested }) => {
       const manager = new FakeDaemonManager();
-      const initial = { ...manager.statusResult, version: DAEMON_VERSION, options: running };
-      const needsRestart =
-        requested !== undefined && requested !== (running.actionsCompactMetadata ?? true);
-      const successor = { ...initial, options: { actionsCompactMetadata: requested } };
-      manager.statusResults = needsRestart ? [initial, initial, initial, successor] : [];
-      manager.statusResult = needsRestart ? successor : initial;
+      manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION, options: running };
       const client = presentationClient("profile-a");
       const timer = new FakeTimer();
       const proxy = new DaemonMcpProxy({
@@ -56,10 +52,7 @@ describe("compact metadata daemon reuse", () => {
       });
       try {
         await proxy.listTools();
-        expect(manager.restartCalled).toBe(needsRestart);
-        if (needsRestart) {
-          expect(manager.restartOptions).toEqual({ actionsCompactMetadata: requested });
-        }
+        expect(manager.restartCalled).toBe(false);
         expect(timer.getSleepHistory()).toEqual([]);
         if (requested !== undefined) {
           expect(client.callToolCalls[0]?.params[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]).toBe(
@@ -111,7 +104,7 @@ describe("compact metadata daemon reuse", () => {
       version: DAEMON_VERSION,
       options: { actionsCompactMetadata: true },
     };
-    const successor = { ...running, options: { embeddedSdk: true, actionsCompactMetadata: false } };
+    const successor = { ...running, options: { embeddedSdk: true, actionsCompactMetadata: true } };
     manager.statusResults = [running, running, running, successor];
     manager.statusResult = successor;
     const timer = new FakeTimer();
@@ -127,7 +120,8 @@ describe("compact metadata daemon reuse", () => {
     try {
       await proxy.listTools();
       expect(manager.restartCalled).toBe(true);
-      expect(manager.restartOptions).toEqual({ embeddedSdk: true, actionsCompactMetadata: false });
+      // The restart carries process options only; the opt-out stays on the connection.
+      expect(manager.restartOptions).toEqual({ embeddedSdk: true });
       expect(client.callToolCalls[0]?.params[INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]).toBe(false);
       expect(timer.getSleepHistory()).toEqual([]);
     } finally {

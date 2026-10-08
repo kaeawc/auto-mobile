@@ -9,10 +9,12 @@ export const CONNECTION_PRESENTATION_OPTION_KEYS = [
   "enabledTools",
   "disabledTools",
   "toolResultsNoStructuredContent",
+  "actionsCompactMetadata",
 ] as const satisfies readonly (keyof DaemonOptions)[];
 
 const DAEMON_CHILD_EXCLUDED_OPTION_KEYS = [
   "toolResultsNoStructuredContent",
+  "actionsCompactMetadata",
 ] as const satisfies readonly (keyof DaemonOptions)[];
 
 /** Environment equivalents that belong to the spawning MCP connection, not its child daemon. */
@@ -20,6 +22,7 @@ export const CONNECTION_PRESENTATION_ENV_KEYS = [
   "AUTOMOBILE_ENABLED_TOOLS",
   "AUTOMOBILE_DISABLED_TOOLS",
   "AUTOMOBILE_TOOL_RESULTS_NO_STRUCTURED_CONTENT",
+  "AUTOMOBILE_ACTIONS_COMPACT_METADATA",
 ] as const;
 
 /** Remove presentation fields that can never become daemon-wide startup policy. */

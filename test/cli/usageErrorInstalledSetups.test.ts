@@ -178,7 +178,9 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
     expect(args).toContain("--port");
     expect(args).toContain("--enable-tool");
     expect(args).toContain("--a11y-level");
-    expect(args).toContain("--actions-compact-metadata");
+    // Connection-scoped presentation options never reach the shared daemon (#10377).
+    expect(args).not.toContain("--actions-compact-metadata");
+    expect(args).not.toContain("--tool-results-no-structured-content");
     expect(invocationError(childArgv(args))).toBeUndefined();
   });
 

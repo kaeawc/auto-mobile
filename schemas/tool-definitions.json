@@ -3794,7 +3794,7 @@
   },
   {
     "name": "launchApp",
-    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
+    "description": "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker. overlay:true (iOS simulators only) relaunches the app with the overlay agent injected, so its current state is lost.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3819,6 +3819,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "overlay": {
+          "description": "iOS simulator only: inject the overlay agent so the overlay tool can draw over this app. Always relaunches the app, losing its state. Rejected on physical iOS devices (use the in-app SDK), on Android (overlays need no injection) and for com.apple.* apps.",
+          "type": "boolean"
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -6928,6 +6932,32 @@
         },
         "observedAppId": {
           "type": "string"
+        },
+        "overlayAgent": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "agentVersion": {
+              "type": "string"
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["port", "agentVersion", "protocolVersion", "capabilities"],
+          "additionalProperties": false
         },
         "observationOmitted": {
           "type": "object",

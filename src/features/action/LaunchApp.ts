@@ -28,7 +28,10 @@ import {
 } from "./confirmAndroidPackageInstalledLive";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { resolveIosColdAppCheckKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import {
+  resolveIosColdAppCheckKind,
+  resolveIosDeviceKind,
+} from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import {
   resolveIosLaunchBackend,
@@ -149,6 +152,29 @@ function resolvePerformanceSamplingCoordinator(
   dependencies: LaunchAppDependencies,
 ): PerformanceSamplingCoordinator {
   return dependencies.performanceSamplingCoordinator ?? getPerformanceMonitor();
+}
+
+interface IosLaunchProcessOptions {
+  launchArguments?: string[];
+  launchEnvironment?: Record<string, string>;
+}
+
+function needsIosColdStart(
+  coldBoot: boolean,
+  clearAppData: boolean,
+  { launchArguments, launchEnvironment }: IosLaunchProcessOptions,
+): boolean {
+  return (
+    coldBoot || clearAppData || Boolean(launchArguments?.length) || launchEnvironment !== undefined
+  );
+}
+
+function coldIosLaunchOptions({ launchArguments, launchEnvironment }: IosLaunchProcessOptions) {
+  return {
+    foregroundIfRunning: false,
+    launchArguments,
+    ...(launchEnvironment === undefined ? {} : { environment: launchEnvironment }),
+  };
 }
 
 interface AndroidLaunchOptions {
@@ -392,6 +418,7 @@ export class LaunchApp extends BaseVisualChange {
    * @param activityName - Optional activity name to launch (Android only)
    * @param userId - Optional Android user ID (auto-detected if not provided)
    * @param skipUiStability - Whether to skip UI stability checks
+   * @param launchEnvironment - `SIMCTL_CHILD_*` variables for a fresh iOS simulator process
    */
   async execute(
     packageName: string,
@@ -402,17 +429,30 @@ export class LaunchApp extends BaseVisualChange {
     skipUiStability?: boolean,
     signal?: AbortSignal,
     launchArguments?: string[],
+    launchEnvironment?: Record<string, string>,
   ): Promise<LaunchAppResult> {
     logger.info("execute");
     signal?.throwIfAborted();
     switch (this.device.platform) {
       case "ios":
-        return this.executeiOS(packageName, clearAppData, coldBoot, signal, launchArguments);
+        if (
+          launchEnvironment !== undefined &&
+          resolveIosDeviceKind({ deviceId: this.device.deviceId }) !== "simulator"
+        ) {
+          throw new ActionableError("A launch environment is supported on iOS simulators only.");
+        }
+        return this.executeiOS(packageName, clearAppData, coldBoot, signal, {
+          launchArguments,
+          launchEnvironment,
+        });
       case "android":
         if (launchArguments?.length) {
           throw new ActionableError(
             "launchArguments are supported on iOS only. Android launch intent extras require a separate interface.",
           );
+        }
+        if (launchEnvironment !== undefined) {
+          throw new ActionableError("A launch environment is supported on iOS simulators only.");
         }
         return this.executeAndroidWithSamplingPriority({
           packageName,
@@ -479,14 +519,16 @@ export class LaunchApp extends BaseVisualChange {
    * @param bundleId - The bundle identifier to launch
    * @param clearAppData - Whether to wipe the app's data container before launch (iOS simulator)
    * @param coldBoot - Whether to cold boot the app or resume if already running
+   * @param processOptions - Arguments and simulator environment for a fresh process
    */
   private async executeiOS(
     bundleId: string,
     clearAppData: boolean,
     coldBoot: boolean,
     signal?: AbortSignal,
-    launchArguments?: string[],
+    processOptions: IosLaunchProcessOptions = {},
   ): Promise<LaunchAppResult> {
+    const { launchArguments } = processOptions;
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
 
@@ -501,8 +543,8 @@ export class LaunchApp extends BaseVisualChange {
           // Clearing app data always implies a fresh process: the app is
           // terminated, its sandbox wiped, then relaunched. Treat it as a cold
           // boot so we go through the terminate → clearCache → launch path.
-          // Arguments are consumed only when a new app process starts.
-          const needsColdStart = coldBoot || clearAppData || Boolean(launchArguments?.length);
+          // Arguments and the environment are consumed only when a new app process starts.
+          const needsColdStart = needsIosColdStart(coldBoot, clearAppData, processOptions);
 
           // Simulators launch/terminate via simctl; physical devices via devicectl
           // (parity with installApp/uninstallApp). Resolve once so cold and warm
@@ -590,7 +632,7 @@ export class LaunchApp extends BaseVisualChange {
               bundleId,
             );
             launchResult = await perf.track("launch", () =>
-              backend.launchApp(bundleId, { foregroundIfRunning: false, launchArguments }),
+              backend.launchApp(bundleId, coldIosLaunchOptions(processOptions)),
             );
             this.assertLaunchNotAborted(signal);
           } else {

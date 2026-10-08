@@ -13,6 +13,7 @@ export interface ExecSeamOptions {
   cwd?: string;
   signal?: AbortSignal;
   killSignal?: NodeJS.Signals;
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Raw stdout/stderr an exec seam resolves with, before Buffer coercion. */
@@ -31,6 +32,8 @@ export interface ExecRequestOptions {
   cwd?: string;
   signal?: AbortSignal;
   killSignal?: NodeJS.Signals;
+  /** Complete child environment; omitted means the child inherits the host process env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Behavior toggles for {@link runExecSeam} that do not map to node exec options. */
@@ -83,6 +86,9 @@ export async function runExecSeam(
     }
     if (options.killSignal !== undefined) {
       execOptions.killSignal = options.killSignal;
+    }
+    if (options.env !== undefined) {
+      execOptions.env = options.env;
     }
     const { stdout, stderr } = await invoke(execOptions);
     return createExecResult(stdout, stderr);

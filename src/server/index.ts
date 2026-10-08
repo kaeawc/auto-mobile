@@ -307,6 +307,7 @@ import { registerSnapshotOfTools } from "./snapshotOfTools";
 import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
 import { registerOverlayTools } from "./overlayTools";
+import { overlayAgentRegistry } from "../features/overlay/ios/overlayAgentInjection";
 import { registerHighlightTools } from "./highlightTools";
 import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
@@ -638,7 +639,7 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
-  registerOverlayTools();
+  registerOverlayTools({ agentConnections: overlayAgentRegistry });
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

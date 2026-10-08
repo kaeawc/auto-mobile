@@ -48,27 +48,26 @@ internal fun validOverlayFixture(name: String): OverlaySpec {
     generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
       .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
       .first { it.isFile }
+  return loadOverlaySpec(file)
+}
+
+/** Reads [file] and validates it with the production [OverlaySpecValidator]. */
+internal fun loadOverlaySpec(file: File): OverlaySpec {
+  check(file.isFile) { "Overlay spec not found: ${file.path}" }
   val validation = OverlaySpecValidator.validate(file.readText())
-  check(validation is OverlaySpecValidation.Success) { "$name: $validation" }
+  check(validation is OverlaySpecValidation.Success) { "${file.path}: $validation" }
   return validation.spec
 }
 
 /**
- * Renders [spec] through the production [OverlaySpecContent] adapter in a Robolectric activity,
- * captures the composed view and records or verifies it against the baseline named [name].
+ * Renders [spec] through the production [OverlaySpecContent] adapter in a Robolectric activity and
+ * captures the composed view. Shared by the snapshot tests and the host-side preview
+ * ([OverlayPreviewRenderTest]) so both draw exactly what the renderer draws.
  *
- * Must run under `RobolectricTestRunner` with `@GraphicsMode(NATIVE)`; the surface size and density
- * come from the test's `@Config(qualifiers = …)`. [pending] marks a test whose baseline is not
- * recorded yet: skipped when verifying, still produced when recording.
+ * Must run under `RobolectricTestRunner` with `@GraphicsMode(NATIVE)`; the surface size, density
+ * and night mode come from the current Robolectric qualifiers.
  */
-internal fun overlayScreenshotTest(
-  name: String,
-  spec: OverlaySpec,
-  pending: Boolean = false,
-  options: OverlayScreenshotComparator.Options = OverlayScreenshotComparator.Options(),
-) {
-  OverlayScreenshotEnvironment.assumeReferencePlatform()
-  OverlayScreenshotEnvironment.skipIfPending(name, pending)
+internal fun renderOverlay(name: String, spec: OverlaySpec): OverlayScreenshotComparator.Image {
   val root = mapOverlaySpec(spec).root
   val controller = Robolectric.buildActivity(ComponentActivity::class.java).setup()
   try {
@@ -79,13 +78,29 @@ internal fun overlayScreenshotTest(
     check(view.width > 0 && view.height > 0) { "$name: overlay view was not laid out" }
     val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
     view.draw(Canvas(bitmap))
-    OverlayScreenshotEnvironment.handleResult(
-      BitmapPngCodec,
-      name,
-      BitmapPngCodec.toImage(bitmap),
-      options,
-    )
+    return BitmapPngCodec.toImage(bitmap)
   } finally {
     controller.pause().stop().destroy()
   }
+}
+
+/**
+ * Renders [spec] with [renderOverlay] and records or verifies it against the baseline named [name].
+ * [pending] marks a test whose baseline is not recorded yet: skipped when verifying, still produced
+ * when recording.
+ */
+internal fun overlayScreenshotTest(
+  name: String,
+  spec: OverlaySpec,
+  pending: Boolean = false,
+  options: OverlayScreenshotComparator.Options = OverlayScreenshotComparator.Options(),
+) {
+  OverlayScreenshotEnvironment.assumeReferencePlatform()
+  OverlayScreenshotEnvironment.skipIfPending(name, pending)
+  OverlayScreenshotEnvironment.handleResult(
+    BitmapPngCodec,
+    name,
+    renderOverlay(name, spec),
+    options,
+  )
 }

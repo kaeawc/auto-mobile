@@ -49,4 +49,107 @@ class OverlaySpecContentScreenshotTest {
   @Test
   fun sheetBindings() =
     overlayScreenshotTest("sheet_bindings", validOverlayFixture("sheet-bindings"), pending = true)
+
+  /** Buttons, checkbox and switch in a row and column layout. */
+  @Test
+  fun materialControls() =
+    overlayScreenshotTest(
+      "material_controls",
+      validOverlayFixture("material-controls"),
+      pending = true,
+    )
+
+  /** Slider, chips and a card. */
+  @Test
+  fun materialSliderChipCard() =
+    overlayScreenshotTest(
+      "material_slider_chip_card",
+      validOverlayFixture("material-slider-chip-card"),
+      pending = true,
+    )
+
+  /** Radio group, list items, checkbox, switch and icon buttons. */
+  @Test
+  fun selectionControls() =
+    overlayScreenshotTest(
+      "selection_controls",
+      validOverlayFixture("selection-controls"),
+      pending = true,
+    )
+
+  /** Colour-role and corner-radius style tokens. */
+  @Test
+  fun colorRoleAndCornerTokens() =
+    overlayScreenshotTest(
+      "color_role_and_corner_tokens",
+      validOverlayFixture("color-role-and-corner-tokens"),
+      pending = true,
+    )
+
+  /** Elevation, linear and radial gradients, and aspect ratio. */
+  @Test
+  fun elevationGradientAspectRatio() =
+    overlayScreenshotTest(
+      "elevation_gradient_aspect_ratio",
+      validOverlayFixture("elevation-gradient-aspect-ratio"),
+      pending = true,
+    )
+
+  /** Text style roles under a scaled typography theme. */
+  @Test
+  fun textStyleRole() =
+    overlayScreenshotTest("text_style_role", validOverlayFixture("text-style-role"), pending = true)
+
+  /** Conditional styles resolved against the initial state. */
+  @Test
+  fun styleWhen() =
+    overlayScreenshotTest("style_when", validOverlayFixture("style-when"), pending = true)
+
+  /** A list template expanded with repeat. */
+  @Test
+  fun repeatTemplate() =
+    overlayScreenshotTest("repeat", validOverlayFixture("repeat"), pending = true)
+
+  /** Row weights and size bounds. */
+  @Test
+  fun rowWeightSizeBounds() =
+    overlayScreenshotTest(
+      "row_weight_size_bounds",
+      validOverlayFixture("row-weight-size-bounds"),
+      pending = true,
+    )
+
+  /** Dark mode with a seed colour scheme. */
+  @Test
+  fun themeSeed() =
+    overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"), pending = true)
+
+  /** Light mode with scaled serif typography and custom shapes. */
+  @Test
+  fun themeTypographyShapes() =
+    overlayScreenshotTest(
+      "theme_typography_shapes",
+      validOverlayFixture("theme-typography-shapes"),
+      pending = true,
+    )
+
+  /** A `system` theme on a light device. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun themeDeviceLight() =
+    overlayScreenshotTest(
+      "theme_device_light",
+      validOverlayFixture("theme-device"),
+      pending = true,
+    )
+
+  /** A `system` theme on a dark device. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun themeDeviceDark() =
+    overlayScreenshotTest(
+      "theme_device_dark",
+      validOverlayFixture("theme-device"),
+      pending = true,
+    )
 }

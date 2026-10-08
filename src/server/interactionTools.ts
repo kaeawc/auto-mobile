@@ -1205,7 +1205,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           .enum(SEND_KEYS_CLEAR_MODES)
           .optional()
           .describe(
-            "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
+            "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK or when the IME cannot be activated, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
           ),
       })
       .strict(),

@@ -946,7 +946,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   /**
    * auto/ime clear (#10479): the IME clearField when CtrlProxy advertises `ime_clear_field_v1`,
    * activated and restored like IME typing (inside the call's IME span when there is one);
-   * otherwise key-event deletes, which need no keyboard switch. Never the accessibility clear.
+   * otherwise, or when the IME could not be activated (the prior keyboard already restored),
+   * key-event deletes, which need no keyboard switch. Never the accessibility clear.
    */
   private async clearAndroidWithIme(
     signal?: AbortSignal,
@@ -957,11 +958,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!supportsClearField) {
       return this.clearImeFieldWithKeyEvents(signal, display);
     }
-    return this.executeAndroidImeCommit("", "insert", undefined, {
+    const result = await this.executeAndroidImeCommit("", "insert", undefined, {
       signal,
       display,
       delivery: "clearField",
     });
+    if (!result.imeActivationFailed) {
+      return result;
+    }
+    logger.warn(
+      `[SendKeys] IME unavailable for the clear; deleting with key events: ${result.error}`,
+    );
+    return this.clearImeFieldWithKeyEvents(signal, display);
   }
 
   /** Explicit `mode: "a11y"` clear: ACTION_SET_TEXT, then key-event deletes if it fails. */

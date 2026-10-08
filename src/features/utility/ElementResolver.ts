@@ -350,6 +350,15 @@ function preferVisibleMatches(
   return visible.length > 0 && visible.length < matches.length ? visible : matches;
 }
 
+/** Whether the selector names an element by identifier alone, with no text to match. */
+function isIdOnlySelector(selector: ResolverSelector): boolean {
+  return (
+    (selector.elementId !== undefined || selector.testTag !== undefined) &&
+    selector.text === undefined &&
+    selector.contentDescription === undefined
+  );
+}
+
 export function isWithin(
   node: SearchableEntry,
   ancestor: SearchableEntry,
@@ -701,10 +710,19 @@ export class ElementResolver {
       }
     }
     if (preserveTextScope) {
+      // A text container keeps the innermost node that carries the text. An id
+      // container keeps the outermost one: an iOS container with an identifier
+      // can be captured twice, the real node plus an empty nested node with the
+      // same id, and only the outer node holds the container's children (#10266).
+      const keepOutermost = isIdOnlySelector(selector);
       matched.matches = matched.matches.filter(
         ({ node }) =>
           !matched.matches.some(
-            ({ node: other }) => other !== node && isWithin(other, node, snapshot.nodes),
+            ({ node: other }) =>
+              other !== node &&
+              (keepOutermost
+                ? isWithin(node, other, snapshot.nodes)
+                : isWithin(other, node, snapshot.nodes)),
           ),
       );
     } else if (

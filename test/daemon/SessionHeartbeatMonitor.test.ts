@@ -101,6 +101,44 @@ describe("SessionHeartbeatMonitor", () => {
 
       monitor.stop();
     });
+
+    it("a release still tearing down does not hold up other sessions' scans", async () => {
+      await sessionManager.createSession("slow", "emulator-5554", "android", 60_000, 1_000);
+      sessionManager.recordHeartbeat("slow");
+      await sessionManager.createSession("later", "emulator-5556", "android", 60_000, 1_000);
+      const reaped: Array<{ sessionId: string; at: number }> = [];
+      const slowTeardown = Promise.withResolvers<void>();
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId) => {
+          reaped.push({ sessionId, at: timer.now() });
+          if (sessionId === "slow") {
+            await slowTeardown.promise;
+          }
+        },
+        timer,
+      );
+      monitor.start();
+      // "slow" lapses first; its teardown never finishes during this test.
+      timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+      await drainMicrotasks(10);
+      expect(reaped.map((r) => r.sessionId)).toEqual(["slow"]);
+
+      // "later" heartbeats now and lapses while "slow" is still tearing down.
+      sessionManager.recordHeartbeat("later");
+      const lapsesAt = timer.now() + 1_000 + SUSPECT_GRACE_MS;
+      timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+      await drainMicrotasks(10);
+
+      // Released on schedule, and "slow" is not released a second time meanwhile.
+      expect(reaped.map((r) => r.sessionId)).toEqual(["slow", "later"]);
+      expect(reaped[1]!.at - lapsesAt).toBeLessThanOrEqual(
+        DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+      );
+      slowTeardown.resolve();
+      await monitor.stop();
+    });
   });
 
   describe("tick reaping decision", () => {

@@ -1,11 +1,12 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   getDefaultPreFirstHeartbeatGraceMs,
   getDefaultSessionHeartbeatTimeoutMs,
   type Session,
 } from "./sessionManager";
-import { SingleFlightInterval } from "./SingleFlightInterval";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
 import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
 import {
@@ -75,6 +76,8 @@ export const DEFAULT_STALL_MARGIN_MS = 2_000;
 export const UNSETTLED_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
 
 const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
+/** How long shutdown waits for releases a scan started before giving up on them. */
+const REAP_STOP_TIMEOUT_MS = 5_000;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -102,7 +105,7 @@ function readPositiveMsEnv(primaryName: string, legacyName: string): number | un
  * the daemon passes its default timer.
  */
 export class SessionHeartbeatMonitor {
-  private readonly interval: SingleFlightInterval;
+  private intervalHandle: NodeJS.Timeout | null = null;
   private readonly checkIntervalMs: number;
   private readonly graceMs: number;
   private readonly preFirstHeartbeatGraceMs: number;
@@ -114,6 +117,11 @@ export class SessionHeartbeatMonitor {
   private lastScanSettledAt: number | undefined;
   /** A running scan has already judged its own lateness; a probe mid-scan would count scan time. */
   private scanInFlight = false;
+  /**
+   * Releases started by earlier scans that are still tearing down, one per session. A scan never
+   * waits on them: one slow teardown must not delay the expiry checks of every other session.
+   */
+  private readonly reapsInFlight = new Map<string, Promise<void>>();
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -149,31 +157,63 @@ export class SessionHeartbeatMonitor {
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
-    this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () =>
-      this.tickOnce(),
-    );
   }
 
   start(): void {
     this.lastScanSettledAt ??= this.timer.now();
     this.sessions.setStallProbe?.(() => this.forgiveStallIfLate());
-    this.interval.start();
+    if (this.intervalHandle) {
+      return;
+    }
+    // The scan is synchronous and never waits on a release's teardown (each release is
+    // single-flight per session), so a slow teardown cannot delay other sessions' checks.
+    this.intervalHandle = this.timer.setInterval(() => {
+      try {
+        void Promise.allSettled(this.scan());
+      } catch (error) {
+        logger.warn(`Session heartbeat scan failed: ${errorMessage(error)}`, error);
+      }
+    }, this.checkIntervalMs);
+    (this.intervalHandle as { unref?: () => void }).unref?.();
   }
 
   async stop(): Promise<void> {
     this.sessions.setStallProbe?.(undefined);
-    const settled = await this.interval.stop();
-    if (!settled) {
+    if (this.intervalHandle) {
+      this.timer.clearInterval(this.intervalHandle);
+      this.intervalHandle = null;
+    }
+    const reaps = [...this.reapsInFlight.values()];
+    const reapsSettled =
+      reaps.length === 0 ||
+      (await raceWithDeadline(
+        Promise.allSettled(reaps).then(() => true),
+        {
+          timer: this.timer,
+          timeoutMs: REAP_STOP_TIMEOUT_MS,
+          label: "Heartbeat monitor release drain",
+        },
+      ).catch((error: unknown) => {
+        // A release still tearing down at shutdown is left to the daemon's own teardown bound.
+        logger.debug(`Heartbeat monitor release drain did not finish: ${error}`);
+        return false;
+      }));
+    if (!reapsSettled) {
       logger.warn("Session heartbeat monitor did not settle before shutdown timeout");
     }
   }
 
   /**
-   * Scan sessions once and reap any whose heartbeat has gone stale.
-   * Exposed for deterministic testing; also invoked on each interval tick.
+   * Scan sessions once and reap any whose heartbeat has gone stale, then wait for the releases
+   * this scan started. Exposed for deterministic testing; the interval runs the same scan without
+   * waiting on the releases.
    */
   async tick(): Promise<void> {
-    return this.interval.run();
+    const results = await Promise.allSettled(this.scan());
+    const firstFailure = results.find((result) => result.status === "rejected");
+    if (firstFailure) {
+      throw firstFailure.reason;
+    }
   }
 
   /**
@@ -218,7 +258,8 @@ export class SessionHeartbeatMonitor {
     );
   }
 
-  private async tickOnce(): Promise<void> {
+  /** Judge every session now and start the releases due; returns the releases started. */
+  private scan(): Promise<void>[] {
     this.forgiveOwnStall();
     this.scanInFlight = true;
     try {
@@ -228,15 +269,12 @@ export class SessionHeartbeatMonitor {
       // sweeping here gives them the monitor's interval granularity instead of the
       // 5-minute cleanup sweep.
       this.sessions.cleanupExpiredSessions();
-      const results = await Promise.allSettled(this.reapStaleSessions());
-      const firstFailure = results.find((result) => result.status === "rejected");
-      if (firstFailure) {
-        throw firstFailure.reason;
-      }
+      return this.reapStaleSessions();
     } finally {
       this.scanInFlight = false;
       if (this.lastScanSettledAt !== undefined) {
-        this.lastScanSettledAt = this.timer.now();
+        // Never backwards: a scan judged at an earlier clock reading must not reopen a stall.
+        this.lastScanSettledAt = Math.max(this.lastScanSettledAt, this.timer.now());
       }
     }
   }
@@ -245,6 +283,9 @@ export class SessionHeartbeatMonitor {
   private reapStaleSessions(): Promise<void>[] {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
+      if (this.reapsInFlight.has(session.sessionId)) {
+        continue;
+      }
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
       // the rehydration-owner timeout while they await ownership.
       const now = this.timer.now();
@@ -263,18 +304,32 @@ export class SessionHeartbeatMonitor {
         `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,
       );
       try {
-        reaps.push(
-          this.reap(session.sessionId, reason).catch((error: unknown) => {
-            logger.warn(`Failed to reap stale session ${session.sessionId}`, error);
-            throw error;
-          }),
-        );
+        reaps.push(this.trackReap(session.sessionId, this.reap(session.sessionId, reason)));
       } catch (error) {
         logger.warn(`Failed to reap stale session ${session.sessionId}`, error);
         reaps.push(Promise.reject(error));
       }
     }
     return reaps;
+  }
+
+  /** Record a started release so later scans skip its session until it settles. */
+  private trackReap(sessionId: string, reap: Promise<void>): Promise<void> {
+    const logged = reap.catch((error: unknown) => {
+      logger.warn(`Failed to reap stale session ${sessionId}`, error);
+      throw error;
+    });
+    const settled = logged.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.reapsInFlight.set(sessionId, settled);
+    void settled.then(() => {
+      if (this.reapsInFlight.get(sessionId) === settled) {
+        this.reapsInFlight.delete(sessionId);
+      }
+    });
+    return logged;
   }
 
   /**

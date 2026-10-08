@@ -56,6 +56,21 @@ class OverlayStateLogicTest {
   }
 
   @Test
+  fun `decrement subtracts by defaulting to one and refuses non finite results`() {
+    assertEquals(OverlayScalar.Numeric(2.0), OverlayDecrementAction("count").nextValue(state))
+    assertEquals(
+      OverlayScalar.Numeric(5.0),
+      OverlayDecrementAction("count", by = -2.0).nextValue(state),
+    )
+    assertNull(OverlayDecrementAction("name").nextValue(state))
+    assertNull(OverlayDecrementAction("missing").nextValue(state))
+    assertNull(
+      OverlayDecrementAction("count", by = Double.MAX_VALUE)
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE)))
+    )
+  }
+
+  @Test
   fun `toggle flips booleans only`() {
     assertEquals(OverlayScalar.BooleanValue(false), OverlayToggleAction("on").nextValue(state))
     assertNull(OverlayToggleAction("count").nextValue(state))

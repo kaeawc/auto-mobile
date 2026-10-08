@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "x",
+          "visibleWhen": {
+            "any": [
+              {
+                "key": "k",
+                "equals": "a"
+              },
+              {
+                "key": "k",
+                "notEquals": "{item.zzz}"
+              }
+            ]
+          }
+        }
+      ],
+      "repeat": {
+        "items": [
+          {
+            "id": "a",
+            "label": "Alpha",
+            "price": 3,
+            "on": true
+          },
+          {
+            "id": "b",
+            "label": "Beta",
+            "price": 4.5,
+            "on": false
+          }
+        ],
+        "as": "item"
+      }
+    },
+    "state": {
+      "k": "a"
+    }
+  },
+  "expectedPath": "root.children[0].visibleWhen.any[1].notEquals"
+}

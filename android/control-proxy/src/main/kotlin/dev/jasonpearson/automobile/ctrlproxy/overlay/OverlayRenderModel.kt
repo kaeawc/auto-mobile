@@ -53,32 +53,19 @@ data class OverlayRenderModel(
     }
 }
 
-/** Path spelling and traversal order match the protocol validator, including unsupported nodes. */
+/**
+ * Path spelling and traversal order match the protocol validator, including unsupported nodes.
+ * `repeat` templates count once per instance, so an expanded list cannot exceed the node limit.
+ */
 fun guardOverlayTree(root: OverlayNode) {
   var count = 0
   fun visit(node: OverlayNode, path: String, depth: Int) {
     require(++count <= OverlaySpecValidator.MAX_OVERLAY_NODES) { "$path: Node limit exceeded" }
     require(depth <= OverlaySpecValidator.MAX_OVERLAY_DEPTH) { "$path: Tree depth limit exceeded" }
-    when (node) {
-      is OverlayScrollNode -> visit(node.child, "$path.child", depth + 1)
-      is OverlayBottomSheetNode -> visit(node.child, "$path.child", depth + 1)
-      else ->
-        overlayChildren(node).forEachIndexed { index, child ->
-          visit(child, "$path.children[$index]", depth + 1)
-        }
-    }
+    overlayChildEntries(node, path, bind = false).forEach { visit(it.node, it.path, depth + 1) }
   }
   visit(root, "root", 1)
 }
-
-private fun overlayChildren(node: OverlayNode): List<OverlayNode> =
-  when (node) {
-    is OverlayBoxNode -> node.children
-    is OverlayRowNode -> node.children
-    is OverlayColumnNode -> node.children
-    is OverlayPagerNode -> node.children
-    else -> emptyList()
-  }
 
 fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): OverlayRenderModel {
   guardOverlayTree(spec.root)
@@ -136,10 +123,7 @@ private fun mapOverlayNode(
       else -> ""
     }
   val children =
-    overlayDescendants(node).mapIndexed { index, child ->
-      val childPath =
-        if (node is OverlayScrollNode || node is OverlayBottomSheetNode) "$path.child"
-        else "$path.children[$index]"
+    overlayChildEntries(node, path).map { (child, childPath) ->
       mapOverlayNode(child, state, pages, childPath, context)
     }
   val pager =

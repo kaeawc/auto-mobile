@@ -282,6 +282,13 @@ export const actionSchema = z.discriminatedUnion("type", [
       by: z.number().finite().optional(),
     })
     .strict(),
+  z
+    .object({
+      type: z.enum(["decrement"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      by: z.number().finite().optional(),
+    })
+    .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
 const commonNodeShape = {
@@ -294,9 +301,25 @@ const commonNodeShape = {
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
 };
-const boxBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["box"]) }).strict();
-const rowBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["row"]) }).strict();
-const columnBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["column"]) }).strict();
+// A literal list template: the container's children are instantiated once per item.
+const repeatItemSchema = z.custom<Record<string, string | number | boolean>>(
+  (value) =>
+    z.record(keySchema, z.union([z.string(), z.number().finite(), z.boolean()])).safeParse(value)
+      .success,
+);
+const repeatSchema = z
+  .object({ items: z.array(repeatItemSchema).min(1).max(32), as: keySchema })
+  .strict();
+const repeatShape = { repeat: repeatSchema.optional() };
+const boxBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["box"]) })
+  .strict();
+const rowBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .strict();
+const columnBaseSchema = z
+  .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .strict();
 const textBaseSchema = z
   .object({ ...commonNodeShape, type: z.enum(["text"]), text: z.string() })
   .strict();
@@ -485,6 +508,7 @@ export const OVERLAY_ACTION_TYPES = [
   "setState",
   "toggle",
   "increment",
+  "decrement",
   "dismiss",
 ] as const;
 export const OVERLAY_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;

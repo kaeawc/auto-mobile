@@ -737,7 +737,8 @@ final class WebSocketServer: @unchecked Sendable {
             let error = boundError(phase, elapsedMs)
             let response = WebSocketResponse.error(
                 type: request.requestType.responseType.rawValue,
-                requestId: request.requestId, error: error.errorDescription ?? "Gesture execution bound exceeded"
+                requestId: request.requestId, error: error.errorDescription ?? "Gesture execution bound exceeded",
+                errorCode: error.wireCode
             )
             do {
                 try responder.send(JSONEncoder().encode(response))

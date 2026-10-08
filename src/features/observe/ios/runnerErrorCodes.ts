@@ -27,3 +27,39 @@ export function isRunnerDeadlineCompletedLate(failure: {
   }
   return failure.error !== undefined && RUNNER_DEADLINE_COMPLETED_LATE_WORDING.test(failure.error);
 }
+
+/**
+ * The runner answered before its gesture returned: the XCUITest call is still executing and can
+ * still land, so the outcome is unknown (#10016).
+ */
+export const RUNNER_GESTURE_BOUND_EXCEEDED_CODE = "gesture_bound_exceeded";
+
+/**
+ * Wording fallback for runners that predate the gesture-bound code: the text of
+ * `CommandError.gestureBoundExceeded`. "in phase" excludes the query bound, which shares the rest
+ * of the wording but is a read, not a gesture. Prefer the code.
+ */
+export const RUNNER_GESTURE_BOUND_EXCEEDED_WORDING =
+  /exceeded execution bound \d+ms in phase [\s\S]*XCUITest call is still executing/i;
+
+/** True when a runner failure says its gesture was still executing when the runner answered. */
+export function isRunnerGestureBoundExceeded(failure: {
+  errorCode?: string;
+  error?: string;
+}): boolean {
+  if (failure.errorCode !== undefined) {
+    return failure.errorCode === RUNNER_GESTURE_BOUND_EXCEEDED_CODE;
+  }
+  return failure.error !== undefined && RUNNER_GESTURE_BOUND_EXCEEDED_WORDING.test(failure.error);
+}
+
+/**
+ * True when a runner reply leaves a gesture's effect unknown: it finished after its deadline, or
+ * it was still executing when the runner answered. Either way it may have been applied.
+ */
+export function isRunnerGestureOutcomeUnknown(failure: {
+  errorCode?: string;
+  error?: string;
+}): boolean {
+  return isRunnerDeadlineCompletedLate(failure) || isRunnerGestureBoundExceeded(failure);
+}

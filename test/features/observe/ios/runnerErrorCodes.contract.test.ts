@@ -5,7 +5,11 @@ import {
   RUNNER_DEADLINE_COMPLETED_LATE_CODE,
   RUNNER_DEADLINE_COMPLETED_LATE_WORDING,
   RUNNER_DEADLINE_NOT_STARTED_CODE,
+  RUNNER_GESTURE_BOUND_EXCEEDED_CODE,
+  RUNNER_GESTURE_BOUND_EXCEEDED_WORDING,
   isRunnerDeadlineCompletedLate,
+  isRunnerGestureBoundExceeded,
+  isRunnerGestureOutcomeUnknown,
 } from "../../../../src/features/observe/ios/runnerErrorCodes";
 
 // The one place the Swift runner's deadline error and the host's reading of it are pinned together
@@ -73,5 +77,71 @@ describe("runner deadline error: Swift CommandError <-> host contract (#10161)",
     expect(isRunnerDeadlineCompletedLate({ error: text(completed) })).toBe(true);
     expect(isRunnerDeadlineCompletedLate({ error: text(notStarted) })).toBe(false);
     expect(isRunnerDeadlineCompletedLate({})).toBe(false);
+  });
+});
+
+/** The `wireCode` returned for `.gestureBoundExceeded`. */
+function swiftGestureBoundCode(): string {
+  const match = /case \.gestureBoundExceeded:[\s\S]*?return "([^"]+)"/.exec(swift);
+  if (!match) {
+    throw new Error("Could not locate the gestureBoundExceeded wireCode in CommandError.swift");
+  }
+  return match[1];
+}
+
+/** `errorDescription` for a bound case, with its interpolations filled in like the runner does. */
+function swiftBoundDescription(caseName: "gestureBoundExceeded" | "queryBoundExceeded"): string {
+  const match = new RegExp(
+    `case let \\.${caseName}\\([^)]*\\):\\s*(?://[^\\n]*\\s*)*return "([^"]+)"`,
+  ).exec(swift);
+  if (!match) {
+    throw new Error(`Could not locate the ${caseName} description in CommandError.swift`);
+  }
+  const values: Record<string, string> = {
+    command: "request_swipe",
+    phase: "xcuitestGesture",
+    boundMs: "4500",
+    elapsedMs: "4502",
+  };
+  return match[1].replace(/\\\((\w+)\)/g, (_whole, name: string) => values[name] ?? name);
+}
+
+describe("runner gesture-bound error: Swift CommandError <-> host contract (#10016)", () => {
+  test("the Swift wire code is the TypeScript constant", () => {
+    expect(swiftGestureBoundCode()).toBe(RUNNER_GESTURE_BOUND_EXCEEDED_CODE);
+  });
+
+  test("the wording fallback matches the gesture bound and not the query bound", () => {
+    const gesture = swiftBoundDescription("gestureBoundExceeded");
+    const query = swiftBoundDescription("queryBoundExceeded");
+
+    expect(gesture).toContain("exceeded execution bound 4500ms in phase xcuitestGesture");
+    expect(RUNNER_GESTURE_BOUND_EXCEEDED_WORDING.test(gesture)).toBe(true);
+    expect(RUNNER_GESTURE_BOUND_EXCEEDED_WORDING.test(query)).toBe(false);
+  });
+
+  test("the code decides when present; the wording decides only for a runner without one", () => {
+    const gesture = swiftBoundDescription("gestureBoundExceeded");
+
+    expect(isRunnerGestureBoundExceeded({ errorCode: RUNNER_GESTURE_BOUND_EXCEEDED_CODE })).toBe(
+      true,
+    );
+    expect(
+      isRunnerGestureBoundExceeded({ errorCode: RUNNER_DEADLINE_NOT_STARTED_CODE, error: gesture }),
+    ).toBe(false);
+    expect(isRunnerGestureBoundExceeded({ error: gesture })).toBe(true);
+    expect(isRunnerGestureBoundExceeded({})).toBe(false);
+  });
+
+  test("either unknown-outcome reply counts; a gesture never started does not", () => {
+    expect(isRunnerGestureOutcomeUnknown({ errorCode: RUNNER_GESTURE_BOUND_EXCEEDED_CODE })).toBe(
+      true,
+    );
+    expect(isRunnerGestureOutcomeUnknown({ errorCode: RUNNER_DEADLINE_COMPLETED_LATE_CODE })).toBe(
+      true,
+    );
+    expect(isRunnerGestureOutcomeUnknown({ errorCode: RUNNER_DEADLINE_NOT_STARTED_CODE })).toBe(
+      false,
+    );
   });
 });

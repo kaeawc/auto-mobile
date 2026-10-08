@@ -244,6 +244,8 @@ final class SwipeDeadlineTests: XCTestCase {
         XCTAssertEqual(result.type, "swipe_result")
         XCTAssertEqual(result.requestId, "stuck")
         XCTAssertEqual(result.success, false)
+        // The gesture may still land, so the host must read this as outcome-unknown (#10016).
+        XCTAssertEqual(result.errorCode, "gesture_bound_exceeded")
         XCTAssertTrue(result.error?.contains("xcuitestGesture") == true)
         XCTAssertTrue(result.error?.contains("4500ms") == true)
         XCTAssertTrue(result.error?.contains("still executing") == true)

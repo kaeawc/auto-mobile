@@ -179,8 +179,9 @@ fun AutoMobileDesktopApp(
   // names the desktop session, read per frame so a session rotation is picked up.
   val latestSessionUuidProvider by rememberUpdatedState(desktopSessionState.sessionUuidProvider)
   val desktopInputSessionUuid: () -> String? = remember { { latestSessionUuidProvider() } }
-  // Input is active tool use and watching is not (#10730): every input path allocates its device to
-  // the desktop session first and drops the input when it cannot. The allocation is stable per
+  // Input is active tool use and watching is not (#10730): every input path, the pane's device
+  // controls included, allocates its device to the desktop session first and drops the input when
+  // it cannot. The allocation is stable per
   // socket, so a session rotation does not rebuild the clients or the view model keyed on them.
   val inputAllocation = desktopSessionState.inputAllocation
   val desktopInputClient =
@@ -192,6 +193,8 @@ fun AutoMobileDesktopApp(
             inputSessionUuidProvider = desktopInputSessionUuid,
           ),
           inputAllocation,
+          // Rotate, snapshot, unlock and locale run as the desktop session that holds the device.
+          sessionUuidProvider = desktopInputSessionUuid,
         )
       } else {
         graph.autoMobileClient

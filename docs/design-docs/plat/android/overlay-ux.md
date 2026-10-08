@@ -448,8 +448,10 @@ opts out and keeps every change instant. Motion is also off when the system
 animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
-read when the spec changes. Only nodes with `visibleWhen` get an animation
-wrapper.
+observed while the overlay is shown, so setting it to 0 after the overlay is up
+makes the next visibility or page change instant, and turning motion off
+mid-scroll snaps the pager to its target page. Only nodes with `visibleWhen` get
+an animation wrapper.
 
 `box`, `row` and `column` containers animate their size when their children
 appear, disappear or change (`animateContentSize`), gated by the same

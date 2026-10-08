@@ -63,10 +63,8 @@ internal fun OverlayRuntimeContent(
 ) {
   val snapshot by runtime.snapshots.collectAsState()
   val resolver = LocalContext.current.contentResolver
-  val motion =
-    remember(snapshot.spec) {
-      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
-    }
+  val durationScale by rememberAnimatorDurationScale(resolver)
+  val motion = overlayMotionEnabled(snapshot.spec.motion, durationScale)
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -322,8 +320,10 @@ private fun RenderOverlayPager(
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalOverlayMotion.current
-  LaunchedEffect(node.page) {
-    if (pager.currentPage != node.page) {
+  // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
+  // The offset check matters then: past the halfway point currentPage already reads the target.
+  LaunchedEffect(node.page, animate) {
+    if (pager.currentPage != node.page || pager.currentPageOffsetFraction != 0f) {
       if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
     }
   }

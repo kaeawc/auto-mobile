@@ -3,7 +3,7 @@ import { loadJobSteps, loadWorkflow, stepNamed } from "../helpers/workflowSteps"
 
 const WORKFLOW = ".github/workflows/pull_request.yml";
 const MERGE_WORKFLOW = ".github/workflows/merge.yml";
-const JOB_ID = "format-check";
+const JOB_ID = "fast-validation";
 const FORMAT_STEP = "Check formatting";
 
 describe("#5531 formatting workflow", () => {
@@ -13,11 +13,13 @@ describe("#5531 formatting workflow", () => {
     const workflow = loadWorkflow(WORKFLOW);
 
     expect(steps.length).toBeGreaterThan(0);
-    expect(workflow.jobs?.[JOB_ID]?.if).toBe(
-      "needs.detect-changes.outputs.format_changed == 'true'",
-    );
     expect(format).toBeDefined();
-    expect(format?.run).toBe("bun run format:check");
+    expect(format?.if).toBe("needs.detect-changes.outputs.format_changed == 'true'");
+    expect(format?.run).toContain("if ! bun run format:check; then");
+    expect(format?.run).toContain("exit 1");
+    // Folded into Fast Validation to save a runner slot per PR; it must not
+    // come back as a separate job that Fast Validation waits on.
+    expect(workflow.jobs?.["format-check"]).toBeUndefined();
   });
 
   test("treats Markdown and workflow configuration as formatter inputs", () => {
@@ -30,10 +32,11 @@ describe("#5531 formatting workflow", () => {
     expect(filters).toContain("'.oxfmtrc.json'");
   });
 
-  test("makes formatting a dependency of required Fast Validation", () => {
+  test("runs formatting inside required Fast Validation before the slow validators", () => {
     const fastValidation = loadWorkflow(WORKFLOW).jobs?.["fast-validation"];
-    expect(fastValidation?.needs).toContain("format-check");
-    const guard = stepNamed(loadJobSteps(WORKFLOW, "fast-validation"), "Require formatter result");
+    expect(fastValidation?.needs).toEqual(["detect-changes"]);
+    const steps = loadJobSteps(WORKFLOW, "fast-validation");
+    const guard = stepNamed(steps, "Require change detection result");
 
     expect(guard).toBeDefined();
     expect(guard?.run).toContain('detect_result="${{ needs.detect-changes.result }}"');
@@ -41,10 +44,10 @@ describe("#5531 formatting workflow", () => {
     expect(guard?.run).toContain(
       'echo "Change detection concluded $detect_result; formatter gate cannot be trusted"',
     );
-    expect(guard?.run).toContain('formatter_result="${{ needs.format-check.result }}"');
-    expect(guard?.run).toContain(
-      'if [[ "$formatter_result" == "failure" || "$formatter_result" == "cancelled" ]]; then',
-    );
+    const formatIndex = steps.findIndex((step) => step.name === FORMAT_STEP);
+    const validatorsIndex = steps.findIndex((step) => step.name === "Run fast validation checks");
+    expect(formatIndex).toBeGreaterThan(-1);
+    expect(formatIndex).toBeLessThan(validatorsIndex);
   });
 
   test("runs the full-tree formatter backstop after merge", () => {

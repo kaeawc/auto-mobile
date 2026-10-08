@@ -149,7 +149,7 @@ teardown() {
   for ci_value in true 1; do
     run_lint CI="$ci_value" RUNNER_OS=Windows
     [ "$status" -eq 0 ]
-    [[ "$output" == *"format is gated on Linux (format-check job); skipped on Windows: CRLF checkout"* ]]
+    [[ "$output" == *"format is gated on Linux (Fast Validation format step); skipped on Windows: CRLF checkout"* ]]
     [[ "$output" != *"Checking formatting"* ]]
     assert_follow_on_checks
     cmp "$FIXTURE" "$TEST_DIR/original.ts"

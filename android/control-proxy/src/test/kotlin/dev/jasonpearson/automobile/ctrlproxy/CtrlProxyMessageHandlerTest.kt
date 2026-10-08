@@ -841,7 +841,15 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches get_sdk_capabilities`() = runTest {
     dispatch("""{"type":"get_sdk_capabilities","requestId":"sc1","packageName":"com.example"}""")
-    assertEquals("getSdkCapabilities" to listOf<Any?>("sc1", "com.example"), lastCall)
+    assertEquals("getSdkCapabilities" to listOf<Any?>("sc1", "com.example", null), lastCall)
+  }
+
+  @Test
+  fun `dispatches get_sdk_capabilities with a target user`() = runTest {
+    dispatch(
+      """{"type":"get_sdk_capabilities","requestId":"sc2","packageName":"com.example","userId":10}"""
+    )
+    assertEquals("getSdkCapabilities" to listOf<Any?>("sc2", "com.example", 10), lastCall)
   }
 
   @Test

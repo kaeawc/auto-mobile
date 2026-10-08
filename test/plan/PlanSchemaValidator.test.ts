@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "bun:test";
-import Ajv from "ajv";
+import { compileAjv } from "../helpers/jsonSchemaCompile";
 import { dump } from "js-yaml";
 import path from "path";
 import planSchema from "../../schemas/test-plan.schema.json";
@@ -263,8 +263,14 @@ steps:
     ],
   ])("preserves the full result for %s", (_name, schema, plan, expectedError) => {
     const original = Reflect.get(validator, "validateFn");
-    const ajv = new Ajv({ allErrors: true, verbose: true, messages: false });
-    Reflect.set(validator, "validateFn", ajv.compile({ type: "object", ...schema }));
+    Reflect.set(
+      validator,
+      "validateFn",
+      compileAjv(
+        { type: "object", ...schema },
+        { allErrors: true, verbose: true, messages: false },
+      ),
+    );
     try {
       expect(validator.validateYaml(dump(plan))).toEqual({ valid: false, errors: [expectedError] });
     } finally {

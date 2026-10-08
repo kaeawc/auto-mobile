@@ -1,4 +1,4 @@
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDownloadsFixtureTools } from "../../src/server/downloadsFixtureTools";
@@ -13,7 +13,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
   let originalToolCallRepository: unknown;
 
   beforeAll(() => {
-    new Ajv2020({ strict: false }).compile({
+    compileAjv2020({
       type: "object",
       properties: { warmup: { type: "string" } },
     });
@@ -49,7 +49,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
     // cross-session ownership guard run for this tool.
     expect(ToolRegistry.getTool("stageSessionDownloads")!.requiresDevice).toBe(true);
 
-    const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
+    const validate = compileAjv2020(definition!.inputSchema);
     expect(
       validate({
         sessionUuid: "session-1",
@@ -78,7 +78,7 @@ describe("stageSessionDownloads tool (#7007)", () => {
     const definition = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "stageSessionDownloads",
     );
-    const validate = new Ajv2020({ strict: false }).compile(definition!.inputSchema);
+    const validate = compileAjv2020(definition!.inputSchema);
     const base = { sessionUuid: "session-1", directory: "run-42" };
 
     // Directory traversal / separators / values the runtime trims to blank.

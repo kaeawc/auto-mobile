@@ -1,4 +1,4 @@
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import {
@@ -323,8 +323,7 @@ describe("published observe waitFor input schema", () => {
     const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
     expect(observeTool).toBeDefined();
 
-    const ajv = new Ajv2020({ strict: false, allErrors: true });
-    const validate = ajv.compile(observeTool!.inputSchema);
+    const validate = compileAjv2020(observeTool!.inputSchema, { strict: false, allErrors: true });
     validatePublishedObserveInput = (input: unknown) => ({
       valid: validate(input),
     });
@@ -3011,7 +3010,7 @@ describe("nested waitFor runtime and advertised agreement", () => {
     ToolRegistry.clearTools();
     registerObserveTools();
     const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe")!;
-    validatePublished = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+    validatePublished = compileAjv2020(definition.inputSchema);
   });
   const chain = {
     elementId: "item_42",

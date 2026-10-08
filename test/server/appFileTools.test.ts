@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { registerAppFileTools } from "../../src/server/appFileTools";
 import {
   createAppFileServiceForTesting,
@@ -35,7 +35,7 @@ describe("App file tools", () => {
     expect(toolDefinition!.inputSchema.properties.container).toBeUndefined();
     expect(toolDefinition!.inputSchema.properties.destinationPath).toBeUndefined();
 
-    const validate = new Ajv2020({ strict: false }).compile(toolDefinition!.inputSchema);
+    const validate = compileAjv2020(toolDefinition!.inputSchema);
     const target = { domain: "app_containers", appId: "com.example.app", container: "documents" };
     expect(validate({ target, files: [{ destinationPath: "missing-source.txt" }] })).toBe(false);
     expect(
@@ -56,7 +56,7 @@ describe("App file tools", () => {
     const definition = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "putAppFile",
     )!;
-    const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+    const validate = compileAjv2020(definition.inputSchema);
     expect(
       validate({
         target: { domain: "user_files", namespace: "fixtures" },

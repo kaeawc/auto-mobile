@@ -1,6 +1,6 @@
 import { FakeToolSelectionRepository as FakeRepository } from "../fakes/FakeToolSelectionRepository";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020";
+import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
 import { z } from "zod/v4";
 import { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -331,7 +331,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       const definition = ToolRegistry.getToolDefinitions().find(
         (tool) => tool.name === "getAndroid",
       )!;
-      const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+      const validate = compileAjv2020(definition.inputSchema);
 
       expect(validate({ deviceId: "emulator-5554", enableTools: ["sendKeys"] })).toBe(true);
       expect(validate({ deviceId: "emulator-5554", enableTools: ["notATool"] })).toBe(false);
@@ -341,7 +341,7 @@ describe("setToolEnabled batch enable (#6869)", () => {
       const definition = ToolRegistry.getToolDefinitions().find(
         (tool) => tool.name === SET_TOOL_ENABLED_TOOL_NAME,
       )!;
-      const validate = new Ajv2020({ strict: false }).compile(definition.inputSchema);
+      const validate = compileAjv2020(definition.inputSchema);
 
       expect(validate({ toolName: "sendKeys" })).toBe(true);
       expect(validate({ toolNames: ["sendKeys"] })).toBe(true);

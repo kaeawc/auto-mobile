@@ -84,7 +84,8 @@ struct NodeView: View {
         ["switch", "checkbox", "button"].contains(node.type)
     }
 
-    private var style: Style? { node.style }
+    /// `style` with every matching `styleWhen` entry merged over it.
+    private var style: Style? { node.resolvedStyle(state: model.state) }
 
     @ViewBuilder private var content: some View {
         switch node.type {
@@ -448,7 +449,8 @@ private struct IdentifierModifier: ViewModifier {
 
     /// A label needs its own accessibility element: on a bare container SwiftUI would spread it
     /// over the children.
-    @ViewBuilder private func identified(_ content: Content) -> some View {
+    @ViewBuilder
+    private func identified(_ content: Content) -> some View {
         if identifier == nil, label == nil || grouping == .leaf {
             content
         } else if let identifier {
@@ -458,7 +460,8 @@ private struct IdentifierModifier: ViewModifier {
         }
     }
 
-    @ViewBuilder private func grouped(_ content: Content) -> some View {
+    @ViewBuilder
+    private func grouped(_ content: Content) -> some View {
         switch grouping {
         case .leaf: content
         case .contain: content.accessibilityElement(children: .contain)
@@ -466,7 +469,8 @@ private struct IdentifierModifier: ViewModifier {
         }
     }
 
-    @ViewBuilder private func labelled(_ content: some View) -> some View {
+    @ViewBuilder
+    private func labelled(_ content: some View) -> some View {
         if let label {
             content.accessibilityLabel(label)
         } else {
@@ -492,7 +496,7 @@ struct PagerView: View {
     }
 
     private var fills: Bool {
-        if case .fill = node.style?.height { return true }
+        if case .fill = node.resolvedStyle(state: model.state)?.height { return true }
         return false
     }
 

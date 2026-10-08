@@ -85,7 +85,13 @@ struct OverlaySession {
     // MARK: Interactions
 
     /// A tap's actions in order; a `dismiss` ends the overlay and drops the remaining actions.
+    /// Android's `OverlayRuntime.tap` (#10622): if any `setState`/`toggle`/`increment`/`decrement`
+    /// changed state, exactly one `change` event carrying the final state follows the last action;
+    /// `emit` actions fire in order with the state as it was at that point. A list that nets no
+    /// change emits nothing.
     mutating func run(_ actions: [OverlayAction]) -> [OverlayEvent] {
+        let baseline = state
+        var touched: [String] = []
         var events: [OverlayEvent] = []
         for action in actions {
             guard isShown else { break }
@@ -93,38 +99,63 @@ struct OverlaySession {
             case "emit":
                 events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null)
             case "setPage":
-                guard let pager = action.pager, let current = pages[pager] else { continue }
-                let target = switch action.page {
-                case .string("next"): current + 1
-                case .string("prev"): current - 1
-                default: action.page?.intValue ?? current
-                }
-                events += setPage(pager, target)
+                events += runSetPage(action)
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
-                applyStateAction(action)
+                if let key = applyStateAction(action), !touched.contains(key) { touched.append(key) }
             }
         }
-        return events
+        guard isShown else { return events }
+        return events + emitStateChange(touched.filter { baseline[$0] != state[$0] })
     }
 
-    /// `setState`, `toggle` and `increment` are silent. A toggle of a non-boolean, or an increment
-    /// of a non-number or to a non-finite value, is a no-op, as on Android.
-    private mutating func applyStateAction(_ action: OverlayAction) {
-        guard let key = action.key else { return }
-        switch action.type {
-        case "setState":
-            if let value = action.value { state[key] = value }
-        case "toggle":
-            if case let .bool(stored)? = state[key] { state[key] = .bool(!stored) }
-        case "increment":
-            if let next = state[key]?.numberValue.map({ $0 + (action.by ?? 1) }), next.isFinite {
-                state[key] = .number(next)
-            }
-        default:
-            return
+    /// A `setPage` action: `next`/`prev` step from the current page, a number jumps to it.
+    private mutating func runSetPage(_ action: OverlayAction) -> [OverlayEvent] {
+        guard let pager = action.pager, let current = pages[pager] else { return [] }
+        let target = switch action.page {
+        case .string("next"): current + 1
+        case .string("prev"): current - 1
+        default: action.page?.intValue ?? current
         }
+        return setPage(pager, target)
+    }
+
+    /// Applies one state action and returns the key it wrote, or nil when it was a no-op. A toggle
+    /// of a non-boolean, or an increment/decrement of a non-number or to a non-finite value, is a
+    /// no-op, as on Android.
+    private mutating func applyStateAction(_ action: OverlayAction) -> String? {
+        guard let key = action.key else { return nil }
+        let next: JSONValue? = switch action.type {
+        case "setState": action.value
+        case "toggle": state[key]?.boolValue.map { .bool(!$0) }
+        case "increment": stepped(state[key], by: action.by ?? 1)
+        case "decrement": stepped(state[key], by: -(action.by ?? 1))
+        default: nil
+        }
+        guard let next else { return nil }
+        state[key] = next
+        return key
+    }
+
+    private func stepped(_ value: JSONValue?, by step: Double) -> JSONValue? {
+        guard let next = value?.numberValue.map({ $0 + step }), next.isFinite else { return nil }
+        return .number(next)
+    }
+
+    /// One key keeps the `{key, value}` payload of `change`; several send `{keys, values}`. The
+    /// event's `state` always carries the full final state.
+    private mutating func emitStateChange(_ keys: [String]) -> [OverlayEvent] {
+        guard let first = keys.first else { return [] }
+        let payload: JSONValue = if keys.count == 1 {
+            .object(["key": .string(first), "value": state[first] ?? .null])
+        } else {
+            .object([
+                "keys": .array(keys.map(JSONValue.string)),
+                "values": .object(Dictionary(uniqueKeysWithValues: keys.map { ($0, state[$0] ?? .null) })),
+            ])
+        }
+        return emit(kind: "emit", name: "change", payload: payload)
     }
 
     /// Test-hook tap (see `OverlayTestHooks`): runs the identified node's `onTap` in-process, as a
@@ -146,7 +177,7 @@ struct OverlaySession {
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
-    /// Android's `OverlayRuntime.change`. `setState` actions and wire patches stay silent.
+    /// Android's `OverlayRuntime.change`.
     mutating func change(key: String, value: JSONValue) -> [OverlayEvent] {
         guard isShown, state[key] != value else { return [] }
         state[key] = value

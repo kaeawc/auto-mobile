@@ -326,6 +326,8 @@ const ENSURE_CHECKED_POLL_TIMEOUT_MS = ENSURE_CHECKED_POLL_BACKOFF_MS.reduce(
   0,
 );
 const POST_TAP_EFFECT_POLL_MS = 150;
+/** How long an iOS focus tap re-reads the screen for the field to report focus (#10266). */
+const IOS_FOCUS_SETTLE_TIMEOUT_MS = 1500;
 
 /**
  * Minimum wall-clock time a hierarchy-only post-tap frame must hold UNCHANGED
@@ -2366,6 +2368,48 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     }
     return shared;
+  }
+
+  /**
+   * Confirm a focus tap against the post-tap observation. On iOS that first capture
+   * can predate the field taking focus (#10266): the field is focused moments later,
+   * but the first read shows no focused field that matches the target. Re-read fresh
+   * captures for a bounded window before reporting the focus unconfirmed, and return
+   * the capture that confirmed it as the result's observation.
+   */
+  private async verifyFocusAfterTap(
+    result: TapOnElementResult,
+    verify: (observation: ObserveResult | undefined) => boolean,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (verify(result.observation)) {
+      return true;
+    }
+    const initial = result.observation;
+    if (this.device.platform !== "ios" || !initial) {
+      return false;
+    }
+    const deadline = this.timer.now() + IOS_FOCUS_SETTLE_TIMEOUT_MS;
+    while (this.timer.now() < deadline) {
+      await this.timer.sleep(POST_TAP_EFFECT_POLL_MS);
+      throwIfAborted(signal);
+      const hierarchy = await this.refreshViewHierarchy(
+        deadline - this.timer.now(),
+        initial.screenSize,
+        signal,
+        true,
+      );
+      if (!hierarchy) {
+        continue;
+      }
+      const observation: ObserveResult = { ...initial };
+      this.replaceObservationHierarchy(observation, hierarchy, true);
+      if (verify(observation)) {
+        result.observation = observation;
+        return true;
+      }
+    }
+    return false;
   }
 
   private verifyIndexedFocusTarget(
@@ -4659,13 +4703,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
       if (requestedAction === "focus" && result.success && !result.wasAlreadyFocused) {
         const target = focusTarget ?? result.element;
-        result.focusVerified = this.verifyFocusedInputTarget(
-          { ...options, action: "focus" },
-          target,
-          result.observation,
-          focusLabelText,
-          result.selectedElement?.indexInMatches,
-          preTapHierarchy,
+        result.focusVerified = await this.verifyFocusAfterTap(
+          result,
+          (observation) =>
+            this.verifyFocusedInputTarget(
+              { ...options, action: "focus" },
+              target,
+              observation,
+              focusLabelText,
+              result.selectedElement?.indexInMatches,
+              preTapHierarchy,
+            ),
+          signal,
         );
         if (!result.focusVerified) {
           result.success = false;

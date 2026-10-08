@@ -24,6 +24,7 @@ import {
   OVERLAY_CAPTURE,
   PROTOTYPE_CAPTURE,
   capturedAppLayerOverlayHierarchy,
+  capturedFloatingCoverHierarchy,
   capturedOverlayHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
@@ -247,5 +248,27 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
     expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", point, "tap")).toThrow(
       /overlay window covers that point/,
     );
+  });
+});
+
+describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)", () => {
+  // The unfiltered wire capture still holds button_elevated under the floating overlay; the
+  // device's occlusion pass dropped it from the ordinary capture. Once a capture keeps the row,
+  // layer "app" must return it and a tap on it must be refused as covered, not "not found".
+  const elevated = (hierarchy: ViewHierarchyResult) =>
+    new ResolverElementSelector().selectByResourceId(hierarchy, "button_elevated").element;
+
+  test('"app" returns the covered row and the tap guard refuses its centre', () => {
+    const hierarchy = capturedFloatingCoverHierarchy();
+    const row = elevated(scopeHierarchyForSelector(hierarchy, "app"));
+    expect(row).toBeDefined();
+    const centre = {
+      x: Math.floor((row!.bounds.left + row!.bounds.right) / 2),
+      y: Math.floor((row!.bounds.top + row!.bounds.bottom) / 2),
+    };
+    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", centre, "tap")).toThrow(
+      /an AutoMobile overlay window covers that point/,
+    );
+    expect(elevated(scopeHierarchyForSelector(hierarchy, "overlay"))).toBeNull();
   });
 });

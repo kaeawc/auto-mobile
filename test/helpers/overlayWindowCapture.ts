@@ -1,5 +1,6 @@
 import capture from "../fixtures/android-launcher/launcher-recents-emulator-5602.json";
 import appLayerCapture from "../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
+import floatingCoverCapture from "../fixtures/android-overlay-window/floating-overlay-over-button-elevated.raw.json";
 import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
 import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
@@ -107,10 +108,19 @@ export const PROTOTYPE_CAPTURE = {
   appWindowId: 150,
   statusBarWindowId: 157,
   appLayerOverlayWindowId: 174,
+  floatingOverlayWindowId: 170,
   appPackage: "dev.jasonpearson.automobile.playground",
 } as const;
 
 /** `window.layer: "app"` prototype (a TYPE_SYSTEM window without overlay metadata) over the Playground. */
 export function capturedAppLayerOverlayHierarchy(): ViewHierarchyResult {
   return convertCapture(appLayerCapture.rawViewHierarchy.json);
+}
+
+/**
+ * Floating system-layer prototype over the Playground "Elevated" button. The unfiltered wire JSON,
+ * so `button_elevated` is still present under the overlay window.
+ */
+export function capturedFloatingCoverHierarchy(): ViewHierarchyResult {
+  return convertCapture(floatingCoverCapture.rawViewHierarchy.json);
 }

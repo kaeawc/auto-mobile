@@ -37,8 +37,14 @@ data class OverlaySelector(
 
 @Serializable
 data class OverlayCondition(
-  val key: String,
-  val equals: OverlayScalar,
+  val key: String? = null,
+  val equals: OverlayScalar? = null,
+  val notEquals: OverlayScalar? = null,
+  val gt: Double? = null,
+  val lt: Double? = null,
+  val all: List<OverlayCondition>? = null,
+  val any: List<OverlayCondition>? = null,
+  val not: OverlayCondition? = null,
 )
 
 @Serializable
@@ -150,6 +156,14 @@ data class OverlaySetStateAction(
   val key: String,
   val value: OverlayScalar,
 ) : OverlayAction()
+
+@SerialName("toggle")
+@Serializable
+data class OverlayToggleAction(val key: String) : OverlayAction()
+
+@SerialName("increment")
+@Serializable
+data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
 
 @SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
 
@@ -374,4 +388,6 @@ data class OverlaySpec(
   val state: Map<String, OverlayScalar>? = null,
   val root: OverlayNode,
   val theme: OverlaySpecTheme? = null,
+  /** `none` opts out of overlay animation; absent or `standard` follows the system scale. */
+  val motion: String? = null,
 )

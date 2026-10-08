@@ -113,12 +113,47 @@
                       "value": true
                     },
                     {
+                      "type": "toggle",
+                      "key": "open"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "selected"
+                    },
+                    {
+                      "type": "increment",
+                      "key": "selected",
+                      "by": -0.5
+                    },
+                    {
                       "type": "dismiss"
                     }
                   ],
                   "visibleWhen": {
-                    "key": "open",
-                    "equals": true
+                    "all": [
+                      {
+                        "key": "open",
+                        "equals": true
+                      },
+                      {
+                        "not": {
+                          "key": "selected",
+                          "gt": 3
+                        }
+                      },
+                      {
+                        "any": [
+                          {
+                            "key": "title",
+                            "notEquals": "Hidden"
+                          },
+                          {
+                            "key": "selected",
+                            "lt": -1
+                          }
+                        ]
+                      }
+                    ]
                   }
                 }
               }

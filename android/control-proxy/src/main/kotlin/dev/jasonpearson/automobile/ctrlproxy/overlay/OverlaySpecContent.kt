@@ -396,9 +396,12 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(
-          overlayThemedColor(node.style.background, node.style.source.background)
-            ?: MaterialTheme.colorScheme.surface
+        .then(
+          // The authored background and gradient are already painted by `modifier`; a later opaque
+          // fill would cover them, so the surface is only the fallback when neither is authored.
+          if (node.style.source.background == null && node.style.source.gradient == null)
+            Modifier.background(MaterialTheme.colorScheme.surface)
+          else Modifier
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(

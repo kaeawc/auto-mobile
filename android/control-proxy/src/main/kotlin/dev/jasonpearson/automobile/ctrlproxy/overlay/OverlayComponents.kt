@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -113,7 +114,17 @@ internal fun RenderOverlayButton(
   when (source.variant) {
     "outlined" -> OutlinedButton(onClick, modifier, content = content)
     "text" -> TextButton(onClick, modifier, content = content)
-    else -> Button(onClick, modifier, content = content)
+    else ->
+      // An authored gradient is painted behind the button, so its container must not cover it.
+      Button(
+        onClick,
+        modifier,
+        colors =
+          if (node.style.source.gradient != null)
+            ButtonDefaults.buttonColors(containerColor = Color.Transparent)
+          else ButtonDefaults.buttonColors(),
+        content = content,
+      )
   }
 }
 

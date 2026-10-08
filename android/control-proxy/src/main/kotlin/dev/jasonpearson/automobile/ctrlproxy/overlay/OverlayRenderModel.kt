@@ -355,11 +355,21 @@ fun overlayLinearGradientLine(angle: Double, width: Float, height: Float): Pair<
     Offset(center.x + dx * half, center.y + dy * half)
 }
 
-/** Stop colors and, only when every stop authors a position, their explicit positions. */
+/**
+ * Stop colors and, only when every stop authors a position, their explicit positions. Positions are
+ * made non-decreasing (a stop never starts before the previous one), which is what Skia does to a
+ * descending list anyway, so the rendered result is deterministic and documented.
+ */
 fun overlayGradientStops(stops: List<OverlayGradientStop>): Pair<List<Color>, List<Float>?> {
   val colors = stops.map { overlayColor(it.color) }
   val positions = stops.map { it.position?.toFloat() }
-  return colors to if (positions.all { it != null }) positions.map { checkNotNull(it) } else null
+  if (!positions.all { it != null }) return colors to null
+  var floor = 0f
+  return colors to
+    positions.map {
+      floor = maxOf(floor, checkNotNull(it))
+      floor
+    }
 }
 
 /** Compose uses Float dp; reject unrepresentable values before installing a content lambda. */

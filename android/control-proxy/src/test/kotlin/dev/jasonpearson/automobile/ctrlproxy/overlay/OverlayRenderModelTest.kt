@@ -221,6 +221,11 @@ class OverlayRenderModelTest {
         listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff", 1.0))
       )
     assertEquals(listOf(0.2f, 1f), explicit.second)
+    val descending =
+      overlayGradientStops(
+        listOf(OverlayGradientStop("#000000", 0.8), OverlayGradientStop("#ffffff", 0.2))
+      )
+    assertEquals(listOf(0.8f, 0.8f), descending.second)
   }
 
   @Test

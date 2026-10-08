@@ -681,6 +681,44 @@ describe("DeviceSessionRepository", () => {
     },
   );
 
+  test("restart-recovery activity extends only a device-restart-released row's expiry (#10713)", async () => {
+    const base: DeviceSessionRecord = {
+      sessionUuid: "restarting",
+      deviceId: "emulator-5554",
+      stableDeviceId: "Pixel_8_API_35",
+      platform: "android",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 120_000,
+      sessionTimeoutMs: 120_000,
+      heartbeatTimeoutMs: 8_000,
+      hasReceivedHeartbeat: true,
+    };
+    await repo.upsertActiveSession(base);
+    await repo.upsertActiveSession({ ...base, sessionUuid: "plain-released" });
+    await repo.markReleased(
+      "restarting",
+      "released",
+      10_000,
+      deviceRestartReleaseReason("Pixel_8_API_35"),
+    );
+    await repo.markReleased("plain-released", "released", 10_000, "explicit-release");
+
+    await repo.recordRestartRecoveryActivity("restarting", 60_000);
+    expect((await repo.getSession("restarting"))?.expires_at_ms).toBe(180_000);
+    // An earlier activity never shortens the persisted expiry.
+    await repo.recordRestartRecoveryActivity("restarting", 30_000);
+    expect((await repo.getSession("restarting"))?.expires_at_ms).toBe(180_000);
+
+    await repo.recordRestartRecoveryActivity("plain-released", 60_000);
+    expect((await repo.getSession("plain-released"))?.expires_at_ms).toBe(120_000);
+
+    // Once recovered (active again), late recovery activity no longer writes the row.
+    await repo.upsertActiveSession({ ...base, lastUsedAtMs: 70_000, expiresAtMs: 190_000 });
+    await repo.recordRestartRecoveryActivity("restarting", 200_000);
+    expect((await repo.getSession("restarting"))?.expires_at_ms).toBe(190_000);
+  });
+
   test("late activity does not reactivate released sessions", async () => {
     await repo.upsertActiveSession({
       sessionUuid: "session-1",

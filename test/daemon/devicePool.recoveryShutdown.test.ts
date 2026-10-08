@@ -1480,7 +1480,11 @@ test.each(["not-attempted", "exhausted"] as const)(
         "(120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
     );
     expect(timer.getSleepHistory()).toEqual([]);
-    expect(await persistence.getSession?.("session")).toEqual(persisted);
+    // The row stays non-terminal; only the call's restart-recovery activity extends its expiry (#10713).
+    expect(await persistence.getSession?.("session")).toEqual({
+      ...persisted,
+      expires_at_ms: timer.now() + persisted.session_timeout_ms!,
+    });
     expect(sessions.getTerminalReleaseSnapshot("session")).toBeUndefined();
     timer.advanceTime(60_000);
     manager.bootedDevices = [original];
@@ -2146,6 +2150,37 @@ test("a client retrying through a cold boot keeps its session past the idle wind
     });
   } finally {
     sessions.stopCleanupTimer();
+  }
+});
+
+test("restart-recovery activity survives a daemon restart during the device restart (#10713)", async () => {
+  const { timer, persistence, sessions, pool } = await setupPassiveRestartWithIdleWindow();
+  try {
+    const attempt = trackSettlement(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+        requestDeadlineMs: 60_000,
+      }),
+    );
+    await flush();
+    await advanceSecondsUntil(timer, 60_000);
+    expect(String(await attempt.result)).toContain("Cannot safely recover session");
+    sessions.recordToolCallEnded("session");
+    await flush();
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      expires_at_ms: 60_000 + RESTART_TEST_IDLE_MS,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+
+  // A fresh daemon has no in-memory activity; past the expiry stored at the device loss it still
+  // admits the retrying client because the activity was persisted.
+  const restarted = new SessionManager(timer, persistence);
+  try {
+    timer.setCurrentTime(RESTART_TEST_IDLE_MS + 30_000);
+    expect(await restarted.isReleasedSessionInRestartRecoveryWindow("session")).toBe(true);
+  } finally {
+    restarted.stopCleanupTimer();
   }
 });
 

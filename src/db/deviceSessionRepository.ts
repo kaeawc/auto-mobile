@@ -85,6 +85,12 @@ export interface DeviceSessionPersistence {
   getSession?(sessionUuid: string): Promise<DeviceSession | undefined>;
   listRecoverableSessions?(): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
+  /**
+   * Extend a device-restart-released row's expiry to `activityAtMs + session_timeout_ms` when that
+   * is later (#10713), so tool activity during a device-restart recovery survives a daemon restart.
+   * A row that is no longer device-restart-released (recovered, terminalized) is left untouched.
+   */
+  recordRestartRecoveryActivity?(sessionUuid: string, activityAtMs: number): Promise<void>;
   recordLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   replaceLivenessOwnership?(sessionUuid: string, ownerToken: string | null): Promise<void>;
   markReleased(
@@ -273,6 +279,27 @@ export class DeviceSessionRepository {
         `[DeviceSessionRepository] Failed to record activity for ${sessionUuid}: ${error}`,
       );
       throw toActionableError(error, `Failed to record activity for session ${sessionUuid}`);
+    }
+  }
+
+  async recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void> {
+    try {
+      const db = await this.getDb();
+      await db
+        .updateTable("device_sessions")
+        .set({
+          expires_at_ms: sql<number>`max(expires_at_ms, ${activityAtMs} + session_timeout_ms)`,
+          updated_at: this.nowIso(),
+        })
+        .where("session_uuid", "=", sessionUuid)
+        .where("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}%`)
+        .where("released_at_ms", "is not", null)
+        .execute();
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to record restart-recovery activity for session ${sessionUuid}`,
+      );
     }
   }
 

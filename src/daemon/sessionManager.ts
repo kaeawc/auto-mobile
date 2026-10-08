@@ -1692,12 +1692,31 @@ export class SessionManager {
     };
   }
 
-  /** A tool call started, joined or ended against a session waiting out a device restart. */
+  /**
+   * A tool call started, joined or ended against a session waiting out a device restart.
+   *
+   * The in-memory mark applies at once (see {@link readPersistedSession}); the durable write
+   * (#10713) lets the extended expiry survive a daemon restart during the device restart, which
+   * would otherwise fall back to the expiry stored at the device loss.
+   */
   private recordRestartRecoveryActivity(sessionId: string): void {
-    this.restartRecoveryActivityAt.set(
-      sessionId,
-      Math.max(this.restartRecoveryActivityAt.get(sessionId) ?? 0, this.timer.now()),
+    const activityAt = Math.max(
+      this.restartRecoveryActivityAt.get(sessionId) ?? 0,
+      this.timer.now(),
     );
+    this.restartRecoveryActivityAt.set(sessionId, activityAt);
+    void this.getBarrier()
+      .track(async () => {
+        await this.deviceSessionRepository.recordRestartRecoveryActivity?.(sessionId, activityAt);
+      })
+      .catch((error) => {
+        // The in-memory mark still governs this process; only a daemon restart before the next
+        // activity write would fall back to the stored expiry.
+        logger.warn(
+          `[SessionManager] Failed to persist restart-recovery activity for ${sessionId}: ` +
+            errorMessage(error),
+        );
+      });
   }
 
   /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */

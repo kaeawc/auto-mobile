@@ -1,4 +1,5 @@
 import {
+  isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
@@ -77,6 +78,18 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       pre_cli_heartbeat_timeout_source: update.preCliHeartbeatTimeoutSource ?? null,
       pre_cli_session_timeout_ms: update.preCliSessionTimeoutMs ?? null,
     });
+  }
+
+  async recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void> {
+    const row = this.rows.get(sessionUuid);
+    if (
+      !row?.release_reason ||
+      !isDeviceRestartReleaseReason(row.release_reason) ||
+      row.released_at_ms === null
+    ) {
+      return;
+    }
+    row.expires_at_ms = Math.max(row.expires_at_ms, activityAtMs + row.session_timeout_ms);
   }
 
   async recordLivenessOwnership(sessionUuid: string, ownerToken: string | null): Promise<void> {

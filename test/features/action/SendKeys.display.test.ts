@@ -83,28 +83,8 @@ describe("sendKeys selector-less display focus", () => {
       expect(h.focusedSelectors).toEqual([]);
     });
 
-    test(`multi-display ${route} on the focused panel dispatches text, clear and IME`, async () => {
-      const h = harness(multiDisplay, "outside", [
-        { isFocused: false, panelUniqueId: "local:inside", displayId: 0 },
-        { isFocused: true, panelUniqueId: "local:outside", displayId: 2 },
-      ]);
-      expect((await run(h, "outside")).success).toBe(true);
-      expect(h.inserted).toEqual(["hello"]);
-      expect(h.clientCalls).toEqual(["insert:hello", "clear", "ime"]);
-    });
-
-    test(`multi-display ${route} on an unfocused panel refuses with both panels and fixes`, async () => {
-      const h = harness(multiDisplay, "outside", [
-        { isFocused: true, panelUniqueId: "local:inside", displayId: 0 },
-      ]);
-      const result = await run(h, "outside");
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('display "outside"');
-      expect(result.error).toContain('focused panel is "inside"');
-      expect(result.error).toContain("tapOn");
-      expect(result.error).toContain("setActiveDevice {display: null}");
-      expect(h.clientCalls).toEqual([]);
-    });
+    // The multi-display pinned-panel cases (focused panel dispatches, unfocused panel refuses)
+    // run over captured windows in SendKeys.capturedMultiDisplayFocus.test.ts (#9208).
   }
 
   test("single physical panel and explicit active allow selector-less input", async () => {

@@ -1,0 +1,6 @@
+  mCurrentFocus=null
+  mFocusedApp=ActivityRecord{58245921 u0 com.android.settings/.Settings t20}
+  mCurrentFocus=Window{ad27b16 u0 com.google.android.settings.intelligence/com.google.android.settings.intelligence.modules.search.SearchActivity}
+  mFocusedApp=ActivityRecord{167854130 u0 com.google.android.settings.intelligence/.modules.search.SearchActivity t21}
+    mFocusedWindow=Window{ad27b16 u0 com.google.android.settings.intelligence/com.google.android.settings.intelligence.modules.search.SearchActivity}
+  mTopFocusedDisplayId=7

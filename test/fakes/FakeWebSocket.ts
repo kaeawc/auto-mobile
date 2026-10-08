@@ -21,15 +21,6 @@ export enum WebSocketState {
 export type PongMode = "auto" | "withhold";
 
 /**
- * When the handshake outcome (open, or an "instant"/"timeout" failure being
- * armed) is delivered. "event-loop" defers failures to a real `setImmediate`;
- * "microtask" delivers every outcome in a microtask so a test driving a
- * manual FakeTimer with microtask-only draining (`settleByFakeEvents`) sees
- * the refusal before it fires the client's fake connection timeout.
- */
-export type HandshakeScheduling = "event-loop" | "microtask";
-
-/**
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
@@ -49,7 +40,6 @@ export class FakeWebSocket
     connectTimeoutMs: number = 0,
     timer: Timer = defaultTimer,
     pongMode: PongMode = "auto",
-    handshakeScheduling: HandshakeScheduling = "event-loop",
   ) {
     super();
     this.failureMode = failureMode;
@@ -57,23 +47,14 @@ export class FakeWebSocket
     this.timer = timer;
     this.pongMode = pongMode;
 
-    // For success mode with no delay, emit open synchronously after constructor returns
-    // This ensures the "open" event fires before any FakeTimer.setTimeout with autoAdvance
-    // can schedule its timeout callback via setImmediate
-    if (
-      handshakeScheduling === "microtask" ||
-      (this.failureMode === "none" && this.connectTimeoutMs === 0)
-    ) {
-      // Use queueMicrotask to emit after constructor returns but before setImmediate callbacks
-      queueMicrotask(() => {
-        this.handleConnection();
-      });
-    } else {
-      // For failure modes or delayed connections, use setImmediate
-      setImmediate(() => {
-        this.handleConnection();
-      });
-    }
+    // Settle the handshake (open, or an "instant"/"timeout" failure being armed) on
+    // a microtask: after the constructor returns, so the caller can attach
+    // listeners, but before fake time moves. FakeTimer auto-advance and
+    // `settleByFakeEvents` both fire a pending connect deadline only once the
+    // microtask queue goes quiet, so a refused dial is always observed first.
+    queueMicrotask(() => {
+      this.handleConnection();
+    });
   }
 
   private handleConnection(): void {
@@ -131,11 +112,13 @@ export class FakeWebSocket
   // Real `ws` ping() sends a protocol-level ping frame; a cooperative peer
   // replies with "pong". Only emits when `pongMode` is "auto" — "withhold"
   // models the wedged-peer failure mode the liveness probe (#7554) detects.
+  // The pong lands on a microtask so auto-advance cannot fire the liveness
+  // deadline first.
   ping(): void {
     if (this.readyState !== WebSocketState.OPEN || this.pongMode !== "auto") {
       return;
     }
-    setImmediate(() => {
+    queueMicrotask(() => {
       if (this.readyState === WebSocketState.OPEN) {
         this.emit("pong");
       }
@@ -197,7 +180,7 @@ export function createNthAttemptSuccessWebSocketFactory(
 
 /**
  * Factory whose fake server starts accepting connections after fake time advances.
- * Handshakes resolve in a microtask, so drive it with a manual FakeTimer and
+ * Handshakes resolve in a microtask, so drive it with FakeTimer auto-advance or
  * `settleByFakeEvents`: a refused dial is then always observed before fake time
  * reaches the client's connection timeout, independent of real event-loop load.
  */
@@ -218,6 +201,6 @@ export function createTimeGatedWebSocketFactory(
       gateStartedAt ??= timer.now();
     }
     const accepting = gateStartedAt !== undefined && timer.now() - gateStartedAt >= gateMs;
-    return new FakeWebSocket(url, accepting ? "none" : "instant", 0, timer, "auto", "microtask");
+    return new FakeWebSocket(url, accepting ? "none" : "instant", 0, timer);
   };
 }

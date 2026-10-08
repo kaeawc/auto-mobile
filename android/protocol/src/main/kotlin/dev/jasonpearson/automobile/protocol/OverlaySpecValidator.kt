@@ -373,15 +373,17 @@ object OverlaySpecValidator {
     depth: Int,
   ): OverlaySpecError? {
     val options = rule.getValue("options").jsonArray.map { it.jsonObject }
-    val selected =
-      options.firstOrNull { option ->
-        when (option.text("kind")) {
-          "object" -> value is JsonObject
-          "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
-          else -> value is JsonPrimitive && value.isString
-        }
-      } ?: return fail(path, "Invalid union value")
-    return walk(value, selected, path, context, depth)
+    val candidates = options.filter { option ->
+      when (option.text("kind")) {
+        "object" -> value is JsonObject
+        "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
+        else -> value is JsonPrimitive && value.isString
+      }
+    }
+    // Several options can accept the same JSON type (a hex colour or a role name are both strings).
+    val errors = candidates.map { walk(value, it, path, context, depth) }
+    if (errors.any { it == null }) return null
+    return errors.firstOrNull() ?: fail(path, "Invalid union value")
   }
 
   private fun numberValid(value: JsonElement, rule: JsonObject): Boolean {

@@ -73,7 +73,8 @@ data class OverlayStyle(
   val height: OverlayDimension? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
-  val cornerRadius: Double? = null,
+  /** A dp number or a Material Shapes token. */
+  val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
   val alpha: Double? = null,
   val alignment: String? = null,

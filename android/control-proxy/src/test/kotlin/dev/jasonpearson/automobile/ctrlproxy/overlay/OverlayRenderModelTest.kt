@@ -105,7 +105,7 @@ class OverlayRenderModelTest {
         height = OverlayDimension.Dp(40.5),
         padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
         background = "#112233",
-        cornerRadius = 6.0,
+        cornerRadius = OverlayCornerRadius.Dp(6.0),
         border = OverlayBorder(2.0, "#80112233"),
         alpha = 0.4,
         alignment = "bottomEnd",

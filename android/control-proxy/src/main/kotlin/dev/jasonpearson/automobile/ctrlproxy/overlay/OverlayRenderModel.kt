@@ -246,12 +246,16 @@ fun overlayColor(value: String): Color {
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
 
+/** The colour of a hex value, or null for a Material ColorScheme role name (resolved in render). */
+private fun overlayHexColor(value: String?): Color? =
+  value?.takeIf { it.startsWith("#") }?.let(::overlayColor)
+
 fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
   OverlayRenderStyle(
     style,
-    style.background?.let(::overlayColor),
-    style.border?.color?.let(::overlayColor),
-    style.color?.let(::overlayColor) ?: Color.Black,
+    overlayHexColor(style.background),
+    overlayHexColor(style.border?.color),
+    overlayHexColor(style.color) ?: Color.Black,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
@@ -316,7 +320,7 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,
       "padding.end" to style.padding?.end,
-      "cornerRadius" to style.cornerRadius,
+      "cornerRadius" to (style.cornerRadius as? OverlayCornerRadius.Dp)?.dp,
       "border.width" to style.border?.width,
       "spacing" to style.spacing,
       "textSize" to style.textSize,

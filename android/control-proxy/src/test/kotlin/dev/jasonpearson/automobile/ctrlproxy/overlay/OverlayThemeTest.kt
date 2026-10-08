@@ -188,6 +188,61 @@ class OverlayThemeTest {
   }
 
   @Test
+  fun `colour roles resolve against the scheme and hex colours stay literal`() {
+    val scheme = lightColorScheme(primary = Color(0xFF123456), surfaceContainer = Color(0xFF654321))
+    assertEquals(Color(0xFF123456), overlayColorRole(scheme, "primary"))
+    assertEquals(Color(0xFF654321), overlayColorRole(scheme, "surfaceContainer"))
+    assertNull(overlayColorRole(scheme, "onPurple"))
+    assertEquals(Color(0xFF123456), overlayResolveColor(scheme, null, "primary"))
+    assertEquals(Color.Red, overlayResolveColor(scheme, Color.Red, "#FFFF0000"))
+    assertEquals(Color.Red, overlayResolveColor(scheme, Color.Red, null))
+    assertNull(overlayResolveColor(scheme, null, null))
+  }
+
+  @Test
+  fun `colour role tokens map to no literal colour and hex stays parsed`() {
+    val style = mapOverlayStyle(OverlayStyle(background = "surface", color = "#112233"))
+    assertNull(style.background)
+    assertEquals(Color(0xFF112233), style.color)
+    assertEquals(Color.Black, mapOverlayStyle(OverlayStyle(color = "onSurface")).color)
+  }
+
+  @Test
+  fun `corner tokens map to the theme's shape steps and dp stays literal`() {
+    val shapes = Shapes(large = RoundedCornerShape(11.dp))
+    assertEquals(shapes.large, overlayCornerShape(shapes, OverlayCornerRadius.Token("large")))
+    assertEquals(shapes.small, overlayCornerShape(shapes, OverlayCornerRadius.Token("small")))
+    assertEquals(
+      RoundedCornerShape(0.dp),
+      overlayCornerShape(shapes, OverlayCornerRadius.Token("none")),
+    )
+    assertEquals(
+      RoundedCornerShape(percent = 50),
+      overlayCornerShape(shapes, OverlayCornerRadius.Token("full")),
+    )
+    assertEquals(
+      RoundedCornerShape(6.dp),
+      overlayCornerShape(shapes, OverlayCornerRadius.Dp(6.0)),
+    )
+  }
+
+  @Test
+  fun `cornerRadius decodes dp and tokens and rejects unknown tokens`() {
+    val json = kotlinx.serialization.json.Json
+    assertEquals(
+      OverlayCornerRadius.Dp(4.0),
+      json.decodeFromString(OverlayCornerRadiusSerializer, "4"),
+    )
+    assertEquals(
+      OverlayCornerRadius.Token("extraLarge"),
+      json.decodeFromString(OverlayCornerRadiusSerializer, "\"extraLarge\""),
+    )
+    assertThrows(kotlinx.serialization.SerializationException::class.java) {
+      json.decodeFromString(OverlayCornerRadiusSerializer, "\"huge\"")
+    }
+  }
+
+  @Test
   fun `host dismiss colours are translucent and contrast with the scheme`() {
     val dark = overlayDismissColors(true)
     val light = overlayDismissColors(false)

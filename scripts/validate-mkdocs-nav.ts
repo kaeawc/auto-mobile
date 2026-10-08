@@ -32,7 +32,10 @@ const EXCLUDED_FILES = new Set([
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",
 ]);
-const TODO_IGNORED_FILES = new Set(["contributing.md"]);
+// Copied files mirror root documents (lychee/deploy copy CHANGELOG.md into
+// docs/), so their release-note text, which can legitimately mention "TODOs",
+// is not docs-page TODO debt.
+const TODO_IGNORED_FILES = new Set(["changelog.md", "contributing.md"]);
 
 export function collectNavFiles(value: unknown): string[] {
   if (typeof value === "string") {

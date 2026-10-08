@@ -798,8 +798,10 @@ EOF
 
 # Usage: run_completion_order_lane [ENV=VALUE]...; uses $hook and $hook_dir.
 run_completion_order_lane() {
+  # Isolated chunking is off so each attempt is one `bun test` invocation and
+  # the hook's attempts file counts attempts, not chunks (#10619).
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=3 \
-    AUTOMOBILE_UNIT_SHARD_POLL_SECONDS=0.02 \
+    AUTOMOBILE_UNIT_SHARD_POLL_SECONDS=0.02 AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE=0 \
     STUB_SHARD_HOOK="$hook" STUB_HOOK_DIR="$hook_dir" "$@" bash "$SCRIPT" unit
 }
 

@@ -133,8 +133,7 @@ class WebSocketServer(
 
     /** Overlay requests answer a malformed frame with an `overlay_result` rather than an error. */
     private val overlayRequestTypes =
-      setOf("show_overlay", "dismiss_overlay", "inspect_overlays") +
-        overlayAssetRequestTypes
+      setOf("show_overlay", "dismiss_overlay", "inspect_overlays") + overlayAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
     private val textInputRequestTypes =

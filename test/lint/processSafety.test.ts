@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  candidateFiles,
   checkProcessSafetyAllowlist,
   PROCESS_SAFETY_ALLOWLIST,
   checkProcessSafetySource,
@@ -255,6 +258,20 @@ STUB
       expect(checkProcessSafetySource(file, readFileSync(file, "utf8"))).toEqual([]);
     },
   );
+
+  test("tree walk skips untracked tool environments such as .venv", () => {
+    const root = mkdtempSync(join(tmpdir(), "process-safety-"));
+    try {
+      mkdirSync(join(root, ".venv", "lib"), { recursive: true });
+      mkdirSync(join(root, "nested", "node_modules"), { recursive: true });
+      writeFileSync(join(root, ".venv", "lib", "editable.pth"), "");
+      writeFileSync(join(root, "nested", "node_modules", "dep.sh"), "");
+      writeFileSync(join(root, "nested", "tool.sh"), "");
+      expect(candidateFiles(root)).toEqual([join(root, "nested", "tool.sh")]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   // scripts/check-boundaries.sh enforces the full real-tree scan outside unit tests.
 });

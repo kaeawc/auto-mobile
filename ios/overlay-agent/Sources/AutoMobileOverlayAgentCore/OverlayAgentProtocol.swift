@@ -128,10 +128,13 @@ struct OverlayConnectionGate {
     }
 
     private let token: String
+    /// Request types advertised in `hello_result`; the host refuses to send anything else.
+    private let capabilities: [String]
     private(set) var state: State = .awaitingHello
 
-    init(token: String) {
+    init(token: String, capabilities: [String] = OverlayAgentProtocol.capabilities) {
         self.token = token
+        self.capabilities = capabilities
     }
 
     var isAuthenticated: Bool {
@@ -177,7 +180,7 @@ struct OverlayConnectionGate {
             "type": "hello_result",
             "agentVersion": OverlayAgentProtocol.agentVersion,
             "protocolVersion": OverlayAgentProtocol.protocolVersion,
-            "capabilities": OverlayAgentProtocol.capabilities,
+            "capabilities": capabilities,
         ])
     }
 

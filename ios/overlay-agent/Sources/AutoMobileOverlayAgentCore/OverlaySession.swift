@@ -226,6 +226,12 @@ enum OverlayTestHooks {
         environment[environmentKey] == "1"
     }
 
+    /// Capabilities to advertise in `hello_result`: the test hooks are listed only when enabled,
+    /// because the host client refuses to send a request type the agent does not advertise.
+    static func capabilities(enabled: Bool) -> [String] {
+        enabled ? OverlayAgentProtocol.capabilities + gatedRequestTypes.sorted() : OverlayAgentProtocol.capabilities
+    }
+
     /// The error to reply with when `requestType` is a test hook and hooks are off; nil otherwise.
     static func rejection(requestType: String, enabled: Bool) -> String? {
         guard gatedRequestTypes.contains(requestType), !enabled else { return nil }

@@ -1,6 +1,6 @@
-import XCTest
 @testable import ScreenCaptureCore
 @testable import ScreenCaptureHelper
+import XCTest
 
 /// Tests the STDIN control-channel framing (issue #4788): newline-delimited JSON
 /// is split and dispatched, partial lines buffer across chunks, and malformed

@@ -39,10 +39,12 @@ fi
 current="$(bun -e '
   import ts from "typescript";
   import { Glob } from "bun";
-  import { readFileSync } from "node:fs";
+  import { readFileSync, realpathSync } from "node:fs";
   import { relative, resolve } from "node:path";
   const root = process.cwd();
-  const testRoot = resolve(process.argv[1]);
+  // process.cwd() is already a real path (macOS /tmp -> /private/tmp), so
+  // resolve symlinks here too or relative() yields ../../tmp/... keys.
+  const testRoot = realpathSync(resolve(process.argv[1]));
   const rows: Array<[string, number]> = [];
   for (const path of new Glob("**/*.ts").scanSync({ cwd: testRoot })) {
     const absolute = resolve(testRoot, path);

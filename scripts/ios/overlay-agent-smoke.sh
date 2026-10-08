@@ -13,6 +13,9 @@
 # demo's `like-button` twice and asserts the host receives overlay_event "liked" with an
 # increasing sequence. This exercises the spec action and event path, not UIKit touch delivery.
 #
+# CI: the advisory CircleCI "Prototype Simulator" job (.circleci/continue_config.yml), one matrix
+# leg per iOS version, runs this when the overlay agent's inputs change. It is not a required check.
+#
 # Usage: scripts/ios/overlay-agent-smoke.sh <ios-version|latest>   e.g. 26, 18.5, latest
 #
 # Environment:
@@ -109,14 +112,24 @@ fail() {
   exit 1
 }
 
-# The host driver prints the agent's asynchronous `event {json}` / `unmatched {json}` lines on
-# stdout next to the one JSON reply, so a captured file is not a single JSON document. Keep only
-# the last overlay_result line (a bounded, line-oriented filter) and rewrite the file with it.
-keep_reply() {
-  local file="$1" reply
-  reply="$(grep '^{' "${file}" | jq -c 'select(.type == "overlay_result")' | tail -n 1 || true)"
-  [[ -n ${reply} ]] || fail "no overlay_result reply from the driver: $(cat "${file}")"
+# Rewrites <file> with the last top-level JSON value in it that matches the jq <filter>, or fails.
+# The driver prints each reply as one compact JSON line on stdout and its handshake log on stderr,
+# but this must not depend on that: a driver that also prints labelled log lines (`agent {json}`,
+# `event {json}`, `unmatched {json}`) or pretty-prints a reply across several lines has to work
+# too. Labelled log lines are dropped whole (their JSON bodies are never picked apart), then jq
+# parses what remains as a stream of JSON values with --slurp, so a multi-line value is one value.
+keep_last_json() {
+  local file="$1" filter="$2" what="$3" reply
+  if ! reply="$({ grep -v -E '^[A-Za-z_]+ [{[]' "${file}" || true; } \
+    | jq -c -s "[.[] | select(type == \"object\") | select(${filter})] | last // empty")"; then
+    fail "driver output for ${what} is not JSON: $(cat "${file}")"
+  fi
+  [[ -n ${reply} ]] || fail "no ${what} reply from the driver: $(cat "${file}")"
   printf '%s\n' "${reply}" > "${file}"
+}
+
+keep_reply() {
+  keep_last_json "$1" '.type == "overlay_result"' overlay_result
 }
 
 echo "== build agent"
@@ -179,6 +192,7 @@ echo "== tap the like button twice and expect overlay_event"
 sequences=()
 for tap in 1 2; do
   "${driver[@]}" tap like-button > "${log_dir}/tap-${tap}.json"
+  keep_last_json "${log_dir}/tap-${tap}.json" '.result.type == "overlay_result"' simulate_tap
   [[ "$(jq -r '.result.success' "${log_dir}/tap-${tap}.json")" == true ]] || fail "simulate_tap failed: $(cat "${log_dir}/tap-${tap}.json")"
   [[ "$(jq -r '[.events[] | select(.type == "overlay_event" and .kind == "emit" and .name == "liked" and .id == "floating-demo")] | length' "${log_dir}/tap-${tap}.json")" == 1 ]] \
     || fail "tap ${tap} did not deliver exactly one overlay_event 'liked': $(cat "${log_dir}/tap-${tap}.json")"

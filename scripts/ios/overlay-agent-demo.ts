@@ -8,6 +8,10 @@
  *   bun scripts/ios/overlay-agent-demo.ts sheet                     bottom sheet with a text field
  *   bun scripts/ios/overlay-agent-demo.ts status | dismiss | events
  *
+ * Stdout carries only machine-readable output: each command prints its reply as ONE compact JSON
+ * line, which scripts/ios/overlay-agent-smoke.sh parses. Human-facing logs (the agent handshake)
+ * go to stderr. The `events` command streams `event {json}` lines and is for interactive use.
+ *
  * Specs go through the same validator as the Android path. `launch`
  * passes a host-chosen port and a fresh auth token to the agent (#10566) and saves both to
  * scratch/overlay-agent/session.json for the other commands.
@@ -20,6 +24,7 @@ import {
   createOverlayAgentLaunchConfig,
   NodeOverlayAgentConnector,
   type OverlayAgentClient,
+  type OverlayAgentMessage,
 } from "../../src/features/overlay/ios/overlayAgentClient";
 import type { OverlaySpec } from "../../src/features/overlay/overlaySpec";
 import { validateOverlaySpec } from "../../src/features/overlay/overlayValidation";
@@ -44,7 +49,8 @@ async function openAgent(): Promise<OverlayAgentClient> {
     ...session,
     connector: new NodeOverlayAgentConnector(),
   });
-  console.log("agent", JSON.stringify(agent.handshake));
+  // stderr: stdout is reserved for the command's JSON reply.
+  console.error("agent", JSON.stringify(agent.handshake));
   return agent;
 }
 
@@ -229,8 +235,8 @@ async function main(): Promise<void> {
         }
         // The agent pushes a tap's events before it replies on the same stream, so everything
         // collected by the time the reply lands belongs to this tap.
-        const events: Message[] = [];
-        agent.onEvent = (event) => events.push(event);
+        const events: OverlayAgentMessage[] = [];
+        agent.onEvent((event) => events.push(event));
         const result = await agent.request("simulate_tap", { nodeId });
         console.log(JSON.stringify({ result, events }));
         break;
@@ -243,7 +249,7 @@ async function main(): Promise<void> {
         await waitForEvent(agent, () => false);
         break;
       default:
-        console.log(JSON.stringify(await agent.request("get_overlay_status"), null, 2));
+        console.log(JSON.stringify(await agent.request("get_overlay_status")));
     }
   } finally {
     agent.close();

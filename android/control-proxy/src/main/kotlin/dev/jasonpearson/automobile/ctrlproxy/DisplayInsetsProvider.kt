@@ -121,6 +121,8 @@ private fun unavailableInsets(): ObservationInsetsInfo =
     displayCutoutInfo = DisplayCutoutInfo.unknown(),
   )
 
+// Only reached from the API 30+ WindowInsets path (see WindowMetricsDisplayInsetsProvider).
+@TargetApi(Build.VERSION_CODES.Q)
 private fun toSystemInsetsInfo(insets: android.graphics.Insets): SystemInsetsInfo =
   SystemInsetsInfo(
     top = insets.top,

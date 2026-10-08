@@ -219,6 +219,13 @@ describe("OverlayAgentClient after the handshake", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("refuses the simulate_tap test hook unless the agent advertises it", async () => {
+    const { client } = await connected();
+    await expect(client.request("simulate_tap", { nodeId: "like-button" })).rejects.toThrow(
+      "does not support simulate_tap",
+    );
+  });
+
   test("times a request out on the injected timer", async () => {
     const { timer, client } = await connected();
     const pending = client.request("get_overlay_status");

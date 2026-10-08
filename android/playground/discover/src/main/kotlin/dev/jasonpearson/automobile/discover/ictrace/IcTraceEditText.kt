@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.discover.ictrace
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings
 import android.text.InputType
@@ -11,6 +12,7 @@ import android.widget.EditText
 
 // Plain EditText (not AppCompatEditText): this view is hosted in a Compose/Material3 activity that
 // has no AppCompat theme, under which AppCompatEditText fails to take touch focus.
+@SuppressLint("AppCompatCustomView")
 class IcTraceEditText(context: Context, attrs: AttributeSet? = null) : EditText(context, attrs) {
   var recorder: IcTraceRecorder? = null
   var captureText: Boolean = false

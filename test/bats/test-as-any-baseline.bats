@@ -58,3 +58,11 @@ teardown() {
   [ "$status" -eq 0 ]
   grep -q "^2[[:space:]]" "$TEST_AS_ANY_BASELINE"
 }
+
+@test "a symlinked test root keys files by their real path" {
+  bash "$SCRIPT" --update
+  ln -s "$TEST_DIR/test" "$TEST_DIR/linked-test"
+  TEST_AS_ANY_ROOT="$TEST_DIR/linked-test" run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new assertions (1 gated assertion(s)"* ]]
+}

@@ -269,10 +269,19 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertNil(OverlayTestHooks.rejection(requestType: "simulate_tap", enabled: true))
         XCTAssertNil(OverlayTestHooks.rejection(requestType: "show_overlay", enabled: false))
     }
+
+    func testTestHooksAreAdvertisedOnlyWhenEnabled() {
+        XCTAssertEqual(OverlayTestHooks.capabilities(enabled: false), OverlayAgentProtocol.capabilities)
+        XCTAssertFalse(OverlayTestHooks.capabilities(enabled: false).contains("simulate_tap"))
+        XCTAssertEqual(
+            OverlayTestHooks.capabilities(enabled: true),
+            OverlayAgentProtocol.capabilities + ["simulate_tap"]
+        )
+    }
 }
 
-private extension Result {
-    var failureValue: Failure? {
+extension Result {
+    fileprivate var failureValue: Failure? {
         if case let .failure(error) = self { return error }
         return nil
     }

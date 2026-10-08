@@ -17,20 +17,22 @@ final class OverlayServer {
         var gate: OverlayConnectionGate
         var framer = OverlayLineFramer()
 
-        init(connection: NWConnection, token: String) {
+        init(connection: NWConnection, token: String, capabilities: [String]) {
             self.connection = connection
-            gate = OverlayConnectionGate(token: token)
+            gate = OverlayConnectionGate(token: token, capabilities: capabilities)
         }
     }
 
     private let configuration: OverlayAgentConfiguration
+    private let capabilities: [String]
     private let handler: Handler
     private var listener: NWListener?
     private var clients: [ObjectIdentifier: Client] = [:]
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.overlay-agent")
 
-    init(configuration: OverlayAgentConfiguration, handler: @escaping Handler) {
+    init(configuration: OverlayAgentConfiguration, capabilities: [String], handler: @escaping Handler) {
         self.configuration = configuration
+        self.capabilities = capabilities
         self.handler = handler
     }
 
@@ -69,7 +71,7 @@ final class OverlayServer {
 
     private func accept(_ connection: NWConnection) {
         let key = ObjectIdentifier(connection)
-        let client = Client(connection: connection, token: configuration.token)
+        let client = Client(connection: connection, token: configuration.token, capabilities: capabilities)
         clients[key] = client
         connection.stateUpdateHandler = { [weak self] state in
             switch state {

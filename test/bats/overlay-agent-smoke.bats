@@ -66,7 +66,24 @@ case "$1" in
       echo "not listening" >&2
       exit 1
     fi
-    if [[ -f ${shown_file} ]]; then
+    if [[ ${STUB_DRIVER_MODE} == hello-and-pretty-reply ]]; then
+      # The shape an older driver printed on the iOS 26 leg: a labelled handshake line, then the
+      # get_overlay_status reply pretty-printed across several lines.
+      echo 'agent {"agentVersion":"0.1.0","protocolVersion":1,"type":"hello","bundleId":"com.apple.Preferences"}'
+      shown=false id=null
+      if [[ -f ${shown_file} ]]; then shown=true id='"floating-demo"'; fi
+      cat << JSON
+{
+  "type": "overlay_result",
+  "requestId": "r1",
+  "status": {
+    "shown": ${shown},
+    "id": ${id}
+  },
+  "success": true
+}
+JSON
+    elif [[ -f ${shown_file} ]]; then
       echo '{"type":"overlay_result","success":true,"status":{"shown":true,"id":"floating-demo"}}'
     else
       echo '{"type":"overlay_result","success":true,"status":{"shown":false,"id":null}}'
@@ -83,6 +100,9 @@ case "$1" in
   tap)
     n=$(($(cat "${STUB_STATE}/taps" 2> /dev/null || echo 0) + 1))
     echo "${n}" > "${STUB_STATE}/taps"
+    if [[ ${STUB_DRIVER_MODE} == hello-and-pretty-reply ]]; then
+      echo 'agent {"agentVersion":"0.1.0","protocolVersion":1,"type":"hello"}'
+    fi
     case "${STUB_DRIVER_MODE}" in
       tap-rejected) echo '{"result":{"type":"overlay_result","success":false,"error":"simulate_tap is a test hook"},"events":[]}' ;;
       tap-no-event) echo '{"result":{"type":"overlay_result","success":true},"events":[]}' ;;
@@ -95,7 +115,9 @@ case "$1" in
     if [[ ${STUB_DRIVER_MODE} == event-before-reply ]]; then
       echo 'event {"kind":"dismissed","id":"floating-demo","type":"overlay_event","sequence":1}'
     fi
-    if [[ ${STUB_DRIVER_MODE} != event-only ]]; then
+    if [[ ${STUB_DRIVER_MODE} == garbage-dismiss ]]; then
+      echo 'Traceback: not json at all'
+    elif [[ ${STUB_DRIVER_MODE} != event-only ]]; then
       echo '{"type":"overlay_result","success":true}'
     fi
     ;;
@@ -123,6 +145,25 @@ STUB
   [ "${status}" -eq 0 ]
   [[ ${output} == *"PASS on iOS 26.5"* ]]
   [ "$(jq -r '.type' "${OVERLAY_SMOKE_LOG_DIR}/dismiss.json")" = overlay_result ]
+}
+
+@test "reads a pretty-printed multi-line reply after a labelled agent handshake line" {
+  export STUB_DRIVER_MODE=hello-and-pretty-reply
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  [[ ${output} == *"PASS on iOS 26.5"* ]]
+  [[ ${output} != *"parse error"* ]]
+  [ "$(jq -c '.status' "${OVERLAY_SMOKE_LOG_DIR}/status-initial.json")" = '{"shown":false,"id":null}' ]
+  [ "$(jq -r '.status.id' "${OVERLAY_SMOKE_LOG_DIR}/status-shown.json")" = floating-demo ]
+  [ "$(jq -r '.events[0].sequence' "${OVERLAY_SMOKE_LOG_DIR}/tap-2.json")" -eq 2 ]
+}
+
+@test "fails clearly when the driver output is not JSON" {
+  export STUB_DRIVER_MODE=garbage-dismiss
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"driver output for overlay_result is not JSON"* ]]
+  grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
 }
 
 @test "fails clearly when the driver prints no overlay_result reply" {

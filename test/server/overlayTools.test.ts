@@ -83,7 +83,7 @@ describe("overlay MCP tool", () => {
 
   test("an unknown action names the supported actions", async () => {
     const { payload } = await call({ action: "explode" });
-    expect(payload.error).toContain("show, dismiss, status or awaitEvent");
+    expect(payload.error).toContain("show, dismiss, status, inspect or awaitEvent");
   });
 
   test.each([

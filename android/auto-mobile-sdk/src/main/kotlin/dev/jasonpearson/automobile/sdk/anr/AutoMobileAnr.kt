@@ -105,7 +105,10 @@ object AutoMobileAnr {
   /** Clears the retained application context during SDK shutdown or a failed initialization. */
   internal fun reset() =
     synchronized(this) {
-      session?.close()
+      // A session only exists once initialize() passed its API 30 check.
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        session?.close()
+      }
       session = null
       capabilityGate = null
       deliveryScheduler = null

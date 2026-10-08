@@ -103,6 +103,15 @@ final class OverlayConnectionGateTests: XCTestCase {
         XCTAssertEqual(gate.frameLimit, OverlayAgentProtocol.maxFrameBytes)
     }
 
+    func testHelloResultAdvertisesTheCapabilitiesTheGateWasGiven() throws {
+        let capabilities = OverlayTestHooks.capabilities(enabled: true)
+        var gate = OverlayConnectionGate(token: token, capabilities: capabilities)
+        guard case let .helloAccepted(result) = try gate.receive(line: line(["type": "hello", "token": token])) else {
+            return XCTFail("hello was not accepted")
+        }
+        XCTAssertEqual(result["capabilities"] as? [String], capabilities)
+    }
+
     func testCapabilitiesDoNotAdvertiseTheRemovedUpdatePath() {
         XCTAssertFalse(OverlayAgentProtocol.capabilities.contains("update_overlay"))
         XCTAssertTrue(OverlayAgentProtocol.capabilities.contains("show_overlay"))

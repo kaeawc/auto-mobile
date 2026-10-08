@@ -1,5 +1,9 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+
 /** The error an input dropped by [InputAllocatingClient] reports. */
 internal const val INPUT_NOT_ALLOCATED_ERROR =
   "Input dropped: the desktop session could not take control of this device. Another session " +
@@ -10,13 +14,44 @@ internal const val INPUT_NOT_ALLOCATED_ERROR =
  * target device on the first input, and an input it cannot allocate the device for is dropped
  * instead of reaching the daemon. Every other call goes straight to [delegate].
  *
+ * A tool call that names a `deviceId` is input too: the desktop's device controls (rotate, device
+ * snapshot, unlock, locale) drive the device, so they allocate it the same way and run as the
+ * desktop session ([sessionUuidProvider]) that holds it, never under another session or an implicit
+ * one. Only send tool calls through this client that act on the device; reads belong on a client
+ * that does not allocate.
+ *
  * The input methods block on the allocation, so they must run where the delegate's blocking socket
  * calls already run: the pane's dispatch thread or an IO dispatcher, never the UI thread.
  */
 class InputAllocatingClient(
   private val delegate: AutoMobileClient,
   private val allocation: DesktopInputAllocation,
+  /** The desktop session a device-targeted tool call acts as; null leaves the call unnamed. */
+  private val sessionUuidProvider: () -> String? = { null },
 ) : AutoMobileClient by delegate {
+
+  override fun callTool(name: String, arguments: JsonObject): JsonElement {
+    val deviceId = (arguments["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    // A tool call without a device id targets no particular device, so there is nothing to
+    // allocate.
+    if (deviceId == null) return delegate.callTool(name, arguments)
+    if (!allocation.awaitInputAllowed(deviceId)) {
+      throw McpConnectionException(INPUT_NOT_ALLOCATED_ERROR)
+    }
+    val session = sessionUuidProvider()
+    val named =
+      if (session.isNullOrBlank() || "sessionUuid" in arguments) {
+        arguments
+      } else {
+        JsonObject(arguments + ("sessionUuid" to JsonPrimitive(session)))
+      }
+    return delegate.callTool(name, named)
+  }
+
+  // Interface delegation would send the default callToolChecked straight to the delegate's
+  // callTool, skipping the allocation above.
+  override fun callToolChecked(name: String, arguments: JsonObject): JsonElement =
+    checkToolResponse(callTool(name, arguments), DaemonJson)
 
   override fun inputTap(
     x: Double,

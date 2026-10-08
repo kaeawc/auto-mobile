@@ -68,17 +68,27 @@ object NoOpEmulatorControlExecutor : EmulatorControlExecutor {
 }
 
 /**
- * Real executor backed by the daemon [AutoMobileClient]. Sets the active device first, then invokes
- * the control's MCP tool with the resolved platform + deviceId, enabling the tool's server
- * capability where one gates it. Untested IO seam (mirrors `DaemonMcpResourceClient`).
+ * Real executor backed by the daemon [AutoMobileClient]. Invokes the control's MCP tool with the
+ * resolved platform + deviceId, enabling the tool's server capability where one gates it. Untested
+ * IO seam (mirrors `DaemonMcpResourceClient`).
+ *
+ * Every control here drives the device, so it is active use like a tap (#10730): it runs on
+ * [inputClient], which allocates the device to the desktop session on first use and refuses it
+ * while another session holds the device. Nothing here calls `setActiveDevice` itself; allocating
+ * on [client] would hold the device outside the desktop session's model, under whatever session the
+ * shared client carries. Device snapshot counts as input too: unlike a screenshot it runs device
+ * commands (an emulator VM snapshot pauses the VM; settings and app containers are read off the
+ * device) and writes host state.
  */
 class DaemonEmulatorControlExecutor(
+  /** Decides the button transport only; no device call goes through it. */
   private val client: AutoMobileClient,
   private val foregroundAppResolver: ForegroundAppResolver = ObservationForegroundAppResolver(),
   private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
   /**
-   * The client the Unix `input/pressButton` fast path uses. A device the desktop session holds
-   * takes input only from that session (#10698), so the desktop passes a client that names it.
+   * The client every device call uses. A device the desktop session holds takes input only from
+   * that session (#10698), so the desktop passes an `InputAllocatingClient` that allocates and
+   * names it. A host with no desktop session (a non-Unix transport) passes its only client.
    */
   private val inputClient: AutoMobileClient = client,
 ) : EmulatorControlExecutor {
@@ -90,13 +100,12 @@ class DaemonEmulatorControlExecutor(
   ) {
     withContext(ioDispatcher) {
       val wire = platform.wireName()
-      // Target the pane's device explicitly (belt-and-suspenders with the deviceId arg below), so a
-      // control never races onto whichever device happened to be active.
-      client.setActiveDeviceChecked(deviceId, wire)
+      // Each call names the pane's device, so a control never races onto whichever device happened
+      // to be active, and the input client allocates exactly that device.
       when (control) {
         EmulatorControl.Rotate -> {
-          client.setToolEnabled("rotate")
-          client.callToolChecked(
+          inputClient.setToolEnabled("rotate")
+          inputClient.callToolChecked(
             "rotate",
             buildJsonObject {
               put("orientation", orientation.toolValue)
@@ -106,8 +115,8 @@ class DaemonEmulatorControlExecutor(
           )
         }
         EmulatorControl.Snapshot -> {
-          client.setToolEnabled("deviceSnapshot")
-          client.callToolChecked(
+          inputClient.setToolEnabled("deviceSnapshot")
+          inputClient.callToolChecked(
             "deviceSnapshot",
             buildJsonObject {
               put("action", "capture")
@@ -117,7 +126,7 @@ class DaemonEmulatorControlExecutor(
           )
         }
         EmulatorControl.Unlock ->
-          client.callToolChecked(
+          inputClient.callToolChecked(
             "wakeAndUnlock",
             buildJsonObject {
               put("platform", wire)
@@ -142,8 +151,7 @@ class DaemonEmulatorControlExecutor(
     // fast path landed — so Back/Home/Recent/Power keep working off a remote daemon.
     if (client.transportName != UNIX_TRANSPORT_NAME) {
       withContext(ioDispatcher) {
-        client.setActiveDeviceChecked(deviceId, wire)
-        client.callToolChecked(
+        inputClient.callToolChecked(
           "pressButton",
           buildJsonObject {
             put("button", button.toolValue)
@@ -155,7 +163,7 @@ class DaemonEmulatorControlExecutor(
       return
     }
     // Unix fast path: single lightweight round-trip, matching the video-pane tap path.
-    // `input/pressButton` targets the deviceId directly, so the old `setActiveDeviceChecked`
+    // `input/pressButton` targets the deviceId directly, so the old `setActiveDevice`
     // pre-call was redundant — and it was a whole extra (sometimes slow) daemon round-trip that
     // dominated command-bar button latency. Dropping it and the heavier `pressButton` MCP-tool
     // dispatch in favor of the direct `inputPressButton` wire method halves the round-trips.
@@ -184,8 +192,7 @@ class DaemonEmulatorControlExecutor(
   override suspend fun setLocale(deviceId: String, platform: Platform, locale: String) {
     withContext(ioDispatcher) {
       val wire = platform.wireName()
-      client.setActiveDeviceChecked(deviceId, wire)
-      client.setToolEnabled("changeLocalization")
+      inputClient.setToolEnabled("changeLocalization")
       // Resolve the foreground app on both platforms: Android *requires* it as the change target,
       // while iOS applies the locale device-wide but must relaunch the app (restartApp) to show it.
       val foregroundApp = foregroundAppResolver.resolve(deviceId)
@@ -193,7 +200,7 @@ class DaemonEmulatorControlExecutor(
         LOG.warn("Cannot change locale on $deviceId: no foreground app to target")
         return@withContext
       }
-      client.callToolChecked(
+      inputClient.callToolChecked(
         "changeLocalization",
         buildJsonObject {
           put("locale", locale)

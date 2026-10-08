@@ -73,13 +73,6 @@ interface AutoMobileClient {
 
   fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
 
-  fun setActiveDeviceChecked(deviceId: String, platform: String) {
-    val result = setActiveDevice(deviceId, platform)
-    if (!result.success) {
-      throw McpConnectionException(result.message ?: "Failed to set active device")
-    }
-  }
-
   fun observe(platform: String = "android"): ObserveResult
 
   /**
@@ -222,7 +215,7 @@ interface AutoMobileClient {
   fun close() {}
 }
 
-private fun checkToolResponse(responseElement: JsonElement, json: Json): JsonElement {
+internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonElement {
   val response =
     responseElement as? JsonObject
       ?: throw McpConnectionException("Tool response was not an object")

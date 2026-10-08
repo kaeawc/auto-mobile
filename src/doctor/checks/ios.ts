@@ -47,6 +47,11 @@ import {
 } from "../../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import { checkDevicectlAvailability } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { compareSimctlVersions } from "../../utils/ios-cmdline-tools/simctlVersion";
+import {
+  NetworkFilterStatusInspector,
+  type NetworkFilterHostStatus,
+} from "../../features/networkFilter/NetworkFilterInstaller";
+import { NETWORK_FILTER_INSTALL_COMMAND } from "../../features/networkFilter/networkFilterApp";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -133,6 +138,13 @@ export interface IosDoctorDependencies {
   runnerInspector: IosCtrlProxyRunnerInspector;
   runnerCommandRequirements?: IosRunnerCommandRequirements;
   observeRoundTripInspector: IosObserveRoundTripInspector;
+  /**
+   * Read-only Network Extension status (#10588). Optional so suites that build
+   * their own dependencies skip the check rather than probing the real host.
+   */
+  networkFilterInspector?: {
+    inspect(options?: { timeoutMs?: number }): Promise<NetworkFilterHostStatus>;
+  };
 }
 
 /**
@@ -517,6 +529,7 @@ export function createIosDoctorDependencies(
     createSimctlClient: () => new SimCtlClient(),
     runnerInspector: createIosCtrlProxyRunnerInspector(() => new SimCtlClient(), logger),
     observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger),
+    networkFilterInspector: new NetworkFilterStatusInspector(),
   };
 }
 
@@ -1533,8 +1546,104 @@ export async function runIosChecks(
   await run(() => checkBootedSimulators(dependencies, options));
   await run(() => checkIosCtrlProxyRunner(dependencies, options));
   await run(() => checkIosObserveRoundTrip(dependencies, options));
+  await run(() => checkIosNetworkFilter(dependencies, options));
 
   return results;
+}
+
+const IOS_NETWORK_FILTER_CHECK = "iOS Network Filter";
+
+/**
+ * Report the opt-in Network Extension app's state (#10588): not installed,
+ * installed with a version mismatch, pending approval/restart, or ready. This
+ * check is read-only; installing stays an explicit command.
+ */
+export async function checkIosNetworkFilter(
+  dependencies: Pick<
+    IosDoctorDependencies,
+    "platform" | "logger" | "networkFilterInspector"
+  > = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
+): Promise<CheckResult> {
+  const name = IOS_NETWORK_FILTER_CHECK;
+  if (dependencies.platform() !== "darwin") {
+    return { name, status: "skip", message: "Network Extension app only available on macOS" };
+  }
+  const inspector = dependencies.networkFilterInspector;
+  if (!inspector) {
+    return { name, status: "skip", message: "Network Extension status inspector not configured" };
+  }
+  let status: NetworkFilterHostStatus;
+  try {
+    const currentProbe = remainingDoctorProbe(probe);
+    status = await awaitDoctorProbe(currentProbe, () =>
+      inspector.inspect({
+        timeoutMs: currentProbe.timeoutMs ?? DOCTOR_EXEC_TIMEOUT_MS,
+      }),
+    );
+  } catch (error) {
+    dependencies.logger.warn(`Network filter check failed: ${errorMessage(error)}`, error);
+    return {
+      name,
+      status: "warn",
+      message: `Network Extension status check failed: ${errorMessage(error)}`,
+      recommendation: `Run \`${NETWORK_FILTER_INSTALL_COMMAND}\` to reinstall and reactivate it.`,
+    };
+  }
+  return classifyNetworkFilterStatus(status);
+}
+
+function classifyNetworkFilterStatus(status: NetworkFilterHostStatus): CheckResult {
+  const name = IOS_NETWORK_FILTER_CHECK;
+  if (!status.installed) {
+    return {
+      name,
+      status: "skip",
+      message: "Network Extension app not installed (optional; needed for iOS networkCondition)",
+      value: "not_installed",
+      detail: `Install it with \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`,
+    };
+  }
+  if (status.installedVersion !== status.expectedVersion) {
+    return networkFilterVersionMismatch(status);
+  }
+  if (status.report?.state === "ready") {
+    return {
+      name,
+      status: "pass",
+      message: `Network Extension app ${status.expectedVersion} is active`,
+      value: "ready",
+    };
+  }
+  return networkFilterNotReady(status.report);
+}
+
+function networkFilterVersionMismatch(status: NetworkFilterHostStatus): CheckResult {
+  const controllerState = status.report?.controllerState ?? status.report?.state;
+  return {
+    name: IOS_NETWORK_FILTER_CHECK,
+    status: "warn",
+    message:
+      `Installed Network Extension app is version ${status.installedVersion ?? "unknown"}, ` +
+      `expected ${status.expectedVersion}`,
+    value: "version_mismatch",
+    detail: controllerState ? `Controller state: ${controllerState}` : undefined,
+    recommendation: `Run \`${NETWORK_FILTER_INSTALL_COMMAND} --upgrade\`.`,
+  };
+}
+
+function networkFilterNotReady(report: NetworkFilterHostStatus["report"]): CheckResult {
+  const state = report?.state ?? "unknown";
+  return {
+    name: IOS_NETWORK_FILTER_CHECK,
+    status: "warn",
+    message: `Network Extension app installed but not ready (${state})`,
+    value: state,
+    detail: report?.detail,
+    recommendation:
+      report?.nextSteps ??
+      `Run \`${NETWORK_FILTER_INSTALL_COMMAND}\` to activate it; macOS may then ask for approval in System Settings.`,
+  };
 }
 
 /** Run only host-wide iOS tooling checks after repair. */

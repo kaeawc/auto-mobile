@@ -126,6 +126,16 @@ async function main() {
     process.exit(0);
   }
 
+  const networkFilterIndex = rawArgs.indexOf("--ios-network-filter");
+  if (networkFilterIndex >= 0) {
+    // Opt-in host action (#10588): installing a system extension changes the
+    // host, so it only ever runs from this explicit command, before any daemon,
+    // database or device startup work.
+    const { runIosNetworkFilterCommand } = await import("./cli/iosNetworkFilter");
+    startupBenchmark.endPhase("moduleImports");
+    process.exit(await runIosNetworkFilterCommand(rawArgs.slice(networkFilterIndex + 1)));
+  }
+
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer, registerMcpTools } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");

@@ -9,6 +9,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { OVERLAY_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import {
   registerOverlayTools,
   overlaySchema,
@@ -56,6 +57,7 @@ describe("overlay MCP tool", () => {
     restore = preserveToolRegistry();
     timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
+    client.setSupportedCommands([OVERLAY_SHOW_IN_PLACE_CAPABILITY]);
     invalidator = new FakeDeviceWindowCacheInvalidator();
     unsubscribe = registerOverlayTools({
       clientFactory: () => client,
@@ -150,6 +152,30 @@ describe("overlay MCP tool", () => {
     expect((await call({ action: "status" })).payload.overlays).toEqual([
       { id: "panel", lastAction: "show", success: true, timestamp: 5 },
     ]);
+  });
+
+  test("a same-id show on a CtrlProxy without in-place show warns that pages restarted (#10642)", async () => {
+    client.setSupportedCommands([]);
+    await call({ action: "show", spec });
+    expect((await call({ action: "show", spec: { ...spec, id: "other" } })).payload.warning).toBe(
+      undefined,
+    );
+    const { payload } = await call({ action: "show", spec: { ...spec, id: "other" } });
+    expect(payload.success).toBe(true);
+    expect(payload.warning).toContain(OVERLAY_SHOW_IN_PLACE_CAPABILITY);
+    expect(payload.warning).toContain("pager pages restarted");
+    expect(client.getOverlayHistory()).toHaveLength(3);
+    // reset: true asks for a fresh show, which every CtrlProxy gives, so nothing to warn about.
+    expect((await call({ action: "show", spec, reset: true })).payload.warning).toBeUndefined();
+  });
+
+  test("a refused same-id show on a CtrlProxy without in-place show does not warn", async () => {
+    client.setSupportedCommands([]);
+    await call({ action: "show", spec });
+    client.setOverlayResult({ success: false, error: "rejected" });
+    const { payload } = await call({ action: "show", spec });
+    expect(payload.success).toBe(false);
+    expect(payload.warning).toBeUndefined();
   });
 
   test.each([true, false])("reset %p is forwarded only as the caller wrote it", async (reset) => {

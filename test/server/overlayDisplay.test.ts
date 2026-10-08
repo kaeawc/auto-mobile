@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { OVERLAY_SHOW_IN_PLACE_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import {
   overlayOutputSchema,
   overlaySchema,
@@ -46,7 +47,7 @@ describe("overlay display targeting", () => {
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    client.setSupportedCommands(["overlay_display_id_v1"]);
+    client.setSupportedCommands(["overlay_display_id_v1", OVERLAY_SHOW_IN_PLACE_CAPABILITY]);
     adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
     unsubscribe = registerOverlayTools({
@@ -275,6 +276,38 @@ describe("overlay display targeting", () => {
     const olderPayload = await older;
     expect(olderPayload.success).toBe(true);
     expect(olderPayload.lastResult?.displayId).toBe(2);
+    const overlays = (await call({ action: "status" })).overlays;
+    expect(overlays).toHaveLength(1);
+    expect(Object.hasOwn(overlays?.[0] ?? {}, "displayId")).toBe(false);
+  });
+
+  test("a same-id show superseded during its display lookup is never sent (#10641)", async () => {
+    const lookupStarted: Array<() => void> = [];
+    const releaseLookup: Array<() => void> = [];
+    const lookup = adb.executeCommand.bind(adb);
+    let lookups = 0;
+    adb.executeCommand = async (...args) => {
+      if (lookups++ === 0) {
+        // The first show's display lookup stalls until a newer same-id show has landed.
+        await new Promise<void>((resolve) => {
+          releaseLookup.push(resolve);
+          lookupStarted.forEach((notify) => notify());
+        });
+      }
+      return lookup(...args);
+    };
+    const stalled = new Promise<void>((resolve) => lookupStarted.push(resolve));
+    const older = call({ action: "show", spec, display: "inner" });
+    await stalled;
+    const newer = await call({ action: "show", spec });
+    expect(newer.success).toBe(true);
+    releaseLookup[0]();
+    const olderPayload = await older;
+    expect(olderPayload.success).toBe(false);
+    expect(olderPayload.error).toContain("newer show");
+    // The device still shows the newer overlay on the default display, matching host status.
+    expect(client.getOverlayHistory()).toHaveLength(1);
+    expect(client.getOverlayHistory()[0].displayId).toBeUndefined();
     const overlays = (await call({ action: "status" })).overlays;
     expect(overlays).toHaveLength(1);
     expect(Object.hasOwn(overlays?.[0] ?? {}, "displayId")).toBe(false);

@@ -906,6 +906,13 @@ export const OVERLAY_WINDOW_OPTIONS_CAPABILITY = "overlay_window_options_v1";
 export const OVERLAY_PERSISTENCE_REPLAY_CAPABILITY = "overlay_persistence_replay_v1";
 
 /**
+ * Advertised by a CtrlProxy whose `show_overlay` replaces an overlay of the same id in place,
+ * keeping its display and each pager's page unless `reset` is set (#10550). An older device ignores
+ * `reset` and re-shows the overlay fresh, so pages restart (#10642).
+ */
+export const OVERLAY_SHOW_IN_PLACE_CAPABILITY = "overlay_show_in_place_v1";
+
+/**
  * Advertised by a CtrlProxy that answers `set_network_mock_rules` (when it carries a requestId)
  * with `set_network_mock_rules_result` naming the rules the app's regex engine rejected (#10101).
  * The host only waits for that reply when the flag is present.
@@ -937,6 +944,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
+  OVERLAY_SHOW_IN_PLACE_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   OVERLAY_WINDOW_METADATA_CAPABILITY,
   SDK_CAPABILITIES_USER_ID_CAPABILITY,

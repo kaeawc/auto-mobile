@@ -44,6 +44,7 @@ import {
   OVERLAY_DISPLAY_CAPABILITY,
   OVERLAY_PERSISTENCE_REPLAY_CAPABILITY,
   OVERLAY_WINDOW_OPTIONS_CAPABILITY,
+  OVERLAY_SHOW_IN_PLACE_CAPABILITY,
 } from "../features/observe/android/ctrlProxyProtocol";
 import type {
   OverlayDismiss,
@@ -699,18 +700,40 @@ interface MutationOutcome {
   warning?: string;
 }
 
+/**
+ * A newer show of the same id on this device started while this one resolved its display or
+ * staged assets (#10641). Sending now would put this older spec on screen, possibly on another
+ * display, while host status records the newer one, so the older show is never sent.
+ */
+function supersededBeforeSend(args: { spec?: unknown }): OverlayResult {
+  const id = (args.spec as OverlaySpec | undefined)?.id;
+  return {
+    success: false,
+    error: `Overlay ${id ?? ""} was not sent: a newer show of the same id on this device started first and is the one on screen.`,
+  };
+}
+
+/** A re-send after a newer same-id show landed would replace it with this older spec. */
+function needsAssetResend(first: OverlayResult, superseded: () => boolean): boolean {
+  return first.success && (first.missingAssets?.length ?? 0) > 0 && !superseded();
+}
+
 async function sendOverlay(
   target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   stage: AssetStage,
   signal: AbortSignal | undefined,
   displayId: number | undefined,
+  superseded: () => boolean = () => false,
 ): Promise<MutationOutcome> {
   if (stage.failure) {
     return { result: stage.failure };
   }
+  if (superseded()) {
+    return { result: supersededBeforeSend(args) };
+  }
   const first = await runMutation(target, args, displayId);
-  if (!first.success || !first.missingAssets?.length) {
+  if (!needsAssetResend(first, superseded)) {
     return { result: first };
   }
   const retry = await retryMissingAssets(target, args, stage, first, signal, displayId);
@@ -883,6 +906,10 @@ async function performMutation(
   const shown = shownOnDevice(store, scope, target);
   const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
+  // An older CtrlProxy re-shows a same-id overlay fresh on the display it is sent, so its pages
+  // restart. It still validates before replacing, so a refused show leaves the old overlay and its
+  // events exactly as an in-place one does; only the caller needs telling.
+  const legacy = await legacyInPlaceWarning(overlayTarget, target, inPlace);
   const generation = beginShowGeneration(commits, scope, args.action, target);
   // Every display lookup and window-option check happens before staging; nothing is re-resolved
   // after dispatch. A refused show must not reset the event epoch of an overlay still on screen.
@@ -908,7 +935,9 @@ async function performMutation(
     assetReaders,
     signal,
   );
-  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
+  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId, () =>
+    isSuperseded(commits, scope, target, generation),
+  );
   retireObservation(dependencies.cacheInvalidator, device, result);
   const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = isSuperseded(commits, scope, target, generation)
@@ -926,8 +955,28 @@ async function performMutation(
     ...(result.error ? { error: result.error } : {}),
     lastResult,
     ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
-    ...missingAssetsOutput(result, [warning, placed.warning]),
+    ...missingAssetsOutput(result, [warning, placed.warning], legacy),
   };
+}
+
+/**
+ * A same-id show replaces in place only on a CtrlProxy advertising overlay_show_in_place_v1. An
+ * older APK ignores reset and re-shows the overlay fresh on the display it is sent (#10642), so the
+ * caller is told its pager pages restarted. iOS's overlay agent always replaces in place.
+ */
+async function legacyInPlaceWarning(
+  target: OverlayTarget,
+  overlay: { id?: string },
+  inPlace: boolean,
+): Promise<string | undefined> {
+  if (
+    !inPlace ||
+    !target.android ||
+    (await target.android.supportsCommand(OVERLAY_SHOW_IN_PLACE_CAPABILITY))
+  ) {
+    return undefined;
+  }
+  return `the connected CtrlProxy does not advertise ${OVERLAY_SHOW_IN_PLACE_CAPABILITY}, so overlay ${overlay.id} was re-shown fresh on its display: pager pages restarted. Update the connected CtrlProxy to keep pages.`;
 }
 
 /**
@@ -1102,11 +1151,15 @@ function placedDisplay(
   };
 }
 
+/** [landedWarning] is reported only when the mutation succeeded. */
 function missingAssetsOutput(
   result: OverlayResult,
   warnings: readonly (string | undefined)[],
+  landedWarning?: string,
 ): { missingAssets?: string[]; warning?: string } {
-  const warning = warnings.filter((entry) => entry !== undefined).join(" ");
+  const warning = [...warnings, result.success ? landedWarning : undefined]
+    .filter((entry) => entry !== undefined)
+    .join(" ");
   return {
     ...(result.success && result.missingAssets?.length
       ? { missingAssets: result.missingAssets }

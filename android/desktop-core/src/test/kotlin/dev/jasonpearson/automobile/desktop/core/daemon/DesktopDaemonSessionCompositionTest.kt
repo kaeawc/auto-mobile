@@ -291,6 +291,40 @@ class DesktopDaemonSessionCompositionTest {
   }
 
   @Test
+  fun `a refusal of input the session thought it held drops the hold and shows held elsewhere`() =
+    runComposeUiTest {
+      // The daemon idle-released the device and an agent took it before the desktop noticed: the
+      // next input reaches the daemon and is refused with device_owned_by_other_session (#10743).
+      val transport = RecordingDaemonTransport()
+      val host = start(transport, listOf(pixel))
+      assertTrue(input(host, pixel.deviceId))
+      repeat(2) { tick() }
+
+      host.state().reportHeldElsewhere(pixel.deviceId)
+      settle()
+      repeat(2) { tick() }
+
+      assertEquals("emulator-5554", host.state().heldElsewhereDeviceId)
+      assertEquals(null, host.state().boundDeviceId)
+      // The stale hold is released by rotating the session; nothing re-binds on its own.
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+      assertFalse(input(host, pixel.deviceId))
+      assertEquals(listOf("emulator-5554"), transport.boundDevices())
+    }
+
+  @Test
+  fun `a refusal reported for a device no pane shows is ignored`() = runComposeUiTest {
+    val transport = RecordingDaemonTransport()
+    val host = start(transport, listOf(pixel))
+
+    host.state().reportHeldElsewhere(pixelFold.deviceId)
+    settle()
+
+    assertEquals(null, host.state().heldElsewhereDeviceId)
+  }
+
+  @Test
   fun `the holder releasing the device does not grab it`() = runComposeUiTest {
     val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }
     val host = start(transport, listOf(pixel))

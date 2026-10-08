@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import dev.jasonpearson.automobile.desktop.core.daemon.isDeviceOwnedRefusal
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
@@ -77,6 +78,12 @@ sealed interface WorkspaceAction {
 sealed interface WorkspaceEffect {
   /** Open the device picker. Wired to a real screen in a later PR. */
   data object OpenPicker : WorkspaceEffect
+
+  /**
+   * The daemon refused a pane control because another session holds [deviceId] (#10783). The host
+   * shows the pane's held-elsewhere notice; nothing retries the control.
+   */
+  data class DeviceHeldElsewhere(val deviceId: String) : WorkspaceEffect
 }
 
 /**
@@ -141,6 +148,7 @@ class WorkspaceViewModel(
         throw cancellation
       } catch (error: Exception) {
         LOG.warn("Device button $button failed for $deviceId: ${error.message}", error)
+        reportRefusal(deviceId, error)
       }
     }
   }
@@ -159,6 +167,7 @@ class WorkspaceViewModel(
         throw cancellation
       } catch (error: Exception) {
         LOG.warn("Set locale $locale failed for $deviceId: ${error.message}", error)
+        reportRefusal(deviceId, error)
       }
     }
   }
@@ -265,9 +274,10 @@ class WorkspaceViewModel(
   /**
    * Run an emulator [control] against the targeted column off the UI thread; unknown ids are a
    * no-op. Rotate first toggles the tracked per-column orientation and drives the tool with the new
-   * value. Failures are logged, not swallowed — a device call that throws must not crash the
-   * workspace or leave the effect path wedged (repo error-handling convention: log-and-continue for
-   * best-effort UI actions).
+   * value; a failed rotate puts the tracked orientation back, since the device never turned.
+   * Failures are logged, not swallowed — a device call that throws must not crash the workspace or
+   * leave the effect path wedged (repo error-handling convention: log-and-continue for best-effort
+   * UI actions).
    */
   private fun runControl(deviceId: String, control: EmulatorControl) {
     val content = _state.value as? WorkspaceUiState.Content ?: return
@@ -284,7 +294,22 @@ class WorkspaceViewModel(
         throw cancellation
       } catch (error: Exception) {
         LOG.warn("Emulator control $control failed for $deviceId: ${error.message}", error)
+        if (control == EmulatorControl.Rotate) {
+          // Only undo this rotate's own toggle: a later rotate that already moved the pane on
+          // owns the tracked orientation now.
+          mutate(deviceId) {
+            if (it.orientation == orientation) it.copy(orientation = column.orientation) else it
+          }
+        }
+        reportRefusal(deviceId, error)
       }
+    }
+  }
+
+  /** Surface a held-device refusal (#10783) to the host; any other failure is only logged. */
+  private suspend fun reportRefusal(deviceId: String, error: Exception) {
+    if (error.isDeviceOwnedRefusal()) {
+      _effect.send(WorkspaceEffect.DeviceHeldElsewhere(deviceId))
     }
   }
 

@@ -179,6 +179,10 @@ fun AutoMobileDesktopApp(
   // names the desktop session, read per frame so a session rotation is picked up.
   val latestSessionUuidProvider by rememberUpdatedState(desktopSessionState.sessionUuidProvider)
   val desktopInputSessionUuid: () -> String? = remember { { latestSessionUuidProvider() } }
+  // A daemon refusal of a pane's input or control (`device_owned_by_other_session`) shows the
+  // pane's held-elsewhere notice instead of only reaching the log (#10743, #10783).
+  val latestReportHeldElsewhere by rememberUpdatedState(desktopSessionState.reportHeldElsewhere)
+  val reportHeldElsewhere: (String) -> Unit = remember { { latestReportHeldElsewhere(it) } }
   // Input is active tool use and watching is not (#10730): every input path, the pane's device
   // controls included, allocates its device to the desktop session first and drops the input when
   // it cannot. The allocation is stable per
@@ -379,6 +383,7 @@ fun AutoMobileDesktopApp(
           pickerViewModel.onAction(DevicePickerAction.Refresh)
           pickerOpen = true
         }
+        is WorkspaceEffect.DeviceHeldElsewhere -> reportHeldElsewhere(effect.deviceId)
       }
     }
   }
@@ -670,6 +675,7 @@ fun AutoMobileDesktopApp(
                         clientProvider = columnControlClientProvider,
                         enabled = controlActive,
                         sessionUuidProvider = paneSessionUuidProvider,
+                        onDeviceHeldElsewhere = reportHeldElsewhere,
                       )
                     Box {
                       DeviceStreamView(

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const root = join(import.meta.dir, "..");
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -18,7 +19,7 @@ if (!packageManagerVersion || !engineVersion || packageManagerVersion !== engine
 }
 
 function findYamlFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true })
+  return sortedReaddirEntriesSync(directory)
     .flatMap((entry) => {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {

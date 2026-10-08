@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
+import { sortedReaddir } from "../../src/utils/io";
 import {
   noOpSnapshotDirectorySync,
   noOpSnapshotFileSync,
@@ -222,10 +223,7 @@ describe("snapshot journal enumeration and discard", () => {
       );
       expect(warnings).toHaveLength(2);
       expect(warnings.map((call) => call[1])).toEqual([failure, failure]);
-      expect((await fs.readdir(root)).sort()).toEqual([
-        "save.journal.tmp.replacing",
-        "save.replacing",
-      ]);
+      expect(await sortedReaddir(root)).toEqual(["save.journal.tmp.replacing", "save.replacing"]);
     } finally {
       rm.mockRestore();
       warning.mockRestore();

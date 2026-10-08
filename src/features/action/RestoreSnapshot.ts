@@ -53,6 +53,7 @@ import {
   defaultEmulatorConsoleBusyRegistry,
   type EmulatorConsoleBusyRegistry,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
+import { sortedReaddirEntries } from "../../utils/io";
 
 /** Parse only complete iOS snapshot version shapes; patch versions do not affect compatibility. */
 export function parseIosSnapshotOsVersion(
@@ -723,7 +724,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
     }
 
     try {
-      const entries = await fs.readdir(appDataPath, { withFileTypes: true });
+      const entries = await sortedReaddirEntries(appDataPath);
       return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
     } catch (error) {
       logger.warn(`[iOS] Failed to read app data bundles: ${error}`);

@@ -23,6 +23,7 @@ import {
   indeterminateSimulatorUninstallError,
   SIMULATOR_UNINSTALL_TIMEOUT_MS,
 } from "./simulatorUninstallBound";
+import { sortedReaddir } from "../io";
 
 /** Short reads share the 15-second device-list budget used by the lister and SimCtlClient. */
 const DEVICECTL_INFO_TIMEOUT_MS = 15_000;
@@ -68,7 +69,7 @@ const defaultDependencies: DeviceAppManagerDependencies = {
   readFile: async (path) => fs.readFile(path, "utf-8"),
   mkdtemp: async (prefix) => fs.mkdtemp(prefix),
   rm: async (path) => fs.rm(path, { recursive: true, force: true }),
-  readdir: async (path) => fs.readdir(path),
+  readdir: async (path) => sortedReaddir(path),
   stat: async (path) => fs.stat(path),
   tmpdir,
   logger,

@@ -53,6 +53,7 @@ import {
   DefaultDeviceIncarnationInvalidator,
   type DeviceIncarnationInvalidator,
 } from "./DeviceIncarnationInvalidator";
+import { sortedReaddirEntries } from "../utils/io";
 
 interface DeviceSnapshotCaptureArgs {
   snapshotName?: string;
@@ -1020,7 +1021,7 @@ async function* iterateScopedSnapshotDirs(
     const scopeRootPath = path.join(snapshotStore.getBasePath(), platform);
     let deviceDirs: Dirent[];
     try {
-      deviceDirs = await fs.readdir(scopeRootPath, { withFileTypes: true });
+      deviceDirs = await sortedReaddirEntries(scopeRootPath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {
@@ -1076,7 +1077,7 @@ async function importFlatLegacySnapshots(
 ): Promise<boolean> {
   let entries: Dirent[];
   try {
-    entries = await fs.readdir(snapshotStore.getBasePath(), { withFileTypes: true });
+    entries = await sortedReaddirEntries(snapshotStore.getBasePath());
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
@@ -1150,7 +1151,7 @@ async function importScopedLegacySnapshots(
   for await (const { pathOptions, scopedDirPath } of iterateScopedSnapshotDirs(snapshotStore)) {
     let snapshotDirs: Dirent[];
     try {
-      snapshotDirs = await fs.readdir(scopedDirPath, { withFileTypes: true });
+      snapshotDirs = await sortedReaddirEntries(scopedDirPath);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== "ENOENT") {

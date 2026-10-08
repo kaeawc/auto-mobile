@@ -6,6 +6,7 @@
  * If no path is provided, validates all test plans in the repository
  */
 
+import { compareCodeUnits } from "../src/utils/io";
 import path from "path";
 import { PlanSchemaValidator } from "../src/utils/plan/PlanSchemaValidator";
 
@@ -41,6 +42,7 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
   })) {
     files.push(file);
   }
+  files.sort(compareCodeUnits);
 
   if (files.length === 0) {
     console.error(`No YAML files found matching pattern: ${pattern}`);

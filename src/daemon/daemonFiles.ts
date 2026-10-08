@@ -1,13 +1,5 @@
 import path from "node:path";
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
@@ -24,6 +16,7 @@ import type { DaemonLaunchLogOwner, DaemonPidFileEnumeration } from "../utils/lo
 import { releaseVersion } from "../utils/mcpVersion";
 import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { sortedReaddirSync } from "../utils/io";
 
 // Register hoisted functions only: no discovery/read or logger access at module
 // initialization. CLI/MCP/doctor and daemon imports all share this wiring. A
@@ -513,7 +506,7 @@ export function listDaemonPidFilesSync(
   // of whether `pidFilePath` is the default location or a custom one.
   const uncertain = true;
   try {
-    for (const entry of readdirSync(dir)) {
+    for (const entry of sortedReaddirSync(dir)) {
       if (entry.startsWith(DAEMON_PID_FILE_BASENAME_PREFIX) && entry.endsWith(".pid")) {
         found.add(path.join(dir, entry));
       }
@@ -584,7 +577,7 @@ export function listDaemonPidFilePathsOrThrow(
 function readPidDirectoryEntriesOrThrow(dir: string): string[] {
   let entries: string[] = [];
   try {
-    entries = readdirSync(dir);
+    entries = sortedReaddirSync(dir);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;

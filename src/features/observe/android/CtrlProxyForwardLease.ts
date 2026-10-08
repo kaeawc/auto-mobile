@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
@@ -20,6 +20,7 @@ import {
   getCtrlProxyForwardLeaseOwnerSocketPath,
   type ForwardLeaseRelinquishProbe,
 } from "../shared/ctrlProxyForwardLeaseOwnership";
+import { sortedReaddirSync } from "../../../utils/io";
 
 /** Shared (agent-invariant) directory holding one lease lock file per device. */
 export const CTRL_PROXY_FORWARD_LEASE_SUBDIR = "ctrlproxy-forwards";
@@ -383,7 +384,7 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   public recordedForwards(): RecordedCtrlProxyForward[] {
     let fileNames: string[];
     try {
-      fileNames = readdirSync(this.lockDir());
+      fileNames = sortedReaddirSync(this.lockDir());
     } catch (error) {
       // No readable directory means no records to prune; ownership checks still fail closed.
       logger.warn(

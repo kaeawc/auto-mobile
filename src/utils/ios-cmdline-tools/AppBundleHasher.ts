@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
 import { join, relative } from "path";
+import { sortedReaddir } from "../io";
 
 interface AppBundleHasherDependencies {
   readDir: (path: string) => Promise<string[]>;
@@ -9,7 +10,7 @@ interface AppBundleHasherDependencies {
 }
 
 const defaultDependencies: AppBundleHasherDependencies = {
-  readDir: async (path) => fs.readdir(path),
+  readDir: async (path) => sortedReaddir(path),
   stat: async (path) => fs.stat(path),
   readFile: async (path) => fs.readFile(path),
 };

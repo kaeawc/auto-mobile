@@ -19,6 +19,7 @@ import type {
   ObservationArtifactWriter,
   ObservationArtifactWriteInput,
 } from "./finalizeToolResponse";
+import { sortedReaddirEntriesSync } from "../utils/io";
 
 const SECURE_TOOL_OUTPUT_DIR_MODE = 0o700;
 const PRUNE_INTERVAL_MS = 60_000;
@@ -56,7 +57,7 @@ export class NodeToolOutputArtifactFileSystem implements ToolOutputArtifactFileS
   }
 
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
-    return fs.readdirSync(dirPath, { withFileTypes: true }).map((entry) => {
+    return sortedReaddirEntriesSync(dirPath).map((entry) => {
       const entryPath = path.join(dirPath, entry.name);
       const stats = fs.statSync(entryPath);
       return {

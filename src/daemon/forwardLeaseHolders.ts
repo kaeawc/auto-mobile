@@ -1,4 +1,3 @@
-import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { readExclusiveLockContent, type LockContent } from "../utils/fileLock";
 import { isProcessRunning } from "../utils/processLiveness";
@@ -15,6 +14,7 @@ import {
   type ForwardLeaseOwnerReport,
 } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { DaemonDeviceLeaseOwnerProbe } from "./deviceLeaseOwnerQuery";
+import { sortedReaddirSync } from "../utils/io";
 
 /** One device's CtrlProxy forwarding-lease holder, read from its lock file. */
 export interface ForwardLeaseHolder {
@@ -34,7 +34,7 @@ export interface ForwardLeaseHolderSource {
 
 export const defaultForwardLeaseHolderSource: ForwardLeaseHolderSource = {
   lockDir: ctrlProxyForwardLeaseDir,
-  listFiles: (dir) => readdirSync(dir),
+  listFiles: (dir) => sortedReaddirSync(dir),
   readLock: readExclusiveLockContent,
   isProcessRunning: (pid) => isProcessRunning(pid),
 };

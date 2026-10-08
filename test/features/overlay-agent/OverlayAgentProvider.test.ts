@@ -10,6 +10,7 @@ import {
   type OverlayAgentProviderDeps,
 } from "../../../src/features/overlay-agent/OverlayAgentProvider";
 import { logger } from "../../../src/utils/logger";
+import { sortedReaddir } from "../../../src/utils/io";
 import { createFileBackedDbHarness, type FileBackedDbHarness } from "../../db/withFileBackedDb";
 import { FakeChecksumCalculator } from "../../fakes/FakeChecksumCalculator";
 import { FakeFileDownloader } from "../../fakes/FakeFileDownloader";
@@ -124,8 +125,7 @@ describe("OverlayAgentProvider", () => {
     await expect(makeProvider().ensure()).rejects.toThrow(/checksum verification failed/);
     expect(await exists(dylibPath())).toBe(true);
     expect(await exists(metadataPath())).toBe(true);
-    // readdir order is filesystem-defined (ext4 hash order differs from APFS/NTFS); sort first.
-    expect((await fs.readdir(cacheDir)).sort()).toEqual([
+    expect(await sortedReaddir(cacheDir)).toEqual([
       OVERLAY_AGENT_CACHE_FILENAME,
       OVERLAY_AGENT_METADATA_FILENAME,
     ]);
@@ -239,7 +239,7 @@ describe("OverlayAgentProvider", () => {
       `${dylibPath()}.a1.download`,
       `${dylibPath()}.b1.download`,
     ]);
-    expect((await fs.readdir(cacheDir)).sort()).toEqual([
+    expect(await sortedReaddir(cacheDir)).toEqual([
       OVERLAY_AGENT_CACHE_FILENAME,
       OVERLAY_AGENT_METADATA_FILENAME,
     ]);

@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src/utils";
 const BASELINE = "scripts/utils-import-direction-baseline.txt";
@@ -18,7 +19,7 @@ export function toPosixPath(path: string): string {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const file = join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(file)

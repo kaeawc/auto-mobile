@@ -12,6 +12,7 @@ import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
 import { getAbortSignal } from "../AbortContext";
 import { getSharedAutoMobileDir } from "../tempDir";
+import { sortedReaddir } from "../io";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -98,7 +99,7 @@ const createDefaultDependencies = (): XcodeSigningDependencies => ({
   platform: () => process.platform,
   securityClient: new SecurityClient(),
   xcodebuild: new XcodebuildClient(),
-  readDir: async (path) => fs.readdir(path),
+  readDir: async (path) => sortedReaddir(path),
   readFile: async (path) => fs.readFile(path, "utf-8"),
   stat: async (path) => fs.stat(path),
   writeFile: async (path, data) => fs.writeFile(path, data, "utf-8"),

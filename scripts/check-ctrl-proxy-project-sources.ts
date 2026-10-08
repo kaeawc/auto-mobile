@@ -1,6 +1,7 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { load } from "js-yaml";
+import { sortedReaddirEntries } from "../src/utils/io";
 
 type Source = string | { path: string; excludes?: string[] };
 type Project = { targets?: Record<string, { sources?: Source[] }> };
@@ -20,7 +21,7 @@ async function collect(path: string, sourceRoot: string, excludes: string[]): Pr
   const absolute = join(projectDir, path);
   const entry = await stat(absolute);
   if (entry.isDirectory()) {
-    for (const child of await readdir(absolute, { withFileTypes: true })) {
+    for (const child of await sortedReaddirEntries(absolute)) {
       const childPath = join(path, child.name);
       const relativeChild = relative(sourceRoot, childPath);
       if (

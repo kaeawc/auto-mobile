@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { builtinModules } from "node:module";
 import path from "node:path";
 import ts from "typescript";
+import { sortedReaddirSync } from "../../../src/utils/io";
 
 const BUILTINS = new Set<string>(builtinModules);
 
@@ -23,7 +24,7 @@ function addRootFromSpec(roots: Set<string>, spec: string): void {
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
-  for (const entry of readdirSync(dir)) {
+  for (const entry of sortedReaddirSync(dir)) {
     const full = path.join(dir, entry);
     if (statSync(full).isDirectory()) {
       collectSourceFiles(full, out);

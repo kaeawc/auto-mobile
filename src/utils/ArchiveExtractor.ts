@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { ActionableError } from "../models/ActionableError";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "./HostCommandExecutor";
 import { logger } from "./logger";
+import { sortedReaddir, sortedReaddirEntries } from "./io";
 
 /** Default extraction timeout — a local `tar` unpack should complete well within this. */
 const DEFAULT_EXTRACTION_TIMEOUT_MS = 120000;
@@ -138,7 +139,7 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
 
   /** Move each top-level extracted entry from staging into the destination, replacing any prior copy. */
   private async moveExtractedInto(stagingDir: string, destinationDir: string): Promise<void> {
-    const names = await fs.readdir(stagingDir);
+    const names = await sortedReaddir(stagingDir);
     for (const name of names) {
       const from = path.join(stagingDir, name);
       const to = path.join(destinationDir, name);
@@ -192,7 +193,7 @@ export class DefaultArchiveExtractor implements ArchiveExtractor {
  * consumer that legitimately needs symlinks must widen this policy deliberately.
  */
 async function assertStagedSymlinksSafe(stagingDir: string): Promise<void> {
-  const dirents = await fs.readdir(stagingDir, { withFileTypes: true });
+  const dirents = await sortedReaddirEntries(stagingDir);
   for (const dirent of dirents) {
     const entryPath = path.join(stagingDir, dirent.name);
     if (dirent.isSymbolicLink()) {
@@ -226,7 +227,7 @@ async function removeStagingTree(stagingDir: string): Promise<void> {
 /** Recursively grant owner rwx on every real directory so removal can proceed. */
 async function restoreOwnerWritable(dir: string): Promise<void> {
   await fs.chmod(dir, 0o700).catch(() => undefined);
-  const dirents: Dirent[] = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const dirents: Dirent[] = await sortedReaddirEntries(dir).catch(() => []);
   for (const dirent of dirents) {
     if (dirent.isDirectory() && !dirent.isSymbolicLink()) {
       await restoreOwnerWritable(path.join(dir, dirent.name));

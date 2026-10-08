@@ -233,6 +233,23 @@ describe("LaunchApp", () => {
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 
+  test("rejects an Android launch environment before invoking device commands", async () => {
+    await expect(
+      launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770" },
+      ),
+    ).rejects.toThrow("launch environment is supported on iOS simulators only");
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+  });
+
   test("checks Android running state through the shared process-state command", async () => {
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", {
@@ -3339,6 +3356,39 @@ describe("LaunchApp", () => {
         expect(harness.installedApps.getCallCount()).toBe(cold ? 1 : 0);
         expect(harness.fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
         expect(harness.targetBundleIdCalls).toEqual([userBundleId]);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    test("a launch environment forces a fresh simulator process and reaches simctl", async () => {
+      fakeTimer.enableAutoAdvance();
+      const harness = createIOSTestHarness({ bundleId: userBundleId });
+      const environment = {
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/tmp/AutoMobileOverlayAgent.dylib",
+        SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770",
+      };
+      try {
+        const result = await harness.iosLaunchApp.execute(
+          userBundleId,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          environment,
+        );
+        expect(result).toMatchObject({ success: true, pid: 123 });
+        expect(harness.calls).toEqual([
+          "listapps",
+          `terminate:${simulatorId}:${userBundleId}`,
+          `launch:${simulatorId}:${userBundleId}:${JSON.stringify({
+            foregroundIfRunning: false,
+            environment,
+          })}`,
+        ]);
       } finally {
         harness.cleanup();
       }

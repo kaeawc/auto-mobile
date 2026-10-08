@@ -1475,6 +1475,14 @@ export const launchAppResultSchema = z
     verified: z.boolean().optional(),
     verifyFailureReason: z.string().optional(),
     observedAppId: z.string().optional(),
+    overlayAgent: z
+      .object({
+        port: z.number().int(),
+        agentVersion: z.string(),
+        protocolVersion: z.number().int(),
+        capabilities: z.array(z.string()),
+      })
+      .optional(),
     observationOmitted: z
       .object({
         reason: z.literal("stale_launch_observation"),

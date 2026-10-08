@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -97,21 +97,35 @@ describe("SessionCacheData has no untyped escape hatch (issue #2973)", () => {
     return out;
   }
 
-  test("EC8: production code writes setter-only slots only via SessionManager setters", () => {
+  // Reading every source file can exceed Bun's default hook limit on loaded CI runners.
+  const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
+  // Reading every `src/` file is tree-scan IO, not the guard itself: do it once in
+  // beforeAll. A file that never names a slot cannot match either check below, so
+  // only files that mention one are kept for the test to scan.
+  const slotSources: { rel: string; source: string }[] = [];
+  beforeAll(() => {
     const sessionManagerAbs = join(process.cwd(), SESSION_MANAGER);
     // `sessionManager.ts` is where the setters and `updateSessionCache` live, so
     // it is (by design) the one place that writes the slots directly.
-    const files = listSrcTsFiles().filter((abs) => abs !== sessionManagerAbs);
+    for (const abs of listSrcTsFiles()) {
+      if (abs === sessionManagerAbs) {
+        continue;
+      }
+      const source = readFileSync(abs, "utf8");
+      if (SETTER_ONLY_SLOTS.some((slot) => source.includes(slot))) {
+        slotSources.push({ rel: abs.slice(process.cwd().length + 1), source });
+      }
+    }
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
+  test("EC8: production code writes setter-only slots only via SessionManager setters", () => {
     // A single `updateSessionCache( … )` call, argument list captured (non-greedy,
     // no nested braces) so we can look for a typed-slot key inside it. Anchoring on
     // the call site avoids false positives from Zod schemas / request DTOs that
     // happen to have a `keepScreenAwake:` field of their own.
     const UPDATE_CALL = /updateSessionCache\s*\(([^)]*\{[^{}]*\}[^)]*)\)/g;
 
-    for (const abs of files) {
-      const source = readFileSync(abs, "utf8");
-      const rel = abs.slice(process.cwd().length + 1);
+    for (const { rel, source } of slotSources) {
       for (const slot of SETTER_ONLY_SLOTS) {
         const setter = `set${slot[0].toUpperCase()}${slot.slice(1)}`;
 

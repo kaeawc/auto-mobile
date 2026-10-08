@@ -4066,6 +4066,10 @@ export class Daemon {
         },
         { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
         {
+          name: "device allocation claims",
+          run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
+        },
+        {
           // Session release broadcasts must be written while subscribed proxy
           // sockets are still connected; closing first degrades the exact
           // daemon-shutdown reason into session-not-found after reconnect.

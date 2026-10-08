@@ -67,6 +67,12 @@ class FakeOwnershipFiles implements DeviceOwnershipFileSource {
     this.files.set(path, { pid: owner.pid, token: owner.ownerToken, metadata: owner.metadata });
     return true;
   }
+  release(path: string, owner: { pid: number; ownerToken: string }): void {
+    const held = this.files.get(path);
+    if (held?.pid === owner.pid && held.token === owner.ownerToken) {
+      this.files.delete(path);
+    }
+  }
 }
 
 class FakeOwnerProbe implements ForwardLeaseOwnerProbe {
@@ -209,6 +215,17 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
       expect(await ownership.claim("b")).toBe(true);
       expect(files.files.get("/claims/a.lock")?.pid).toBe(SELF_PID);
       expect(files.files.get("/claims/b.lock")?.pid).toBe(SELF_PID);
+    });
+
+    test("release withdraws this daemon's claim but never another daemon's", async () => {
+      const { files, ownership } = harness();
+      expect(await ownership.claim("d")).toBe(true);
+      ownership.release("d");
+      expect(files.files.has("/claims/d.lock")).toBe(false);
+
+      files.files.set("/claims/e.lock", { pid: FOREIGN_PID, token: "t", metadata: metadata("/s") });
+      ownership.release("e");
+      expect(files.files.get("/claims/e.lock")?.pid).toBe(FOREIGN_PID);
     });
   });
 

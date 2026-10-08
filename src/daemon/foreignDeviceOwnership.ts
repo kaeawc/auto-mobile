@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import {
   readExclusiveLockContent,
+  releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
   type LockContent,
@@ -50,6 +51,11 @@ export interface ForeignDeviceOwnership {
    * still in use: the caller must give the device back.
    */
   claim(deviceId: string): Promise<boolean>;
+  /**
+   * Withdraw this daemon's allocation claim on a device it no longer assigns to a session. A
+   * claim another daemon took over is left alone.
+   */
+  release(deviceId: string): void;
 }
 
 /** The owner a lock file names: its PID and token, as written. */
@@ -73,6 +79,8 @@ export interface DeviceOwnershipFileSource {
     observed: LockOwner,
     owner: { pid: number; ownerToken: string; metadata?: string },
   ): boolean;
+  /** Remove the lock at `path` only while `owner` still holds it. */
+  release(path: string, owner: { pid: number; ownerToken: string }): void;
 }
 
 /** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
@@ -155,12 +163,13 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
     return tryAcquireExclusiveLock(path, owner);
   },
   takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
+  release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
 };
 
 /**
  * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
  * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
- * daemon takes when multi-device allocation assigns it the device. The claim lives in a directory
+ * daemon takes while a session holds the device (#10709). The claim lives in a directory
  * scoped to the ADB server rather than to the coordination directory, so daemons with different
  * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
  * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
@@ -240,6 +249,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     // The previous claimant is gone or no longer uses the device.
     return this.source.takeOver(path, observed, owner);
+  }
+
+  release(deviceId: string): void {
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    if (path === undefined) {
+      return;
+    }
+    try {
+      this.source.release(path, { pid: this.selfPid, ownerToken: this.ownerToken });
+    } catch (error) {
+      // The claim lapses anyway once this daemon reports no session on the device.
+      logger.warn(
+        `Cannot release the allocation claim on ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private claimOwner(): { pid: number; ownerToken: string; metadata?: string } {

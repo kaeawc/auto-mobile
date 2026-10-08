@@ -632,7 +632,7 @@ jobs:
   build-ide-plugin:
     timeout-minutes: 20
     name: "Build IDE Plugin"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: (needs.detect-changes.outputs.ide_plugin_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
@@ -674,7 +674,7 @@ jobs:
   ide-plugin-unit-tests:
     timeout-minutes: 20
     name: "Run IDE Plugin Unit Tests"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: [detect-changes, build-ide-plugin]
     if: (needs.detect-changes.outputs.ide_plugin_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
@@ -818,7 +818,7 @@ jobs:
   fast-validation:
     timeout-minutes: 20
     name: "Fast Validation"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: [detect-changes, format-check]
     # This required check must always report a result, including auto-chore
     # changes and a failed change-detection job.
@@ -961,7 +961,7 @@ jobs:
   detekt:
     timeout-minutes: 30
     name: "Detekt"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
     # `kotlin` filter cannot change what it reports. This gates whether the job
@@ -1268,7 +1268,7 @@ jobs:
 
   codeql-node:
     name: "CodeQL Analysis - Node.js/TypeScript"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 360
@@ -1616,7 +1616,7 @@ jobs:
 
   memory-leak-detection:
     name: "Memory Leak Detection"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 30
@@ -1790,7 +1790,7 @@ jobs:
   kotlin-code-coverage:
     timeout-minutes: 30
     name: "Run CtrlProxy Unit Tests"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
@@ -2597,7 +2597,7 @@ jobs:
   android-emulator-compile-smoke:
     timeout-minutes: 10
     name: "Android Emulator Compile Smoke"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
@@ -2621,7 +2621,7 @@ jobs:
   junit-runner-unit-tests:
     timeout-minutes: 20
     name: "Run JUnit Runner Unit Tests"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:
@@ -2690,8 +2690,7 @@ jobs:
   # Re-enabled in #110
   junit-runner-emulator-tests:
     name: "Run JUnit Runner Emulator Tests"
-    # Trusted same-repo PRs run on Namespace (KVM-backed); forks stay on GitHub-hosted.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'
@@ -2822,8 +2821,7 @@ jobs:
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
-    # Trusted same-repo PRs run on Namespace (KVM-backed); forks stay on GitHub-hosted.
-    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [detect-changes, build-android-control-proxy, android-emulator-compile-smoke]
     if: needs.detect-changes.outputs.android_should_run == 'true'
@@ -2872,7 +2870,7 @@ jobs:
   build-junit-runner-library:
     timeout-minutes: 20
     name: "Build JUnitRunner Library"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:
@@ -2907,7 +2905,7 @@ jobs:
   build-android-control-proxy:
     timeout-minutes: 20
     name: "Build CtrlProxy APK"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true' || needs.detect-changes.outputs.webrtc_should_run == 'true'
     defaults:
@@ -2946,7 +2944,7 @@ jobs:
   build-playground-app:
     timeout-minutes: 20
     name: "Build Playground App"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:

@@ -93,43 +93,9 @@ runs:
         java -version
         java -XshowSettings:properties -version 2>&1 | awk -F= '/java.specification.version/ {gsub(/ /,"",$2); if ($2+0 < 21) {print "Java 21+ is required"; exit 1}}'
 
-    # GitHub-hosted Ubuntu images ship an Android SDK; Namespace runner images
-    # do not, so install one only when no SDK root resolves.
-    - name: Detect Android SDK
-      id: android-sdk
-      shell: ${{ inputs.shell }}
-      run: |
-        sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-        if [ -n "$sdk_root" ] && [ -d "$sdk_root" ]; then
-          echo "present=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "present=false" >> "$GITHUB_OUTPUT"
-        fi
-
-    - name: Install Android SDK
-      if: steps.android-sdk.outputs.present != 'true'
-      uses: android-actions/setup-android@v3
-      with:
-        # The action's legacy default requests the removed `tools` package.
-        packages: platform-tools
-
-    - name: Record Android SDK root
-      shell: ${{ inputs.shell }}
-      run: |
-        sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-        echo "Using Android SDK at $sdk_root"
-        echo "ANDROID_EMULATOR_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
-
     - name: Enable KVM group perms
       shell: ${{ inputs.shell }}
       run: |
-        ls -l /dev/kvm || true
-        # Namespace runners are containers without udev and already expose a
-        # user-accessible /dev/kvm; only GitHub-hosted VMs need the udev rule.
-        if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-          echo "/dev/kvm is already accessible; skipping udev rule."
-          exit 0
-        fi
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
@@ -156,7 +122,7 @@ runs:
         path: |
           ~/.android/avd/*
           ~/.android/adb*
-          ${{ env.ANDROID_EMULATOR_SDK_ROOT }}/system-images/*
+          /usr/local/lib/android/sdk/system-images/*
         key: avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
         restore-keys: |
           avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-${{ inputs.arch }}-

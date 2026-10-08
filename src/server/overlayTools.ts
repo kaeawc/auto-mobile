@@ -1126,7 +1126,7 @@ function overlayPlatformError(
     const options = requestedOverlayWindowOptions(args.spec as OverlaySpec);
     if (options.appLayer || options.devicePersistence) {
       return new ActionableError(
-        "window.layer \"app\" and window.persistence \"device\" are Android only; omit them on iOS.",
+        'window.layer "app" and window.persistence "device" are Android only; omit them on iOS.',
       );
     }
   }

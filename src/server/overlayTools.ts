@@ -224,7 +224,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       spec: specInput
         .optional()
         .describe(
-          'Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge), optional state, root. window.opacity is 0-100, default 100. window.layer "app" and window.persistence "device" need a CtrlProxy advertising overlay_window_options_v1.',
+          'Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source "device", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100. window.layer "app" and window.persistence "device" need a CtrlProxy advertising overlay_window_options_v1.',
         ),
       display: z
         .string()
@@ -689,7 +689,10 @@ async function prepareWindowOptions(
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
   }
-  if (!(await client.supportsCommand(OVERLAY_WINDOW_OPTIONS_CAPABILITY))) {
+  const supported = await client.supportsCommand(OVERLAY_WINDOW_OPTIONS_CAPABILITY);
+  // The lookup waits for connection and handshake; an abort during it must stop every variant.
+  signal?.throwIfAborted();
+  if (!supported) {
     return {
       success: false,
       error: new ActionableError(overlayWindowOptionsUnsupportedMessage(options)).message,
@@ -887,6 +890,19 @@ function clearMutationEvents(
   }
 }
 
+/** A show subscribes (and resets the event epoch) only once its preflight accepted it. */
+function startShowEvents(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  action: OverlayMutation,
+  id: string | undefined,
+  client: OverlayClient,
+): void {
+  if (action === "show" && id !== undefined) {
+    events.show(scope, id, client);
+  }
+}
+
 function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
   const state = DaemonState.getInstance();
   if (!state.isInitialized()) {
@@ -923,9 +939,7 @@ async function performMutation(
     : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
   const client = clientFactory(device);
   const previouslyShown = store.status(scope).overlays.some((entry) => entry.id === target.id);
-  if (args.action === "show") {
-    events.show(scope, target.id!, client);
-  }
+  // Preflight first: a refused show must not reset the event epoch of an overlay still on screen.
   const { displayId, failure } = await preflightMutation(
     client,
     device,
@@ -933,6 +947,9 @@ async function performMutation(
     dependencies,
     signal,
   );
+  if (!failure) {
+    startShowEvents(events, scope, args.action, target.id, client);
+  }
   const stage: AssetStage = failure
     ? { uploaded: [], prepared: [], failure }
     : await stageAssets(client, args, assetReaders, signal);

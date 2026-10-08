@@ -3209,6 +3209,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  override fun getSdkCapabilities(requestId: String?, packageName: String) {
+    asyncActionRunner.launch(requestId, "get_sdk_capabilities") {
+      val state =
+        dev.jasonpearson.automobile.ctrlproxy.storage.discoverSdkCapabilities(
+          this@CtrlProxy,
+          packageName,
+        )
+      resultBroadcaster.guard(requestId, "sdk_capabilities") {
+        webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.SdkCapabilitiesResult(
+            timestamp = timeProvider.currentTimeMillis(),
+            requestId = requestId,
+            state = state,
+          )
+        )
+      }
+    }
+  }
+
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
     handleListDataStores(requestId, packageName, adapterName)
 

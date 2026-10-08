@@ -219,6 +219,7 @@ const KOTLIN_SERIAL_NAMES = [
   "list_preference_files",
   "get_preferences",
   "discover_keystore",
+  "get_sdk_capabilities",
   "list_data_stores",
   "get_data_store",
   "subscribe_storage",
@@ -759,6 +760,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         ctrlProxyRequests.discoverKeystore({ requestId: "ks-1", packageName: "com.x" }),
       ),
       expected: '{"type":"discover_keystore","requestId":"ks-1","packageName":"com.x"}',
+    },
+    {
+      builder: "getSdkCapabilities",
+      name: "SDK capability and capture-policy snapshot",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.getSdkCapabilities({ requestId: "sc-1", packageName: "com.x" }),
+      ),
+      expected: '{"type":"get_sdk_capabilities","requestId":"sc-1","packageName":"com.x"}',
     },
     {
       builder: "listDataStores",

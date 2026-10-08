@@ -526,6 +526,14 @@ data class DiscoverKeystore(
   val packageName: String,
 ) : WebSocketRequest()
 
+/** Reads the app SDK's capability and capture-policy snapshot (issue #5191). */
+@Serializable
+@SerialName("get_sdk_capabilities")
+data class GetSdkCapabilities(
+  override val requestId: String? = null,
+  val packageName: String,
+) : WebSocketRequest()
+
 /**
  * Lists the Jetpack DataStore instances exposed by a host-registered adapter (issue #5192/#5573).
  * DataStore descriptors reuse the SharedPreferences result shapes (StorageResponse.FileList, empty

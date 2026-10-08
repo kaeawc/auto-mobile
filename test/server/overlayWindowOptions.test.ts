@@ -1,3 +1,4 @@
+import { event } from "../helpers/overlayTestEvent";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   overlayOutputSchema,
@@ -150,6 +151,31 @@ describe("overlay window.layer and window.persistence", () => {
     expect(payload.error).toContain('window.layer "app" and window.persistence "device"');
     expect(client.getOverlayHistory()).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("a persistence-only request cancelled during the capability lookup never sends", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const handler = ToolRegistry.getTool("overlay")!.deviceAwareHandler!;
+    await expect(
+      handler(
+        device,
+        { action: "show", spec: spec({ persistence: "device" }) },
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(client.getOverlayHistory()).toEqual([]);
+  });
+
+  test("a refused replacement keeps the buffered events of the overlay still on screen", async () => {
+    await call({ action: "show", spec: spec() });
+    client.emitOverlayEvent(event(1, "proto"));
+    client.setSupportedCommands([]);
+    const refused = await call({ action: "show", spec: spec({ layer: "app" }) });
+    expect(refused.success).toBe(false);
+    const awaited = await call({ action: "awaitEvent", id: "proto" });
+    expect(awaited.event?.sequence).toBe(1);
   });
 
   test("update with a spec is checked like show", async () => {

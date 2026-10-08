@@ -9,13 +9,14 @@ setup() {
   SCRIPT="${REPO_ROOT}/scripts/ios/build-overlay-agent.sh"
   MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
   CALLS="${BATS_TEST_TMPDIR}/calls.log"
-  SRC_DIR="${BATS_TEST_TMPDIR}/src"
+  SRC_ROOT="${BATS_TEST_TMPDIR}/Sources"
+  SRC_DIR="${SRC_ROOT}/AutoMobileOverlayAgent"
   CALLER_DIR="${BATS_TEST_TMPDIR}/caller"
-  mkdir -p "${MOCK_BIN}" "${SRC_DIR}" "${CALLER_DIR}"
+  mkdir -p "${MOCK_BIN}" "${SRC_DIR}" "${SRC_ROOT}/AutoMobileOverlayAgentCore" "${CALLER_DIR}"
   : > "${CALLS}"
   printf 'int x;\n' > "${SRC_DIR}/Loader.c"
   printf 'let a = 1\n' > "${SRC_DIR}/A.swift"
-  printf 'let b = 2\n' > "${SRC_DIR}/B.swift"
+  printf 'let b = 2\n' > "${SRC_ROOT}/AutoMobileOverlayAgentCore/B.swift"
 
   # xcrun: --show-sdk-path prints a fake SDK; clang/swiftc record the call and
   # create the file named by -o.
@@ -56,7 +57,7 @@ SCRIPT
 
   export CALLS
   export PATH="${MOCK_BIN}:${PATH}"
-  export OVERLAY_AGENT_SOURCE_DIR="${SRC_DIR}"
+  export OVERLAY_AGENT_SOURCES_ROOT="${SRC_ROOT}"
 }
 
 @test "builds both simulator slices, lipos them, and ad-hoc signs" {
@@ -68,12 +69,12 @@ SCRIPT
   [[ "${output}" == *"/out/agent.dylib" ]]
   grep -Fq -- "-target arm64-apple-ios17.0-simulator" "${CALLS}"
   grep -Fq -- "-target x86_64-apple-ios17.0-simulator" "${CALLS}"
-  [ "$(grep -c 'xcrun swiftc' "${CALLS}")" -eq 2 ]
-  [ "$(grep -c 'xcrun clang' "${CALLS}")" -eq 2 ]
+  [ "$(grep -c 'iphonesimulator swiftc' "${CALLS}")" -eq 2 ]
+  [ "$(grep -c 'iphonesimulator clang' "${CALLS}")" -eq 2 ]
   grep -Fq "lipo -create" "${CALLS}"
   grep -Fq "codesign --force --sign -" "${CALLS}"
-  # Both Swift sources are passed to every swiftc invocation.
-  [ "$(grep 'xcrun swiftc' "${CALLS}" | grep -c 'A.swift.*B.swift')" -eq 2 ]
+  # Sources from the app and core directories are passed to every swiftc invocation.
+  [ "$(grep 'iphonesimulator swiftc' "${CALLS}" | grep -c 'A.swift.*B.swift')" -eq 2 ]
 }
 
 @test "honors OVERLAY_AGENT_MIN_IOS" {
@@ -91,11 +92,12 @@ SCRIPT
   [[ "${output}" == *"missing x86_64"* ]]
   [ ! -e "${CALLER_DIR}/agent.dylib" ]
   [ ! -e "${CALLER_DIR}/agent.dylib.partial" ]
-  ! grep -Fq "codesign" "${CALLS}"
+  # Slices are signed by the shared build script; the fat output must not be.
+  ! grep -Fq "codesign --force --sign - ${CALLER_DIR}" "${CALLS}"
 }
 
 @test "fails when there are no Swift sources" {
-  rm -f "${SRC_DIR}"/*.swift
+  rm -f "${SRC_DIR}"/*.swift "${SRC_ROOT}"/*/*.swift
 
   run bash -c 'cd "$1" && "$2" agent.dylib' _ "${CALLER_DIR}" "${SCRIPT}"
 

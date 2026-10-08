@@ -58,9 +58,9 @@ export interface ReleaseChecksumEntry {
    */
   screenCaptureHelperSha256?: string;
   /**
-   * SHA-256 of the universal (arm64 + x86_64) ad-hoc-signed iOS simulator
-   * overlay-agent dylib (#10564). Optional so releases predating its delivery
-   * simply have no verifiable agent.
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator overlay-agent dylib
+   * (`AutoMobileOverlayAgent.dylib`, #10564/#10565). Optional: releases that
+   * predate it degrade to "overlay agent unavailable for this build".
    */
   overlayAgentSha256?: string;
 }
@@ -931,6 +931,30 @@ export function resolveVideoJarChecksum(
   return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
 }
 
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator overlay agent (#10564). */
+export const OVERLAY_AGENT_DYLIB_FILENAME = "AutoMobileOverlayAgent.dylib";
+
+/** Download URL for the iOS-simulator overlay-agent dylib. */
+export function resolveOverlayAgentUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    OVERLAY_AGENT_DYLIB_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected overlay-agent dylib SHA-256 for the pinned version; "" when unknown. */
+export function resolveOverlayAgentChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.overlayAgentSha256 ?? "";
+}
+
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */
 export function resolveScreenCaptureHelperUrl(
   env: EnvLike = process.env,
@@ -950,30 +974,6 @@ export function resolveScreenCaptureHelperChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
-}
-
-/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS simulator overlay agent. */
-export const OVERLAY_AGENT_DYLIB_FILENAME = "AutoMobileOverlayAgent.dylib";
-
-/** Download URL for the iOS simulator overlay-agent dylib. */
-export function resolveOverlayAgentUrl(
-  env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
-): string {
-  return buildReleaseAssetUrl(
-    OVERLAY_AGENT_DYLIB_FILENAME,
-    resolvePinnedVersion(env),
-    resolveAssetBaseUrl(env),
-    registry,
-  );
-}
-
-/** Expected dylib SHA-256 for the selected release; empty when unknown. */
-export function resolveOverlayAgentChecksum(
-  env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
-): string {
-  return entryForPinnedVersion(env, registry)?.overlayAgentSha256 ?? "";
 }
 
 /**

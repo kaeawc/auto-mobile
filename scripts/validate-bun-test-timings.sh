@@ -667,9 +667,14 @@ FILENAME == recheck_file {
       if (run_rows[aggregated_runkey] >= expected_rows) {
         runs[aggregated_key] += 1
         if (seen_run[aggregated_runkey] <= limit_ms) under[aggregated_key]++
-        samples[aggregated_key] = (aggregated_key in samples) \
-          ? samples[aggregated_key] "," seen_run[aggregated_runkey] \
-          : seen_run[aggregated_runkey]
+        # Test membership before assigning: mawk creates the left-hand element
+        # before evaluating the right-hand side, so `a[k] = (k in a) ? ...` is
+        # always true there and prepends an empty (0ms) sample to the median.
+        sample_list = seen_run[aggregated_runkey]
+        if (aggregated_key in samples) {
+          sample_list = samples[aggregated_key] "," sample_list
+        }
+        samples[aggregated_key] = sample_list
       }
     }
     recheck_finalized = 1

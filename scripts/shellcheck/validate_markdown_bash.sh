@@ -213,6 +213,9 @@ process_file() {
   # AT LEAST as many backticks as the opener, so a block opened with ``` may be
   # closed with ```` (a longer fence) — matching only an exact 3-backtick close
   # would swallow the rest of the file as one block.
+  # "```+" spells ">=3 backticks" without an ERE interval: the default mawk on
+  # the Namespace Ubuntu runners did not honor `{3,}`, so a 4-backtick opener
+  # never matched there while 3-backtick fences still did.
   local awk_out
   awk_out="$(awk '
     function fence_len(s,   m) {
@@ -221,10 +224,10 @@ process_file() {
       while (substr(s, m + 1, 1) == "`") { m++ }
       return m
     }
-    !inblock && $0 ~ /^[[:space:]]*`{3,}bash[[:space:]]*$/ {
+    !inblock && $0 ~ /^[[:space:]]*```+bash[[:space:]]*$/ {
       inblock = 1; openlen = fence_len($0); print "@@ " NR; next
     }
-    inblock && $0 ~ /^[[:space:]]*`{3,}[[:space:]]*$/ && fence_len($0) >= openlen {
+    inblock && $0 ~ /^[[:space:]]*```+[[:space:]]*$/ && fence_len($0) >= openlen {
       inblock = 0; print "@@END"; next
     }
     inblock { print "@@L " $0 }

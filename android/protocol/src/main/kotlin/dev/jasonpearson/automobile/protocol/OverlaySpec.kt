@@ -84,7 +84,8 @@ data class OverlayStyle(
   val maxHeight: Double? = null,
   val padding: OverlayPadding? = null,
   val background: String? = null,
-  val cornerRadius: Double? = null,
+  /** A dp number or a Material Shapes token. */
+  val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
   val alpha: Double? = null,
   val alignment: String? = null,
@@ -96,6 +97,8 @@ data class OverlayStyle(
   val textAlign: String? = null,
   val maxLines: Int? = null,
   val fontFamily: String? = null,
+  /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
+  val textStyle: String? = null,
 )
 
 @Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
@@ -182,6 +185,8 @@ sealed class OverlayNode {
   abstract val style: OverlayStyle?
   abstract val styleWhen: List<OverlayStyleWhen>?
   abstract val visibleWhen: OverlayCondition?
+  /** `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit; absent is fade + expand. */
+  abstract val transition: String?
   abstract val anchor: OverlayAnchor?
   abstract val safeAreaPadding: OverlaySafeAreaPadding?
 }
@@ -195,6 +200,7 @@ data class OverlayBoxNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
@@ -209,6 +215,7 @@ data class OverlayRowNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
@@ -223,6 +230,7 @@ data class OverlayColumnNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
@@ -237,6 +245,7 @@ data class OverlayTextNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val text: String,
@@ -251,6 +260,7 @@ data class OverlayImageNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val asset: String,
@@ -266,9 +276,12 @@ data class OverlayIconNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val name: String,
+  /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
+  val variant: String? = null,
 ) : OverlayNode()
 
 @SerialName("spacer")
@@ -280,6 +293,7 @@ data class OverlaySpacerNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
 ) : OverlayNode()
@@ -293,6 +307,7 @@ data class OverlayTextFieldNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val stateKey: String,
@@ -306,7 +321,9 @@ data class OverlaySwitchNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val stateKey: String,
@@ -320,7 +337,9 @@ data class OverlayCheckboxNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val stateKey: String,
@@ -334,11 +353,62 @@ data class OverlayButtonNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val label: String,
   val variant: String = "filled",
+) : OverlayNode()
+
+@SerialName("slider")
+@Serializable
+data class OverlaySliderNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+  val min: Double,
+  val max: Double,
+  val step: Double? = null,
+) : OverlayNode()
+
+@SerialName("chip")
+@Serializable
+data class OverlayChipNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val label: String,
+  val variant: String? = null,
+  val stateKey: String? = null,
+) : OverlayNode()
+
+@SerialName("card")
+@Serializable
+data class OverlayCardNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val variant: String = "filled",
+  val children: List<OverlayNode>,
 ) : OverlayNode()
 
 @SerialName("scroll")
@@ -350,6 +420,7 @@ data class OverlayScrollNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val axis: String = "vertical",
@@ -365,6 +436,7 @@ data class OverlayPagerNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
@@ -379,6 +451,7 @@ data class OverlayTabBarNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val items: List<OverlayItem>,
@@ -396,6 +469,7 @@ data class OverlayBottomNavNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val items: List<OverlayItem>,
@@ -412,6 +486,7 @@ data class OverlayBottomSheetNode(
   override val style: OverlayStyle? = null,
   override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val child: OverlayNode,
@@ -438,10 +513,22 @@ data class OverlaySpecThemeColors(
   val source: String? = null,
 )
 
+/** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */
+@Serializable
+data class OverlaySpecThemeTypography(
+  val scale: Double? = null,
+  val fontFamily: String? = null,
+)
+
+/** `corner` picks one of the Material corner families (none, small, medium, large, full). */
+@Serializable data class OverlaySpecThemeShapes(val corner: String? = null)
+
 @Serializable
 data class OverlaySpecTheme(
   val mode: String? = null,
   val colors: OverlaySpecThemeColors? = null,
+  val typography: OverlaySpecThemeTypography? = null,
+  val shapes: OverlaySpecThemeShapes? = null,
 )
 
 @Serializable

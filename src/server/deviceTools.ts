@@ -193,7 +193,6 @@ import {
   type VirtualDeviceLifecycleOperation,
 } from "../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
-import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
 
@@ -4129,16 +4128,13 @@ export function validatePooledDeviceMapping(device: BootedDevice, requestedIdent
   if (!daemonState.isInitialized()) {
     return;
   }
-  const pooled = daemonState.getDevicePool().getDevice(device.deviceId);
-  // A physical iPhone's display name is mutable metadata, not identity, so a
-  // rename must not read as a stale pool entry here either (#5690). The pool
-  // itself tolerates it in matchesRuntimeIdentity(); both consult the same
-  // predicate so this validator cannot reject what the pool would accept.
-  const nameIsIdentity = !hasMutableDisplayName(device.platform, device.deviceId);
-  if (
-    pooled &&
-    (pooled.platform !== device.platform || (nameIsIdentity && pooled.name !== device.name))
-  ) {
+  const devicePool = daemonState.getDevicePool();
+  const pooled = devicePool.getDevice(device.deviceId);
+  // Delegate to the pool's own predicate rather than re-deriving it, so this
+  // validator cannot reject a pairing the pool tolerates: a physical iPhone's
+  // mutable display name (#5690) and an emulator's `Unknown (<serial>)`
+  // placeholder (#10603) are both judged exactly as the pool judges them.
+  if (pooled && !devicePool.matchesRuntimeIdentity(pooled, device)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
         `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +

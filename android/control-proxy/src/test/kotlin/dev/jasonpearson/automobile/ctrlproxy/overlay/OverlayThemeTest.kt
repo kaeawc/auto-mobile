@@ -1,9 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -167,6 +172,126 @@ class OverlayThemeTest {
         scheme.primary.contrastWith(scheme.surface) >= 3f,
       )
       assertTrue("onPrimary, dark=$dark", scheme.onPrimary.contrastWith(scheme.primary) >= 4.5f)
+    }
+  }
+
+  @Test
+  fun `no typography keeps the stock Material scale`() {
+    assertEquals(Typography().titleLarge, overlayTypography(null).titleLarge)
+    assertEquals(Typography().bodySmall, overlayTypography(OverlaySpecThemeTypography()).bodySmall)
+  }
+
+  @Test
+  fun `a scale multiplies every role's size and line height`() {
+    val base = Typography()
+    val scaled = overlayTypography(OverlaySpecThemeTypography(scale = 1.5))
+    assertEquals(base.bodyMedium.fontSize.value * 1.5f, scaled.bodyMedium.fontSize.value, 0.001f)
+    assertEquals(
+      base.displayLarge.fontSize.value * 1.5f,
+      scaled.displayLarge.fontSize.value,
+      0.001f,
+    )
+    assertEquals(
+      base.labelSmall.lineHeight.value * 1.5f,
+      scaled.labelSmall.lineHeight.value,
+      0.001f,
+    )
+    assertEquals(base.titleLarge.fontWeight, scaled.titleLarge.fontWeight)
+  }
+
+  @Test
+  fun `a font family replaces the family of every role`() {
+    assertEquals(
+      FontFamily.Serif,
+      overlayTypography(OverlaySpecThemeTypography(fontFamily = "serif")).headlineSmall.fontFamily,
+    )
+    assertEquals(
+      FontFamily.Monospace,
+      overlayTypography(OverlaySpecThemeTypography(fontFamily = "mono")).labelLarge.fontFamily,
+    )
+    assertEquals(
+      FontFamily.SansSerif,
+      overlayTypography(OverlaySpecThemeTypography(fontFamily = "sans")).bodyLarge.fontFamily,
+    )
+  }
+
+  @Test
+  fun `text style tokens resolve to their Material roles`() {
+    val typography = Typography()
+    assertEquals(typography.titleLarge, overlayTextRole(typography, "titleLarge"))
+    assertEquals(typography.displaySmall, overlayTextRole(typography, "displaySmall"))
+    assertEquals(typography.labelMedium, overlayTextRole(typography, "labelMedium"))
+    assertNull(overlayTextRole(typography, null))
+    assertNull(overlayTextRole(typography, "headline"))
+  }
+
+  @Test
+  fun `corner choices map to Material shape families`() {
+    assertEquals(Shapes(), overlayShapes(null))
+    assertEquals(Shapes(), overlayShapes(OverlaySpecThemeShapes("medium")))
+    assertEquals(RoundedCornerShape(0.dp), overlayShapes(OverlaySpecThemeShapes("none")).large)
+    val small = overlayShapes(OverlaySpecThemeShapes("small"))
+    val large = overlayShapes(OverlaySpecThemeShapes("large"))
+    assertEquals(RoundedCornerShape(8.dp), small.large)
+    assertEquals(RoundedCornerShape(28.dp), large.large)
+    assertEquals(RoundedCornerShape(2.dp), small.extraSmall)
+    val full = overlayShapes(OverlaySpecThemeShapes("full"))
+    assertEquals(RoundedCornerShape(percent = 50), full.extraSmall)
+    assertEquals(RoundedCornerShape(percent = 50), full.extraLarge)
+  }
+
+  @Test
+  fun `colour roles resolve against the scheme and hex colours stay literal`() {
+    val scheme = lightColorScheme(primary = Color(0xFF123456), surfaceContainer = Color(0xFF654321))
+    assertEquals(Color(0xFF123456), overlayColorRole(scheme, "primary"))
+    assertEquals(Color(0xFF654321), overlayColorRole(scheme, "surfaceContainer"))
+    assertNull(overlayColorRole(scheme, "onPurple"))
+    assertEquals(Color(0xFF123456), overlayResolveColor(scheme, null, "primary"))
+    assertEquals(Color.Red, overlayResolveColor(scheme, Color.Red, "#FFFF0000"))
+    assertEquals(Color.Red, overlayResolveColor(scheme, Color.Red, null))
+    assertNull(overlayResolveColor(scheme, null, null))
+  }
+
+  @Test
+  fun `colour role tokens map to no literal colour and hex stays parsed`() {
+    val style = mapOverlayStyle(OverlayStyle(background = "surface", color = "#112233"))
+    assertNull(style.background)
+    assertEquals(Color(0xFF112233), style.color)
+    assertEquals(Color.Unspecified, mapOverlayStyle(OverlayStyle(color = "onSurface")).color)
+  }
+
+  @Test
+  fun `corner tokens map to the theme's shape steps and dp stays literal`() {
+    val shapes = Shapes(large = RoundedCornerShape(11.dp))
+    assertEquals(shapes.large, overlayCornerShape(shapes, OverlayCornerRadius.Token("large")))
+    assertEquals(shapes.small, overlayCornerShape(shapes, OverlayCornerRadius.Token("small")))
+    assertEquals(
+      RoundedCornerShape(0.dp),
+      overlayCornerShape(shapes, OverlayCornerRadius.Token("none")),
+    )
+    assertEquals(
+      RoundedCornerShape(percent = 50),
+      overlayCornerShape(shapes, OverlayCornerRadius.Token("full")),
+    )
+    assertEquals(
+      RoundedCornerShape(6.dp),
+      overlayCornerShape(shapes, OverlayCornerRadius.Dp(6.0)),
+    )
+  }
+
+  @Test
+  fun `cornerRadius decodes dp and tokens and rejects unknown tokens`() {
+    val json = kotlinx.serialization.json.Json
+    assertEquals(
+      OverlayCornerRadius.Dp(4.0),
+      json.decodeFromString(OverlayCornerRadiusSerializer, "4"),
+    )
+    assertEquals(
+      OverlayCornerRadius.Token("extraLarge"),
+      json.decodeFromString(OverlayCornerRadiusSerializer, "\"extraLarge\""),
+    )
+    assertThrows(kotlinx.serialization.SerializationException::class.java) {
+      json.decodeFromString(OverlayCornerRadiusSerializer, "\"huge\"")
     }
   }
 

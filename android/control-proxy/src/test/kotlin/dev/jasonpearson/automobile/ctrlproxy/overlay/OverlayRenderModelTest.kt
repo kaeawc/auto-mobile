@@ -70,21 +70,34 @@ class OverlayRenderModelTest {
         .jsonObject
         .getValue("definitions")
         .jsonObject
-        .getValue("item")
-        .jsonObject
-        .getValue("fields")
-        .jsonObject
-        .getValue("icon")
-        .jsonObject
-        .getValue("rule")
+        .getValue("iconName")
         .jsonObject
         .getValue("values")
         .jsonArray
-    for (name in names) assertNotNull(
-      name.jsonPrimitive.content,
-      overlayIcon(name.jsonPrimitive.content),
-    )
+    assertTrue(names.size > 2000)
+    for ((index, name) in names.withIndex()) {
+      val content = name.jsonPrimitive.content
+      assertNotNull(content, overlayIcon(content))
+      // Every name loads filled; styles share the class layout, so a sample of names covers them.
+      if (index % 40 != 0) continue
+      for (variant in listOf("outlined", "rounded", "sharp", "twoTone")) {
+        assertNotNull("$content/$variant", overlayIcon(content, variant))
+      }
+    }
     assertNull(overlayIcon("unknown"))
+    assertNull(overlayIcon("Home"))
+    assertNull(overlayIcon("home; drop"))
+  }
+
+  @Test
+  fun `icon variants resolve distinct artwork and unknown variants fall back to filled`() {
+    val filled = checkNotNull(overlayIcon("timer"))
+    assertSame(filled, overlayIcon("timer", "filled"))
+    assertSame(filled, overlayIcon("timer", "unheard-of"))
+    assertNotSame(filled, overlayIcon("timer", "outlined"))
+    assertNotSame(overlayIcon("timer", "rounded"), overlayIcon("timer", "sharp"))
+    assertNotNull(overlayIcon("bedtime"))
+    assertNotNull(overlayIcon("alarm_add", "twoTone"))
   }
 
   @Test
@@ -185,7 +198,7 @@ class OverlayRenderModelTest {
         maxHeight = 90.0,
         padding = OverlayPadding(1.0, 2.0, 3.0, 4.0),
         background = "#112233",
-        cornerRadius = 6.0,
+        cornerRadius = OverlayCornerRadius.Dp(6.0),
         border = OverlayBorder(2.0, "#80112233"),
         alpha = 0.4,
         alignment = "bottomEnd",

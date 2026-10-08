@@ -142,16 +142,40 @@ describe("variant carousel composition", () => {
   });
   describe("control row stays reachable (#10086)", () => {
     const labelled = [{ ...image, label: "Red A" }, { ...image, label: "Green B" }, image];
-    for (const presentation of ["fullscreen", "floating"] as const) {
-      test(`${presentation}: every control row pads into the system bars and cutout`, () => {
-        for (const page of pages({ id: "panel", variants: labelled, presentation })) {
+    const edgeCases = [
+      {
+        name: "fullscreen",
+        input: { presentation: "fullscreen" },
+        edges: ["bottom", "start", "end"],
+      },
+      {
+        name: "default floating",
+        input: { presentation: "floating" },
+        edges: ["bottom", "start", "end"],
+      },
+      {
+        name: "top floating",
+        input: { presentation: "floating", gravity: "topEnd" },
+        edges: ["top", "start", "end"],
+      },
+      {
+        name: "center floating",
+        input: { presentation: "floating", gravity: "centerStart" },
+        edges: ["start", "end"],
+      },
+    ] as const;
+    for (const { name, input, edges } of edgeCases) {
+      test(`${name}: the control row pads only the edges it touches`, () => {
+        for (const page of pages({ id: "panel", variants: labelled, ...input })) {
           const row = children(page).at(-1)!;
           expect(row.safeAreaPadding).toEqual({
             types: ["systemBars", "cutout"],
-            edges: ["top", "bottom", "start", "end"],
+            edges: [...edges],
           });
         }
       });
+    }
+    for (const presentation of ["fullscreen", "floating"] as const) {
       test(`${presentation}: the control row has a background and readable text`, () => {
         for (const page of pages({ id: "panel", variants: labelled, presentation })) {
           const row = children(page).at(-1)!;

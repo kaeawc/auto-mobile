@@ -18003,7 +18003,7 @@
           "enum": ["show", "update", "dismiss", "status", "awaitEvent", "showVariants"]
         },
         "spec": {
-          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\"), optional state, root. window.opacity is 0-100, default 100.",
+          "description": "Full overlay spec: id, window, optional theme (mode light|dark|system, colors.seed hex or colors.source \"device\", typography.scale 0.75-1.5 and fontFamily sans|serif|mono, shapes.corner none|small|medium|large|full; text style.textStyle names a Material type role such as titleLarge; style color, background and border.color take hex or a Material colour role such as primary, onSurface, surfaceContainer; style.cornerRadius takes dp or none|extraSmall|small|medium|large|extraLarge|full), optional state, root. window.opacity is 0-100, default 100.",
           "type": "object",
           "properties": {
             "id": {
@@ -18120,6 +18120,31 @@
                   },
                   "additionalProperties": false,
                   "minProperties": 1
+                },
+                "typography": {
+                  "type": "object",
+                  "properties": {
+                    "scale": {
+                      "type": "number",
+                      "minimum": 0.75,
+                      "maximum": 1.5
+                    },
+                    "fontFamily": {
+                      "type": "string",
+                      "enum": ["sans", "serif", "mono"]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "shapes": {
+                  "type": "object",
+                  "properties": {
+                    "corner": {
+                      "type": "string",
+                      "enum": ["none", "small", "medium", "large", "full"]
+                    }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false,
@@ -18336,12 +18361,73 @@
                           "additionalProperties": false
                         },
                         "background": {
-                          "type": "string",
-                          "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "primary",
+                                "onPrimary",
+                                "primaryContainer",
+                                "onPrimaryContainer",
+                                "inversePrimary",
+                                "secondary",
+                                "onSecondary",
+                                "secondaryContainer",
+                                "onSecondaryContainer",
+                                "tertiary",
+                                "onTertiary",
+                                "tertiaryContainer",
+                                "onTertiaryContainer",
+                                "background",
+                                "onBackground",
+                                "surface",
+                                "onSurface",
+                                "surfaceVariant",
+                                "onSurfaceVariant",
+                                "surfaceTint",
+                                "inverseSurface",
+                                "inverseOnSurface",
+                                "error",
+                                "onError",
+                                "errorContainer",
+                                "onErrorContainer",
+                                "outline",
+                                "outlineVariant",
+                                "scrim",
+                                "surfaceBright",
+                                "surfaceDim",
+                                "surfaceContainer",
+                                "surfaceContainerHigh",
+                                "surfaceContainerHighest",
+                                "surfaceContainerLow",
+                                "surfaceContainerLowest"
+                              ]
+                            }
+                          ]
                         },
                         "cornerRadius": {
-                          "type": "number",
-                          "minimum": 0
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "extraSmall",
+                                "small",
+                                "medium",
+                                "large",
+                                "extraLarge",
+                                "full"
+                              ]
+                            }
+                          ]
                         },
                         "border": {
                           "type": "object",
@@ -18351,8 +18437,7 @@
                               "minimum": 0
                             },
                             "color": {
-                              "type": "string",
-                              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
                             }
                           },
                           "required": ["width", "color"],
@@ -18402,8 +18487,7 @@
                           "maximum": 900
                         },
                         "color": {
-                          "type": "string",
-                          "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style/properties/background"
                         },
                         "textAlign": {
                           "type": "string",
@@ -18417,6 +18501,26 @@
                         "fontFamily": {
                           "type": "string",
                           "enum": ["default", "sansSerif", "serif", "monospace"]
+                        },
+                        "textStyle": {
+                          "type": "string",
+                          "enum": [
+                            "displayLarge",
+                            "displayMedium",
+                            "displaySmall",
+                            "headlineLarge",
+                            "headlineMedium",
+                            "headlineSmall",
+                            "titleLarge",
+                            "titleMedium",
+                            "titleSmall",
+                            "bodyLarge",
+                            "bodyMedium",
+                            "bodySmall",
+                            "labelLarge",
+                            "labelMedium",
+                            "labelSmall"
+                          ]
                         }
                       },
                       "additionalProperties": false
@@ -18545,6 +18649,10 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when"
+                    },
+                    "transition": {
+                      "type": "string",
+                      "enum": ["none", "fade", "expand", "slide"]
                     },
                     "anchor": {
                       "anyOf": [
@@ -18704,6 +18812,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18745,6 +18856,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18788,6 +18902,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18825,6 +18942,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18869,6 +18989,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -18880,45 +19003,11 @@
                       "enum": ["icon"]
                     },
                     "name": {
+                      "type": "string"
+                    },
+                    "variant": {
                       "type": "string",
-                      "enum": [
-                        "home",
-                        "search",
-                        "settings",
-                        "person",
-                        "favorite",
-                        "add",
-                        "close",
-                        "check",
-                        "arrow_back",
-                        "arrow_forward",
-                        "chevron_left",
-                        "chevron_right",
-                        "menu",
-                        "more_vert",
-                        "share",
-                        "edit",
-                        "delete",
-                        "info",
-                        "warning",
-                        "notifications",
-                        "star",
-                        "shopping_cart",
-                        "help",
-                        "refresh",
-                        "done",
-                        "cancel",
-                        "play_arrow",
-                        "pause",
-                        "stop",
-                        "mail",
-                        "phone",
-                        "location_on",
-                        "calendar_today",
-                        "visibility",
-                        "lock",
-                        "logout"
-                      ]
+                      "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                     }
                   },
                   "required": ["type", "name"],
@@ -18944,6 +19033,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -18979,6 +19071,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19022,6 +19117,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19059,8 +19157,14 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19099,8 +19203,14 @@
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
                     },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19138,6 +19248,157 @@
                     },
                     "style": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["slider"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "min": {
+                      "type": "number"
+                    },
+                    "max": {
+                      "type": "number"
+                    },
+                    "step": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["type", "stateKey", "min", "max"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["chip"]
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["assist", "filter"]
+                    },
+                    "stateKey": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                    }
+                  },
+                  "required": ["type", "label"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": ["card"]
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": ["filled", "elevated", "outlined"]
+                    },
+                    "children": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/properties/spec/properties/root"
+                      },
+                      "minItems": 0
+                    }
+                  },
+                  "required": ["type", "children"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
@@ -19186,6 +19447,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19228,6 +19492,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19248,45 +19515,7 @@
                             "minLength": 1
                           },
                           "icon": {
-                            "type": "string",
-                            "enum": [
-                              "home",
-                              "search",
-                              "settings",
-                              "person",
-                              "favorite",
-                              "add",
-                              "close",
-                              "check",
-                              "arrow_back",
-                              "arrow_forward",
-                              "chevron_left",
-                              "chevron_right",
-                              "menu",
-                              "more_vert",
-                              "share",
-                              "edit",
-                              "delete",
-                              "info",
-                              "warning",
-                              "notifications",
-                              "star",
-                              "shopping_cart",
-                              "help",
-                              "refresh",
-                              "done",
-                              "cancel",
-                              "play_arrow",
-                              "pause",
-                              "stop",
-                              "mail",
-                              "phone",
-                              "location_on",
-                              "calendar_today",
-                              "visibility",
-                              "lock",
-                              "logout"
-                            ]
+                            "$ref": "#/properties/spec/properties/root/anyOf/5/properties/name"
                           },
                           "image": {
                             "type": "string",
@@ -19335,6 +19564,9 @@
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
                     },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
                     },
@@ -19348,7 +19580,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/13/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/16/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -19385,6 +19617,9 @@
                     },
                     "visibleWhen": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
                     },
                     "anchor": {
                       "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
@@ -19697,12 +19932,73 @@
                             "additionalProperties": false
                           },
                           "background": {
-                            "type": "string",
-                            "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "primary",
+                                  "onPrimary",
+                                  "primaryContainer",
+                                  "onPrimaryContainer",
+                                  "inversePrimary",
+                                  "secondary",
+                                  "onSecondary",
+                                  "secondaryContainer",
+                                  "onSecondaryContainer",
+                                  "tertiary",
+                                  "onTertiary",
+                                  "tertiaryContainer",
+                                  "onTertiaryContainer",
+                                  "background",
+                                  "onBackground",
+                                  "surface",
+                                  "onSurface",
+                                  "surfaceVariant",
+                                  "onSurfaceVariant",
+                                  "surfaceTint",
+                                  "inverseSurface",
+                                  "inverseOnSurface",
+                                  "error",
+                                  "onError",
+                                  "errorContainer",
+                                  "onErrorContainer",
+                                  "outline",
+                                  "outlineVariant",
+                                  "scrim",
+                                  "surfaceBright",
+                                  "surfaceDim",
+                                  "surfaceContainer",
+                                  "surfaceContainerHigh",
+                                  "surfaceContainerHighest",
+                                  "surfaceContainerLow",
+                                  "surfaceContainerLowest"
+                                ]
+                              }
+                            ]
                           },
                           "cornerRadius": {
-                            "type": "number",
-                            "minimum": 0
+                            "anyOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "extraSmall",
+                                  "small",
+                                  "medium",
+                                  "large",
+                                  "extraLarge",
+                                  "full"
+                                ]
+                              }
+                            ]
                           },
                           "border": {
                             "type": "object",
@@ -19712,8 +20008,7 @@
                                 "minimum": 0
                               },
                               "color": {
-                                "type": "string",
-                                "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                                "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/background"
                               }
                             },
                             "required": ["width", "color"],
@@ -19763,8 +20058,7 @@
                             "maximum": 900
                           },
                           "color": {
-                            "type": "string",
-                            "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+                            "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style/properties/background"
                           },
                           "textAlign": {
                             "type": "string",
@@ -19778,6 +20072,26 @@
                           "fontFamily": {
                             "type": "string",
                             "enum": ["default", "sansSerif", "serif", "monospace"]
+                          },
+                          "textStyle": {
+                            "type": "string",
+                            "enum": [
+                              "displayLarge",
+                              "displayMedium",
+                              "displaySmall",
+                              "headlineLarge",
+                              "headlineMedium",
+                              "headlineSmall",
+                              "titleLarge",
+                              "titleMedium",
+                              "titleSmall",
+                              "bodyLarge",
+                              "bodyMedium",
+                              "bodySmall",
+                              "labelLarge",
+                              "labelMedium",
+                              "labelSmall"
+                            ]
                           }
                         },
                         "additionalProperties": false
@@ -19906,6 +20220,10 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen/items/properties/when"
+                      },
+                      "transition": {
+                        "type": "string",
+                        "enum": ["none", "fade", "expand", "slide"]
                       },
                       "anchor": {
                         "anyOf": [
@@ -20075,6 +20393,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20116,6 +20437,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20159,6 +20483,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20196,6 +20523,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20240,6 +20570,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20251,45 +20584,11 @@
                         "enum": ["icon"]
                       },
                       "name": {
+                        "type": "string"
+                      },
+                      "variant": {
                         "type": "string",
-                        "enum": [
-                          "home",
-                          "search",
-                          "settings",
-                          "person",
-                          "favorite",
-                          "add",
-                          "close",
-                          "check",
-                          "arrow_back",
-                          "arrow_forward",
-                          "chevron_left",
-                          "chevron_right",
-                          "menu",
-                          "more_vert",
-                          "share",
-                          "edit",
-                          "delete",
-                          "info",
-                          "warning",
-                          "notifications",
-                          "star",
-                          "shopping_cart",
-                          "help",
-                          "refresh",
-                          "done",
-                          "cancel",
-                          "play_arrow",
-                          "pause",
-                          "stop",
-                          "mail",
-                          "phone",
-                          "location_on",
-                          "calendar_today",
-                          "visibility",
-                          "lock",
-                          "logout"
-                        ]
+                        "enum": ["filled", "outlined", "rounded", "sharp", "twoTone"]
                       }
                     },
                     "required": ["type", "name"],
@@ -20315,6 +20614,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20350,6 +20652,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20393,6 +20698,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20430,8 +20738,14 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20470,8 +20784,14 @@
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
                       },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
@@ -20509,6 +20829,157 @@
                       },
                       "style": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["slider"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "min": {
+                        "type": "number"
+                      },
+                      "max": {
+                        "type": "number"
+                      },
+                      "step": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["type", "stateKey", "min", "max"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["chip"]
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": ["assist", "filter"]
+                      },
+                      "stateKey": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                      }
+                    },
+                    "required": ["type", "label"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
+                      },
+                      "visibleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "anchor": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
+                      },
+                      "safeAreaPadding": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/safeAreaPadding"
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["card"]
+                      },
+                      "variant": {
+                        "type": "string",
+                        "enum": ["filled", "elevated", "outlined"]
+                      },
+                      "children": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/properties/variants/items/properties/spec"
+                        },
+                        "minItems": 0
+                      }
+                    },
+                    "required": ["type", "children"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/id"
+                      },
+                      "testTag": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/testTag"
+                      },
+                      "onTap": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/onTap"
+                      },
+                      "style": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/style"
+                      },
+                      "styleWhen": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/styleWhen"
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
@@ -20557,6 +21028,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20599,6 +21073,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20619,45 +21096,7 @@
                               "minLength": 1
                             },
                             "icon": {
-                              "type": "string",
-                              "enum": [
-                                "home",
-                                "search",
-                                "settings",
-                                "person",
-                                "favorite",
-                                "add",
-                                "close",
-                                "check",
-                                "arrow_back",
-                                "arrow_forward",
-                                "chevron_left",
-                                "chevron_right",
-                                "menu",
-                                "more_vert",
-                                "share",
-                                "edit",
-                                "delete",
-                                "info",
-                                "warning",
-                                "notifications",
-                                "star",
-                                "shopping_cart",
-                                "help",
-                                "refresh",
-                                "done",
-                                "cancel",
-                                "play_arrow",
-                                "pause",
-                                "stop",
-                                "mail",
-                                "phone",
-                                "location_on",
-                                "calendar_today",
-                                "visibility",
-                                "lock",
-                                "logout"
-                              ]
+                              "$ref": "#/properties/variants/items/properties/spec/anyOf/5/properties/name"
                             },
                             "image": {
                               "type": "string",
@@ -20706,6 +21145,9 @@
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
                       },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
+                      },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"
                       },
@@ -20719,7 +21161,7 @@
                       "items": {
                         "type": "array",
                         "items": {
-                          "$ref": "#/properties/variants/items/properties/spec/anyOf/13/properties/items/items"
+                          "$ref": "#/properties/variants/items/properties/spec/anyOf/16/properties/items/items"
                         },
                         "minItems": 2,
                         "maxItems": 5
@@ -20756,6 +21198,9 @@
                       },
                       "visibleWhen": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/visibleWhen"
+                      },
+                      "transition": {
+                        "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/transition"
                       },
                       "anchor": {
                         "$ref": "#/properties/variants/items/properties/spec/anyOf/0/properties/anchor"

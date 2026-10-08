@@ -19,7 +19,7 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
-- Built-in icons come from a closed list; other artwork uses image assets.
+- Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; overlay opacity is a percentage; app-element anchoring is supported; observe
@@ -89,8 +89,24 @@ from. At least one of its fields is required:
 | `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
 | `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
 
-An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
-are a later slice (#10438).
+| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
+| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
+
+`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+inferred from backgrounds.
+
+A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
+in all) and so follows the theme's scale and family. It supplies size, weight and family; an
+explicit `textSize`, `fontWeight` or `fontFamily` on the same node still wins. Plain text
+without `textStyle` keeps its authored 14 sp default and is not scaled; it takes the theme's
+`typography.fontFamily` only when it names no `fontFamily` of its own.
+
+A text node with no `color` draws in the theme's content colour (`onSurface`). A `cornerRadius` token maps to the
+theme's Shapes (`shapes.corner` shifts them), `none` is square and `full` a pill. A
+role-valued `background` does not take part in inferring the overlay's light/dark
+theme from authored backgrounds (it would be circular); set `theme.mode` or
+`colors.seed` for that.
 
 ## Windows
 
@@ -119,6 +135,7 @@ Every node has required `type`. All other common properties are optional:
 | `style`           | Strict style object below.                                                                         |
 | `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
 | `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
+| `transition`      | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
 
@@ -133,24 +150,27 @@ layout room.
 
 ## Nodes
 
-| `type`        | Node-specific properties                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `box`         | Required `children` array, possibly empty; children stack.                                                           |
-| `row`         | Required `children` array, possibly empty; horizontal layout.                                                        |
-| `column`      | Required `children` array, possibly empty; vertical layout.                                                          |
-| `text`        | Required `text` string, possibly empty.                                                                              |
-| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                            |
-| `icon`        | Required built-in `name` below.                                                                                      |
-| `spacer`      | No node-specific properties; size comes from style.                                                                  |
-| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
-| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
-| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
-| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.             |
-| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
-| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                |
-| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                   |
-| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.            |
-| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                |
+| `type`        | Node-specific properties                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box`         | Required `children` array, possibly empty; children stack.                                                                                       |
+| `row`         | Required `children` array, possibly empty; horizontal layout.                                                                                    |
+| `column`      | Required `children` array, possibly empty; vertical layout.                                                                                      |
+| `text`        | Required `text` string, possibly empty.                                                                                                          |
+| `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                        |
+| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                              |
+| `spacer`      | No node-specific properties; size comes from style.                                                                                              |
+| `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                      |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                        |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.                                         |
+| `slider`      | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`. |
+| `chip`        | Required nonempty `label`; optional `variant`: `assist`, `filter`; optional `stateKey` naming a boolean (a filter chip).                         |
+| `card`        | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                       |
+| `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                             |
+| `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                            |
+| `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                               |
+| `bottomNav`   | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                        |
+| `bottomSheet` | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                            |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -186,8 +206,24 @@ node carrying its label as text, a native role (`Switch`, `Checkbox`,
 `Button`), and for switch and checkbox the checkable/checked state, so `observe`
 reports them as controls and `tapOn` by `testTag` or label toggles or presses
 them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
-`slider`, `chip`, `card`, `listItem` and the other components in #10439 are
-later slices.
+`listItem` and the other components in #10439 are later slices.
+
+`slider`, `chip` and `card` are the second slice. A slider is bound to a number
+state key that must already lie within `min`..`max`; `step`, when given, must
+be positive and divide `max - min` evenly (the thumb snaps to those positions,
+otherwise it is continuous). Dragging, or an accessibility set-progress action,
+stores the snapped number, emits `change` (`{key, value}`) only when the value
+moved, and then runs the node's `onTap`. It is one accessibility node carrying
+its label and a progress range (current, `min`..`max`, steps), so `observe`
+reports the value as range info. A chip with a `stateKey` is a filter chip: it
+toggles that boolean like a switch, emits `change`, then runs `onTap`, and
+reports the `Checkbox` role with its checked state. A chip without one is an
+assist chip: a `Button` that runs `onTap`. `variant: filter` requires a
+`stateKey` and `variant: assist` forbids one; `input` and `suggestion` chips are
+later slices. A card is a Material container whose `children` are laid out as a
+column; its `variant` selects filled, elevated or outlined, a `style.background`
+overrides the container colour, and an `onTap` makes the whole card clickable.
+A card has no accessibility label of its own.
 
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
@@ -208,9 +244,9 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
 | `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
 | `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
-| `background`, `color`                            | Strict hex color.                                                                                                            |
-| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
-| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `background`, `color`                            | Strict hex color, or a Material 3 color role name (see below).                                                               |
+| `cornerRadius`                                   | Nonnegative dp, or a Shapes token: `none`, `extraSmall`, `small`, `medium`, `large`, `extraLarge`, `full`.                   |
+| `border`                                         | `{width, color}`; nonnegative dp width; `color` takes hex or a color role name.                                              |
 | `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
 | `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
 | `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
@@ -221,20 +257,29 @@ height which must be positive. Positive values use a minimum of 0.000001.
 | `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
 | `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
-Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
-No short hex, named colors, CSS functions, or separate color opacity. Style
+Colors accept `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits, or one
+of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
+`primaryContainer`, `secondary`, `tertiary`, `background`, `surface`, `onSurface`,
+`surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
+steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
+of the scheme, 36 in all). A role resolves against the overlay's active theme
+(`theme.mode`, `colors.seed`, device colour), so it follows light/dark and the
+seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
 Start/end use layout direction, including RTL.
 
 ## Icons and images
 
-Built-in Material names (36): `home`, `search`, `settings`, `person`, `favorite`,
-`add`, `close`, `check`, `arrow_back`, `arrow_forward`, `chevron_left`,
-`chevron_right`, `menu`, `more_vert`, `share`, `edit`, `delete`, `info`, `warning`,
-`notifications`, `star`, `shopping_cart`, `help`, `refresh`, `done`, `cancel`,
-`play_arrow`, `pause`, `stop`, `mail`, `phone`, `location_on`, `calendar_today`,
-`visibility`, `lock`, `logout`.
+Built-in Material names are the 2,075 icons of `material-icons-extended`, written
+in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
+`iconName` definition in `schemas/overlay-spec-contract.json`, shared by the TypeScript
+and JVM validators. The renderer already ships that library, so the full set adds no APK
+size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
+`filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
+filled. Material Symbols names with no `material-icons-extended` counterpart are not
+available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
+assets, which would need a bundled variable font or an asset-transport extension.
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
@@ -311,8 +356,17 @@ animator duration scale is 0 (`adb shell settings put global
 animator_duration_scale 0`), so `observe` screenshots are settled with no
 extra waits; other scales are honored by Compose's animation clock. The scale is
 read when the spec changes. Only nodes with `visibleWhen` get an animation
-wrapper. Size-change animation, `transition` variants and `pressScale` are
-follow-ups.
+wrapper.
+
+`box`, `row` and `column` containers animate their size when their children
+appear, disappear or change (`animateContentSize`), gated by the same
+motion-enabled check, so a sibling slides into the freed space instead of
+jumping.
+
+A node's optional `transition` picks the `visibleWhen` enter/exit: `none`
+(instant), `fade`, `expand` (grow/shrink) or `slide` (vertical slide with a
+fade). Absent keeps the default fade + expand. It has no effect on nodes
+without `visibleWhen`, or when motion is off. `pressScale` is a follow-up.
 
 ## Actions and state
 

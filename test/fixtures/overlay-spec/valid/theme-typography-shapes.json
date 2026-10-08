@@ -1,0 +1,22 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "mode": "light",
+    "typography": {
+      "scale": 1.25,
+      "fontFamily": "serif"
+    },
+    "shapes": {
+      "corner": "large"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "x"
+  }
+}

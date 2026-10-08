@@ -51,6 +51,8 @@ export const SDK_CAPABILITIES_UNAVAILABLE_REASONS = [
   "BRIDGE_UNAVAILABLE",
   /** The bridge answered with data that does not match the snapshot schema. */
   "MALFORMED_RESPONSE",
+  /** The app runs in another Android user and CtrlProxy lacks INTERACT_ACROSS_USERS. */
+  "CROSS_USER_UNSUPPORTED",
   /** CtrlProxy did not answer in time. */
   "REQUEST_TIMEOUT",
   /** No app id was supplied and no foreground app could be determined. */
@@ -102,5 +104,6 @@ export function parseSdkCapabilitiesState(raw: unknown): SdkCapabilitiesResult {
 
 /** Existing Android test-control boundary; resources inject a fake instead of connecting. */
 export interface SdkCapabilitiesReader {
-  getSdkCapabilities(packageName: string): Promise<SdkCapabilitiesResult>;
+  /** `userId` is the app's Android user; omitted reads CtrlProxy's own user. */
+  getSdkCapabilities(packageName: string, userId?: number): Promise<SdkCapabilitiesResult>;
 }

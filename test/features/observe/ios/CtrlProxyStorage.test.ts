@@ -64,15 +64,17 @@ describe("CtrlProxyStorage (iOS)", function () {
     };
   };
 
+  // The socket helpers wait on microtasks, not real turns: auto-advance fires a
+  // pending request deadline whenever the test yields the event loop.
   const waitForSocket = async (
     getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 100; i++) {
       const s = getSocket();
       if (s) {
         return s;
       }
-      await new Promise((r) => setImmediate(r));
+      await Promise.resolve();
     }
     return getSocket();
   };
@@ -91,11 +93,11 @@ describe("CtrlProxyStorage (iOS)", function () {
     if (!socket) {
       return;
     }
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 100; i++) {
       if (commandPayloads(socket).length >= minCount) {
         return;
       }
-      await new Promise((r) => setImmediate(r));
+      await Promise.resolve();
     }
   };
 

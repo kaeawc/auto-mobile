@@ -32,8 +32,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeInstalledAppsProvider } from "../../fakes/FakeInstalledAppsProvider";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
-import type { FakeTimer } from "../../fakes/FakeTimer";
-import { MicrotaskPumpFakeTimer } from "../../fakes/MicrotaskPumpFakeTimer";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
@@ -101,7 +100,7 @@ describe("LaunchApp", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeObserveScreen = new FakeObserveScreen();
-    fakeTimer = new MicrotaskPumpFakeTimer();
+    fakeTimer = new FakeTimer();
     fakeWindow = new FakeWindow();
 
     fakeObserveScreen.setObserveResult(createObserveResult());
@@ -231,6 +230,23 @@ describe("LaunchApp", () => {
         "--flag",
       ]),
     ).rejects.toThrow("launchArguments are supported on iOS only");
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+  });
+
+  test("rejects an Android launch environment before invoking device commands", async () => {
+    await expect(
+      launchApp.execute(
+        packageName,
+        false,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770" },
+      ),
+    ).rejects.toThrow("launch environment is supported on iOS simulators only");
     expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
   });
 
@@ -3340,6 +3356,39 @@ describe("LaunchApp", () => {
         expect(harness.installedApps.getCallCount()).toBe(cold ? 1 : 0);
         expect(harness.fakeCtrlProxy.getLaunchAppHistory()).toEqual([userBundleId]);
         expect(harness.targetBundleIdCalls).toEqual([userBundleId]);
+      } finally {
+        harness.cleanup();
+      }
+    });
+
+    test("a launch environment forces a fresh simulator process and reaches simctl", async () => {
+      fakeTimer.enableAutoAdvance();
+      const harness = createIOSTestHarness({ bundleId: userBundleId });
+      const environment = {
+        SIMCTL_CHILD_DYLD_INSERT_LIBRARIES: "/tmp/AutoMobileOverlayAgent.dylib",
+        SIMCTL_CHILD_AUTOMOBILE_OVERLAY_PORT: "8770",
+      };
+      try {
+        const result = await harness.iosLaunchApp.execute(
+          userBundleId,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          environment,
+        );
+        expect(result).toMatchObject({ success: true, pid: 123 });
+        expect(harness.calls).toEqual([
+          "listapps",
+          `terminate:${simulatorId}:${userBundleId}`,
+          `launch:${simulatorId}:${userBundleId}:${JSON.stringify({
+            foregroundIfRunning: false,
+            environment,
+          })}`,
+        ]);
       } finally {
         harness.cleanup();
       }

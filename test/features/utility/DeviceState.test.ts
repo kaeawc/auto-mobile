@@ -29,6 +29,7 @@ import {
 } from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeNetworkFilterBridge } from "../../fakes/FakeNetworkFilterBridge";
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -90,7 +91,10 @@ describe("DeviceState", () => {
       IOS_BIOMETRIC_UNENROLL_COMMAND,
       `${IOS_BIOMETRIC_ENROLLMENT} 0\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
     );
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    });
 
     const read = await deviceState.getState(["biometrics"]);
     const write = await deviceState.setState({
@@ -115,11 +119,10 @@ describe("DeviceState", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 0\n`);
 
-    const result = await new DeviceState(iosSimulator, { simctl }).getState([
-      "doNotDisturb",
-      "biometrics",
-      "networkCondition",
-    ]);
+    const result = await new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    }).getState(["doNotDisturb", "biometrics", "networkCondition"]);
 
     expect(result.success).toBe(true);
     expect(result.unsupported).toEqual(["doNotDisturb", "networkCondition"]);
@@ -131,11 +134,10 @@ describe("DeviceState", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(IOS_BIOMETRIC_GET_COMMAND, new Error("biometric read failed"));
 
-    const result = await new DeviceState(iosSimulator, { simctl }).getState([
-      "doNotDisturb",
-      "biometrics",
-      "networkCondition",
-    ]);
+    const result = await new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    }).getState(["doNotDisturb", "biometrics", "networkCondition"]);
 
     expect(result.success).toBe(false);
     expect(result.unsupported).toEqual(["doNotDisturb", "networkCondition"]);
@@ -295,7 +297,10 @@ describe("DeviceState", () => {
   test("reads iOS simulator Do Not Disturb as unsupported without issuing a notifyutil read", async () => {
     const simctl = new FakeSimCtlClient();
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    });
     const result = await deviceState.getState();
 
     expect(result.success).toBe(true);
@@ -314,7 +319,10 @@ describe("DeviceState", () => {
   test("reports iOS simulator DND priority/alarms as unsupported, not a silent downgrade", async () => {
     const simctl = new FakeSimCtlClient();
 
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    });
     const result = await deviceState.setState({ doNotDisturb: { mode: "priority" } });
 
     expect(result.success).toBe(false);
@@ -688,7 +696,10 @@ describe("DeviceState", () => {
 
   test("reports network conditioning unsupported on an iOS simulator", async () => {
     const simctl = new FakeSimCtlClient();
-    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const deviceState = new DeviceState(iosSimulator, {
+      simctl,
+      networkFilterBridge: new FakeNetworkFilterBridge(),
+    });
 
     const set = await deviceState.setState({ networkCondition: { profile: "3g" } });
     const get = await deviceState.getState(["networkCondition"]);
@@ -700,8 +711,14 @@ describe("DeviceState", () => {
       requestedProfile: "3g",
       verified: false,
     });
-    expect(get.networkCondition).toMatchObject({ supported: false, capability: "unsupported" });
-    expect(set.networkCondition?.error).toContain("iOS");
+    expect(get.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      backend: "network-extension",
+      controller: { state: "not_installed" },
+    });
+    expect(set.networkCondition?.error).toContain("iOS Simulator");
+    expect(set.networkCondition?.error).not.toContain("host-side proxy");
     // No simctl command is issued for an unsupported concern.
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });

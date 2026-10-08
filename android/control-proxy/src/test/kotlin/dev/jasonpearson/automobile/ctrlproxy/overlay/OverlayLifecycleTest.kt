@@ -113,11 +113,13 @@ class OverlayLifecycleTest {
       timer.advance(TTL - 1)
       assertTrue(host.isShowing)
       timer.advance(1)
-      assertDismiss("ttl")
-      assertEquals(OverlayScalar.Text("patch"), events.single().state["label"])
+      assertDismiss("ttl", 2L)
+      // The tap's one change event precedes the ttl dismissal.
+      assertEquals(listOf("change", null), events.map { it.name })
+      assertEquals(OverlayScalar.Text("patch"), events.last().state["label"])
       timer.advance(TTL)
       controller.onClientCountChanged(0)
-      assertEquals(1, events.size)
+      assertEquals(2, events.size)
     }
 
   @Test
@@ -255,9 +257,10 @@ class OverlayLifecycleTest {
       assertEquals(OverlayScalar.Text("changed"), runtime.current.state["label"])
       assertEquals(3, host.calls.count { it == "relayout" })
       assertSame(task, timer.tasks.last())
-      assertEquals(1, events.size)
+      // Only the tap's change event; configuration changes emit nothing.
+      assertEquals(2, events.size)
       controller.dismiss(null, "panel", null)
-      assertDismiss("agent", 2L)
+      assertDismiss("agent", 3L)
     }
 
   @Test

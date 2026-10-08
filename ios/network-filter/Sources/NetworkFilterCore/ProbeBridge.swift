@@ -17,16 +17,21 @@ public protocol ProbeBridge {
     /// `managedSimulators` is a JSON array of `ManagedSimulator`: the only
     /// simulators the provider may attribute flows to.
     func snapshot(version: Int, managedSimulators: Data, reply: @escaping (Data?, String?) -> Void)
+
+    /// `command` is a JSON `NetworkRuleCommand`; the reply is a JSON `NetworkRuleResult`.
+    func rule(version: Int, command: Data, reply: @escaping (Data?, String?) -> Void)
 }
 
 public final class ProbeService: NSObject, ProbeBridge {
     private let probe: IdentityProbe
+    private let rules: NetworkRuleStore
     private let lock = NSLock()
     private var active = false
     private var generation: UInt64 = 0
 
-    public init(probe: IdentityProbe) {
+    public init(probe: IdentityProbe, rules: NetworkRuleStore) {
         self.probe = probe
+        self.rules = rules
     }
 
     @discardableResult
@@ -35,6 +40,9 @@ public final class ProbeService: NSObject, ProbeBridge {
         defer { lock.unlock() }
         active = false
         generation &+= 1
+        // A stopped or restarting filter must not resurrect an impairment the
+        // host may have stopped renewing: every rule ends here.
+        rules.removeAll()
         return generation
     }
 
@@ -66,7 +74,9 @@ public final class ProbeService: NSObject, ProbeBridge {
             return
         }
         do {
-            let data = try JSONEncoder().encode(probe.snapshot(managedSimulators: simulators))
+            let data = try JSONEncoder().encode(
+                probe.snapshot(managedSimulators: simulators, rules: rules.activeRules())
+            )
             lock.lock()
             let current = active && revision == generation
             lock.unlock()
@@ -78,5 +88,30 @@ public final class ProbeService: NSObject, ProbeBridge {
         } catch {
             reply(nil, "Unable to encode identity-probe snapshot")
         }
+    }
+
+    public func rule(version: Int, command: Data, reply: @escaping (Data?, String?) -> Void) {
+        guard version == IdentityProbe.version else {
+            reply(nil, "Unsupported identity-probe protocol version")
+            return
+        }
+        guard let decoded = try? JSONDecoder().decode(NetworkRuleCommand.self, from: command) else {
+            reply(nil, "Invalid network rule command")
+            return
+        }
+        lock.lock()
+        let started = active
+        lock.unlock()
+        // An inactive provider applies nothing, so its answer is definitive: the
+        // controller retries this startup state like a read-back.
+        guard started else {
+            reply(nil, ProbeReadbackStartupState.inactiveProviderMessage)
+            return
+        }
+        guard let data = try? JSONEncoder().encode(rules.execute(decoded)) else {
+            reply(nil, "Unable to encode network rule result")
+            return
+        }
+        reply(data, nil)
     }
 }

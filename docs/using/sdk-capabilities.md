@@ -6,6 +6,16 @@ The read goes through the connected CtrlProxy (`get_sdk_capabilities`) to the ap
 debug SDK bridge. Add `?appId={packageName}` to name an app; without it the
 foreground app of the device is used.
 
+## Work and secondary profiles
+
+When the target app is the foreground app, the resource forwards that app's Android
+user, so an app in a work or secondary profile is read in its own user. An `appId`
+that is not in the foreground is read in CtrlProxy's own user. Reading another user
+needs `INTERACT_ACROSS_USERS`, which CtrlProxy declares but Android does not grant
+at install. Grant it with
+`adb shell pm grant dev.jasonpearson.automobile.ctrlproxy android.permission.INTERACT_ACROSS_USERS`.
+A CtrlProxy APK older than this feature always reads its own user.
+
 ## Response
 
 The JSON envelope carries `schemaVersion` (this envelope's version), `deviceId`,
@@ -30,6 +40,8 @@ The JSON envelope carries `schemaVersion` (this envelope's version), `deviceId`,
   - `MALFORMED_RESPONSE`: the bridge answered with data that does not match the
     snapshot schema, including a capability without a string `state` or an
     outcome other than `ok` or `unavailable`.
+  - `CROSS_USER_UNSUPPORTED`: the app runs in another Android user and CtrlProxy
+    does not hold `INTERACT_ACROSS_USERS`.
   - `REQUEST_TIMEOUT`: CtrlProxy did not answer in time.
   - `NO_APP`: no `appId` was given and no foreground app was found.
   - `UNSUPPORTED_PLATFORM`: the device is not Android.

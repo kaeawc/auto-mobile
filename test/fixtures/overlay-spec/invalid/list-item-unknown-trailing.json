@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {},
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "listItem",
+          "headline": "H",
+          "trailing": {
+            "type": "badge"
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].trailing.type"
+}

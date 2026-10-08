@@ -511,12 +511,17 @@ data class DiscoverKeystore(
   val packageName: String,
 ) : WebSocketRequest()
 
-/** Reads the app SDK's capability and capture-policy snapshot (issue #5191). */
+/**
+ * Reads the app SDK's capability and capture-policy snapshot (issue #5191). [userId] names the
+ * Android user (work or secondary profile) whose app instance to read; null reads the service's own
+ * user. Hosts send it only to a service advertising `sdk_capabilities_user_id_v1`.
+ */
 @Serializable
 @SerialName("get_sdk_capabilities")
 data class GetSdkCapabilities(
   override val requestId: String? = null,
   val packageName: String,
+  val userId: Int? = null,
 ) : WebSocketRequest()
 
 /**

@@ -77,6 +77,7 @@ export type MatchKind =
   | "id-namespace"
   | "text-exact"
   | "test-tag-exact"
+  | "test-tag-resource-id"
   | "contains"
   | "regex"
   | "class-exact"
@@ -152,6 +153,27 @@ function qualifiedId(id: string): { packageName: string; name: string } | undefi
   return separator > 0 && separator + 4 < id.length
     ? { packageName: id.slice(0, separator), name: id.slice(separator + 4) }
     : undefined;
+}
+
+/**
+ * A test tag matches a node's `test-tag` first. When no node carries that tag, it falls back to
+ * a node whose `resource-id` is exactly the tag and that has no `test-tag` of its own: Compose
+ * with `testTagsAsResourceId` (including the AutoMobile overlay) reports `Modifier.testTag` only
+ * as the bare `resource-id`, since CtrlProxy fills `test-tag` from accessibility extras (#10626).
+ * The fallback is exact only (no `pkg:id/` suffix match), so a classic View id matches only
+ * when the full id is given.
+ */
+function matchTestTag(
+  nodes: readonly SearchableEntry[],
+  testTag: string,
+): { node: SearchableEntry; kind: MatchKind }[] {
+  const tagged = nodes.filter((node) => node.testTag === testTag);
+  if (tagged.length > 0) {
+    return tagged.map((node) => ({ node, kind: "test-tag-exact" }));
+  }
+  return nodes
+    .filter((node) => node.testTag === undefined && node.nativeId === testTag)
+    .map((node) => ({ node, kind: "test-tag-resource-id" }));
 }
 
 function centerWithinViewport(
@@ -1003,12 +1025,7 @@ export class ElementResolver {
       );
     }
     if (selector.testTag !== undefined) {
-      return {
-        matches: nodes
-          .filter((node) => node.testTag === selector.testTag)
-          .map((node) => ({ node, kind: "test-tag-exact" })),
-        matchMode: "exact",
-      };
+      return { matches: matchTestTag(nodes, selector.testTag), matchMode: "exact" };
     }
     if (selector.className !== undefined) {
       return {

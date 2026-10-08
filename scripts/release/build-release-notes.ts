@@ -4,7 +4,7 @@
  *
  *   VERSION=0.0.82 TAG=0.0.82 GITHUB_REPOSITORY=kaeawc/auto-mobile \
  *     APK_CHECKSUM=... IPA_CHECKSUM=... VIDEO_JAR_CHECKSUM=... \
- *     SCREEN_CAPTURE_HELPER_CHECKSUM=... bun scripts/release/build-release-notes.ts
+ *     SCREEN_CAPTURE_HELPER_CHECKSUM=... OVERLAY_AGENT_CHECKSUM=... bun scripts/release/build-release-notes.ts
  *
  * CHANGELOG_PATH defaults to CHANGELOG.md; RELEASE_NOTES_PATH defaults to
  * release_notes.txt. A missing changelog is allowed. Only whole changelog lines
@@ -25,6 +25,7 @@ interface ReleaseNotesInput {
     ipa: string;
     videoJar: string;
     screenCaptureHelper: string;
+    overlayAgent: string;
     networkFilter: string;
   };
 }
@@ -57,6 +58,7 @@ export function buildReleaseNotes(input: ReleaseNotesInput): string {
     `\n\n## CtrlProxy iOS IPA\n\n**SHA256 Checksum:** \`${checksums.ipa}\`\n\nDownload the IPA from the release assets below.` +
     `\n\n## video-server jar\n\n**SHA256 Checksum:** \`${checksums.videoJar}\`\n\nDownload automobile-video.jar from the release assets below.` +
     `\n\n## macOS screen-capture-helper\n\n**SHA256 Checksum:** \`${checksums.screenCaptureHelper}\`\n\nDownload screen-capture-helper-macos-universal.zip from the release assets below.` +
+    `\n\n## iOS simulator overlay agent\n\n**SHA256 Checksum:** \`${checksums.overlayAgent}\`\n\nDownload AutoMobileOverlayAgent.dylib (universal arm64 + x86_64, ad-hoc signed) from the release assets below.` +
     `\n\n## macOS network-filter\n\n**SHA256 Checksum:** \`${checksums.networkFilter}\`\n\nDownload automobile-network-filter-macos-universal.zip from the release assets below.` +
     "\n\n## Desktop App\n\nNative installers are attached below: macOS `.dmg` (signed & notarized), Windows `.msi`, and Linux `.deb`.";
   if (changelogPart.length + tail.length <= RELEASE_NOTES_BUDGET) {
@@ -108,6 +110,7 @@ if (import.meta.main) {
     ipa: requiredEnv("IPA_CHECKSUM"),
     videoJar: requiredEnv("VIDEO_JAR_CHECKSUM"),
     screenCaptureHelper: requiredEnv("SCREEN_CAPTURE_HELPER_CHECKSUM"),
+    overlayAgent: requiredEnv("OVERLAY_AGENT_CHECKSUM"),
     networkFilter: requiredEnv("NETWORK_FILTER_CHECKSUM"),
   };
   const changelogPath = process.env.CHANGELOG_PATH || "CHANGELOG.md";

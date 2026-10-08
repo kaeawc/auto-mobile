@@ -19,6 +19,23 @@ import { addDeviceTargetingToSchema, withJsonSchemaOverride } from "./toolSchema
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import {
+  AndroidOverlayTransport,
+  type AndroidOverlayClient,
+} from "../features/overlay/androidOverlayTransport";
+import {
+  overlayAssetPutClient,
+  overlayEventSource,
+  type OverlayTransport,
+} from "../features/overlay/OverlayTransport";
+import type { OverlayEventSource } from "../features/overlay/OverlayEventCoordinator";
+import {
+  IosOverlayTransport,
+  noOverlayAgentConnections,
+  overlayAgentNotConnectedMessage,
+  type OverlayAgentConnections,
+} from "../features/overlay/ios/iosOverlayTransport";
+import type { OverlayAgentClient } from "../features/overlay/ios/overlayAgentClient";
 import { overlayDisplayUnsupportedMessage } from "../features/observe/android/CtrlProxyOverlays";
 import { OVERLAY_DISPLAY_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import type { OverlayDismiss, OverlayResult } from "../features/observe/android/ctrlProxyProtocol";
@@ -141,12 +158,16 @@ const assetsInput = z
           .string()
           .min(1)
           .max(MAX_OVERLAY_ASSET_ID_LENGTH)
-          .describe("Opaque asset id that spec image nodes reference (image.asset)"),
+          .describe(
+            "Opaque asset id that spec image nodes reference (image.asset, or style.fontFamily {asset})",
+          ),
         path: z
           .string()
           .min(1)
           .optional()
-          .describe("Absolute path of a PNG, JPEG or WebP file the daemon can read"),
+          .describe(
+            "Absolute path of a PNG, JPEG or WebP image, or a TTF/OTF font (up to 2 MiB), the daemon can read",
+          ),
         observation: z
           .string()
           .min(1)
@@ -196,7 +217,7 @@ export const overlaySchema = addDeviceTargetingToSchema(
       assets: assetsInput
         .optional()
         .describe(
-          "show only: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes. Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
+          "show only: images to upload before the overlay is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the overlay changes and names the assets already stored. If the device reports a supplied asset missing after the overlay is sent, it is re-uploaded and the overlay re-sent once.",
         ),
       all: z.literal(true).optional().describe("Dismiss all overlays on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
@@ -386,20 +407,20 @@ export interface OverlayEventLifecycle {
   subscribeDeviceRemoval(listener: (deviceId: string) => void): () => void;
   subscribeDeviceUnbound(listener: (deviceId: string) => void): () => void;
 }
-type OverlayClient = Pick<
-  AndroidCtrlProxyClient,
-  | "requestShowOverlay"
-  | "requestDismissOverlay"
-  | "requestPutOverlayAsset"
-  | "onOverlayEvent"
-  | "supportsCommand"
->;
+type OverlayClient = AndroidOverlayClient;
+/** The transport for one call; `android` carries the CtrlProxy-only display gate. */
+interface OverlayTarget {
+  transport: OverlayTransport;
+  android?: AndroidOverlayTransport;
+}
 export interface OverlayToolDependencies {
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: OverlayAssetFileReader;
   /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
   observationScreenshotReader?: OverlayObservationScreenshotReader;
   clientFactory?: (device: BootedDevice) => OverlayClient;
+  /** Injected iOS simulator agent connections, recorded by `launchApp {overlay: true}` (#10567). */
+  agentConnections?: OverlayAgentConnections;
   adbFactory?: AdbClientFactory;
   lastRenderedObservation?: OverlayDisplayDependencies["lastRenderedObservation"];
   store?: OverlayStatusStore;
@@ -417,21 +438,19 @@ let unsubscribeOverlayLifecycle: (() => void) | undefined;
 // Validation has already succeeded. Forward authored specs unchanged; omitted
 // defaults (including opacity=100) remain the wire contract's defaults.
 async function mutate(
-  client: OverlayClient,
+  target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   displayId?: number,
 ): Promise<OverlayResult> {
   if (args.action === "show") {
-    return client.requestShowOverlay(
-      args.spec as OverlaySpec,
-      args.timeoutMs,
-      undefined,
+    return target.transport.show(args.spec as OverlaySpec, {
+      timeoutMs: args.timeoutMs,
       displayId,
-      args.reset,
-    );
+      reset: args.reset,
+    });
   }
-  const target: OverlayDismiss = args.all ? { all: true } : { id: args.id! };
-  return client.requestDismissOverlay(target, args.timeoutMs);
+  const dismissal: OverlayDismiss = args.all ? { all: true } : { id: args.id! };
+  return target.transport.dismiss(dismissal, args.timeoutMs);
 }
 
 /**
@@ -439,12 +458,13 @@ async function mutate(
  * anything is sent, when the device cannot honour it. Only show carries a display.
  */
 async function showDisplayId(
-  client: OverlayClient,
+  target: OverlayTarget,
   device: BootedDevice,
   args: z.infer<typeof overlaySchema>,
   dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
 ): Promise<number | undefined> {
-  if (args.action !== "show" || args.display === undefined) {
+  // overlayPlatformError refuses display off Android, so only Android reaches the resolver.
+  if (args.action !== "show" || args.display === undefined || !target.android) {
     return undefined;
   }
   const displayId = await resolveOverlayDisplayId(device, args.display, {
@@ -456,7 +476,7 @@ async function showDisplayId(
   if (!displayId) {
     return undefined;
   }
-  if (!(await client.supportsCommand(OVERLAY_DISPLAY_CAPABILITY))) {
+  if (!(await target.android.supportsCommand(OVERLAY_DISPLAY_CAPABILITY))) {
     throw new ActionableError(overlayDisplayUnsupportedMessage(displayId));
   }
   return displayId;
@@ -476,7 +496,7 @@ interface AssetReaders {
 
 /** Upload every `assets` entry before the overlay is sent; a failure ends the call. */
 async function stageAssets(
-  client: OverlayClient,
+  target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   readers: AssetReaders,
   signal: AbortSignal | undefined,
@@ -492,7 +512,11 @@ async function stageAssets(
   if ("error" in prepared) {
     return { uploaded: [], prepared: [], failure: { success: false, error: prepared.error } };
   }
-  const outcome = await uploadOverlayAssets(client, prepared.assets, { signal, action: "show" });
+  const outcome = await uploadOverlayAssets(
+    overlayAssetPutClient(target.transport),
+    prepared.assets,
+    { signal, action: "show" },
+  );
   return {
     uploaded: outcome.uploaded,
     prepared: prepared.assets,
@@ -501,12 +525,12 @@ async function stageAssets(
 }
 
 async function runMutation(
-  client: OverlayClient,
+  target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   displayId: number | undefined,
 ): Promise<OverlayResult> {
   try {
-    return await mutate(client, args, displayId);
+    return await mutate(target, args, displayId);
   } catch (error) {
     logger.warn("[overlay] Request failed", error);
     return { success: false, error: toActionableError(error, "Overlay request failed").message };
@@ -524,7 +548,7 @@ interface MissingAssetRetry {
  * the abort signal, and keeps the first (successful) result when the repair cannot complete.
  */
 async function retryMissingAssets(
-  client: OverlayClient,
+  target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   stage: AssetStage,
   first: OverlayResult,
@@ -543,7 +567,10 @@ async function retryMissingAssets(
   if (signal?.aborted) {
     return fail("the request was cancelled");
   }
-  const upload = await uploadOverlayAssets(client, again, { signal, action: "resend" });
+  const upload = await uploadOverlayAssets(overlayAssetPutClient(target.transport), again, {
+    signal,
+    action: "resend",
+  });
   if (!upload.success) {
     return fail(upload.error ?? "upload failed");
   }
@@ -551,7 +578,7 @@ async function retryMissingAssets(
     return fail("the request was cancelled before the overlay was re-sent");
   }
   // The re-send targets the display the first send resolved, never a re-resolved one.
-  const second = await runMutation(client, args, displayId);
+  const second = await runMutation(target, args, displayId);
   return second.success
     ? { result: second, repair: { kind: "still-missing" } }
     : fail(second.error ?? "re-sending the overlay failed");
@@ -563,7 +590,7 @@ interface MutationOutcome {
 }
 
 async function sendOverlay(
-  client: OverlayClient,
+  target: OverlayTarget,
   args: z.infer<typeof overlaySchema>,
   stage: AssetStage,
   signal: AbortSignal | undefined,
@@ -572,11 +599,11 @@ async function sendOverlay(
   if (stage.failure) {
     return { result: stage.failure };
   }
-  const first = await runMutation(client, args, displayId);
+  const first = await runMutation(target, args, displayId);
   if (!first.success || !first.missingAssets?.length) {
     return { result: first };
   }
-  const retry = await retryMissingAssets(client, args, stage, first, signal, displayId);
+  const retry = await retryMissingAssets(target, args, stage, first, signal, displayId);
   const result = retry?.result ?? first;
   if (!result.missingAssets?.length) {
     return { result };
@@ -593,13 +620,13 @@ async function sendOverlay(
 
 /** A refused display ends the call before any asset is uploaded or anything is sent. */
 async function resolveShowDisplay(
-  client: OverlayClient,
+  target: OverlayTarget,
   device: BootedDevice,
   args: z.infer<typeof overlaySchema>,
   dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
 ): Promise<{ displayId?: number; failure?: OverlayResult }> {
   try {
-    return { displayId: await showDisplayId(client, device, args, dependencies) };
+    return { displayId: await showDisplayId(target, device, args, dependencies) };
   } catch (error) {
     logger.warn("[overlay] Request failed", error);
     return {
@@ -632,22 +659,22 @@ function clearMutationEvents(
 function startFreshShowEvents(
   events: OverlayEventCoordinator,
   scope: OverlayScope,
-  client: OverlayClient,
+  source: OverlayEventSource,
   show: { target: { id?: string }; args: { action: OverlayMutation }; inPlace: boolean },
 ): void {
   if (show.args.action === "show" && !show.inPlace) {
-    events.show(scope, show.target.id!, client);
+    events.show(scope, show.target.id!, source);
   }
 }
 
 function settleShowEvents(
   events: OverlayEventCoordinator,
   scope: OverlayScope,
-  client: OverlayClient,
+  source: OverlayEventSource,
   outcome: { target: { id?: string }; inPlace: boolean; success: boolean },
 ): void {
   if (outcome.inPlace && outcome.success) {
-    events.show(scope, outcome.target.id!, client);
+    events.show(scope, outcome.target.id!, source);
   }
 }
 
@@ -669,7 +696,7 @@ function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): ()
 type OverlayHandlerDependencies = {
   store: OverlayStatusStore;
   events: OverlayEventCoordinator;
-  clientFactory: (device: BootedDevice) => OverlayClient;
+  target: OverlayTarget;
   assetReaders: AssetReaders;
   commits: OverlayCommitGenerations;
   now: () => number;
@@ -685,6 +712,27 @@ function mutationTarget(
   return { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
 }
 
+function shownOnDevice(
+  store: OverlayStatusStore,
+  scope: OverlayScope,
+  target: { id?: string },
+): OverlayLastResult | undefined {
+  return target.id ? store.shownOnDevice(scope.deviceId, target.id) : undefined;
+}
+
+/** A refused display ends the call before any asset is uploaded. */
+async function stageUnlessRefused(
+  failure: OverlayResult | undefined,
+  target: OverlayTarget,
+  args: z.infer<typeof overlaySchema>,
+  readers: AssetReaders,
+  signal: AbortSignal | undefined,
+): Promise<AssetStage> {
+  return failure
+    ? { uploaded: [], prepared: [], failure }
+    : stageAssets(target, args, readers, signal);
+}
+
 async function performMutation(
   dependencies: OverlayHandlerDependencies,
   device: BootedDevice,
@@ -692,29 +740,33 @@ async function performMutation(
   scope: OverlayScope,
   signal?: AbortSignal,
 ): Promise<OverlayOutput> {
-  const { store, events, clientFactory, assetReaders, commits } = dependencies;
+  const { store, events, target: overlayTarget, assetReaders, commits } = dependencies;
   const target = mutationTarget(args);
-  const client = clientFactory(device);
+  const source = overlayEventSource(overlayTarget.transport);
   // The device holds one active overlay, so presence is device-wide, not per session.
-  const shown = target.id ? store.shownOnDevice(scope.deviceId, target.id) : undefined;
+  const shown = shownOnDevice(store, scope, target);
   const previouslyShown = shown !== undefined;
   const inPlace = args.action === "show" && shown !== undefined && args.reset !== true;
   const generation = beginShowGeneration(commits, scope, args.action, target);
-  startFreshShowEvents(events, scope, client, { target, args, inPlace });
+  startFreshShowEvents(events, scope, source, { target, args, inPlace });
   // Every display lookup happens before staging; nothing is re-resolved after dispatch.
-  const resolved = await resolveMutationDisplay(inPlace, client, device, args, dependencies);
+  const resolved = await resolveMutationDisplay(inPlace, overlayTarget, device, args, dependencies);
   const comparable = await comparableForMutation(resolved, inPlace, device, args, dependencies);
   // An in-place show names the display it replaces on: if the overlay is dismissed while assets
   // stage, the runner then shows it fresh there instead of on the default display.
   const displayId = inPlace ? shown?.displayId : resolved.displayId;
-  const stage: AssetStage = resolved.failure
-    ? { uploaded: [], prepared: [], failure: resolved.failure }
-    : await stageAssets(client, args, assetReaders, signal);
-  const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
+  const stage = await stageUnlessRefused(
+    resolved.failure,
+    overlayTarget,
+    args,
+    assetReaders,
+    signal,
+  );
+  const { result, warning } = await sendOverlay(overlayTarget, args, stage, signal, displayId);
   const placed = placedDisplay(args, shown, comparable, result.success);
   const lastResult = isSuperseded(commits, scope, target, generation)
     ? supersededResult(dependencies, { args, target, result, placed })
-    : commitMutation(dependencies, scope, client, {
+    : commitMutation(dependencies, scope, source, {
         args,
         target,
         result,
@@ -775,12 +827,12 @@ interface CommitOutcome {
 function commitMutation(
   dependencies: OverlayHandlerDependencies,
   scope: OverlayScope,
-  client: OverlayClient,
+  source: OverlayEventSource,
   outcome: CommitOutcome & { inPlace: boolean; previouslyShown: boolean },
 ): OverlayLastResult {
   const { store, events } = dependencies;
   const { args, target, result, placed, inPlace, previouslyShown } = outcome;
-  settleShowEvents(events, scope, client, { target, inPlace, success: result.success });
+  settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
@@ -818,12 +870,12 @@ function supersededResult(
  */
 async function resolveMutationDisplay(
   inPlace: boolean,
-  client: OverlayClient,
+  target: OverlayTarget,
   device: BootedDevice,
   args: z.infer<typeof overlaySchema>,
   dependencies: Pick<OverlayToolDependencies, "adbFactory" | "lastRenderedObservation">,
 ): Promise<{ displayId?: number; failure?: OverlayResult }> {
-  return inPlace ? {} : resolveShowDisplay(client, device, args, dependencies);
+  return inPlace ? {} : resolveShowDisplay(target, device, args, dependencies);
 }
 
 /**
@@ -926,14 +978,14 @@ function notifyOverlayWaitProgress(
 async function waitForOverlayEvent(
   events: OverlayEventCoordinator,
   scope: OverlayScope,
-  client: OverlayClient,
+  source: OverlayEventSource,
   query: Pick<
     z.infer<typeof overlaySchema>,
     "id" | "eventName" | "kind" | "afterSequence" | "timeoutMs"
   >,
   context: { progress?: ProgressCallback; signal?: AbortSignal },
 ) {
-  const waiting = events.awaitEvent(scope, query.id!, client, {
+  const waiting = events.awaitEvent(scope, query.id!, source, {
     eventName: query.eventName,
     kind: query.kind,
     afterSequence: query.afterSequence,
@@ -946,6 +998,33 @@ async function waitForOverlayEvent(
   } finally {
     notifyOverlayWaitProgress(context.progress, true);
   }
+}
+
+/**
+ * Inputs only CtrlProxy can honour, refused before any device request. iOS simulators run the
+ * injected overlay agent: no display and no reset (a same-id show always replaces in place).
+ */
+function overlayPlatformError(
+  device: BootedDevice,
+  args: z.infer<typeof overlaySchema>,
+): ActionableError | undefined {
+  if (device.platform === "android") {
+    return undefined;
+  }
+  if (device.platform !== "ios") {
+    return new ActionableError(
+      "Overlays need an Android device or an iOS simulator. Target one with deviceId or sessionUuid.",
+    );
+  }
+  if (args.display !== undefined) {
+    return new ActionableError("display is Android only; omit display on iOS.");
+  }
+  if (args.reset !== undefined) {
+    return new ActionableError(
+      "reset is Android only; on iOS a show with the same id always replaces the overlay in place.",
+    );
+  }
+  return undefined;
 }
 
 function defaultOverlayLifecycle(): OverlayEventLifecycle {
@@ -985,21 +1064,63 @@ function subscribeOverlayCleanup(
   };
 }
 
+/**
+ * One transport per underlying client keeps the coordinator's per-device event subscription
+ * stable across calls, exactly as when it subscribed to the client itself.
+ */
+function overlayTargets(
+  clientFactory: (device: BootedDevice) => OverlayClient,
+  agentConnections: OverlayAgentConnections,
+): {
+  androidTarget: (device: BootedDevice) => OverlayTarget;
+  iosTarget: (device: BootedDevice) => OverlayTarget | undefined;
+} {
+  const androidTransports = new WeakMap<OverlayClient, AndroidOverlayTransport>();
+  const iosTransports = new WeakMap<OverlayAgentClient, IosOverlayTransport>();
+  const androidTarget = (device: BootedDevice): OverlayTarget => {
+    const client = clientFactory(device);
+    let transport = androidTransports.get(client);
+    if (transport === undefined) {
+      transport = new AndroidOverlayTransport(client);
+      androidTransports.set(client, transport);
+    }
+    return { transport, android: transport };
+  };
+  const iosTarget = (device: BootedDevice): OverlayTarget | undefined => {
+    const agent = agentConnections.get(device.deviceId);
+    if (agent === undefined) {
+      return undefined;
+    }
+    let transport = iosTransports.get(agent);
+    if (transport === undefined) {
+      transport = new IosOverlayTransport(agent);
+      iosTransports.set(agent, transport);
+    }
+    return { transport };
+  };
+  return { androidTarget, iosTarget };
+}
+
+function overlayClock(dependencies: OverlayToolDependencies): Pick<Timer, "now"> {
+  return dependencies.clock ?? dependencies.timer ?? defaultTimer;
+}
+
 export function registerOverlayTools(dependencies: OverlayToolDependencies = {}): () => void {
   // Registry replacement makes the previous handler, store and event buffers obsolete.
   unsubscribeOverlayLifecycle?.();
-  const store =
-    dependencies.store ?? new InMemoryOverlayStatusStore(dependencies.clock ?? dependencies.timer);
+  const store = dependencies.store ?? new InMemoryOverlayStatusStore(overlayClock(dependencies));
   const clientFactory =
     dependencies.clientFactory ??
     ((device: BootedDevice) => AndroidCtrlProxyClient.getInstance(device));
+  const agentConnections = dependencies.agentConnections ?? noOverlayAgentConnections;
+  const { androidTarget, iosTarget } = overlayTargets(clientFactory, agentConnections);
   const events = new OverlayEventCoordinator(
     dependencies.timer ?? defaultTimer,
     store,
     TelemetryRecorder.getInstance(),
   );
   const commits = new OverlayCommitGenerations();
-  const clock = dependencies.clock ?? dependencies.timer ?? defaultTimer;
+  const clock = overlayClock(dependencies);
   const assetReaders: AssetReaders = {
     assetFileReader: dependencies.assetFileReader ?? nodeOverlayAssetFileReader,
     observationScreenshotReader:
@@ -1022,11 +1143,9 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
       });
     }
     const args = parsed.data;
-    if (device.platform !== "android") {
-      const error = new ActionableError(
-        "Overlays are Android only. Target an Android device with deviceId or sessionUuid.",
-      );
-      return responseFor({ success: false, error: error.message });
+    const platformError = overlayPlatformError(device, args);
+    if (platformError) {
+      return responseFor({ success: false, error: platformError.message });
     }
     const scope = overlayScope(device, args);
     if (args.action === "status") {
@@ -1040,17 +1159,20 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
         }),
       });
     }
+    const target = device.platform === "android" ? androidTarget(device) : iosTarget(device);
+    if (!target) {
+      const error = new ActionableError(overlayAgentNotConnectedMessage(device.deviceId));
+      return responseFor({ success: false, error: error.message });
+    }
     if (args.action === "awaitEvent") {
-      const waited = await waitForOverlayEvent(events, scope, clientFactory(device), args, {
-        progress,
-        signal,
-      });
+      const source = overlayEventSource(target.transport);
+      const waited = await waitForOverlayEvent(events, scope, source, args, { progress, signal });
       return responseFor({ success: true, ...waited });
     }
     const handlerDependencies: OverlayHandlerDependencies = {
       store,
       events,
-      clientFactory,
+      target,
       assetReaders,
       commits,
       now: () => clock.now(),
@@ -1069,7 +1191,7 @@ export function registerOverlayTools(dependencies: OverlayToolDependencies = {})
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android. A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
+    'Show (always a full spec), dismiss (id or all:true), inspect host-local status, or awaitEvent for an overlay id on Android, or on an iOS simulator through the overlay agent that launchApp with overlay:true injects (show, dismiss, status, awaitEvent; sizes are points; reset is Android only). A show with the id of the overlay already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column, text/image/icon/spacer/textField, scroll/pager/tabBar/bottomNav/bottomSheet; actions: emit/setPage/setState/dismiss. Sizes and anchors use dp; window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the overlay is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the overlay re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. Status makes no device request and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed.',
     overlaySchema,
     handler,
     { defaultEnabled: false, outputSchema: overlayOutputSchema },

@@ -1,0 +1,11 @@
+{
+  "id": "motion",
+  "window": { "placement": { "type": "fullscreen" } },
+  "state": { "open": false },
+  "motion": "none",
+  "root": {
+    "type": "text",
+    "text": "x",
+    "visibleWhen": { "key": "open", "equals": true }
+  }
+}

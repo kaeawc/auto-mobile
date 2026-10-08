@@ -9,6 +9,43 @@
     {
       "atMs": 0,
       "actor": "desktop",
+      "label": "register",
+      "request": {
+        "method": "daemon/registerSession",
+        "params": {
+          "sessionId": "d0000000-0000-4000-8000-000000000001",
+          "clientName": "AutoMobile Desktop"
+        }
+      },
+      "response": {
+        "success": true,
+        "result": {
+          "accepted": true,
+          "heartbeatTimeoutMs": 8000,
+          "expiresAtMs": 8000
+        }
+      }
+    },
+    {
+      "atMs": 2000,
+      "actor": "desktop",
+      "label": "heartbeat-watching",
+      "request": {
+        "method": "daemon/heartbeat",
+        "params": {
+          "sessionId": "d0000000-0000-4000-8000-000000000001"
+        }
+      },
+      "response": {
+        "success": true,
+        "result": {
+          "sessionId": "d0000000-0000-4000-8000-000000000001"
+        }
+      }
+    },
+    {
+      "atMs": 2000,
+      "actor": "desktop",
       "label": "bind",
       "request": {
         "method": "tools/call",
@@ -39,6 +76,34 @@
     {
       "atMs": 2000,
       "actor": "desktop",
+      "label": "tap",
+      "request": {
+        "method": "input/tap",
+        "params": {
+          "platform": "android",
+          "deviceId": "emulator-5554",
+          "x": 540,
+          "y": 1200,
+          "sessionUuid": "d0000000-0000-4000-8000-000000000001"
+        }
+      },
+      "response": {
+        "success": true,
+        "result": {
+          "action": "input/tap",
+          "platform": "android",
+          "deviceId": "emulator-5554",
+          "success": true,
+          "coordinates": {
+            "x": 540,
+            "y": 1200
+          }
+        }
+      }
+    },
+    {
+      "atMs": 4000,
+      "actor": "desktop",
       "label": "heartbeat",
       "request": {
         "method": "daemon/heartbeat",
@@ -56,7 +121,7 @@
       "everyMs": 2000
     },
     {
-      "atMs": 4000,
+      "atMs": 6000,
       "actor": "desktop",
       "label": "release-on-quit",
       "request": {
@@ -75,7 +140,7 @@
       }
     },
     {
-      "atMs": 4000,
+      "atMs": 6000,
       "actor": "probe",
       "label": "released",
       "request": {

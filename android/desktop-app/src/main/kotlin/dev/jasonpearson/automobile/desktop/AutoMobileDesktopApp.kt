@@ -31,6 +31,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.CoalescingRecoveryLauncher
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
+import dev.jasonpearson.automobile.desktop.core.daemon.InputAllocatingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
@@ -59,7 +60,6 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
-import dev.jasonpearson.automobile.desktop.core.workspace.InteractionNotifyingControlExecutor
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
@@ -134,12 +134,16 @@ fun AutoMobileDesktopApp(
   // (#4858).
   daemonConnectionState: ConnectionState = ConnectionState.Connecting,
   // False while the window is closed to the tray (#10695): after a short grace the desktop session
-  // releases the focused device, and showing the window binds it again on the next input.
+  // releases the device it holds, and showing the window allocates it again on the next input.
   windowVisible: Boolean = true,
 ) {
   val graph = LocalAutoMobileGraph.current
 
-  val desktopSessionBinding = remember { mutableStateOf<DesktopDaemonSessionBinding?>(null) }
+  // The devices the workspace panes show (#10730). Watching them allocates nothing; the session
+  // allocates the one the user sends input to, and holds it while its pane stays open.
+  val desktopSessionPanes = remember {
+    mutableStateOf<List<DesktopDaemonSessionBinding>>(emptyList())
+  }
   var refreshAfterDaemonRecovery by remember { mutableStateOf<suspend () -> Boolean>({ true }) }
   // Resolved once, not per recomposition: the path lookup is process-wide cached (#10238) but the
   // root must not call into it at all on the UI thread.
@@ -149,7 +153,7 @@ fun AutoMobileDesktopApp(
   val desktopSessionState =
     rememberDesktopDaemonSession(
       desktopSocketPath,
-      desktopSessionBinding,
+      desktopSessionPanes,
       hostVisible = windowVisible,
     ) {
       refreshAfterDaemonRecovery()
@@ -171,38 +175,38 @@ fun AutoMobileDesktopApp(
 
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
-  // Read through rememberUpdatedState so a session rotation does not rebuild the executor (and the
-  // view model keyed on it); a button press is the user using the device (#10716).
-  val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
   // The daemon accepts input for a held device only from its holder (#10698), so every input path
   // names the desktop session, read per frame so a session rotation is picked up.
   val latestSessionUuidProvider by rememberUpdatedState(desktopSessionState.sessionUuidProvider)
   val desktopInputSessionUuid: () -> String? = remember { { latestSessionUuidProvider() } }
+  // Input is active tool use and watching is not (#10730): every input path allocates its device to
+  // the desktop session first and drops the input when it cannot. The allocation is stable per
+  // socket, so a session rotation does not rebuild the clients or the view model keyed on them.
+  val inputAllocation = desktopSessionState.inputAllocation
   val desktopInputClient =
-    remember(graph) {
+    remember(graph, inputAllocation) {
       if (graph.autoMobileClient.transportName == "Unix Socket") {
-        McpDaemonClient(
-          DaemonSocketPaths.socketPath(),
-          inputSessionUuidProvider = desktopInputSessionUuid,
+        InputAllocatingClient(
+          McpDaemonClient(
+            DaemonSocketPaths.socketPath(),
+            inputSessionUuidProvider = desktopInputSessionUuid,
+          ),
+          inputAllocation,
         )
       } else {
         graph.autoMobileClient
       }
     }
   val controlExecutor =
-    remember(graph, desktopDaemonSession) {
-      InteractionNotifyingControlExecutor(
-        DaemonEmulatorControlExecutor(
-          graph.autoMobileClient,
-          inputClient = desktopInputClient,
-          foregroundAppResolver =
-            ObservationForegroundAppResolver(
-              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
-            ),
-        ),
-      ) {
-        onUserInteraction(it)
-      }
+    remember(graph, desktopDaemonSession, desktopInputClient) {
+      DaemonEmulatorControlExecutor(
+        graph.autoMobileClient,
+        inputClient = desktopInputClient,
+        foregroundAppResolver =
+          ObservationForegroundAppResolver(
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+          ),
+      )
     }
   val workspaceViewModel =
     remember(scope, controlExecutor) { WorkspaceViewModel(scope, controlExecutor) }
@@ -323,39 +327,28 @@ fun AutoMobileDesktopApp(
   // graph.autoMobileClient. Non-Unix transports don't support device input, so they yield null and
   // the pane stays a display-only mirror.
   val workspaceControlClientProvider: () -> AutoMobileClient? =
-    remember(graph) {
+    remember(graph, inputAllocation) {
       if (graph.autoMobileClient.transportName == "Unix Socket") {
-        // Resolve once: this provider runs per input action on the pane's dispatch thread.
+        // Resolve once: this provider runs per input action.
         val socketPath = DaemonSocketPaths.socketPath()
         val provider: () -> AutoMobileClient? = {
-          McpDaemonClient(socketPath, inputSessionUuidProvider = desktopInputSessionUuid)
+          InputAllocatingClient(
+            McpDaemonClient(socketPath, inputSessionUuidProvider = desktopInputSessionUuid),
+            inputAllocation,
+          )
         }
         provider
       } else {
         { null }
       }
     }
-  // Bind the focused device only: setActiveDevice allocates the device to this session. Other
-  // observed devices remain unowned, so their stream subscriptions use the daemon's unowned-device
-  // authorization path. The shared hook heartbeats and re-registers this binding after restarts.
-  // A pane that took focus only because the focused pane closed binds nothing until the user
-  // focuses or drives it (#10697), so closing a pane releases its device without grabbing another.
-  val focusedColumn = (workspaceState as? WorkspaceUiState.Content)?.sessionBindingColumn
-  val focusedBinding = focusedColumn?.let {
-    DesktopDaemonSessionBinding(it.deviceId, it.platform.wireName())
-  }
-  SideEffect { desktopSessionBinding.value = focusedBinding }
-  // Bind the session to the FOCUSED (observed) device ONLY. setActiveDevice is allocation-bearing —
-  // it reserves the device for this session — so it must never run for a device the user isn't
-  // observing: registering the session by reserving a booted grid device would hold that device
-  // hostage from CLI/MCP sessions for as long as the app sits on the home grid (Codex P1). The
-  // daemon has no registration-only session path today (a session is created only by allocating a
-  // device, and daemon/heartbeat rejects unknown sessions), so the pristine home grid's live
-  // thumbnails are left to authenticate via the first observe — until then they degrade to the
-  // screenshot fallback. Once any device is observed the session is registered, and the reopened
-  // grid's other (unowned) devices then pass the stream auth's unowned-device branch.
-  // The shared session hook serializes synchronous binds on Dispatchers.IO and uses a generation
-  // token so a stale bind cannot leave the session pinned to the previously-focused device.
+  // Every open pane is watched; none is allocated until the user sends it input (#10730). Closing
+  // a pane releases the device the session holds for it.
+  val paneBindings =
+    (workspaceState as? WorkspaceUiState.Content)?.columns.orEmpty().map {
+      DesktopDaemonSessionBinding(it.deviceId, it.platform.wireName())
+    }
+  SideEffect { desktopSessionPanes.value = paneBindings }
 
   // Window-level ⌘K/Ctrl+K (Main.kt) bumps openPaletteRequest; open the palette in response, but
   // only while the workspace is showing — onboarding and the device grid (shown while nothing is
@@ -618,10 +611,10 @@ fun AutoMobileDesktopApp(
                     )
                   },
                   // Live device mirror in each pane's stream area, fed by the daemon's video-stream
-                  // relay. The pane authenticates with the workspace daemon session (#4977) bound
-                  // to
-                  // the focused device above; when no session is available (non-Unix daemon, or the
-                  // bind failed) the provider yields null and the pane shows the auth refusal, with
+                  // relay. The pane authenticates with the workspace daemon session (#4977), which
+                  // the daemon admits as a viewer whether or not it holds the device (#10698);
+                  // when no session is available (non-Unix daemon, or registration failed) the
+                  // provider yields null and the pane shows the auth refusal, with
                   // AUTOMOBILE_DAEMON_STREAM_AUTH=0 as the operator escape hatch.
                   streamContent = { column ->
                     // Tap-to-control is armed ONLY for the FOCUSED pane on a Unix daemon.
@@ -640,37 +633,34 @@ fun AutoMobileDesktopApp(
                     //    pane arming can't silently steal keystrokes mid-type (#5217). Click a pane
                     // to
                     //    focus (and thus drive) it; the single-device case is always focused.
-                    // Viewing (#10660): another session holds this device, so the pane mirrors
-                    // it without control until the user explicitly takes control.
-                    val viewingOnly = desktopSessionState.viewingDeviceId == column.deviceId
+                    // Held elsewhere (#10660, #10730): an input was refused because another
+                    // session holds this device, so the pane keeps mirroring it without control
+                    // until the user explicitly takes control. Before any input every pane is
+                    // plain watching, which allocates nothing and needs no notice.
+                    val heldElsewhere = desktopSessionState.heldElsewhereDeviceId == column.deviceId
                     val focused =
                       (workspaceState as? WorkspaceUiState.Content)?.focusedDeviceId ==
                         column.deviceId
                     val controlActive =
                       graph.autoMobileClient.transportName == "Unix Socket" &&
                         focused &&
-                        !viewingOnly
-                    // A bind that failed for another reason is an error, not viewing (#10682).
-                    val bindError = desktopSessionState.bindErrorMessage?.takeIf { focused }
-                    // Released for inactivity: the pane stays controllable, and its first input
-                    // binds the device again (owner decision 2026-10-08).
-                    val idleReleased =
-                      focused && desktopSessionState.idleReleasedDeviceId == column.deviceId
-                    val onUserInteraction = desktopSessionState.onUserInteraction
-                    val columnControlClientProvider =
-                      remember(
-                        workspaceControlClientProvider,
-                        workspaceViewModel,
-                        onUserInteraction,
-                        column.deviceId,
-                      ) {
-                        val provider: () -> AutoMobileClient? = {
-                          workspaceViewModel.onUserInteraction(column.deviceId)
-                          onUserInteraction(column.deviceId)
-                          workspaceControlClientProvider()
-                        }
-                        provider
+                        !heldElsewhere
+                    // A bind that failed for another reason is an error, not held elsewhere
+                    // (#10682).
+                    val bindError =
+                      desktopSessionState.bindErrorMessage?.takeIf {
+                        desktopSessionState.bindErrorDeviceId == column.deviceId
                       }
+                    // Released after inactivity: the pane stays controllable, and its next input
+                    // allocates the device again (owner decision 2026-10-08).
+                    val idleReleased = desktopSessionState.idleReleasedDeviceId == column.deviceId
+                    val requestControl = desktopSessionState.requestControl
+                    val takeControl =
+                      remember(requestControl, column.deviceId) {
+                        { requestControl(column.deviceId) }
+                      }
+                    // Input clients allocate the device on the first input (#10730).
+                    val columnControlClientProvider = workspaceControlClientProvider
                     val control =
                       rememberWorkspaceDeviceControl(
                         column = column,
@@ -689,20 +679,20 @@ fun AutoMobileDesktopApp(
                         settings = settings,
                         streamingEnabled = streamingEnabled,
                       )
-                      if (viewingOnly) {
+                      if (heldElsewhere) {
                         DeviceViewingNotice(
-                          onTakeControl = desktopSessionState.requestControl,
+                          onTakeControl = takeControl,
                           modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                         )
                       } else if (idleReleased) {
                         DeviceIdleReleasedNotice(
-                          onTakeControl = desktopSessionState.requestControl,
+                          onTakeControl = takeControl,
                           modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                         )
                       } else if (bindError != null) {
                         DeviceBindErrorNotice(
                           message = bindError,
-                          onRetry = desktopSessionState.requestControl,
+                          onRetry = takeControl,
                           modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
                         )
                       }

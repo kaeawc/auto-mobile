@@ -118,17 +118,18 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
 
 /** The real daemon answers, from the desktop wire fixtures (#10669). */
 private object WireAnswers {
-  val bound = DesktopWireFixture.load("focus-binds-device").exchange("bind")
+  val bound = DesktopWireFixture.load("first-tap-binds-device").exchange("bind")
   val registered = DesktopWireFixture.load("no-click-start").exchange("register")
   val sessionNotFound = DesktopWireFixture.load("heartbeat-expiry").exchange("heartbeat-lapse")
-  val sessionReleased = DesktopWireFixture.load("heartbeat-expiry").exchange("rebind-refused")
+  val sessionReleased =
+    DesktopWireFixture.load("released-session-tap").exchange("bind-refused-released")
   val deviceNotFound = DesktopWireFixture.load("bind-error-not-ownership").exchange("bind-error-1")
 
   /** `assertDeviceOwner`'s refusal, recorded for both devices these tests pick. */
   private val refusals =
     listOf(
         DesktopWireFixture.load("held-by-another-session").exchange("bind-refused"),
-        DesktopWireFixture.load("refused-focus-change").exchange("bind-held-refused"),
+        DesktopWireFixture.load("tap-held-device-releases-previous").exchange("bind-held-refused"),
       )
       .associateBy {
         it.params.getValue("arguments").jsonObject.getValue("deviceId").jsonPrimitive.content

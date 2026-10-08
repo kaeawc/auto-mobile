@@ -156,73 +156,15 @@ class WorkspaceViewModelTest {
     }
 
   @Test
-  fun `the focus a closed pane leaves behind binds nothing until the user picks it`() =
-    testScope.runTest {
-      // #10697: closing the bound pane must release its device without binding the pane that
-      // inherits the focus, which may hold a device an agent just released.
-      val vm = WorkspaceViewModel(this)
-      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-      vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
-      assertEquals("b", (vm.state.value as WorkspaceUiState.Content).sessionBindingColumn?.deviceId)
-
-      vm.onAction(WorkspaceAction.CloseDevice("b"))
-
-      val state = vm.state.value as WorkspaceUiState.Content
-      assertEquals("a", state.focusedDeviceId)
-      assertTrue(state.focusAwaitsInteraction)
-      assertNull(state.sessionBindingColumn)
-    }
-
-  @Test
-  fun `clicking the auto-focused pane makes it the session binding`() = testScope.runTest {
+  fun `closing the focused pane moves focus to the survivor`() = testScope.runTest {
+    // Focus allocates nothing (#10730), so inheriting it cannot take a device (#10697).
     val vm = WorkspaceViewModel(this)
     vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
     vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+
     vm.onAction(WorkspaceAction.CloseDevice("b"))
 
-    vm.onAction(WorkspaceAction.FocusDevice("a"))
-
-    assertEquals("a", (vm.state.value as WorkspaceUiState.Content).sessionBindingColumn?.deviceId)
-  }
-
-  @Test
-  fun `driving the auto-focused pane makes it the session binding`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
-    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
-    vm.onAction(WorkspaceAction.ObserveDevice(column("c")))
-    vm.onAction(WorkspaceAction.CloseDevice("c"))
-
-    // Input on a pane that is not the focused one does not pick anything.
-    vm.onUserInteraction("b")
-    assertNull((vm.state.value as WorkspaceUiState.Content).sessionBindingColumn)
-
-    vm.onUserInteraction("a")
-    assertEquals("a", (vm.state.value as WorkspaceUiState.Content).sessionBindingColumn?.deviceId)
-  }
-
-  @Test
-  fun `a hardware button on the auto-focused pane makes it the session binding`() =
-    testScope.runTest {
-      val exec = FakeEmulatorControlExecutor()
-      val vm = WorkspaceViewModel(this, exec)
-      vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-      vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
-      vm.onAction(WorkspaceAction.CloseDevice("b"))
-
-      vm.onAction(WorkspaceAction.PressDeviceButton("a", DeviceButton.Back))
-
-      assertEquals("a", (vm.state.value as WorkspaceUiState.Content).sessionBindingColumn?.deviceId)
-    }
-
-  @Test
-  fun `closing an unfocused pane keeps a user-picked focus bound`() = testScope.runTest {
-    val vm = WorkspaceViewModel(this)
-    vm.onAction(WorkspaceAction.ObserveDevice(column("a")))
-    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
-    vm.onAction(WorkspaceAction.CloseDevice("a"))
-
-    assertEquals("b", (vm.state.value as WorkspaceUiState.Content).sessionBindingColumn?.deviceId)
+    assertEquals("a", (vm.state.value as WorkspaceUiState.Content).focusedDeviceId)
   }
 
   @Test

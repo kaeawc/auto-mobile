@@ -4,7 +4,7 @@ import NetworkFilterCore
 
 @objc(IdentityFilterProvider)
 final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate {
-    private let probe = IdentityProbe(resolver: SecurityProbeIdentityResolver())
+    private let probe = IdentityProbe(resolver: SecurityProbeIdentityResolver(), processTable: DarwinProcessTable())
     private var listener: NSXPCListener?
     private lazy var service = ProbeService(probe: probe)
 

@@ -36,6 +36,7 @@ blanket focusability proposal).
 | `id`     | Required nonempty overlay identifier string.                      |
 | `window` | Required window configuration below.                              |
 | `state`  | Optional flat object of string, finite number, or boolean values. |
+| `motion` | Optional `none` or `standard` (default). See Motion below.        |
 | `root`   | Required single node.                                             |
 
 All numeric values are finite. State keys (including action/binding/condition
@@ -77,6 +78,20 @@ retain JsonElement. Validated integer model fields normalize decimal/exponent
 spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
 plugin or API-check task; its published artifact includes the contract resource.
 
+## Theme
+
+Optional top-level `theme` sets the Material scheme every built-in component draws
+from. At least one of its fields is required:
+
+| Field           | Meaning                                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
+| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
+| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+
+An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
+are a later slice (#10438).
+
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
@@ -102,7 +117,8 @@ Every node has required `type`. All other common properties are optional:
 | `testTag`         | Nonempty accessibility/test selector tag.                                                          |
 | `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
-| `visibleWhen`     | `{key, equals}`; equals is a scalar. Missing key or unequal value means hidden.                    |
+| `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
+| `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
 
@@ -127,6 +143,9 @@ layout room.
 | `icon`        | Required built-in `name` below.                                                                                      |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
+| `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `checkbox`    | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
+| `button`      | Required nonempty `label`; optional `variant`: `filled` (default), `outlined`, `text`. Taps run `onTap`.             |
 | `scroll`      | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping. |
 | `pager`       | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                |
 | `tabBar`      | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                   |
@@ -156,6 +175,20 @@ window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
 window while open; a sheet placement is only a window placement.
 
+`switch`, `checkbox` and `button` are Material 3 components (#10439, first
+slice). A switch or checkbox draws the bound boolean; a tap anywhere on the
+control, including its label, flips that state value, emits a `change` event
+(`{key, value}`) like a text field or `stateKey` selection, and then runs the
+node's own `onTap`, if any. A `setState` that would make the bound value
+non-boolean is rejected like any other binding type change. A button runs its
+`onTap`; without one it is drawn but inert. Each component is one accessibility
+node carrying its label as text, a native role (`Switch`, `Checkbox`,
+`Button`), and for switch and checkbox the checkable/checked state, so `observe`
+reports them as controls and `tapOn` by `testTag` or label toggles or presses
+them. Each reserves the Material 48 dp minimum touch target. `radioGroup`,
+`slider`, `chip`, `card`, `listItem` and the other components in #10439 are
+later slices.
+
 Text interpolation is a renderer concern: `{page}`, `{pageCount}`, and state
 keys may appear in text. No expressions or interpolation parsing occurs during
 validation. Pager context is the nearest enclosing pager; outside a pager those
@@ -169,22 +202,24 @@ Text size uses sp, so it follows the system font scale. Negative offsets/positio
 are allowed; sizes are nonnegative, except text size and sheet height/detent
 height which must be positive. Positive values use a minimum of 0.000001.
 
-| Property              | Accepted value                                                                                                       |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `width`, `height`     | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                             |
-| `padding`             | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                 |
-| `background`, `color` | Strict hex color.                                                                                                    |
-| `cornerRadius`        | Nonnegative dp.                                                                                                      |
-| `border`              | `{width, color}`; nonnegative dp width.                                                                              |
-| `alpha`               | Finite number 0–1; default 1. Multiplies window opacity.                                                             |
-| `alignment`           | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`. |
-| `arrangement`         | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                              |
-| `spacing`             | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.            |
-| `textSize`            | Positive sp; scaled by the system font scale.                                                                        |
-| `fontWeight`          | Integer 100–900.                                                                                                     |
-| `textAlign`           | `start`, `center`, `end`, `justify`.                                                                                 |
-| `maxLines`            | Integer 1–2147483647.                                                                                                |
-| `fontFamily`          | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                     |
+| Property                                         | Accepted value                                                                                                               |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `width`, `height`                                | `"fill"`, `"wrap"`, or strict `{dp: n}`.                                                                                     |
+| `weight`                                         | Positive number. A `row`/`column` child fills the remaining main-axis space in proportion to its weight (ignored elsewhere). |
+| `minWidth`, `maxWidth`, `minHeight`, `maxHeight` | Nonnegative dp bounds applied after `width`/`height`, so `fill` and `{dp}` are clamped by them.                              |
+| `padding`                                        | Strict `{top?, bottom?, start?, end?}`, each nonnegative dp; omitted edges are zero.                                         |
+| `background`, `color`                            | Strict hex color.                                                                                                            |
+| `cornerRadius`                                   | Nonnegative dp.                                                                                                              |
+| `border`                                         | `{width, color}`; nonnegative dp width.                                                                                      |
+| `alpha`                                          | Finite number 0–1; default 1. Multiplies window opacity.                                                                     |
+| `alignment`                                      | `topStart`, `topCenter`, `topEnd`, `centerStart`, `center`, `centerEnd`, `bottomStart`, `bottomCenter`, `bottomEnd`.         |
+| `arrangement`                                    | `start`, `center`, `end`, `spaceBetween`, `spaceAround`, `spaceEvenly`.                                                      |
+| `spacing`                                        | Nonnegative dp between row/column children; arrangement remains authoritative for distributed free space.                    |
+| `textSize`                                       | Positive sp; scaled by the system font scale.                                                                                |
+| `fontWeight`                                     | Integer 100–900.                                                                                                             |
+| `textAlign`                                      | `start`, `center`, `end`, `justify`.                                                                                         |
+| `maxLines`                                       | Integer 1–2147483647.                                                                                                        |
+| `fontFamily`                                     | Closed system set: `default`, `sansSerif`, `serif`, `monospace`.                                                             |
 
 Colors accept only `#RRGGBB` or `#AARRGGBB`, with case-insensitive hex digits.
 No short hex, named colors, CSS functions, or separate color opacity. Style
@@ -266,19 +301,69 @@ successful result is returned with `missingAssets` and a `warning` on the tool o
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
 
+## Motion
+
+Overlay state changes animate by default (#10442). A node with `visibleWhen`
+fades and expands in and fades and shrinks out; a pager page change driven by
+`setPage` animates the scroll instead of jumping. Spec-level `motion: "none"`
+opts out and keeps every change instant. Motion is also off when the system
+animator duration scale is 0 (`adb shell settings put global
+animator_duration_scale 0`), so `observe` screenshots are settled with no
+extra waits; other scales are honored by Compose's animation clock. The scale is
+read when the spec changes. Only nodes with `visibleWhen` get an animation
+wrapper. Size-change animation, `transition` variants and `pressScale` are
+follow-ups.
+
 ## Actions and state
 
-| Action `type` | Properties                                                                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).      |
-| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages. |
-| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                               |
-| `dismiss`     | No additional properties.                                                                                                                         |
+| Action `type` | Properties                                                                                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
+| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
+| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
+| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
+| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
+| `dismiss`     | No additional properties.                                                                                                                                  |
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
+
+### Conditions
+
+A condition is exactly one of these forms. `visibleWhen` takes any of them;
+`bottomSheet.openWhen` keeps the boolean `{key, equals}` form.
+
+| Form                       | Holds when                                                               |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `{key, equals: scalar}`    | The state value is exactly equal (same type). A missing key never holds. |
+| `{key, notEquals: scalar}` | The state value differs, including when the key is missing.              |
+| `{key, gt: number}`        | The state value is a number greater than `gt`. Any other type is false.  |
+| `{key, lt: number}`        | The state value is a number less than `lt`. Any other type is false.     |
+| `{all: [condition, ...]}`  | Every member holds. One to 16 members.                                   |
+| `{any: [condition, ...]}`  | At least one member holds. One to 16 members.                            |
+| `{not: condition}`         | The member does not hold.                                                |
+
+Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
+contract). `key` takes exactly one comparison, and comparisons need `key`;
+errors point at the offending field (for example `root.visibleWhen.gt`).
+`toggle` and `increment` validate their `key` against the declared `state`
+(`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
+no-ops at runtime if the key's type was changed by other means. List templates
+and a `decrement` alias are later slices of #10440.
+
+### Conditional style: styleWhen
+
+Any node may declare `styleWhen`: one to 8 entries of `{when: condition, style: style}`
+(for selected, disabled or error looks without duplicating nodes). `when` takes
+any condition form above; `style` is the same strict style object as `style`, so
+an unknown key fails at `root.styleWhen[0].style.colour`. At render, every entry
+whose condition holds is merged over the node's base `style` in authored order:
+a property set by a later matching entry wins, and properties no entry sets keep
+the base value. Merging is per top-level property, so `padding` and `border`
+replace the base object whole rather than merging edge by edge. Conditions read the
+node's local state, so pager `{page}`/`{pageCount}` keys work inside a pager.
 
 ### Host helper: showVariants
 

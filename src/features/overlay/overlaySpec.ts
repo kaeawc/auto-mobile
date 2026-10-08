@@ -56,12 +56,27 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-const conditionSchema = z
-  .object({
-    key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
-    equals: z.union([z.string(), z.number().finite(), z.boolean()]),
-  })
-  .strict();
+const stateKeySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
+export type OverlayCondition =
+  | { key: string; equals: string | number | boolean }
+  | { key: string; notEquals: string | number | boolean }
+  | { key: string; gt: number }
+  | { key: string; lt: number }
+  | { all: OverlayCondition[] }
+  | { any: OverlayCondition[] }
+  | { not: OverlayCondition };
+const conditionSchema: z.ZodType<OverlayCondition> = z.lazy(() =>
+  z.union([
+    z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
+    z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
+    z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
+    z.object({ key: stateKeySchema, lt: z.number().finite() }).strict(),
+    z.object({ all: z.array(conditionSchema).min(1).max(16) }).strict(),
+    z.object({ any: z.array(conditionSchema).min(1).max(16) }).strict(),
+    z.object({ not: conditionSchema }).strict(),
+  ]),
+);
 const sheetConditionSchema = z
   .object({ key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/), equals: z.boolean() })
   .strict();
@@ -103,6 +118,11 @@ const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
     height: dimensionSchema.optional(),
+    weight: z.number().finite().min(1e-6).optional(),
+    minWidth: z.number().finite().min(0).optional(),
+    maxWidth: z.number().finite().min(0).optional(),
+    minHeight: z.number().finite().min(0).optional(),
+    maxHeight: z.number().finite().min(0).optional(),
     padding: paddingSchema.optional(),
     background: z
       .string()
@@ -139,6 +159,7 @@ const styleSchema = z
     fontFamily: z.enum(["default", "sansSerif", "serif", "monospace"]).optional(),
   })
   .strict();
+const styleWhenEntrySchema = z.object({ when: conditionSchema, style: styleSchema }).strict();
 const itemSchema = z
   .object({
     label: z.string().min(1),
@@ -253,6 +274,19 @@ export const actionSchema = z.discriminatedUnion("type", [
       value: z.union([z.string(), z.number().finite(), z.boolean()]),
     })
     .strict(),
+  z
+    .object({
+      type: z.enum(["toggle"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.enum(["increment"]),
+      key: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+      by: z.number().finite().optional(),
+    })
+    .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
 const commonNodeShape = {
@@ -260,6 +294,7 @@ const commonNodeShape = {
   testTag: z.string().min(1).optional(),
   onTap: z.array(actionSchema).min(1).max(32).optional(),
   style: styleSchema.optional(),
+  styleWhen: z.array(styleWhenEntrySchema).min(1).max(8).optional(),
   visibleWhen: conditionSchema.optional(),
   anchor: anchorSchema.optional(),
   safeAreaPadding: safeAreaPaddingSchema.optional(),
@@ -331,6 +366,30 @@ const textFieldBaseSchema = z
     placeholder: z.string().optional(),
   })
   .strict();
+const switchBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["switch"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+  })
+  .strict();
+const checkboxBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["checkbox"]),
+    stateKey: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/),
+    label: z.string().min(1).optional(),
+  })
+  .strict();
+const buttonBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["button"]),
+    label: z.string().min(1),
+    variant: z.enum(["filled", "outlined", "text"]).optional(),
+  })
+  .strict();
 const scrollBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -389,6 +448,9 @@ export type OverlayNode =
   | z.infer<typeof iconBaseSchema>
   | z.infer<typeof spacerBaseSchema>
   | z.infer<typeof textFieldBaseSchema>
+  | z.infer<typeof switchBaseSchema>
+  | z.infer<typeof checkboxBaseSchema>
+  | z.infer<typeof buttonBaseSchema>
   | (z.infer<typeof scrollBaseSchema> & { child: OverlayNode })
   | (z.infer<typeof pagerBaseSchema> & { children: OverlayNode[] })
   | z.infer<typeof tabBarBaseSchema>
@@ -404,6 +466,9 @@ export const overlayNodeSchema: z.ZodType<OverlayNode, z.ZodTypeDef, unknown> = 
     iconBaseSchema,
     spacerBaseSchema,
     textFieldBaseSchema,
+    switchBaseSchema,
+    checkboxBaseSchema,
+    buttonBaseSchema,
     scrollBaseSchema.extend({ child: z.lazy(() => overlayNodeSchema) }),
     pagerBaseSchema.extend({ children: z.array(z.lazy(() => overlayNodeSchema)).min(1) }),
     tabBarBaseSchema,
@@ -417,10 +482,28 @@ const windowSchema = z
     opacity: z.number().finite().int().min(0).max(100).default(100),
   })
   .strict();
+const themeColorsSchema = z
+  .object({
+    seed: z
+      .string()
+      .regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/)
+      .optional(),
+    source: z.enum(["device"]).optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
+const themeSchema = z
+  .object({
+    mode: z.enum(["light", "dark", "system"]).optional(),
+    colors: themeColorsSchema.optional(),
+  })
+  .strict()
+  .refine((value) => Object.keys(value).length > 0);
 const specSchema = z
   .object({
     id: z.string().min(1),
     window: windowSchema,
+    theme: themeSchema.optional(),
     state: z
       .custom<Record<string, string | number | boolean>>(
         (value) =>
@@ -429,6 +512,7 @@ const specSchema = z
             .safeParse(value).success,
       )
       .optional(),
+    motion: z.enum(["none", "standard"]).optional(),
     root: z.lazy(() => overlayNodeSchema),
   })
   .strict();
@@ -443,11 +527,21 @@ export const OVERLAY_NODE_TYPES = [
   "icon",
   "spacer",
   "textField",
+  "switch",
+  "checkbox",
+  "button",
   "scroll",
   "pager",
   "tabBar",
   "bottomNav",
   "bottomSheet",
 ] as const;
-export const OVERLAY_ACTION_TYPES = ["emit", "setPage", "setState", "dismiss"] as const;
+export const OVERLAY_ACTION_TYPES = [
+  "emit",
+  "setPage",
+  "setState",
+  "toggle",
+  "increment",
+  "dismiss",
+] as const;
 export const OVERLAY_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;

@@ -21,6 +21,7 @@ test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/ios/ipad-ios27-*.json text eol=lf
+test/fixtures/ios/iphone17-ios26-*.json text eol=lf
 test/fixtures/ios/keyboard-modes/*.json text eol=lf
 test/fixtures/android-ime-window/*.json text eol=lf
 test/fixtures/android-overlay-testtag/*.json text eol=lf

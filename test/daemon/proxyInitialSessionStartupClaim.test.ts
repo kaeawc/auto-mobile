@@ -134,6 +134,50 @@ describe("proxy --initial-session-uuid startup claim", () => {
     }
   });
 
+  test("a refused startup claim keeps the binding usable until the old owner stops", async () => {
+    // The previous owner is still alive and keeps heartbeating past the claim leash.
+    const oldOwnerHeartbeat = () =>
+      daemonCall(DAEMON_HEARTBEAT_METHOD, {
+        sessionId: SESSION,
+        livenessOwnerToken: "old-token",
+        claimLivenessOwnership: true,
+      });
+    expect(await oldOwnerHeartbeat()).toMatchObject({ success: true });
+
+    const clients: FakeDaemonClient[] = [];
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const proxy = handoffProxy(clients);
+    try {
+      await proxy.claimInitialSession();
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe("old-token");
+
+      // 30 s of refused claims: well past the 10 s leash that used to fence the binding.
+      for (let elapsed = 0; elapsed < 30_000; elapsed += 1_000) {
+        expect(await oldOwnerHeartbeat()).toMatchObject({ success: true });
+        await timer.advanceTimeAsync(1_000);
+      }
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe("old-token");
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes("no longer claiming it")),
+      ).toBeFalse();
+
+      // The old owner stops; once its lease lapses the keeper's retried claim lands.
+      await timer.advanceTimeAsync(30_000);
+      expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe("handoff-token");
+
+      // The client switches over: its first tool call is routed to the handed-off session.
+      const result = await proxy.callTool("observe", {});
+      expect(result).toBeDefined();
+      expect(clients.at(-1)!.callToolCalls.at(-1)).toMatchObject({
+        toolName: "observe",
+        params: { sessionUuid: SESSION },
+      });
+    } finally {
+      warn.mockRestore();
+      await proxy.close();
+    }
+  });
+
   test("is a no-op without --initial-session-uuid", async () => {
     let created = 0;
     const proxy = new DaemonMcpProxy({

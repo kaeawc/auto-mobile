@@ -999,6 +999,12 @@ export class DaemonMcpProxy {
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
    */
   private latestBindingConflict: { sessionUuid: string; since: number } | undefined;
+  /**
+   * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
+   * While the previous owner is still heartbeating, its refusals must not fence the binding: the
+   * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
+   */
+  private initialSessionAwaitingFirstCall = false;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -1216,6 +1222,7 @@ export class DaemonMcpProxy {
       this.boundSessionUuid = config.initialSessionUuid.trim();
       this.boundSessionUuidAt = this.timer.now();
       this.initialSessionBindingConfigured = true;
+      this.initialSessionAwaitingFirstCall = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
       this.claimableSessions.add(this.boundSessionUuid);
     }
@@ -3334,6 +3341,8 @@ export class DaemonMcpProxy {
     allowSuspectRetry: boolean,
   ): Promise<ForwardedToolCall> {
     signal?.throwIfAborted();
+    // From the first tool call on, a refused claim of the initial binding is leashed as usual.
+    this.initialSessionAwaitingFirstCall = false;
     // These are daemon-internal routing markers. Never accept caller-controlled
     // values: only this proxy may add them after selecting its active binding.
     const callerArgs = { ...args };
@@ -3834,6 +3843,7 @@ export class DaemonMcpProxy {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
     this.initialSessionBindingConfigured = false;
+    this.initialSessionAwaitingFirstCall = false;
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
     this.latestBindingConflict = undefined;
@@ -4953,6 +4963,13 @@ export class DaemonMcpProxy {
    */
   private leashLatestBindingConflict(sessionUuid: string, isCurrent: () => boolean): void {
     if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    if (this.initialSessionAwaitingFirstCall) {
+      // A handoff proxy claimed its initial session at startup while the previous owner still
+      // heartbeats it. Keep the binding claimable and keep retrying: the claim lands once the old
+      // owner's lease lapses, and the leash starts only when a tool call needs the session.
+      this.latestBindingConflict = undefined;
       return;
     }
     const now = this.timer.now();

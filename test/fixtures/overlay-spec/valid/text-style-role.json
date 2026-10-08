@@ -1,0 +1,20 @@
+{
+  "id": "prototype",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "theme": {
+    "typography": {
+      "scale": 0.75
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "Title",
+    "style": {
+      "textStyle": "titleLarge"
+    }
+  }
+}

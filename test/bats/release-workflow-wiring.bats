@@ -81,7 +81,7 @@
   [ "$status" -eq 0 ]
 
   local artifact_name
-  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper; do
+  for artifact_name in control-proxy-apk ctrl-proxy-ios-ipa video-server-jar screen-capture-helper network-filter; do
     [[ "$output" == *"${artifact_name}"$'\t''${{ inputs.prepare_run_id }}'$'\t''${{ secrets.GITHUB_TOKEN }}'$'\t''${{ github.repository }}'* ]]
   done
 
@@ -392,6 +392,25 @@
   grep -Fq "uses: ./.github/workflows/build-screen-capture-helper.yml" "$workflow"
   grep -Fq "verify-release-integrity.sh" "$workflow"
   grep -Fq "SCREEN_CAPTURE_HELPER_SHA256:" "$workflow"
+}
+
+@test "prepare-release records, verifies, and ships the network-filter archive" {
+  local prepare=".github/workflows/prepare-release.yml"
+  local release=".github/workflows/release.yml"
+  grep -Fq "NETWORK_FILTER_SHA256: \${{ needs.build-candidate-network-filter-identity-probe.outputs.sha256 }}" "$prepare"
+  grep -Fq "verify-artifact-sha256.sh /tmp/automobile-network-filter-macos-universal.zip networkfilter" "$prepare"
+  grep -Fq '"network-filter"' "$prepare"
+  grep -Fq '"network-filter"' "$release"
+  grep -Fq "/tmp/automobile-network-filter-macos-universal.zip" "$release"
+  grep -Fq "entry.networkFilterSha256" "$release"
+}
+
+@test "network-filter builder packs with ditto, exposes the archive sha256, and uploads it" {
+  local workflow=".github/workflows/build-network-filter-probe.yml"
+  grep -Fq "name: network-filter" "$workflow"
+  grep -Fq "path: /tmp/automobile-network-filter-macos-universal.zip" "$workflow"
+  grep -Fq 'sha256: ${{ steps.checksum.outputs.sha256 }}' "$workflow"
+  grep -Fq "ditto -c -k --keepParent" scripts/ios/build-network-filter-probe.sh
 }
 
 @test "screen-capture-helper release builder signs, notarizes, and uploads the universal archive" {

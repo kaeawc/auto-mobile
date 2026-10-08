@@ -1051,12 +1051,20 @@ export class SwipeOn extends BaseVisualChange {
         options.container,
       ).bounds;
     }
-    return this.scrollUntilVisible.resolveElement(
+    const container = this.scrollUntilVisible.resolveElement(
       observation.viewHierarchy,
       options.container,
       "inspect",
       options.container.text !== undefined,
-    )?.bounds;
+    );
+    // A page inside a pager swipes as its scrollable ancestor (#10752).
+    return container && options.direction
+      ? this.scrollUntilVisible.resolveSwipeTarget(
+          observation.viewHierarchy,
+          container,
+          options.direction,
+        ).bounds
+      : container?.bounds;
   }
 
   private async executeExplicitDisplay(

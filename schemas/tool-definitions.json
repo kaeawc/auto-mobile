@@ -25648,7 +25648,7 @@
                     "const": "clear"
                   },
                   "mode": {
-                    "description": "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
+                    "description": "Android clear delivery. auto (default) and ime clear through the AutoMobile IME, or key-event deletes on an older control-proxy APK or when the IME cannot be activated, so rich-text editors keep live formatting. a11y uses the accessibility set-text clear. iOS ignores this",
                     "type": "string",
                     "enum": ["auto", "ime", "a11y"]
                   }

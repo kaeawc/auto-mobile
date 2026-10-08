@@ -1158,7 +1158,8 @@ reports the actual `xcuiTypeText` mechanism as
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A
 standalone `{ "action": "clear" }` command clears the focused field. On Android
 its default (`auto`) and `ime` modes clear through the CtrlProxy IME
-(`ime_clear_field_v1`), or with key-event deletes on an older APK, so a
+(`ime_clear_field_v1`), or with key-event deletes on an older APK or when the
+IME cannot be activated, so a
 rich-text editor keeps its live formatting; only `mode: "a11y"` uses the
 accessibility `ACTION_SET_TEXT` clear. Execution
 stops on the first failure and returns compact command metadata plus the final

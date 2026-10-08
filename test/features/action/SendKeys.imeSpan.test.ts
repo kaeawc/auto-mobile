@@ -506,6 +506,30 @@ test.each([undefined, "ime"] as const)(
   },
 );
 
+test.each([undefined, "auto", "ime"] as const)(
+  "a clear-only call in %s mode deletes with key events when the IME cannot be activated (#10479)",
+  async (mode) => {
+    const h = fieldHarness();
+    h.adb.setCommandResponse(activate, { stdout: "", stderr: "selection failed" });
+    const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
+    expect(result.success).toBe(true);
+    expect(h.clientCalls).toEqual([]);
+    expect(h.deletes().length).toBeGreaterThan(0);
+    expect(h.field()).toBe("");
+    expectNoAccessibilityClear(h);
+  },
+);
+
+test("an IME clear that fails after activation does not fall back to key events", async () => {
+  const h = fieldHarness();
+  h.client.commitViaIme = async () => ({ success: false, error: "clear rejected" });
+  const result = await h.action.execute([{ action: "clear" }]);
+  expect(result).toMatchObject({ success: false, error: "clear rejected" });
+  expect(h.deletes()).toEqual([]);
+  expectNoAccessibilityClear(h);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
 test.each([true, false])(
   "a clear-only call on a password field never logs its text (clear capability %s)",
   async (supported) => {

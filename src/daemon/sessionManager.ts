@@ -873,6 +873,7 @@ export function getDefaultPreFirstHeartbeatGraceMs(): number {
 }
 
 export class SessionManager {
+  private stallProbe: (() => void) | undefined;
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
@@ -1644,6 +1645,7 @@ export class SessionManager {
     execution?: SessionExecutionMetadata,
     releaseExpired = true,
   ): Session | null {
+    this.stallProbe?.();
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return null;
     }
@@ -5642,18 +5644,34 @@ export class SessionManager {
   }
 
   /**
+   * Register the detector that applies {@link forgiveDaemonStall} for a stall the monitor has not
+   * yet noticed. Every expiry judgement (lookup, sweep) runs it first, so which timer fires first
+   * after a stall or wake no longer decides the outcome. Pass undefined to detach.
+   */
+  setStallProbe(probe: (() => void) | undefined): void {
+    this.stallProbe = probe;
+  }
+
+  /**
    * Do not hold the daemon's own stall against any session (#10051).
    *
    * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
    * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
    * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
    * time is not counted against the owner while time the owner genuinely missed before the stall
-   * still is. Returns how many sessions were extended.
+   * still is. A stall at least as long as the session's idle window is sleep, not a hiccup, and
+   * is not forgiven (host sleep counts toward idle). Returns how many sessions were extended.
    */
   forgiveDaemonStall(resumedAt: number, lostMs: number): number {
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
+        continue;
+      }
+      // Idle time is wall-clock, host sleep included: a stall that alone outlasts the window
+      // (timeout plus suspect grace) is idleness the owner did not use, not a hiccup to forgive.
+      // Judged here so the monitor tick and every lazy lookup reach the same verdict.
+      if (lostMs >= session.sessionTimeoutMs + suspectGraceMsFor(session)) {
         continue;
       }
       const leaseStart = effectiveLastHeartbeat(session);
@@ -5985,6 +6003,7 @@ export class SessionManager {
    * released promptly instead of waiting for the next 5-minute sweep.
    */
   cleanupExpiredSessions(): void {
+    this.stallProbe?.();
     const expiredSessions: string[] = [];
 
     for (const [sessionId, session] of this.sessions) {

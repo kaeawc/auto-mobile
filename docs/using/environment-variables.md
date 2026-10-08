@@ -310,6 +310,16 @@ its heartbeat monitor runs more than 2 s later than scheduled it moves every
 session's lease forward by exactly that lateness, so a daemon stall of a few
 seconds cannot push a heartbeating owner past lease plus grace.
 
+Idle time is wall-clock, host sleep included. A stall that on its own outlasts a
+session's idle window (its timeout plus the suspect grace), such as a laptop
+asleep for longer than that, is idleness and is not forgiven, so waking the host
+may release the session. The verdict does not depend on which timer runs first
+after the wake: the monitor tick, an owner heartbeat, a tool call and the
+periodic sweep all apply the same stall check before judging expiry. The owner's
+next call fails with `bound_session_lost` and a message saying the session was
+released after sitting idle (time asleep counts) and that it must acquire a new
+device session.
+
 When the lease and grace are already spent by the time recovery starts (a long
 proxy stall, such as a sleeping laptop), the daemon may have forgiven its own
 stall and still hold the sessions, so each attempt is given the heartbeat

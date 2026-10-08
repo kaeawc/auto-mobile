@@ -19,19 +19,34 @@ extension EnvironmentValues {
     }
 }
 
+private struct PaletteKey: EnvironmentKey {
+    static let defaultValue = OverlayPalette.make(theme: nil, systemDark: false)
+}
+
+extension EnvironmentValues {
+    /// The active spec theme's resolved palette; the baseline when the spec has no `theme`.
+    var overlayPalette: OverlayPalette {
+        get { self[PaletteKey.self] }
+        set { self[PaletteKey.self] = newValue }
+    }
+}
+
 extension Color {
+    init(_ rgba: OverlayRGBA) {
+        self.init(.sRGB, red: rgba.red, green: rgba.green, blue: rgba.blue, opacity: rgba.alpha)
+    }
+
     /// `#RRGGBB` or `#AARRGGBB`, matching the spec's Android-style hex.
     init?(hex: String?) {
-        guard let hex, hex.hasPrefix("#"), let value = UInt64(hex.dropFirst(), radix: 16) else { return nil }
-        let digits = hex.count - 1
-        let alpha = digits == 8 ? Double((value >> 24) & 0xFF) / 255 : 1
-        self.init(
-            .sRGB,
-            red: Double((value >> 16) & 0xFF) / 255,
-            green: Double((value >> 8) & 0xFF) / 255,
-            blue: Double(value & 0xFF) / 255,
-            opacity: alpha
-        )
+        guard let rgba = OverlayRGBA(hex: hex) else { return nil }
+        self.init(rgba)
+    }
+}
+
+extension OverlayPalette {
+    /// A colour field as a hex literal or a Material role name from the theme; nil if neither.
+    func color(_ spec: String?) -> Color? {
+        resolve(spec).map { Color($0) }
     }
 }
 
@@ -67,6 +82,7 @@ struct NodeView: View {
     let node: OverlayNode
     @ObservedObject var model: OverlayModel
     @Environment(\.pagerContext) private var pager
+    @Environment(\.overlayPalette) private var palette
 
     var body: some View {
         if isVisible {
@@ -82,6 +98,12 @@ struct NodeView: View {
     /// Controls that run `onTap` from their own action, so the generic tap gesture stays off them.
     private var handlesOwnTap: Bool {
         ["switch", "checkbox", "button"].contains(node.type)
+    }
+
+    /// Unstyled text and icons follow the theme's onSurface once the spec has a theme (Android's
+    /// LocalContentColor); a themeless spec keeps the system primary colour.
+    private var contentColor: Color {
+        palette.themed ? palette.color(role: "onSurface").map { Color($0) } ?? .primary : .primary
     }
 
     /// `style` with every matching `styleWhen` entry merged over it.
@@ -102,7 +124,7 @@ struct NodeView: View {
         case "icon":
             Image(systemName: sfSymbols[node.name ?? ""] ?? "questionmark.square")
                 .font(.system(size: style?.textSize ?? 24))
-                .foregroundColor(Color(hex: style?.color) ?? .primary)
+                .foregroundColor(palette.color(style?.color) ?? contentColor)
                 // Decorative unless it has an authored description or is tappable.
                 .accessibilityHidden(accessibilityLabelOverride == nil)
         case "spacer":
@@ -206,7 +228,7 @@ struct NodeView: View {
         return text
             .tracking(style?.letterSpacing ?? 0)
             .lineSpacing(max(0, (style?.lineHeight ?? scaled) - scaled))
-            .foregroundColor(Color(hex: style?.color) ?? .primary)
+            .foregroundColor(palette.color(style?.color) ?? contentColor)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
             .truncationMode(.tail)
@@ -355,13 +377,13 @@ struct NodeView: View {
                 alignment: contentAlignment,
                 fillsByDefault: node.type == "spacer"
             ))
-            .background(Color(hex: style?.background) ?? .clear)
+            .background(palette.color(style?.background) ?? .clear)
             .clipShape(shape)
             .overlay(
-                shape.stroke(Color(hex: style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
+                shape.stroke(palette.color(style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
             )
             .shadow(
-                color: (style?.elevation ?? 0) > 0 ? Color(hex: style?.shadowColor) ?? .black.opacity(0.25) : .clear,
+                color: (style?.elevation ?? 0) > 0 ? palette.color(style?.shadowColor) ?? .black.opacity(0.25) : .clear,
                 radius: style?.elevation ?? 0
             )
             .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)

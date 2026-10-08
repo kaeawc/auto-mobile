@@ -50,6 +50,10 @@ final class OverlayModel: ObservableObject {
         session.holds(condition)
     }
 
+    func fontAssets() -> [String] {
+        session.fontAssets()
+    }
+
     func missingAssets() -> [String] {
         session.missingAssets(available: Set(assets.keys))
     }

@@ -193,7 +193,14 @@ struct OverlaySession {
 
     /// A `tabBar`/`bottomNav` selection drives its pager when it has one, else its state key, then
     /// runs the node's `onTap` actions, as Android's selection does.
-    mutating func select(index: Int, pager: String?, key: String?, then actions: [OverlayAction] = []) -> [OverlayEvent] {
+    mutating func select(
+        index: Int,
+        pager: String?,
+        key: String?,
+        then actions: [OverlayAction] = []
+    )
+        -> [OverlayEvent]
+    {
         guard isShown else { return [] }
         var events: [OverlayEvent] = []
         if let pager {
@@ -228,6 +235,15 @@ struct OverlaySession {
     }
 
     // MARK: Status
+
+    /// Font asset ids the shown spec names. iOS cannot load an uploaded font, so these are always
+    /// reported missing and drawn with the system font.
+    func fontAssets() -> [String] {
+        guard let spec else { return [] }
+        var ids = Set<String>()
+        spec.root.collectFontAssets(into: &ids)
+        return ids.sorted()
+    }
 
     func missingAssets(available: Set<String>) -> [String] {
         guard let spec else { return [] }

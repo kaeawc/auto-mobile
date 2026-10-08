@@ -939,18 +939,31 @@ export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
 const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
-function restartRecoveryDeadlineFromPersisted(persisted: DeviceSession): number | undefined {
-  if (
-    !persisted.release_reason ||
-    !isDeviceRestartReleaseReason(persisted.release_reason) ||
-    persisted.released_at_ms === null
-  ) {
+function isDeviceRestartReleasedRow(
+  persisted: DeviceSession,
+): persisted is DeviceSession & { released_at_ms: number } {
+  return Boolean(
+    persisted.release_reason &&
+    isDeviceRestartReleaseReason(persisted.release_reason) &&
+    persisted.released_at_ms !== null,
+  );
+}
+
+/**
+ * When a device-restart recovery must give up. Admission is bounded by the session's idle
+ * expiry; a caller-driven wait (`callerInFlight`) is not, because a tool call in flight is
+ * activity and is never released mid-call (owner decision 2026-10-08) — only the cold-boot
+ * allowance bounds it.
+ */
+function restartRecoveryDeadlineFromPersisted(
+  persisted: DeviceSession,
+  callerInFlight = false,
+): number | undefined {
+  if (!isDeviceRestartReleasedRow(persisted)) {
     return undefined;
   }
-  return Math.min(
-    persisted.expires_at_ms,
-    persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS,
-  );
+  const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+  return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
 }
 
 /**
@@ -1055,6 +1068,14 @@ export class SessionManager {
   private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
   /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
   private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
+  /**
+   * Last tool-call activity (a call starting, joining, or ending) against a session that is
+   * waiting out a device restart. The released row's `expires_at_ms` froze at the device loss,
+   * so without this an agent that keeps calling through a cold boot longer than the idle window
+   * would lose its session; it is projected onto the persisted row by
+   * {@link readPersistedSession}. In memory only: a daemon restart falls back to the row.
+   */
+  private readonly restartRecoveryActivityAt: Map<string, number> = new Map();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -1652,12 +1673,33 @@ export class SessionManager {
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
   }
 
+  /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
+  private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const activityAt = this.restartRecoveryActivityAt.get(sessionId);
+    if (!persisted || activityAt === undefined || !isDeviceRestartReleasedRow(persisted)) {
+      return persisted;
+    }
+    return {
+      ...persisted,
+      expires_at_ms: Math.max(persisted.expires_at_ms, activityAt + persisted.session_timeout_ms),
+    };
+  }
+
+  /** A tool call started, joined or ended against a session waiting out a device restart. */
+  private recordRestartRecoveryActivity(sessionId: string): void {
+    this.restartRecoveryActivityAt.set(
+      sessionId,
+      Math.max(this.restartRecoveryActivityAt.get(sessionId) ?? 0, this.timer.now()),
+    );
+  }
+
   /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */
   async isReleasedSessionInRestartRecoveryWindow(sessionId: string): Promise<boolean> {
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return false;
     }
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     if (
       !persisted ||
       this.terminalReleaseSnapshots.has(sessionId) ||
@@ -1672,7 +1714,7 @@ export class SessionManager {
   private async getPersistedTerminalRelease(
     sessionId: string,
   ): Promise<SessionReleaseSnapshot | undefined> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     return persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined;
   }
 
@@ -1699,6 +1741,7 @@ export class SessionManager {
       persisted.expires_at_ms <= this.timer.now() &&
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
+      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
       await this.deviceSessionRepository.markReleased(
         persisted.session_uuid,
         "expired",
@@ -1983,6 +2026,9 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
+      if (this.restartRecoveryActivityAt.has(sessionId)) {
+        this.recordRestartRecoveryActivity(sessionId);
+      }
       const shared = this.sharedSessionAssignments.get(sessionId);
       if (shared?.controller.signal.aborted) {
         await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
@@ -2160,7 +2206,7 @@ export class SessionManager {
       unissuedSessionError = error;
     }
 
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease =
       persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
     if (persistedTerminalRelease) {
@@ -2180,7 +2226,7 @@ export class SessionManager {
     requireIssuedSession: boolean,
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease = persisted
       ? this.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;
@@ -2214,6 +2260,9 @@ export class SessionManager {
       );
     }
 
+    if (persisted && isDeviceRestartReleasedRow(persisted)) {
+      this.recordRestartRecoveryActivity(sessionId);
+    }
     return await this.recoverPersistedSession(
       sessionId,
       devicePool,
@@ -2233,7 +2282,12 @@ export class SessionManager {
     initialOwnership: "owned" | "awaiting-owner",
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const recoveryTarget = await this.recoveryTargetFromPersisted(sessionId, persisted, platform);
+    const recoveryTarget = await this.recoveryTargetFromPersisted(
+      sessionId,
+      persisted,
+      platform,
+      initialOwnership === "owned",
+    );
     if (recoveryTarget && initialOwnership === "awaiting-owner") {
       recoveryTarget.initialOwnership = initialOwnership;
     }
@@ -2271,6 +2325,8 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session ${sessionId} creation failed after device assignment`);
     }
+    // The live session's own clocks take over from here.
+    this.restartRecoveryActivityAt.delete(sessionId);
     logger.info(
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
@@ -3029,7 +3085,7 @@ export class SessionManager {
     releaseReason: string,
   ): Promise<string | null> {
     if (isTerminalReleaseReason(releaseReason) || releaseReason === "superseded") {
-      const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+      const persisted = await this.readPersistedSession(sessionId);
       const deadline = persisted && restartRecoveryDeadlineFromPersisted(persisted);
       if (
         persisted &&
@@ -3785,6 +3841,7 @@ export class SessionManager {
     // must still stop routing tools to a device that is already confirmed
     // lost; a later release retry can persist and complete removal.
     this.terminalReleaseSnapshots.set(snapshot.sessionId, snapshot);
+    this.restartRecoveryActivityAt.delete(snapshot.sessionId);
     await this.persistSessionRelease(snapshot);
   }
 
@@ -5776,6 +5833,12 @@ export class SessionManager {
    */
   recordToolCallEnded(sessionId: string): void {
     const session = this.sessions.get(sessionId);
+    if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
+      // A call that waited on, or failed because of, a device restart is still the client using
+      // the session: restart its idle window so recovery is only lost after real quiet.
+      this.recordRestartRecoveryActivity(sessionId);
+      return;
+    }
     if (!session || this.releasingSessions.has(session)) {
       return;
     }
@@ -6489,6 +6552,7 @@ export class SessionManager {
     sessionId: string,
     persisted: DeviceSession | undefined,
     requestedPlatform: Platform | undefined,
+    callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
     if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
       return undefined;
@@ -6524,7 +6588,7 @@ export class SessionManager {
       platform: persisted.platform,
       stableDeviceId,
       deviceId: persisted.device_id,
-      restartRecoveryDeadlineMs: restartRecoveryDeadlineFromPersisted(persisted),
+      restartRecoveryDeadlineMs: restartRecoveryDeadlineFromPersisted(persisted, callerInFlight),
       liveness: this.recoveryLivenessFromPersisted(persisted),
       persistenceMetadata: {
         source: persisted.source,

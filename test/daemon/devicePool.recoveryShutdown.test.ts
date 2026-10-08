@@ -2051,22 +2051,131 @@ test("device-restart resume terminalizes absence at the persisted restart deadli
   }
 });
 
-test("device-restart resume stops at the earlier session expiry", async () => {
-  const { timer, persistence, sessions, pool } = await setupPassiveRestart();
-  try {
-    const persisted = await persistence.getSession?.("session");
-    if (!persisted) {
-      throw new Error("Expected a persisted restart release");
-    }
-    persisted.expires_at_ms = 5_000;
-    const resume = sessions.getOrCreateSession("session", pool, "android", undefined, true);
+// The owner-decided idle window: a session is released this long after its last tool call ends.
+const RESTART_TEST_IDLE_MS = 2 * 60_000;
+
+/** A device-restart release whose idle deadline (two minutes) falls inside the cold-boot window. */
+async function setupPassiveRestartWithIdleWindow() {
+  const setup = await setupPassiveRestart();
+  const persisted = await setup.persistence.getSession?.("session");
+  if (!persisted) {
+    throw new Error("Expected a persisted restart release");
+  }
+  persisted.session_timeout_ms = RESTART_TEST_IDLE_MS;
+  persisted.expires_at_ms = RESTART_TEST_IDLE_MS;
+  return setup;
+}
+
+function trackSettlement<T>(promise: Promise<T>): {
+  result: Promise<T | unknown>;
+  settled: () => boolean;
+} {
+  let settled = false;
+  const result = promise.then(
+    (value) => {
+      settled = true;
+      return value;
+    },
+    (error: unknown) => {
+      settled = true;
+      return error;
+    },
+  );
+  return { result, settled: () => settled };
+}
+
+async function advanceSecondsUntil(timer: FakeTimer, untilMs: number): Promise<void> {
+  while (timer.now() < untilMs) {
+    timer.advanceTime(Math.min(1_000, untilMs - timer.now()));
     await flush();
-    expect(timer.getPendingTimeouts()).toEqual([1_000]);
-    timer.advanceTime(5_000);
-    await expect(resume).rejects.toThrow("recovery reason: target-absent");
-    expect(await persistence.getSession?.("session")).toMatchObject({
-      release_reason: "identity-recovery-target-absent",
+  }
+}
+
+test("an in-flight caller keeps device-restart recovery past the idle window", async () => {
+  const { timer, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
+  try {
+    const resume = trackSettlement(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    );
+    await flush();
+    // The call is in flight, so it is activity: the two-minute idle deadline does not apply.
+    await advanceSecondsUntil(timer, 150_000);
+    expect(resume.settled()).toBe(false);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    timer.advanceTime(1_000);
+    expect(await resume.result).toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
     });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a client retrying through a cold boot keeps its session past the idle window", async () => {
+  const { timer, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
+  try {
+    // Each call gives up at its own request deadline; the daemon records each call's end.
+    for (const requestDeadlineMs of [60_000, 120_000]) {
+      const attempt = trackSettlement(
+        sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+          requestDeadlineMs,
+        }),
+      );
+      await flush();
+      await advanceSecondsUntil(timer, requestDeadlineMs);
+      expect(String(await attempt.result)).toContain("Cannot safely recover session");
+      sessions.recordToolCallEnded("session");
+    }
+    // Past the idle deadline recorded at the device loss, the retrying client is still admitted.
+    const retry = trackSettlement(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+        requestDeadlineMs: 180_000,
+      }),
+    );
+    await flush();
+    await advanceSecondsUntil(timer, 170_000);
+    expect(retry.settled()).toBe(false);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    timer.advanceTime(1_000);
+    expect(await retry.result).toMatchObject({
+      sessionId: "session",
+      assignedDevice: original.deviceId,
+    });
+  } finally {
+    sessions.stopCleanupTimer();
+  }
+});
+
+test("a quiet client loses device-restart recovery two minutes after its last call ends", async () => {
+  const { timer, persistence, sessions, manager, pool } =
+    await setupPassiveRestartWithIdleWindow();
+  try {
+    const attempt = trackSettlement(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true, {
+        requestDeadlineMs: 30_000,
+      }),
+    );
+    await flush();
+    await advanceSecondsUntil(timer, 30_000);
+    expect(String(await attempt.result)).toContain("Cannot safely recover session");
+    sessions.recordToolCallEnded("session");
+    const lastCallEndedAt = timer.now();
+
+    // The client goes quiet; the device comes back inside the cold-boot window but too late.
+    await advanceSecondsUntil(timer, lastCallEndedAt + RESTART_TEST_IDLE_MS);
+    manager.bootedDevices = [original];
+    await pool.addDevice(original, image);
+    await expect(
+      sessions.getOrCreateSession("session", pool, "android", undefined, true),
+    ).rejects.toThrow("is not an active daemon session");
+    expect(await persistence.getSession?.("session")).toMatchObject({
+      status: "expired",
+      release_reason: "expired",
+    });
+    expect(sessions.getSession("session")).toBeNull();
   } finally {
     sessions.stopCleanupTimer();
   }

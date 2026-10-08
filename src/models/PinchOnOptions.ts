@@ -1,4 +1,5 @@
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+import type { HierarchyLayer } from "./HierarchyLayer";
 
 export interface ElementContainerSelector {
   elementId?: string;
@@ -27,4 +28,9 @@ export interface PinchOnOptions {
   includeSystemInsets?: boolean;
   container?: ElementContainerSelector;
   autoTarget?: boolean;
+  /**
+   * Scope container and auto-target resolution to the app or AutoMobile's overlay, and refuse a
+   * pinch whose finger start points lie on the other layer (issue #9305).
+   */
+  layer?: HierarchyLayer;
 }

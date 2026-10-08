@@ -14838,6 +14838,11 @@
           "description": "Auto-target pinchable containers",
           "type": "boolean"
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -25694,6 +25699,11 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -28778,6 +28788,11 @@
           "type": "string",
           "enum": ["slow", "normal", "fast"]
         },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -29447,6 +29462,11 @@
           "description": "Coordinate gesture (default: tap)",
           "type": "string",
           "enum": ["tap", "longPress", "doubleTap"]
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile overlay; overlay: overlay nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "overlay"]
         },
         "durationMs": {
           "description": "Long-press duration in milliseconds (500–10000; default 1000); only with longPress",

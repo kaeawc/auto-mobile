@@ -1032,16 +1032,28 @@ malformed recursive containers are rejected.
 
 #### Hierarchy layer
 
-`observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, and `dragAndDrop` accept an
-optional top-level `layer` (`"app"` or `"overlay"`) that scopes the view hierarchy
-to one layer of the screen. `app` excludes AutoMobile's own overlay window;
-`overlay` keeps only overlay nodes and fails with an actionable error when no
-overlay is showing. Omit it to search both, topmost first. `observe` applies it
-to the returned hierarchy and to `waitFor` element conditions. `dragAndDrop.layer`
-scopes both the `source` and the `target` drop-target resolution. With `layer: "app"`,
-a coordinate gesture whose point lies under an overlay window is refused before
-dispatch. `layer` on `sendKeys` and `highlight` requires a selector, and `tapOn`
-rejects it together with `accessibilityLink` or `subtext`.
+`observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, `dragAndDrop`, `swipeOn`,
+`pinchOn`, `tapAt`, and `selectAllText` accept an optional top-level `layer`
+(`"app"` or `"overlay"`) that scopes the call to one layer of the screen. `app`
+excludes AutoMobile's own overlay window; `overlay` keeps only overlay nodes and
+fails with an actionable error when no overlay is showing. Omit it to search both,
+topmost first. `observe` applies it to the returned hierarchy and to `waitFor`
+element conditions. `dragAndDrop.layer` scopes both the `source` and the `target`
+drop-target resolution; `swipeOn.layer` scopes `container`, auto-target, and
+`lookFor` resolution; `pinchOn.layer` scopes `container` and auto-target resolution.
+
+Touches go to the window under the point where a finger goes down, so gestures
+are checked there before dispatch: the tap point (`tapAt`, `tapOn`, `tapAny`), the
+swipe start (`swipeOn`), both finger start points (`pinchOn`), and both drag
+endpoints (`dragAndDrop`). With `layer: "app"` a gesture whose point lies under an
+overlay window is refused. With `layer: "overlay"`, `tapAt`, `swipeOn`, and
+`pinchOn` also refuse a point outside every overlay window, because it would
+reach the app. There is no touch-through mode: hide or move the overlay to reach
+the app beneath it.
+`selectAllText` acts on the input-focused field and is refused when that field is
+on the other layer. `layer` on `sendKeys` and `highlight` requires a selector,
+`tapOn` rejects it together with `accessibilityLink` or `subtext`, and `swipeOn`
+rejects it together with `display`.
 
 `swipeOn.container` identifies the element to swipe within and accepts the same
 recursive container, per-level index, and selectionStrategy fields. `lookFor`

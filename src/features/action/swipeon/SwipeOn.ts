@@ -106,6 +106,7 @@ import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { unsupportedDisplayOptionMessage } from "../../observe/SessionDisplayContext";
+import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 
 const DISPLAY_SWIPE_OPTIONS = [
   "lookFor",
@@ -113,6 +114,8 @@ const DISPLAY_SWIPE_OPTIONS = [
   "autoTarget",
   "includeSystemInsets",
   "scrollMode",
+  // Display routes resolve and dispatch without the layer checks below (issue #9305).
+  "layer",
 ] as const;
 
 /** TalkBack state for an explicit-display swipe; `unknownWarning` is set when detection is unconfirmed. */
@@ -157,7 +160,27 @@ function unsupportedDisplaySwipeOption({
   platform: BootedDevice["platform"];
 }) {
   return DISPLAY_SWIPE_OPTIONS.find(
-    (key) => options[key] !== undefined && (platform !== "android" || key === "focusTarget"),
+    (key) =>
+      options[key] !== undefined &&
+      (platform !== "android" || key === "focusTarget" || key === "layer"),
+  );
+}
+
+/**
+ * Refuse a swipe whose start point lies on the other `layer`: the window under the down event
+ * receives the whole gesture (issue #9305). Resolution itself is scoped where the target is found.
+ */
+function assertSwipeStartOnLayer(
+  hierarchy: ViewHierarchyResult | undefined,
+  layer: SwipeOnOptions["layer"],
+  startX: number,
+  startY: number,
+): void {
+  assertGestureOnLayer(
+    hierarchy,
+    layer,
+    [{ x: Math.floor(startX), y: Math.floor(startY) }],
+    "swipe",
   );
 }
 
@@ -315,7 +338,10 @@ export class SwipeOn extends BaseVisualChange {
     };
   }
 
-  private async getScrollableContext(signal?: AbortSignal): Promise<{
+  private async getScrollableContext(
+    signal?: AbortSignal,
+    layer?: SwipeOnOptions["layer"],
+  ): Promise<{
     scrollables: Element[];
     candidates: ScrollableCandidate[];
     observeResult?: ObserveResult;
@@ -366,7 +392,9 @@ export class SwipeOn extends BaseVisualChange {
     if (resolutionGeneration !== undefined) {
       completeWindowResolutionRead(this.device.deviceId, resolutionGeneration);
     }
-    const scrollables = this.scrollables.findScrollableElements(observeResult.viewHierarchy);
+    const scrollables = this.scrollables.findScrollableElements(
+      scopeHierarchyForSelector(observeResult.viewHierarchy, layer),
+    );
     const candidates = this.buildScrollableCandidates(scrollables);
     return { scrollables, candidates, observeResult };
   }
@@ -1215,7 +1243,7 @@ export class SwipeOn extends BaseVisualChange {
     perf: PerformanceTracker;
     signal?: AbortSignal;
   }): Promise<SwipeOnResult> {
-    const context = await this.getScrollableContext(signal);
+    const context = await this.getScrollableContext(signal, options.layer);
     const decision = this.resolveAutoTargetDecision({
       ...context,
       direction: options.direction,
@@ -1540,6 +1568,7 @@ export class SwipeOn extends BaseVisualChange {
           options.direction,
           bounds,
         );
+        assertSwipeStartOnLayer(observeResult.viewHierarchy, options.layer, startX, startY);
 
         const duration = this.getDuration(options);
         const gestureOptions: FencedGestureOptions = {
@@ -1676,6 +1705,7 @@ export class SwipeOn extends BaseVisualChange {
           element,
           observeResult,
         );
+        assertSwipeStartOnLayer(viewHierarchy, options.layer, startX, startY);
 
         const duration = this.getDuration(options);
         const gestureOptions: FencedGestureOptions = {

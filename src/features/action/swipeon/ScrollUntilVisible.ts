@@ -1,3 +1,4 @@
+import { assertGestureOnLayer, scopeHierarchyForSelector } from "../../observe/hierarchyLayer";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import { TALKBACK_STATE_UNKNOWN_WARNING } from "../../accessibility/interfaces/AccessibilityDetector";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
@@ -367,6 +368,7 @@ export class ScrollUntilVisible {
         lastObservation.viewHierarchy!,
         options.container,
         containerElement,
+        options.layer,
       ),
     );
 
@@ -848,6 +850,7 @@ export class ScrollUntilVisible {
       observation.viewHierarchy!,
       options.container,
       container,
+      options.layer,
     );
     return element && this.isElementWithinContainer(element, container.bounds, observation)
       ? element
@@ -970,6 +973,13 @@ export class ScrollUntilVisible {
     swipes,
   }: SearchSwipeDispatchOptions): Promise<SwipeResult> {
     const { startX, startY, endX, endY } = coordinates;
+    // The window under the start point receives the whole swipe (issue #9305).
+    assertGestureOnLayer(
+      observation.viewHierarchy,
+      options.layer,
+      [{ x: Math.floor(startX), y: Math.floor(startY) }],
+      "swipe",
+    );
     const activeDuration = duration;
     const activeDirection = direction;
     const lastObservation = observation;
@@ -1083,6 +1093,7 @@ export class ScrollUntilVisible {
       observation.viewHierarchy!,
       options.container,
       container,
+      options.layer,
     );
     if (element && this.isElementWithinContainer(element, container.bounds, observation)) {
       return element;
@@ -1102,6 +1113,7 @@ export class ScrollUntilVisible {
     if (!options.container) {
       throw new ActionableError("Container must be specified for element swipe");
     }
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
 
     if (!options.container.text && !options.container.elementId) {
       throw new ActionableError("Container must specify either text or elementId");
@@ -1188,7 +1200,7 @@ export class ScrollUntilVisible {
     fallbackElement: Element = this.screenBoundsContainer({ observation: observeResult }),
   ): Promise<Element> {
     let element: Element | null = null;
-    const viewHierarchy = observeResult.viewHierarchy!;
+    const viewHierarchy = scopeHierarchyForSelector(observeResult.viewHierarchy!, options.layer);
 
     if (options.container) {
       if (usesScopedSwipeContainer(options.container)) {
@@ -1249,10 +1261,12 @@ export class ScrollUntilVisible {
     viewHierarchy: ViewHierarchyResult,
     container?: SwipeOnOptions["container"],
     containerElement?: Element,
+    layer?: SwipeOnOptions["layer"],
   ): Promise<Element | null> {
     if (!lookFor.text && !lookFor.elementId) {
       return null;
     }
+    viewHierarchy = scopeHierarchyForSelector(viewHierarchy, layer);
     if (!usesScopedSwipeContainer(container) && !usesScopedSwipeLookFor(lookFor)) {
       return this.resolveElement(viewHierarchy, { ...lookFor, container }, "inspect", true);
     }

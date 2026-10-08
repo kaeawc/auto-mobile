@@ -1,5 +1,6 @@
 import type { ImageRelativePoint } from "./ImageRelativePoint";
 
+import type { HierarchyLayer } from "./HierarchyLayer";
 import type { TapAtPlanContext } from "./TapAtGeometry";
 
 /** One screen point, resolved to the platform-native observe coordinate space. */
@@ -13,6 +14,8 @@ interface TapAtGestureOptions {
   action?: "tap" | "longPress" | "doubleTap";
   /** Long-press duration in milliseconds (500–10000); defaults to 1000. */
   durationMs?: number;
+  /** Refuse the gesture when the point lies on the other layer's windows (issue #9305). */
+  layer?: HierarchyLayer;
 }
 
 export type TapAtOptions = TapAtGestureOptions &

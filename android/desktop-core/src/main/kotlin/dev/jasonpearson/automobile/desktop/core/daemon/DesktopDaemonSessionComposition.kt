@@ -35,6 +35,15 @@ private const val HEARTBEAT_INTERVAL_MS = 2_000L
  */
 internal const val MAX_BIND_ATTEMPTS = 3
 
+/**
+ * Cadence of the automatic single re-attempt while a bind error is surfaced and the pane stays open
+ * (#10716), so a device that comes back needs no manual Retry. Slow on purpose: the error already
+ * burned [MAX_BIND_ATTEMPTS] attempts, and each retry is a daemon round trip.
+ */
+internal const val BIND_ERROR_RETRY_INTERVAL_MS = 30_000L
+private const val BIND_ERROR_RETRY_TICKS =
+  (BIND_ERROR_RETRY_INTERVAL_MS / HEARTBEAT_INTERVAL_MS).toInt()
+
 data class DesktopDaemonSessionBinding(val deviceId: String, val platform: String)
 
 data class DesktopDaemonSessionState(
@@ -209,6 +218,10 @@ fun rememberDesktopDaemonSession(
     // [MAX_BIND_ATTEMPTS] times and then surfaced as [bindErrorMessage], never as viewing.
     var refused = false
     var failedBinds = if (carried != null) MAX_BIND_ATTEMPTS else 0
+    // Heartbeat ticks spent with a bind error surfaced; every [BIND_ERROR_RETRY_TICKS] allows one
+    // more bind attempt (#10716). Counted in ticks, not wall time, so tests drive it with the
+    // virtual clock.
+    var ticksWithBindError = 0
     if (carried != null) bindErrorMessage = carried.second
     // This effect's binding was acknowledged and then lost to a heartbeat lapse, so the next bind
     // is
@@ -351,6 +364,16 @@ fun rememberDesktopDaemonSession(
           LOG.warn("Desktop daemon session lapsed, re-registering: ${error.message}")
         }
         .isSuccess
+      if (alive && failedBinds >= MAX_BIND_ATTEMPTS && bindErrorMessage != null) {
+        ticksWithBindError++
+        if (ticksWithBindError >= BIND_ERROR_RETRY_TICKS) {
+          // One attempt: a failure puts the count straight back to the cap and keeps the message.
+          ticksWithBindError = 0
+          failedBinds = MAX_BIND_ATTEMPTS - 1
+        }
+      } else {
+        ticksWithBindError = 0
+      }
       if (!alive) {
         refreshAfterRecovery = true
         if (bindingAcknowledged) lostAcknowledgedBind = true

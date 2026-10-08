@@ -1,13 +1,18 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   readExclusiveLockContent,
+  releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
   type LockContent,
 } from "../utils/fileLock";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import { isProcessRunning } from "../utils/processLiveness";
-import { ensureSecureSharedAutoMobileDirSync, getSharedAutoMobileDir } from "../utils/tempDir";
+import {
+  ensureSecureDirectorySync,
+  getAdbServerScopedAutoMobileDir,
+  getSharedAutoMobileDir,
+} from "../utils/tempDir";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -46,6 +51,11 @@ export interface ForeignDeviceOwnership {
    * still in use: the caller must give the device back.
    */
   claim(deviceId: string): Promise<boolean>;
+  /**
+   * Withdraw this daemon's allocation claim on a device it no longer assigns to a session. A
+   * claim another daemon took over is left alone.
+   */
+  release(deviceId: string): void;
 }
 
 /** The owner a lock file names: its PID and token, as written. */
@@ -56,6 +66,11 @@ export interface DeviceOwnershipFileSource {
   leasePath(deviceId: string): string;
   /** The allocation claim file for the device; creating its directory is left to `tryAcquire`. */
   claimPath(deviceId: string): string;
+  /**
+   * The coordination-directory claim file 0.0.84 daemons write (#10707). Read-only: a newer
+   * daemon still honours it so it does not take a device an older daemon claimed (#10708).
+   */
+  legacyClaimPath(deviceId: string): string;
   read(path: string): LockContent | undefined;
   isProcessRunning(pid: number): boolean;
   tryAcquire(path: string, owner: { pid: number; ownerToken: string; metadata?: string }): boolean;
@@ -64,10 +79,69 @@ export interface DeviceOwnershipFileSource {
     observed: LockOwner,
     owner: { pid: number; ownerToken: string; metadata?: string },
   ): boolean;
+  /** Remove the lock at `path` only while `owner` still holds it. */
+  release(path: string, owner: { pid: number; ownerToken: string }): void;
 }
 
-/** Shared (agent-invariant) directory of multi-device allocation claims, one lock per device. */
+/** Directory of device allocation claims, one lock per device, under each ADB server's scope. */
 export const DEVICE_ALLOCATION_CLAIM_SUBDIR = "device-allocations";
+
+const DEFAULT_ADB_SERVER_HOST = "localhost";
+const DEFAULT_ADB_SERVER_PORT = "5037";
+const LOOPBACK_ADB_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+/** A file-name-safe key for one ADB server endpoint; loopback spellings share one key. */
+function tcpServerScope(host: string, port: string): string {
+  const canonicalHost = LOOPBACK_ADB_HOSTS.has(host.toLowerCase())
+    ? DEFAULT_ADB_SERVER_HOST
+    : host.toLowerCase();
+  return `tcp-${canonicalHost}-${port}`.replace(/[^A-Za-z0-9.-]/g, "_");
+}
+
+/**
+ * Identifies the ADB server this process's `adb` talks to, from the variables adb itself reads:
+ * `ADB_SERVER_SOCKET` (`tcp:<port>`, `tcp:<host>:<port>`, or another socket spec), else
+ * `ANDROID_ADB_SERVER_ADDRESS` and `ANDROID_ADB_SERVER_PORT` (default `localhost:5037`).
+ * Daemons sharing a server see the same devices, so they must share its claims (#10708).
+ */
+export function adbServerScope(env: NodeJS.ProcessEnv = process.env): string {
+  const socket = env.ADB_SERVER_SOCKET?.trim();
+  if (socket) {
+    if (socket.startsWith("tcp:")) {
+      const endpoint = socket.slice("tcp:".length);
+      const separator = endpoint.lastIndexOf(":");
+      return separator < 0
+        ? tcpServerScope(DEFAULT_ADB_SERVER_HOST, endpoint)
+        : tcpServerScope(endpoint.slice(0, separator), endpoint.slice(separator + 1));
+    }
+    return `socket-${Buffer.from(socket).toString("base64url")}`;
+  }
+  return tcpServerScope(
+    env.ANDROID_ADB_SERVER_ADDRESS?.trim() || DEFAULT_ADB_SERVER_HOST,
+    env.ANDROID_ADB_SERVER_PORT?.trim() || DEFAULT_ADB_SERVER_PORT,
+  );
+}
+
+/**
+ * Where a device's allocation claim lives. It is keyed by the ADB server, not by
+ * `AUTOMOBILE_COORDINATION_DIR`, so two daemons that share an adb server but use different
+ * coordination directories still contend for the same claim on the same device (#10708).
+ */
+export function deviceAllocationClaimPath(
+  deviceId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(
+      adbServerScope(env),
+      DEVICE_ALLOCATION_CLAIM_SUBDIR,
+      env,
+      homeDir,
+    ),
+    ctrlProxyForwardLeaseFileName(deviceId),
+  );
+}
 
 const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   // Read-only: resolving a path does not create the shared directory.
@@ -76,7 +150,8 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
       getSharedAutoMobileDir(CTRL_PROXY_FORWARD_LEASE_SUBDIR),
       ctrlProxyForwardLeaseFileName(deviceId),
     ),
-  claimPath: (deviceId) =>
+  claimPath: (deviceId) => deviceAllocationClaimPath(deviceId),
+  legacyClaimPath: (deviceId) =>
     join(
       getSharedAutoMobileDir(DEVICE_ALLOCATION_CLAIM_SUBDIR),
       ctrlProxyForwardLeaseFileName(deviceId),
@@ -84,17 +159,22 @@ const defaultDeviceOwnershipFileSource: DeviceOwnershipFileSource = {
   read: (path) => readExclusiveLockContent(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
   tryAcquire: (path, owner) => {
-    ensureSecureSharedAutoMobileDirSync(DEVICE_ALLOCATION_CLAIM_SUBDIR);
+    ensureSecureDirectorySync(dirname(path));
     return tryAcquireExclusiveLock(path, owner);
   },
   takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
+  release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
 };
 
 /**
- * Reads two per-device lock files in the shared coordination directory: the CtrlProxy forwarding
- * lease (#10485) a daemon takes when it first talks to a device's CtrlProxy, and the allocation
- * claim a daemon takes when multi-device allocation assigns it the device. Both use the
- * forwarding lease's lock format, including the owner's control socket.
+ * Reads two per-device lock files: the CtrlProxy forwarding lease (#10485) a daemon takes in its
+ * coordination directory when it first talks to a device's CtrlProxy, and the allocation claim a
+ * daemon takes while a session holds the device (#10709). The claim lives in a directory
+ * scoped to the ADB server rather than to the coordination directory, so daemons with different
+ * `AUTOMOBILE_COORDINATION_DIR` values on one adb server still see each other's claims (#10708).
+ * A 0.0.84 daemon's claim in the coordination directory (#10707) is still read, never written.
+ * All use the forwarding lease's lock format, including the owner's control socket, whose
+ * absolute path any daemon on the host can probe.
  *
  * A live PID alone is not trusted: after a crash or reboot the PID can name an unrelated process.
  * An owner that recorded its control socket is asked over it, the same way the CtrlProxy path
@@ -140,8 +220,23 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
       // No claim can be published; allocation proceeds as it did before claims existed.
       return true;
     }
+    if ((await this.legacyClaimOwner(deviceId)) !== undefined) {
+      // A 0.0.84 daemon claimed the device in its coordination directory and still uses it.
+      return false;
+    }
     const owner = this.claimOwner();
-    if (this.source.tryAcquire(path, owner)) {
+    let acquired: boolean;
+    try {
+      acquired = this.source.tryAcquire(path, owner);
+    } catch (error) {
+      logger.warn(
+        `Cannot publish the allocation claim for ${deviceId} at ${path}: ${errorMessage(error)}`,
+        error,
+      );
+      // Without a writable claim directory, allocation proceeds as it did before claims existed.
+      return true;
+    }
+    if (acquired) {
       return true;
     }
     const observed = this.source.read(path);
@@ -154,6 +249,22 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
     }
     // The previous claimant is gone or no longer uses the device.
     return this.source.takeOver(path, observed, owner);
+  }
+
+  release(deviceId: string): void {
+    const path = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
+    if (path === undefined) {
+      return;
+    }
+    try {
+      this.source.release(path, { pid: this.selfPid, ownerToken: this.ownerToken });
+    } catch (error) {
+      // The claim lapses anyway once this daemon reports no session on the device.
+      logger.warn(
+        `Cannot release the allocation claim on ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    }
   }
 
   private claimOwner(): { pid: number; ownerToken: string; metadata?: string } {
@@ -172,11 +283,18 @@ export class ForwardLeaseForeignDeviceOwnership implements ForeignDeviceOwnershi
   private async readForeignOwner(deviceId: string): Promise<number | undefined> {
     const leasePath = this.resolvePath(() => this.source.leasePath(deviceId), deviceId);
     const claimPath = this.resolvePath(() => this.source.claimPath(deviceId), deviceId);
-    const [leaseOwner, claimOwner] = await Promise.all([
+    const [leaseOwner, claimOwner, legacyOwner] = await Promise.all([
       leasePath === undefined ? undefined : this.evaluateOwner(leasePath, deviceId, "lease"),
       claimPath === undefined ? undefined : this.evaluateOwner(claimPath, deviceId, "claim"),
+      this.legacyClaimOwner(deviceId),
     ]);
-    return leaseOwner ?? claimOwner;
+    return leaseOwner ?? claimOwner ?? legacyOwner;
+  }
+
+  /** The live foreign owner of a 0.0.84-format claim in the coordination directory, if any. */
+  private async legacyClaimOwner(deviceId: string): Promise<number | undefined> {
+    const path = this.resolvePath(() => this.source.legacyClaimPath(deviceId), deviceId);
+    return path === undefined ? undefined : this.evaluateOwner(path, deviceId, "claim");
   }
 
   private resolvePath(resolve: () => string, deviceId: string): string | undefined {

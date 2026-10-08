@@ -41,6 +41,11 @@ interface ActiveExecution {
    * either: a poller must not keep a dead owner's session alive.
    */
   readOnlySessionAccess?: boolean;
+  /**
+   * Reads the request's current absolute deadline (live: progress may extend it), on the
+   * tracker's clock. Undefined when the call was admitted without a deadline (#10712).
+   */
+  readDeadlineMs?: () => number | undefined;
 }
 
 export type ExecutionScope = "session" | "global";
@@ -283,6 +288,35 @@ export class ExecutionTracker {
     };
   }
 
+  /**
+   * Record where to read this execution's request deadline, so a release vetoed by the call is
+   * bounded by the call's own deadline rather than a flat ceiling (#10712).
+   */
+  setExecutionDeadline(executionId: string, readDeadlineMs: () => number | undefined): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.readDeadlineMs = readDeadlineMs;
+    }
+  }
+
+  /**
+   * The latest request deadline among the executions running under this device session
+   * (explicit, resolved-autolock and provisional-autolock membership). `Number.POSITIVE_INFINITY`
+   * when any of them has no deadline, undefined when none is running.
+   */
+  getLatestSessionExecutionDeadlineMs(sessionUuid: string): number | undefined {
+    const executionIds = new Set([
+      ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
+      ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
+      ...this.unresolvedAutolockExecutionIds(sessionUuid),
+    ]);
+    const deadlines = [...executionIds].flatMap((executionId) => {
+      const execution = this.executions.get(executionId);
+      return execution ? [execution.readDeadlineMs?.() ?? Number.POSITIVE_INFINITY] : [];
+    });
+    return deadlines.length === 0 ? undefined : Math.max(...deadlines);
+  }
+
   /** Mark an execution as a read-only inventory call, whose end is not session use. */
   markReadOnlySessionAccess(executionId: string): void {
     const execution = this.executions.get(executionId);
@@ -322,6 +356,19 @@ export class ExecutionTracker {
   /** Number of currently admitted tool executions, for fail-closed host maintenance checks. */
   getActiveExecutionCount(): number {
     return this.executions.size;
+  }
+
+  /**
+   * Number of in-flight executions on one device session, counted the same way
+   * {@link hasActiveDeviceSessionExecutions} judges activity: explicit session UUID,
+   * resolved autolock, and still-unresolved autolock executions (#10671).
+   */
+  getActiveDeviceSessionExecutionCount(sessionUuid: string): number {
+    return new Set([
+      ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
+      ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
+      ...this.unresolvedAutolockExecutionIds(sessionUuid),
+    ]).size;
   }
 
   /**

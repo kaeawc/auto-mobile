@@ -196,6 +196,16 @@ Make the target device active and leave the other alone. For **each** checklist 
   sendKeys, pressButton, dragAndDrop, pinchOn, rotate, launch/terminate,
   device state, navigation) and confirm well-formed output on the fresh runners.
 
+**Device-session idle release:** when the range touches session liveness, run
+`bash scripts/live-idle-release-check.sh --confirm-live --serial <emulator> --port <unused-port>`
+against an emulator no other daemon holds. It starts its own private daemon with a
+20 s idle window and checks three things: the device stays held while the proxy
+heartbeats and calls tools, it is released about 10 s after heartbeats stop, and
+it is released once the idle window passes with heartbeats only. Evidence
+(`--daemon active-sessions` snapshots and daemon log lines) lands under
+`scratch/live-idle-release-check/`. To see who holds a device on any daemon, run
+`--daemon active-sessions`.
+
 **Known blockers — record, don't fight:**
 
 - iOS **in-app SDK features** (sqlQuery/execute_sql, mockNetwork error-sim, in-app

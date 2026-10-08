@@ -161,7 +161,11 @@ import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
 } from "../devices/virtualDeviceLifecycleCoordinator";
-import { OwnerDisconnectRelease, OWNER_DISCONNECT_GRACE_MS } from "./ownerDisconnectRelease";
+import {
+  OwnerDisconnectRelease,
+  OWNER_DISCONNECT_GRACE_MS,
+  type OwnerDisconnectReleaseDeferral,
+} from "./ownerDisconnectRelease";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
@@ -730,8 +734,11 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface OwnerDisconnectOptions {
-  /** Defaults to an ownership-fenced session release that returns the device to the pool. */
-  release?: (session: Session, reason: string) => Promise<void>;
+  /**
+   * Defaults to an ownership-fenced session release that returns the device to the pool. Resolve
+   * with a deferral to keep the session while in-flight work vetoes the release.
+   */
+  release?: (session: Session, reason: string) => Promise<OwnerDisconnectReleaseDeferral | void>;
   /** Grace before the session is released. Defaults to {@link OWNER_DISCONNECT_GRACE_MS}. */
   graceMs?: number;
 }
@@ -1048,6 +1055,8 @@ export class DevicePool {
   private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
   private readonly loggedForeignDeviceOwners = new Map<string, number>();
+  /** Android devices whose allocation claim this daemon published and has not withdrawn. */
+  private readonly claimedDeviceIds = new Set<string>();
 
   constructor({
     env,
@@ -2098,6 +2107,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.releaseDeviceClaim(deviceId);
     if (device.platform === "android" && this.androidTransportAliases.retire(deviceId)) {
       this.androidAliasRetirement++;
     }
@@ -5188,17 +5198,53 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.tryAssignFrom(
+    if (!recoveryTarget && this.foreignDeviceOwnership) {
+      return this.tryAssignUnclaimedDevice(sessionId, platform);
+    }
+    if (!recoveryTarget) {
+      // A pool built without ownership tracking (tests) publishes no claims.
+      return this.tryAssignFrom(
+        sessionId,
+        () => this.getDevicesByPlatform(platform),
+        "platform pool empty",
+        () => this.hasPendingAndroidRecovery(platform),
+      );
+    }
+    const result = await this.tryAssignFrom(
       sessionId,
-      () =>
-        recoveryTarget
-          ? this.getDevicesMatchingRecoveryTarget(recoveryTarget)
-          : this.getDevicesByPlatform(platform),
-      recoveryTarget ? "recovery target pool empty" : "platform pool empty",
+      () => this.getDevicesMatchingRecoveryTarget(recoveryTarget),
+      "recovery target pool empty",
       () => this.hasPendingAndroidRecovery(platform),
       recoveryTarget,
       settledRecoveryLoss,
     );
+    if (result.success && result.deviceId !== undefined && this.foreignDeviceOwnership) {
+      // Recovery rebinds the session's own device; publish the claim without giving it back.
+      await this.publishDeviceClaimBestEffort(sessionId, result.deviceId);
+    }
+    return result;
+  }
+
+  /**
+   * Single-device attempt (#10709): skip devices another live daemon drives, and publish this
+   * daemon's claim on the assigned device so other daemons see the session before any CtrlProxy
+   * forward exists. While only other daemons' devices are left, wait as for a busy device.
+   */
+  private async tryAssignUnclaimedDevice(
+    sessionId: string,
+    platform?: Platform,
+  ): ReturnType<DevicePool["tryAssignDevice"]> {
+    await this.refreshForeignOwnership();
+    const result = await this.tryAssignUnownedDevice(sessionId, platform);
+    if (
+      !result.success &&
+      !result.shouldWait &&
+      !result.livenessUnknown &&
+      this.countForeignDrivenDevices(platform) > 0
+    ) {
+      return { ...result, shouldWait: true };
+    }
+    return result;
   }
 
   /** Platform multi-device attempt: like tryAssignDevice, minus devices other daemons drive. */
@@ -5239,7 +5285,7 @@ export class DevicePool {
     ) {
       return result;
     }
-    if (await this.foreignDeviceOwnership.claim(deviceId)) {
+    if (await this.publishDeviceClaim(sessionId, deviceId)) {
       return result;
     }
     logger.info(
@@ -5247,6 +5293,52 @@ export class DevicePool {
     );
     await this.rollbackAssignments(new Map([[sessionId, { deviceId, session: result.session }]]));
     return { ...result, success: false, deviceId: undefined, session: undefined, shouldWait: true };
+  }
+
+  /**
+   * Publish this daemon's claim on an Android device a session holds. False only when another
+   * live daemon's claim on it is still in use. A claim that lands after the session already let
+   * the device go is withdrawn again, so it never outlives the assignment.
+   */
+  private async publishDeviceClaim(sessionId: string, deviceId: string): Promise<boolean> {
+    const ownership = this.foreignDeviceOwnership;
+    if (!ownership || this.devices.get(deviceId)?.platform !== "android") {
+      return true;
+    }
+    if (!(await ownership.claim(deviceId))) {
+      return false;
+    }
+    this.claimedDeviceIds.add(deviceId);
+    if (this.devices.get(deviceId)?.sessionId !== sessionId) {
+      this.releaseDeviceClaim(deviceId);
+    }
+    return true;
+  }
+
+  /** Publish a claim for a device the caller keeps either way (explicit bind, recovery). */
+  private async publishDeviceClaimBestEffort(sessionId: string, deviceId: string): Promise<void> {
+    if (!(await this.publishDeviceClaim(sessionId, deviceId))) {
+      logger.warn(
+        `[DevicePool] Another AutoMobile process still claims ${deviceId}; session ${sessionId} keeps it as requested`,
+      );
+    }
+  }
+
+  /** Withdraw this daemon's claim once no session of this daemon holds the device. */
+  private releaseDeviceClaim(deviceId: string): void {
+    if (this.claimedDeviceIds.delete(deviceId)) {
+      this.foreignDeviceOwnership?.release(deviceId);
+    }
+  }
+
+  /**
+   * Withdraw every allocation claim this daemon still holds. Daemon stop calls this after its
+   * sessions are released; a crashed daemon's claims lapse through the owner-socket check.
+   */
+  releaseDeviceClaimsForShutdown(): void {
+    for (const deviceId of [...this.claimedDeviceIds]) {
+      this.releaseDeviceClaim(deviceId);
+    }
   }
 
   /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
@@ -6058,6 +6150,7 @@ export class DevicePool {
         expectedAssignmentCount,
       );
     }
+    this.releaseDeviceClaim(deviceId);
     this.lastReleasedDeviceId = deviceId;
     this.notifyMultiDeviceAllocationWaiters();
 
@@ -6788,7 +6881,7 @@ export class DevicePool {
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
   ): Promise<string> {
-    return await this.withTargetDeviceDiscovery({
+    const boundSessionId = await this.withTargetDeviceDiscovery({
       deviceId,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
@@ -6917,6 +7010,11 @@ export class DevicePool {
         return sessionId;
       },
     });
+    if (this.foreignDeviceOwnership) {
+      // The caller named this device, so another daemon's claim is reported, not enforced.
+      await this.publishDeviceClaimBestEffort(boundSessionId, deviceId);
+    }
+    return boundSessionId;
   }
 
   private assertExpectedRecoverySession(
@@ -7435,6 +7533,14 @@ export class DevicePool {
         }
       }
     });
+  }
+
+  /**
+   * Tool executions under these session ids ended: retry any owner-disconnect release they
+   * deferred now rather than at the veto's bound (#10712).
+   */
+  sessionExecutionsEnded(sessionIds: Iterable<string>): void {
+    this.ownerDisconnectRelease.executionsEnded(sessionIds);
   }
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */

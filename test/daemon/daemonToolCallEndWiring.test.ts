@@ -8,9 +8,12 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Owner decision 2026-10-08: a session's idle window counts from the END of its last tool call.
-// The daemon wires the execution tracker's end-of-execution signal to the session manager.
+// The daemon wires the execution tracker's end-of-execution signal to the session manager, from
+// start() rather than the constructor (#10712).
 
 interface DaemonSessionTimerInternals {
+  /** What `start()` runs to subscribe the daemon to the global tracker (#10712). */
+  subscribeToolCallEndActivity(): void;
   stopSessionTimers(): void;
 }
 
@@ -39,6 +42,21 @@ describe("Daemon tool-call-end idle wiring", () => {
         "android",
       );
       const createdExpiry = session.expiresAt;
+
+      // A constructed daemon that was never started holds no listener on the global tracker
+      // (#10712): test-built daemons that are never stopped must not leak one.
+      const beforeStart = executionTracker.startExecution(
+        "tapOn",
+        undefined,
+        "tool-call-end-wiring",
+      );
+      executionTracker.endExecution(beforeStart.id);
+      expect(session.lastUsedAt).toBe(0);
+      expect(session.expiresAt).toBe(createdExpiry);
+
+      // start() subscribes; subscribing twice must not stack listeners.
+      internals.subscribeToolCallEndActivity();
+      internals.subscribeToolCallEndActivity();
 
       const execution = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
       timer.advanceTime(90_000);

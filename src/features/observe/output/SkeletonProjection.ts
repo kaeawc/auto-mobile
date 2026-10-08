@@ -1430,7 +1430,10 @@ function markAppRowsCoveredByIme(
 
 /**
  * Mark rows that tapOn cannot reach because an application window (dialog, popup) above the
- * row's window covers it, using the same hit test as the tap path (issue #10481).
+ * row's window covers it, using the same hit test as the tap path (issue #10481). AutoMobile's own
+ * overlay windows that hide the app join those covers (#10715), so a row an opaque overlay and a
+ * dialog cover between them is refused by tapOn and marked here alike; a translucent or partial
+ * overlay keeps the `isFullyCoveredByOwnOverlay` rule.
  */
 function markAppRowsCoveredByApplicationWindow(
   kept: SkeletonAccumulator[],
@@ -1446,7 +1449,7 @@ function markAppRowsCoveredByApplicationWindow(
     const [left, top, right, bottom] = acc.bounds;
     const bounds = { left, top, right, bottom };
     if (
-      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds) ||
+      isFullyCoveredByApplicationWindow(hierarchy, acc.target, bounds, "hiding") ||
       isFullyCoveredByOwnOverlay(hierarchy, acc.target, bounds)
     ) {
       acc.affordances.clear();

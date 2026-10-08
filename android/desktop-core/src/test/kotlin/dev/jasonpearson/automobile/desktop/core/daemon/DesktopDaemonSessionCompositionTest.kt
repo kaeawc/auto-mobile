@@ -150,6 +150,36 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
+  fun `a surfaced bind error is retried automatically on a slow cadence and clears on success`() =
+    runComposeUiTest {
+      // #10716: no heartbeat lapse and no Retry click.
+      val transport = RecordingDaemonTransport().apply { unrelatedBindFailures = 99 }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+
+      repeat(10) { tick() }
+      assertEquals(MAX_BIND_ATTEMPTS, transport.boundDevices().size)
+
+      // Well inside the cadence: no further attempt.
+      repeat(5) { tick() }
+      assertEquals(MAX_BIND_ATTEMPTS, transport.boundDevices().size)
+
+      // Past the cadence: exactly one more attempt, which fails and keeps the error surfaced.
+      repeat(BIND_ERROR_RETRY_INTERVAL_MS.toInt() / HEARTBEAT_MS.toInt()) { tick() }
+      assertEquals(MAX_BIND_ATTEMPTS + 1, transport.boundDevices().size)
+      assertEquals("Device 'emulator-5554' not found in device pool", state?.bindErrorMessage)
+
+      // The device comes back: the next cadence attempt binds and clears the error.
+      transport.unrelatedBindFailures = 0
+      repeat(BIND_ERROR_RETRY_INTERVAL_MS.toInt() / HEARTBEAT_MS.toInt() + 2) { tick() }
+      assertEquals("emulator-5554", state?.boundDeviceId)
+      assertEquals(null, state?.bindErrorMessage)
+    }
+
+  @Test
   fun `a bind refused because another session holds the device never re-sends it`() =
     runComposeUiTest {
       val transport = RecordingDaemonTransport().apply { heldByAnotherSession = true }

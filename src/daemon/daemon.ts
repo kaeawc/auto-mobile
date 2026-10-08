@@ -42,6 +42,7 @@ import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { OwnerDisconnectExecutionVeto } from "./ownerDisconnectRelease";
+import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
@@ -677,7 +678,7 @@ export class Daemon {
     recoveryPolicyEnvironment: NodeJS.ProcessEnv,
   ): DevicePool {
     const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
-      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.sessionExecutionProbe(),
       this.timer,
     );
     return DevicePool.create({
@@ -693,10 +694,11 @@ export class Daemon {
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
-          // Never release mid-call (#5343): returning with the session still held defers the
-          // release, which is retried once the call settles. The veto is bounded (#10663).
-          if (ownerDisconnectExecutionVeto.keeps(session)) {
-            return;
+          // Never release mid-call (#5343): a deferral keeps the session, and the release is
+          // retried when the call ends or the veto's bound passes (#10663, #10712).
+          const deferral = ownerDisconnectExecutionVeto.keeps(session);
+          if (deferral) {
+            return deferral;
           }
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
         },
@@ -753,8 +755,13 @@ export class Daemon {
     this.unsubscribeSessionExecutionEnded = null;
   }
 
-  /** Idleness counts from the END of the last tool call (owner decision 2026-10-08). */
+  /**
+   * Idleness counts from the END of the last tool call (owner decision 2026-10-08), and a call's
+   * end re-arms the owner-disconnect releases it deferred (#10712). Subscribed by `start()` and
+   * dropped by {@link stopSessionTimers}; idempotent so a retried start cannot stack listeners.
+   */
   private subscribeToolCallEndActivity(): void {
+    this.unsubscribeSessionExecutionEnded?.();
     this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
       (sessionUuids) => {
         const sessionIds = new Set(
@@ -765,6 +772,8 @@ export class Daemon {
         for (const sessionId of sessionIds) {
           this.sessionManager.recordToolCallEnded(sessionId);
         }
+        // A deferred owner-disconnect release may be keyed by either id (#10712).
+        this.devicePool.sessionExecutionsEnded(new Set([...sessionUuids, ...sessionIds]));
       },
     );
   }
@@ -784,7 +793,9 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
-    this.subscribeToolCallEndActivity();
+    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId) =>
+      this.latestSessionExecutionDeadlineMs(sessionId),
+    );
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
@@ -956,6 +967,9 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+    // Subscribe here, not in the constructor: only a started daemon is ever stopped, so a
+    // constructed-but-never-started daemon must not leave a listener on the global tracker (#10712).
+    this.subscribeToolCallEndActivity();
     // Record our socket in every CtrlProxy forwarding lease we take, so another
     // AutoMobile process can ask whether we still use the device (#10497).
     setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
@@ -2512,7 +2526,7 @@ export class Daemon {
     this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
-      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.sessionExecutionProbe(),
       async (sessionId, reason) => {
         await this.cancelAndReleaseSession(sessionId, reason);
       },
@@ -2594,6 +2608,30 @@ export class Daemon {
         (executionTracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
           executionTracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
     );
+  }
+
+  /**
+   * How the unsettled-execution veto sees a session's in-flight work: whether any runs, and the
+   * latest request deadline among them, which bounds the veto (#10712).
+   */
+  private sessionExecutionProbe(): SessionExecutionProbe {
+    return {
+      hasActiveExecutions: (sessionId) => this.hasActiveSessionExecution(sessionId),
+      latestExecutionDeadlineMs: (sessionId) => this.latestSessionExecutionDeadlineMs(sessionId),
+    };
+  }
+
+  /** Mirrors {@link hasActiveSessionExecution}; a recovery in flight carries no deadline. */
+  private latestSessionExecutionDeadlineMs(sessionId: string): number | undefined {
+    if (this.devicePool.isSessionRecoveryInFlight(sessionId)) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const executionSessionId =
+      resolveToolSelectionBaseSessionUuid(sessionId, this.sessionManager) ?? sessionId;
+    const deadlines = [...new Set([sessionId, executionSessionId])]
+      .map((id) => executionTracker.getLatestSessionExecutionDeadlineMs(id))
+      .filter((deadline): deadline is number => deadline !== undefined);
+    return deadlines.length === 0 ? undefined : Math.max(...deadlines);
   }
 
   private async tryRecoverCapturedDisconnectTarget(
@@ -4030,6 +4068,10 @@ export class Daemon {
           },
         },
         { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
+        {
+          name: "device allocation claims",
+          run: () => this.devicePool.releaseDeviceClaimsForShutdown(),
+        },
         {
           // Session release broadcasts must be written while subscribed proxy
           // sockets are still connected; closing first degrades the exact

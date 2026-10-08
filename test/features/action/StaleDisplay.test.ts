@@ -29,6 +29,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
+import textCapture from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
 
 const device: BootedDevice = {
   deviceId: "typed-display-fence",
@@ -738,4 +739,80 @@ describe("selector tools retry once after a fold", () => {
     assertResult(result, 7, 8);
     expect(dispatches).toBe(0);
   });
+});
+
+// #10710: lookFor and auto-targeted swipes resolve coordinates from their own fresh read.
+describe("swipeOn lookFor and auto-target retry once after a fold", () => {
+  const restores: Array<{ mockRestore(): void }> = [];
+  afterEach(() => {
+    restores.splice(0).forEach((restore) => restore.mockRestore());
+  });
+
+  function foldedSwipe() {
+    const { h } = staleCallerHarness("android");
+    // The cache still holds the pre-fold inner panel; only a fresh read sees the cover screen.
+    const fresh = {
+      ...h.screen,
+      ...textCapture,
+      screenSize: { width: 1080, height: 2400 },
+      systemInsets: { top: 63, bottom: 63, left: 0, right: 0 },
+      displayRevision: h.transitions.fullRevision,
+      display: { key: "cover", role: "cover", posture: "closed", generation: 8 },
+    } as ObserveResult;
+    h.observe.setObserveResult(fresh);
+    restores.push(
+      spyOn(h.observe, "getMostRecentCachedObserveResult").mockImplementation(async () => h.screen),
+      spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
+        isAvailable: async () => true,
+      } as unknown as AndroidCtrlProxyManager),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        new FakeCtrlProxy(h.timer) as unknown as AndroidCtrlProxyClient,
+      ),
+    );
+    const gesture = new FakeGestureExecutor();
+    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+      ...h.deps,
+      observeScreen: h.observe,
+      executeGesture: gesture,
+      accessibilityDetector: new FakeAccessibilityDetector(),
+    });
+    action.awaitIdle = new FakeAwaitIdle();
+    action.window = new FakeWindow();
+    return { h, action, gesture };
+  }
+  const swipes = {
+    lookFor: {
+      direction: "up",
+      lookFor: { text: "No such row", maxSwipes: 1 },
+    },
+    autoTarget: { direction: "up" },
+  } as const;
+
+  for (const [name, options] of Object.entries(swipes)) {
+    test(`${name}: coordinates come from one fresh read at the new generation`, async () => {
+      const { h, action, gesture } = foldedSwipe();
+      const result = await action.execute(options);
+      expect(result.staleDisplay).toBeUndefined();
+      expect(result.error ?? "").not.toContain("Display changed");
+      expect(h.observe.getExecuteOptions().some((read) => read.freshness === "fresh")).toBe(true);
+      const calls = gesture.getSwipeCalls();
+      expect(calls.length).toBeGreaterThan(0);
+      // The cached inner panel is 100x200; the swipe geometry must come from the cover read.
+      expect(Math.max(...calls.map(({ y1, y2 }) => Math.max(y1, y2)))).toBeGreaterThan(200);
+    });
+
+    test(`${name}: a change after the re-read still refuses`, async () => {
+      const { h, action, gesture } = foldedSwipe();
+      restores.push(
+        spyOn(h.adb, "getDeviceTimestampMs").mockImplementation(async () => {
+          h.transitions.transition(1);
+          return h.timer.now();
+        }),
+      );
+      const result = await action.execute(options);
+      expect(result.success).toBe(false);
+      expect(result.staleDisplay).toMatchObject({ observedGeneration: 8, currentGeneration: 9 });
+      expect(gesture.getSwipeCalls()).toHaveLength(0);
+    });
+  }
 });

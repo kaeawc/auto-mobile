@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -33,6 +34,10 @@ class FakeForeignDeviceOwnership implements ForeignDeviceOwnership {
   async claim(deviceId: string): Promise<boolean> {
     this.claims.push(deviceId);
     return !this.claimRefused.has(deviceId);
+  }
+  readonly releases: string[] = [];
+  release(deviceId: string): void {
+    this.releases.push(deviceId);
   }
 }
 
@@ -265,4 +270,141 @@ describe("multi-device allocation on a shared host", () => {
       });
     });
   }
+});
+
+// #10709: a single-device session must be visible to other daemons from assignment, before any
+// CtrlProxy forward exists, and its claim must never outlive the session.
+describe("single-device allocation on a shared host", () => {
+  let timer: FakeTimer;
+  let sessions: SessionManager;
+  let ownership: FakeForeignDeviceOwnership;
+  let pool: DevicePool;
+
+  const setUp = async (pooled: string[]) => {
+    const manager = new FakeDeviceManager();
+    manager.bootedDevices = pooled.map(android);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "single-device-claim-test", {
+        timer,
+        deviceManager: manager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        foreignDeviceOwnership: ownership,
+      }),
+    );
+    await pool.initializeWithDevices(pooled.map(android));
+  };
+
+  const assign = (sessionId: string) => {
+    let settled = false;
+    const result = pool.assignDeviceToSession(sessionId, "android").then(
+      (value: unknown) => {
+        settled = true;
+        return value;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    return { result, isSettled: () => settled };
+  };
+  const settle = (result: Promise<unknown>) =>
+    settleWithFakeTime(timer, result, {
+      stepMs: 1_000,
+      maxSteps: 8,
+      description: "single-device assignment",
+    });
+
+  beforeEach(() => {
+    timer = new FakeTimer();
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    ownership = new FakeForeignDeviceOwnership();
+  });
+  afterEach(() => {
+    sessions.stopCleanupTimer();
+    timer.reset();
+  });
+
+  test("claims the assigned device and withdraws the claim when the session is released", async () => {
+    await setUp(["d1"]);
+
+    expect(await settle(assign("s1").result)).toBe("d1");
+    expect(ownership.claims).toEqual(["d1"]);
+    expect(ownership.releases).toEqual([]);
+
+    await releaseSessionAndDevice(sessions, pool, "d1", "s1", "test-release");
+
+    expect(pool.getDevice("d1")?.sessionId).toBeNull();
+    expect(ownership.releases).toEqual(["d1"]);
+  });
+
+  test("withdraws the claim when the session expires", async () => {
+    await setUp(["d1"]);
+    expect(await settle(assign("s1").result)).toBe("d1");
+
+    await timer.advanceTimeAsync(24 * 60 * 60 * 1_000);
+    sessions.cleanupExpiredSessions();
+    await drainUntilQuiescent(timer);
+
+    expect(sessions.getSession("s1")).toBeNull();
+    expect(pool.getDevice("d1")?.sessionId).toBeNull();
+    expect(ownership.releases).toEqual(["d1"]);
+  });
+
+  test("skips a device another live daemon drives", async () => {
+    await setUp(["d1", "d2"]);
+    ownership.owners.set("d1", 4242);
+
+    expect(await settle(assign("s1").result)).toBe("d2");
+    expect(ownership.refreshes).toBeGreaterThan(0);
+    expect(pool.getDevice("d1")?.sessionId).toBeNull();
+  });
+
+  test("waits for another daemon's only device instead of failing, then takes it once free", async () => {
+    await setUp(["d1"]);
+    ownership.owners.set("d1", 4242);
+
+    const pending = assign("s1");
+    await drainUntilQuiescent(timer);
+    await timer.advanceTimeAsync(2_000);
+
+    expect(pending.isSettled()).toBe(false);
+    expect(pool.getDevice("d1")?.sessionId).toBeNull();
+
+    ownership.owners.delete("d1");
+    expect(await settle(pending.result)).toBe("d1");
+  });
+
+  test("gives a device back when another daemon claimed it first and never withdraws that claim", async () => {
+    await setUp(["d1"]);
+    ownership.claimRefused.add("d1");
+
+    const pending = assign("s1");
+    await drainUntilQuiescent(timer);
+    await timer.advanceTimeAsync(2_000);
+
+    expect(pending.isSettled()).toBe(false);
+    expect(ownership.claims).toContain("d1");
+    expect(pool.getDevice("d1")?.sessionId).toBeNull();
+    expect(sessions.getSession("s1")).toBeNull();
+    expect(ownership.releases).toEqual([]);
+
+    ownership.claimRefused.delete("d1");
+    expect(await settle(pending.result)).toBe("d1");
+  });
+
+  test("an explicitly bound device is claimed, and daemon stop withdraws outstanding claims", async () => {
+    await setUp(["d1", "d2"]);
+
+    await pool.bindOrReuseDeviceSession("s1", "d1", "android");
+    expect(await settle(assign("s2").result)).toBe("d2");
+    expect(ownership.claims).toEqual(["d1", "d2"]);
+
+    pool.releaseDeviceClaimsForShutdown();
+
+    expect(ownership.releases.sort()).toEqual(["d1", "d2"]);
+    pool.releaseDeviceClaimsForShutdown();
+    expect(ownership.releases).toHaveLength(2);
+  });
 });

@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -58,6 +59,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.InteractionNotifyingControlExecutor
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LogsFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.NavigationFacet
@@ -162,15 +164,22 @@ fun AutoMobileDesktopApp(
 
   val settings = remember(graph) { ObservableSettingsProvider(graph.settingsProvider) }
   val scope = rememberCoroutineScope()
+  // Read through rememberUpdatedState so a session rotation does not rebuild the executor (and the
+  // view model keyed on it); a button press is the user using the device (#10716).
+  val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
   val controlExecutor =
     remember(graph, desktopDaemonSession) {
-      DaemonEmulatorControlExecutor(
-        graph.autoMobileClient,
-        foregroundAppResolver =
-          ObservationForegroundAppResolver(
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
-          ),
-      )
+      InteractionNotifyingControlExecutor(
+        DaemonEmulatorControlExecutor(
+          graph.autoMobileClient,
+          foregroundAppResolver =
+            ObservationForegroundAppResolver(
+              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+            ),
+        )
+      ) {
+        onUserInteraction(it)
+      }
     }
   val workspaceViewModel =
     remember(scope, controlExecutor) { WorkspaceViewModel(scope, controlExecutor) }

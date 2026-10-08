@@ -108,6 +108,8 @@ interface ScrollUntilVisibleDependencies {
       perf?: PerformanceTracker;
       signal?: AbortSignal;
       skipPreviousObserve?: boolean;
+      previousObservation?: ObserveResult;
+      resolvesTargetFromRead?: boolean;
       queryOptions?: {
         text?: string;
         elementId?: string;
@@ -1056,7 +1058,10 @@ export class ScrollUntilVisible {
             progress,
             perf,
             signal,
-            skipPreviousObserve: scrollIteration > 1,
+            // The gesture coordinates come from this in-call read, so it is the pre-action read
+            // the display fence checks; after a fold it passes once it is at the new revision.
+            previousObservation: lastObservation,
+            resolvesTargetFromRead: true,
             deferPostActionScreenshot: true,
             observationTimestampProvider: () => iosDispatchTimestamp,
             predictionContext: {

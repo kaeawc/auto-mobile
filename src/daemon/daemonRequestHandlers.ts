@@ -44,6 +44,7 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
+import { sessionHoldDiagnostics } from "./sessionHoldDiagnostics";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import {
   daemonDeviceLeaseActivitySources,
@@ -97,6 +98,10 @@ export interface DaemonStateAccess {
     /** Put a CLI-adopted session back on the strict heartbeat contract (#6870). */
     restoreHeartbeatLivenessPolicy?(sessionId: string): boolean;
     getSessionForDevice?(deviceId: string): string | null;
+    /** Remember a registered client's name for `holderKind` diagnostics (#10671). */
+    recordSessionClientName?(sessionId: string, clientName: string): void;
+    /** What bounds an in-flight call's idle-release veto, for `idleReleaseAt` (#10671). */
+    getIdleReleaseExecutionVeto?(sessionId: string): { latestDeadlineMs?: number } | undefined;
     getDeviceLabels(sessionId: string): DeviceLabelMap | undefined;
     releaseSession(sessionId: string): Promise<string | null>;
   };
@@ -194,6 +199,7 @@ async function handleRegisterSession(
   }
   const session = manager.getSession(sessionId);
   if (session) {
+    manager.recordSessionClientName?.(sessionId, clientName);
     return {
       success: true,
       result: {
@@ -622,9 +628,15 @@ async function handleAvailableDevices(
   };
 }
 
-async function handleSessionInfo(
+/** Per-session in-flight execution count for the hold diagnostics (#10671). */
+export interface SessionExecutionCounter {
+  getActiveDeviceSessionExecutionCount(sessionUuid: string): number;
+}
+
+export async function handleSessionInfo(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  executions: SessionExecutionCounter = executionTracker,
 ): Promise<DaemonMethodResult> {
   const sessionId = (request.params as { sessionId?: string } | undefined)?.sessionId;
   if (!sessionId) {
@@ -652,6 +664,11 @@ async function handleSessionInfo(
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      ...sessionHoldDiagnostics(
+        session,
+        executions.getActiveDeviceSessionExecutionCount(sessionId),
+        manager.getIdleReleaseExecutionVeto?.(sessionId),
+      ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
     },
@@ -669,21 +686,43 @@ function livenessInfo(
   return lease ? { liveness: { state: lease.phase, remainingMs: lease.remainingMs } } : {};
 }
 
-async function handleActiveSessions(
+export async function handleActiveSessions(
   request: DaemonRequest,
   state: DaemonStateAccess,
+  executions: SessionExecutionCounter & { getActiveExecutionCount(): number } = executionTracker,
 ): Promise<DaemonMethodResult> {
   const manager = state.getSessionManager();
   const sessions = manager.getAllSessions?.() ?? [];
   const releasingSessions = sessions.filter((session) =>
     isSessionReleasing(manager, session.sessionId, session),
   ).length;
+  // Who holds which device and why (#10671). Opt-in, so the counts-only reply busy checks poll
+  // stays as small as it was.
+  const includeSessions =
+    (request.params as { includeSessions?: unknown } | undefined)?.includeSessions === true;
   return {
     success: true,
     result: {
       activeSessions: sessions.length,
-      activeExecutions: executionTracker.getActiveExecutionCount(),
+      activeExecutions: executions.getActiveExecutionCount(),
       ...(releasingSessions > 0 ? { releasingSessions } : {}),
+      ...(includeSessions
+        ? {
+            sessions: sessions.map((session) => ({
+              sessionId: session.sessionId,
+              assignedDevice: session.assignedDevice,
+              platform: session.platform,
+              ...sessionHoldDiagnostics(
+                session,
+                executions.getActiveDeviceSessionExecutionCount(session.sessionId),
+                manager.getIdleReleaseExecutionVeto?.(session.sessionId),
+              ),
+              ...(isSessionReleasing(manager, session.sessionId, session)
+                ? { releasing: true }
+                : {}),
+            })),
+          }
+        : {}),
     },
   };
 }

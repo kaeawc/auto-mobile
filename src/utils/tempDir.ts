@@ -162,7 +162,44 @@ export function getSharedAutoMobileDir(
   return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
 }
 
-function ensureSecureDirectorySync(dir: string): string {
+/**
+ * Resolve a coordination directory scoped to one ADB server rather than to
+ * `AUTOMOBILE_COORDINATION_DIR` (#10708). Daemons that share an ADB server share
+ * its devices even when they use different coordination directories, so state
+ * that must keep them off each other's devices lives under one root keyed by the
+ * server (see `adbServerScope`): `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (or
+ * `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR`) when set, else the OS account
+ * home's `.auto-mobile/adb-servers`. Every daemon on one server must agree on it.
+ */
+export function getAdbServerScopedAutoMobileDir(
+  serverScope: string,
+  subdirectory: string,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.userInfo().homedir,
+): string {
+  const override = (
+    env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR ?? env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR
+  )?.trim();
+  if (override && override.length > 0) {
+    if (!path.isAbsolute(override)) {
+      throw new Error(
+        "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR must be an absolute path so every daemon on one ADB server shares it.",
+      );
+    }
+    return path.join(override, serverScope, subdirectory);
+  }
+  if (homeDir.length === 0) {
+    throw new Error(
+      "Unable to resolve the ADB-server coordination directory without an OS account home directory. Set AUTOMOBILE_ADB_SERVER_COORDINATION_DIR to a writable shared directory.",
+    );
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", "adb-servers", serverScope, subdirectory);
+}
+
+/**
+ * Synchronously ensure `dir` exists with restrictive permissions, refusing a symbolic link.
+ */
+export function ensureSecureDirectorySync(dir: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
   if (fs.lstatSync(dir).isSymbolicLink()) {
     throw new Error(`Refusing to use symbolic-link directory: ${dir}`);

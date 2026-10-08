@@ -277,6 +277,11 @@ describe("handleDaemonRequest", () => {
       lastUsedAt: session.lastUsedAt,
       expiresAt: session.expiresAt,
       cacheSize: JSON.stringify(session.cacheData).length,
+      lastToolActivityAt: session.lastUsedAt,
+      lastOwnerHeartbeatAt: null,
+      idleReleaseAt: session.expiresAt,
+      holderKind: "unknown",
+      activeExecutions: 0,
       // Additive liveness state (#10051); a fresh session is live with its full lease.
       liveness: { state: "live", remainingMs: session.heartbeatTimeoutMs },
     });

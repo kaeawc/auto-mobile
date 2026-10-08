@@ -8,7 +8,11 @@ import {
 } from "./sessionManager";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { effectiveLastHeartbeat, suspectGraceMsFor } from "./livenessOwnerLease";
-import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
+import {
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+  UnsettledExecutionVeto,
+  type SessionExecutionProbeInput,
+} from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   SUSPECT_GRACE_MS,
@@ -67,13 +71,8 @@ export interface SessionHeartbeatMonitorConfig {
 /** Timer jitter tolerated before a late scan is treated as a stall of the daemon itself. */
 export const DEFAULT_STALL_MARGIN_MS = 2_000;
 
-/**
- * Ceiling on how long an execution that never settles may veto the release of a stale session
- * (#10663). No request's deadline can exceed the caller timeout cap, so an execution still
- * tracked this long after its session went stale has outlived any deadline it could have had,
- * and its abandoned owner's device is released anyway.
- */
-export const UNSETTLED_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+/** Shared with the owner-disconnect release; see `./unsettledExecutionVeto` (#10712). */
+export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 
 const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** How long shutdown waits for releases a scan started before giving up on them. */
@@ -97,8 +96,8 @@ function readPositiveMsEnv(primaryName: string, legacyName: string): number | un
  * first heartbeat are reaped after a short pre-first-heartbeat grace. Other
  * sessions are reaped when, after the initial grace period and with no active
  * executions, `now - lastHeartbeat` exceeds the session's heartbeat timeout. An
- * active execution keeps a stale session only up to
- * {@link UNSETTLED_EXECUTION_VETO_CEILING_MS} (#10663).
+ * active execution keeps a stale session only as long as the shared unsettled-execution veto
+ * policy allows (#10663, #10712).
  *
  * Extracted from the daemon so the reaping logic can be driven deterministically
  * with an injected timer in tests. Behaviour is unchanged in production, where
@@ -111,8 +110,8 @@ export class SessionHeartbeatMonitor {
   private readonly preFirstHeartbeatGraceMs: number;
   private readonly defaultHeartbeatTimeoutMs: number;
   private readonly stallThresholdMs: number;
-  /** When each stale session incarnation was first kept alive by an active execution. */
-  private readonly executionVetoSince = new WeakMap<Session, number>();
+  /** Bounds how long active executions keep a stale session (#10663, shared policy #10712). */
+  private readonly executionVeto: UnsettledExecutionVeto;
   /** When the previous scan finished (or the monitor started); undefined until started. */
   private lastScanSettledAt: number | undefined;
   /** A running scan has already judged its own lateness; a probe mid-scan would count scan time. */
@@ -125,7 +124,7 @@ export class SessionHeartbeatMonitor {
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
-    private readonly hasActiveExecutions: (sessionId: string) => boolean,
+    executions: SessionExecutionProbeInput,
     private readonly reap: (
       sessionId: string,
       reason: SessionHeartbeatReleaseReason,
@@ -157,6 +156,7 @@ export class SessionHeartbeatMonitor {
       ) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
+    this.executionVeto = new UnsettledExecutionVeto(executions, timer);
   }
 
   start(): void {
@@ -294,10 +294,10 @@ export class SessionHeartbeatMonitor {
           ? this.rehydrationOwnerStaleReason(session, now)
           : this.staleReason(session, now);
       if (!reason) {
-        this.executionVetoSince.delete(session);
+        this.executionVeto.forget(session);
         continue;
       }
-      if (this.isVetoedByActiveExecution(session, reason, now)) {
+      if (this.isVetoedByActiveExecution(session, reason)) {
         continue;
       }
       logger.warn(
@@ -334,29 +334,22 @@ export class SessionHeartbeatMonitor {
 
   /**
    * Whether an active execution still keeps this stale session (#5343: never reap mid-call).
-   * The veto is bounded (#10663): once it has held for {@link UNSETTLED_EXECUTION_VETO_CEILING_MS} the execution
-   * has outlived any request deadline, nobody is left to consume its result, and the session is
-   * released anyway so its device does not stay held for as long as the call stays unsettled.
+   * The veto is bounded (#10663) by the shared policy in `./unsettledExecutionVeto`: once it has
+   * outlived its bound nobody is left to consume the call's result, and the session is released
+   * anyway so its device does not stay held for as long as the call stays unsettled.
    */
   private isVetoedByActiveExecution(
     session: Session,
     reason: SessionHeartbeatReleaseReason,
-    now: number,
   ): boolean {
-    if (!this.hasActiveExecutions(session.sessionId)) {
-      this.executionVetoSince.delete(session);
-      return false;
-    }
-    const vetoedSince = this.executionVetoSince.get(session) ?? now;
-    this.executionVetoSince.set(session, vetoedSince);
-    const vetoedMs = now - vetoedSince;
-    if (vetoedMs < UNSETTLED_EXECUTION_VETO_CEILING_MS) {
-      return true;
+    const verdict = this.executionVeto.judge(session);
+    if (verdict.kind !== "expired") {
+      return verdict.kind === "kept";
     }
     logger.warn(
-      `Session ${session.sessionId} (${STALE_REASON_DESCRIPTION[reason]}) was kept for ${vetoedMs}ms ` +
-        `by executions that never settled; releasing it anyway past the ` +
-        `${UNSETTLED_EXECUTION_VETO_CEILING_MS}ms unsettled-execution ceiling (reason=${reason})`,
+      `Session ${session.sessionId} (${STALE_REASON_DESCRIPTION[reason]}) was kept for ${verdict.vetoedMs}ms ` +
+        `by executions that never settled; releasing it anyway past their ${verdict.bound} ` +
+        `bound (reason=${reason})`,
     );
     return false;
   }

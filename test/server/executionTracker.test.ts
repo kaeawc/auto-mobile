@@ -649,3 +649,35 @@ describe("ExecutionTracker", function () {
     });
   });
 });
+
+describe("ExecutionTracker session execution deadlines (#10712)", () => {
+  test("reports the latest deadline among a session's executions, or infinity when one has none", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a", "b", "c"]));
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBeUndefined();
+
+    const first = tracker.startExecution("tapOn", undefined, "s");
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(Number.POSITIVE_INFINITY);
+    tracker.setExecutionDeadline(first.id, () => 5_000);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(5_000);
+
+    const second = tracker.startExecution("observe", undefined, "s");
+    let live = 9_000;
+    tracker.setExecutionDeadline(second.id, () => live);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(9_000);
+    live = 12_000;
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(12_000);
+
+    tracker.endExecution(second.id);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBe(5_000);
+    tracker.endExecution(first.id);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("s")).toBeUndefined();
+  });
+
+  test("counts resolved-autolock executions", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["a"]));
+    const execution = tracker.startExecution("tapOn", "mcp-session");
+    tracker.setResolvedAutolockSessionUuid(execution.id, "autolock");
+    tracker.setExecutionDeadline(execution.id, () => 7_000);
+    expect(tracker.getLatestSessionExecutionDeadlineMs("autolock")).toBe(7_000);
+  });
+});

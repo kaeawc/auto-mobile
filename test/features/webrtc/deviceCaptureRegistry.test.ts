@@ -1031,16 +1031,24 @@ test("android relay-first then a metrics consumer shares one capture and detache
   await a.stop();
   expect(h.sources[0].stops).toBe(1);
 });
-test("ios relay-first keeps a metrics-requiring joiner private", async () => {
+test("ios relay-first then a metrics consumer shares one capture", async () => {
   const h = harness();
   const ios = { deviceId: "i", platform: "ios", name: "Sim" } as BootedDevice;
   const a = h.acquire({ device: ios });
   await a.start();
-  expect(h.sources[0].options.onFrameMetrics).toBeUndefined();
-  const b = h.acquire({ device: ios, onFrameMetrics: () => {} });
+  expect(h.sources[0].options.onFrameMetrics).toBeDefined();
+  const seen: unknown[] = [];
+  const b = h.acquire({ device: ios, onFrameMetrics: (value) => seen.push(value) });
   await b.start();
-  expect(h.sources).toHaveLength(2);
+  expect(h.sources).toHaveLength(1);
+  expect(h.sources[0].starts).toBe(1);
+  const metrics = { fps: 30 } as unknown as Parameters<
+    NonNullable<H264CaptureSourceOptions["onFrameMetrics"]>
+  >[0];
+  h.sources[0].options.onFrameMetrics?.(metrics);
+  expect(seen).toEqual([metrics]);
   await Promise.all([a.stop(), b.stop()]);
+  expect(h.sources[0].stops).toBe(1);
 });
 test("simultaneous private stops fence fresh creation and private fatal errors stay local", async () => {
   const h = harness();

@@ -385,6 +385,134 @@ describe("session rotation restoration", () => {
     }
   });
 
+  describe("an abandoned release restore is retried on the next assignment (#10714)", () => {
+    const putCommands = (h: ReturnType<typeof harness>, start: number) =>
+      h.adb
+        .getExecutedCommands()
+        .slice(start)
+        .filter((c) => c.includes("settings put"));
+    /** Release with a read-back that never verifies and spend all five bounded retries. */
+    const abandonedRelease = async (h: ReturnType<typeof harness>) => {
+      await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      h.adb.mismatch = true;
+      await h.manager.releaseSession("rotation-session");
+      const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
+      for (const delay of [250, 500, 1000, 2000, 2000]) {
+        h.timer.advanceTime(delay);
+        await flush();
+      }
+      await pending;
+      expect(h.restored).toHaveLength(6);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+    };
+
+    test("the next session start restores the recorded settings, incl. device_state_rotation_lock, before returning", async () => {
+      const h = harness();
+      h.adb.lock = "0:1:1:2:2:0";
+      h.adb.lockBaseline = "0:1:1:2:2:0";
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await abandonedRelease(h);
+        expect(h.adb.auto).toBe(0);
+        // The device drifts back to the lock map auto-rotate-off records.
+        h.adb.lock = h.adb.lockedLock;
+        h.adb.mismatch = false;
+        const start = h.adb.getExecutedCommands().length;
+
+        await h.manager.createSession("next-session", device.deviceId, "android");
+
+        expect(h.restored).toHaveLength(7);
+        expect(putCommands(h, start)).toEqual([
+          "shell settings put secure device_state_rotation_lock 0:1:1:2:2:0",
+          "shell settings put system user_rotation 2",
+          "shell settings put system accelerometer_rotation 1",
+        ]);
+        expect(h.adb.lock).toBe("0:1:1:2:2:0");
+        expect(h.adb.auto).toBe(1);
+        expect(h.adb.user).toBe(2);
+        // Restored: nothing is left to retry.
+        await h.manager.createSession("third-session", device.deviceId, "android");
+        h.timer.advanceTime(10_000);
+        await flush();
+        expect(h.restored).toHaveLength(7);
+      } finally {
+        warn.mockRestore();
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test("a still-failing start attempts once, keeps the record, and the next release retries it", async () => {
+      const h = harness();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await abandonedRelease(h);
+        await h.manager.createSession("next-session", device.deviceId, "android");
+        expect(h.restored).toHaveLength(7);
+        expect(
+          warn.mock.calls.some(([m]) =>
+            String(m).startsWith(`Rotation settings on ${device.deviceId} are still not restored`),
+          ),
+        ).toBe(true);
+        h.timer.advanceTime(10_000);
+        await flush();
+        expect(h.restored).toHaveLength(7);
+
+        h.adb.mismatch = false;
+        await h.manager.releaseSession("next-session");
+        await h.manager.getPendingDeviceCleanup(device.deviceId);
+        expect(h.restored).toHaveLength(8);
+        expect(h.adb.auto).toBe(1);
+        expect(h.adb.user).toBe(2);
+      } finally {
+        warn.mockRestore();
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test("a window-manager-managed abandon is recorded, and a managed retry drops it", async () => {
+      const h = harness();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await h.manager.createSession("rotation-session", device.deviceId, "android");
+        await h.rotate.execute("landscape");
+        h.adb.mismatch = true;
+        h.adb.deviceStates = FOLD_STATES;
+        await h.manager.releaseSession("rotation-session");
+        await flush();
+        await h.manager.getPendingDeviceCleanup(device.deviceId);
+        expect(h.restored).toHaveLength(1);
+
+        await h.manager.createSession("next-session", device.deviceId, "android");
+        expect(h.restored).toHaveLength(2);
+        expect(
+          warn.mock.calls.some(([m]) => String(m).includes("dropping the abandoned restore")),
+        ).toBe(true);
+
+        await h.manager.createSession("third-session", device.deviceId, "android");
+        expect(h.restored).toHaveLength(2);
+      } finally {
+        warn.mockRestore();
+        h.manager.stopCleanupTimer();
+      }
+    });
+
+    test("retiring the device forgets the abandoned restore", async () => {
+      const h = harness();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await abandonedRelease(h);
+        h.manager.retireRotationRestoration(device.deviceId);
+        h.adb.mismatch = false;
+        await h.manager.createSession("next-session", device.deviceId, "android");
+        expect(h.restored).toHaveLength(6);
+      } finally {
+        warn.mockRestore();
+        h.manager.stopCleanupTimer();
+      }
+    });
+  });
+
   test("rebind restores old device originals and empties replacement slot", async () => {
     const h = harness();
     try {

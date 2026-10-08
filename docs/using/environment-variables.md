@@ -16,19 +16,20 @@ launch metadata are intentionally excluded.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                      | Use and accepted values                                                                                                                                                                             | Default                                                    |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `AUTOMOBILE_DATA_DIR`, `AUTO_MOBILE_DATA_DIR`                 | Base directory for observe, accessibility, navigation, CtrlProxy builds, screen streaming, WebRTC, tool outputs and daemon failure artifacts; filesystem path, relative to daemon launch directory. | `~/.auto-mobile` (OS temp fallback if home is unavailable) |
-| `AUTOMOBILE_LOG_DIR`, `AUTO_MOBILE_LOG_DIR`                   | Daemon and client log directory; filesystem path, relative to daemon launch directory.                                                                                                              | `$AUTOMOBILE_DATA_DIR/logs`                                |
-| `AUTOMOBILE_PLAN_HEALTH_DIR`                                  | Opt-in: each `executePlan` run writes a JSON health summary (per-tool step latency, failures, skips) here and attaches it as `healthSummary` in the result; filesystem path.                        | unset (no summary)                                         |
-| `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`             | Log serialization: `text` or newline-delimited `json`; case-insensitive, trimmed.                                                                                                                   | `text`                                                     |
-| `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                 | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                               | `file`                                                     |
-| `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`               | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                  | `info`                                                     |
-| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR` | Shared cross-process CtrlProxy forwarding lease root; must be an absolute path shared by cooperating agents.                                                                                        | OS account home `.auto-mobile`                             |
-| `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR` | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                      | resolved data directory `tool_outputs`                     |
-| `AUTOMOBILE_DEBUG`                                            | Enable CLI debug logging; exact `1` enables.                                                                                                                                                        | off                                                        |
-| `AUTOMOBILE_DEBUG_PERF`                                       | Enable UI performance debug tracking; exact `1` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                    | off                                                        |
-| `AUTOMOBILE_DOCTOR_TIMEOUT_MS`                                | Doctor command execution timeout; numeric milliseconds via `Number(value)`; zero, empty or NaN falls back to `5000`; use a positive value.                                                          | `5000` ms                                                  |
+| Variable                                                                            | Use and accepted values                                                                                                                                                                             | Default                                                    |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `AUTOMOBILE_DATA_DIR`, `AUTO_MOBILE_DATA_DIR`                                       | Base directory for observe, accessibility, navigation, CtrlProxy builds, screen streaming, WebRTC, tool outputs and daemon failure artifacts; filesystem path, relative to daemon launch directory. | `~/.auto-mobile` (OS temp fallback if home is unavailable) |
+| `AUTOMOBILE_LOG_DIR`, `AUTO_MOBILE_LOG_DIR`                                         | Daemon and client log directory; filesystem path, relative to daemon launch directory.                                                                                                              | `$AUTOMOBILE_DATA_DIR/logs`                                |
+| `AUTOMOBILE_PLAN_HEALTH_DIR`                                                        | Opt-in: each `executePlan` run writes a JSON health summary (per-tool step latency, failures, skips) here and attaches it as `healthSummary` in the result; filesystem path.                        | unset (no summary)                                         |
+| `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`                                   | Log serialization: `text` or newline-delimited `json`; case-insensitive, trimmed.                                                                                                                   | `text`                                                     |
+| `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                               | `file`                                                     |
+| `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                  | `info`                                                     |
+| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root; must be an absolute path shared by cooperating agents.                                                                                        | OS account home `.auto-mobile`                             |
+| `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims, which ignore `AUTOMOBILE_COORDINATION_DIR`; must be an absolute path shared by every daemon on one ADB server.                                     | OS account home `.auto-mobile/adb-servers`                 |
+| `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                      | resolved data directory `tool_outputs`                     |
+| `AUTOMOBILE_DEBUG`                                                                  | Enable CLI debug logging; exact `1` enables.                                                                                                                                                        | off                                                        |
+| `AUTOMOBILE_DEBUG_PERF`                                                             | Enable UI performance debug tracking; exact `1` enables (also `--debug-perf`/`--ui-perf-debug`).                                                                                                    | off                                                        |
+| `AUTOMOBILE_DOCTOR_TIMEOUT_MS`                                                      | Doctor command execution timeout; numeric milliseconds via `Number(value)`; zero, empty or NaN falls back to `5000`; use a positive value.                                                          | `5000` ms                                                  |
 
 </div>
 
@@ -329,6 +330,28 @@ with `daemon_session_not_found`. The harness reads this to decide whether a sess
 survived; it must not heartbeat the session itself to find out. It also prints
 `liveness`: `{ state: "live" | "suspect" | "lapsed", remainingMs }`, the time
 left on the lease or grace window, or zero once lapsed.
+
+To tell an idle holder from an active one, `session-info` also prints:
+
+| Field                  | Meaning                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `lastToolActivityAt`   | Start or end of the session's last tool call; heartbeats never move it.        |
+| `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                        |
+| `idleReleaseAt`        | When idle release is due; the next monitor scan after it releases the session. |
+| `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                  |
+| `activeExecutions`     | Tool calls in flight on the session. Idle release waits for them to finish.    |
+
+`holderKind` comes from the session's liveness policy (`cli` for a one-shot
+`--cli` owner), the client name a client sent to `daemon/registerSession`, and
+the owner token (a token-claimed heartbeat session is a `stdio-proxy`). The
+desktop app and the IDE plugin register under the same name today, so both
+report `desktop`.
+
+`--daemon active-sessions` prints every held session with the same fields plus
+`sessionId`, `assignedDevice` and `platform`, so one command answers which
+client holds which device and when it will be released.
+`scripts/live-idle-release-check.sh` uses it to check idle release against a real
+emulator with a private daemon.
 
 ### Stalled liveness: `daemon_stalled` and `proxy_stalled`
 

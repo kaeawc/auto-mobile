@@ -281,6 +281,41 @@ CtrlProxy/video assets again. `pressButton volume_up` is valid on both Android
 and iOS simulators since #8370; no platform special case is needed. The probe
 changes device volume and optional `--app` launches the specified app.
 
+## Live Check: Device-Session Idle Release
+
+`live-idle-release-check.sh` (#10671) checks the device-session release windows
+against one real emulator. It never runs in CI or fast validation.
+
+```bash
+bun run build
+bash scripts/live-idle-release-check.sh --confirm-live --serial emulator-5560 --port 3920
+```
+
+It starts a private daemon whose socket, pid, lock, aux sockets, data, logs,
+database, coordination and iOS cache directories all live in one `/tmp/am-idle.*`
+directory. The daemon runs on the explicit `--port` with `--strict-port`, and
+`AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` is set to `--idle-timeout-ms` (default
+20000). Inherited daemon, database and session-timing variables are dropped. The
+script refuses ports 3000-3010 and any serial that is not `emulator-NNNN`.
+
+A stdio proxy acquires the emulator with `getAndroid`. The script then checks
+three scenarios:
+
+- **active**: the device stays held past the idle window while the proxy
+  heartbeats and calls `observe`.
+- **no-heartbeat**: the proxy is suspended with SIGSTOP, so its socket stays open.
+  The device must be released within about 10 s.
+- **idle**: the proxy heartbeats but makes no calls. `lastOwnerHeartbeatAt` must
+  advance while `lastToolActivityAt` stays put, and the device must be released
+  once the idle window passes, with the proxy still alive.
+
+Each scenario reads `--daemon active-sessions` and also requires `holderKind` to
+be `stdio-proxy`. Afterwards `adb get-state` must still answer, since release
+never kills the device. The `active-sessions` snapshots and the daemon log lines
+that name the session are saved under `scratch/live-idle-release-check/<time>/`.
+On failure the private directory is kept. `test/bats/live-idle-release-check.bats`
+covers the script with a fake server, adb and clock.
+
 ## Other Scripts
 
 ### Build Scripts

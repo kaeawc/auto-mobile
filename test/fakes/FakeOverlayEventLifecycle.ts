@@ -2,7 +2,9 @@ import type { OverlayEventLifecycle } from "../../src/server/overlayTools";
 
 export class FakeOverlayEventLifecycle implements OverlayEventLifecycle {
   private readonly sessions = new Set<(sessionUuid: string) => void>();
-  private readonly unbound = new Set<(deviceId: string) => void>();
+  /** Unbound listeners per source (session manager); only the current source's fire. */
+  private readonly unboundBySource = new Map<object, Set<(deviceId: string) => void>>();
+  private unboundSource: object = {};
   private readonly devices = new Set<(deviceId: string) => void>();
   subscribeSessionRelease(listener: (sessionUuid: string) => void): () => void {
     this.sessions.add(listener);
@@ -19,21 +21,36 @@ export class FakeOverlayEventLifecycle implements OverlayEventLifecycle {
   getDeviceUnboundSubscribeCalls(): number {
     return this.unboundSubscribeCalls;
   }
+  /** Every live unbound listener, including any still attached to a replaced source. */
   getDeviceUnboundListenerCount(): number {
-    return this.unbound.size;
+    return [...this.unboundBySource.values()].reduce((count, set) => count + set.size, 0);
+  }
+  /** Models DaemonState being reset and re-initialised with a new session manager. */
+  reinitialiseDeviceUnboundSource(): void {
+    this.unboundSource = {};
+  }
+  deviceUnboundSource(): object | undefined {
+    return this.unboundAvailable ? this.unboundSource : undefined;
   }
   subscribeDeviceUnbound(listener: (deviceId: string) => void): (() => void) | undefined {
     this.unboundSubscribeCalls += 1;
     if (!this.unboundAvailable) {
       return undefined;
     }
-    this.unbound.add(listener);
+    const source = this.unboundSource;
+    const listeners = this.unboundBySource.get(source) ?? new Set();
+    this.unboundBySource.set(source, listeners);
+    listeners.add(listener);
     return () => {
-      this.unbound.delete(listener);
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        this.unboundBySource.delete(source);
+      }
     };
   }
+  /** Unbinds through the current source; a subscription to a replaced source hears nothing. */
   unbindDevice(deviceId: string): void {
-    for (const listener of [...this.unbound]) {
+    for (const listener of [...(this.unboundBySource.get(this.unboundSource) ?? [])]) {
       listener(deviceId);
     }
   }
@@ -54,6 +71,6 @@ export class FakeOverlayEventLifecycle implements OverlayEventLifecycle {
     }
   }
   getListenerCount(): number {
-    return this.sessions.size + this.devices.size + this.unbound.size;
+    return this.sessions.size + this.devices.size + this.getDeviceUnboundListenerCount();
   }
 }

@@ -10,6 +10,7 @@ import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   OVERLAY_CAPTURE,
+  capturedFloatingCoverHierarchy,
   capturedOverlayHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
@@ -89,6 +90,19 @@ describe("dragAndDrop layer (#9305)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(service.getDragHistory()).toEqual([]);
+  });
+
+  test("default layer refuses a drag from an app row a captured floating overlay covers (#10715)", async () => {
+    // Device capture: a floating system-layer prototype over the Playground "Elevated" button.
+    const { command, service } = createCommand(capturedFloatingCoverHierarchy());
+    const result = await command.execute({
+      source: { elementId: "button_elevated" },
+      target: { elementId: "button_elevated" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("dragAndDrop source is covered by an AutoMobile overlay window");
     expect(service.getDragHistory()).toEqual([]);
   });
 

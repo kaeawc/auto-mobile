@@ -10,17 +10,21 @@
  * inside it, which cancels the release.
  *
  * A release the pool defers because the session still has work in flight is
- * re-armed, not dropped (#10663): it is retried on a short backoff until the
- * call settles, and an execution that never settles keeps the session only up to
- * {@link OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS}.
+ * re-armed, not dropped (#10663): it is retried when the vetoing call ends
+ * ({@link OwnerDisconnectRelease.executionsEnded}, #10712), and in any case once
+ * the veto's bound passes, so an execution that never settles keeps the session
+ * only as long as the shared unsettled-execution veto policy allows.
  */
 
-import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { ownerLeaseHeartbeat, SUSPECT_GRACE_MS } from "./livenessOwnerLease";
-import { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } from "./mcpRequestTimeout";
+import {
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+  UnsettledExecutionVeto,
+  type SessionExecutionProbeInput,
+} from "./unsettledExecutionVeto";
 import type { Session } from "./sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "./sessionLivenessWindows";
 
@@ -35,21 +39,16 @@ export const OWNER_DISCONNECTED_RELEASE_REASON = "owner-disconnected";
 export const OWNER_DISCONNECT_GRACE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
 
 /**
- * Longest an active execution may keep a session whose owner disconnected (#10663). No request's
- * deadline can exceed the caller timeout cap, so an execution still tracked this long after the
- * release was first deferred has outlived any deadline it could have had, and nobody is left to
- * consume its result.
+ * Longest an active execution may keep a session whose owner disconnected (#10663): the same
+ * bound the heartbeat monitor applies, from the shared policy in `./unsettledExecutionVeto`.
  */
-export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = MAX_CALLER_MCP_REQUEST_TIMEOUT_MS;
+export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = UNSETTLED_EXECUTION_VETO_CEILING_MS;
 
-/** Longest wait between retries of a deferred release. */
-export const OWNER_DISCONNECT_RETRY_MAX_DELAY_MS = 5_000;
-
-/** How a deferred release is retried: soon after the call settles, without a tight loop. */
-export const OWNER_DISCONNECT_RETRY_BACKOFF: BackoffPolicy = exponentialBackoff({
-  initialDelayMs: 1_000,
-  maxDelayMs: OWNER_DISCONNECT_RETRY_MAX_DELAY_MS,
-});
+/** A release the pool deferred because in-flight work vetoed it. */
+export interface OwnerDisconnectReleaseDeferral {
+  /** When the veto stops holding; the release is retried then if no call end re-arms it first. */
+  deferredUntil: number;
+}
 
 /** What the grace tracker needs from the pool. */
 export interface OwnerDisconnectReleasePort {
@@ -57,20 +56,12 @@ export interface OwnerDisconnectReleasePort {
   /** Whether a still-connected client owns the session. */
   hasConnectedOwner(sessionId: string): boolean;
   /**
-   * Release exactly this session incarnation. Resolving while the session is still held means
-   * the release was deferred (for example, a call is still running), and it is retried.
+   * Release exactly this session incarnation, or defer it while in-flight work vetoes it. A
+   * deferred release is retried when one of the session's executions ends, or at
+   * `deferredUntil`. Resolving with no deferral while the session is still held leaves the
+   * session to its heartbeat lease.
    */
-  release(session: Session, reason: string): Promise<void>;
-}
-
-export interface OwnerDisconnectRetryOptions {
-  /** Delay before each retry of a deferred release. */
-  backoff?: BackoffPolicy;
-  /**
-   * How long after its first deferral a release keeps being retried. Defaults to the execution
-   * veto ceiling plus one retry delay, so an attempt always lands past the ceiling.
-   */
-  maxDeferMs?: number;
+  release(session: Session, reason: string): Promise<OwnerDisconnectReleaseDeferral | void>;
 }
 
 type OwnerSession = Pick<
@@ -128,47 +119,44 @@ function ownerHeartbeatSince(session: OwnerSession): number {
 
 /**
  * Bounds how long active executions may veto the owner-disconnect release of a session
- * (#10663). The #5343 "never reap mid-call" rule holds while the call can still finish inside
- * any request deadline; past {@link OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS} the session is
- * released anyway.
+ * (#10663). The #5343 "never reap mid-call" rule holds while the shared unsettled-execution veto
+ * policy allows; past its bound the session is released anyway.
  */
 export class OwnerDisconnectExecutionVeto {
-  /** When active executions first kept each session incarnation. */
-  private readonly vetoedSince = new WeakMap<Session, number>();
+  private readonly veto: UnsettledExecutionVeto;
 
   constructor(
-    private readonly hasActiveExecutions: (sessionId: string) => boolean,
-    private readonly timer: Timer,
-    private readonly ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-  ) {}
+    executions: SessionExecutionProbeInput,
+    timer: Timer,
+    ceilingMs: number = OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
+  ) {
+    this.veto = new UnsettledExecutionVeto(executions, timer, ceilingMs);
+  }
 
-  /** Whether active executions still keep this session from its owner-disconnect release. */
-  keeps(session: Session): boolean {
-    if (!this.hasActiveExecutions(session.sessionId)) {
-      this.vetoedSince.delete(session);
-      return false;
+  /**
+   * The deferral while active executions still keep this session from its owner-disconnect
+   * release, or undefined when it may be released now.
+   */
+  keeps(session: Session): OwnerDisconnectReleaseDeferral | undefined {
+    const verdict = this.veto.judge(session);
+    if (verdict.kind === "kept") {
+      if (verdict.firstKept) {
+        logger.info(
+          `[OwnerDisconnectRelease] Kept session ${session.sessionId} after its owner disconnected: ` +
+            `executions are still active; retrying the release once they end`,
+        );
+      }
+      return { deferredUntil: verdict.until };
     }
-    const now = this.timer.now();
-    const vetoedSince = this.vetoedSince.get(session);
-    if (vetoedSince === undefined) {
-      this.vetoedSince.set(session, now);
-      logger.info(
-        `[OwnerDisconnectRelease] Kept session ${session.sessionId} after its owner disconnected: ` +
-          `executions are still active; retrying the release once they settle`,
+    if (verdict.kind === "expired") {
+      this.veto.forget(session);
+      logger.warn(
+        `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${verdict.vetoedMs}ms after its ` +
+          `owner disconnected by executions that never settled; releasing it anyway past their ` +
+          `${verdict.bound} bound`,
       );
-      return true;
     }
-    const vetoedMs = now - vetoedSince;
-    if (vetoedMs < this.ceilingMs) {
-      return true;
-    }
-    this.vetoedSince.delete(session);
-    logger.warn(
-      `[OwnerDisconnectRelease] Session ${session.sessionId} was kept for ${vetoedMs}ms after its ` +
-        `owner disconnected by executions that never settled; releasing it anyway past the ` +
-        `${this.ceilingMs}ms unsettled-execution ceiling`,
-    );
-    return false;
+    return undefined;
   }
 }
 
@@ -178,27 +166,20 @@ interface PendingRelease {
   closedAt: number;
   /** The scheduled attempt; undefined while an attempt is in flight. */
   handle: NodeJS.Timeout | undefined;
-  /** When the pool first deferred this release. */
-  deferredSince: number | undefined;
-  retries: number;
+  /** Whether the pool has deferred this release at least once. */
+  deferred: boolean;
+  /** One of the session's executions ended while an attempt was in flight: retry at once. */
+  rearmRequested: boolean;
 }
 
 export class OwnerDisconnectRelease {
   private readonly pending = new Map<string, PendingRelease>();
-  private readonly retryBackoff: BackoffPolicy;
-  private readonly maxDeferMs: number;
 
   constructor(
     private readonly port: OwnerDisconnectReleasePort,
     private readonly timer: Timer,
     private readonly graceMs: number = OWNER_DISCONNECT_GRACE_MS,
-    retry: OwnerDisconnectRetryOptions = {},
-  ) {
-    this.retryBackoff = retry.backoff ?? OWNER_DISCONNECT_RETRY_BACKOFF;
-    this.maxDeferMs =
-      retry.maxDeferMs ??
-      OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS + OWNER_DISCONNECT_RETRY_MAX_DELAY_MS;
-  }
+  ) {}
 
   /** The connection `mcpSessionId` that owned `sessionId` closed and no other connection owns it. */
   ownerDisconnected(sessionId: string, mcpSessionId: string): void {
@@ -221,8 +202,8 @@ export class OwnerDisconnectRelease {
       mcpSessionId,
       closedAt,
       handle,
-      deferredSince: undefined,
-      retries: 0,
+      deferred: false,
+      rearmRequested: false,
     });
   }
 
@@ -242,12 +223,33 @@ export class OwnerDisconnectRelease {
     return this.pending.has(sessionId);
   }
 
+  /**
+   * Executions under these session ids ended (#10712): retry every release they deferred now,
+   * instead of waiting for the veto's bound. A release still inside its disconnect grace is left
+   * alone; one whose attempt is in flight retries as soon as that attempt settles.
+   */
+  executionsEnded(sessionIds: Iterable<string>): void {
+    for (const sessionId of sessionIds) {
+      const pending = this.pending.get(sessionId);
+      if (!pending?.deferred) {
+        continue;
+      }
+      if (pending.handle === undefined) {
+        pending.rearmRequested = true;
+        continue;
+      }
+      this.timer.clearTimeout(pending.handle);
+      pending.handle = this.timer.setTimeout(() => this.fire(sessionId), 0);
+    }
+  }
+
   private fire(sessionId: string): void {
     const pending = this.pending.get(sessionId);
     if (!pending) {
       return;
     }
     pending.handle = undefined;
+    pending.rearmRequested = false;
     const { session, mcpSessionId, closedAt } = pending;
     if (this.port.getSession(sessionId) !== session || this.port.hasConnectedOwner(sessionId)) {
       this.pending.delete(sessionId);
@@ -261,18 +263,17 @@ export class OwnerDisconnectRelease {
       );
       return;
     }
-    const attemptAt = this.timer.now();
-    if (pending.deferredSince === undefined) {
+    if (!pending.deferred) {
       logger.info(
         `[OwnerDisconnectRelease] Releasing session ${sessionId} on device ${session.assignedDevice}: ` +
-          `its owning connection ${mcpSessionId} closed ${attemptAt - closedAt} ms ago and ` +
+          `its owning connection ${mcpSessionId} closed ${this.timer.now() - closedAt} ms ago and ` +
           `no other client owns it (reason=${OWNER_DISCONNECTED_RELEASE_REASON})`,
       );
     }
     // The entry stays pending while the attempt is in flight so a reconnecting owner's cancel()
     // also stops any retry of it.
     this.port.release(session, OWNER_DISCONNECTED_RELEASE_REASON).then(
-      () => this.afterAttempt(sessionId, pending, attemptAt),
+      (deferral) => this.afterAttempt(sessionId, pending, deferral),
       (error: unknown) => {
         if (this.pending.get(sessionId) === pending) {
           this.pending.delete(sessionId);
@@ -286,8 +287,15 @@ export class OwnerDisconnectRelease {
     );
   }
 
-  /** Re-arm a release the pool deferred, while it has not been cancelled or outlived its bound. */
-  private afterAttempt(sessionId: string, pending: PendingRelease, attemptAt: number): void {
+  /**
+   * Re-arm a release the pool deferred: on the next end of one of the session's executions
+   * ({@link executionsEnded}), or when the veto's bound passes, whichever comes first.
+   */
+  private afterAttempt(
+    sessionId: string,
+    pending: PendingRelease,
+    deferral: OwnerDisconnectReleaseDeferral | void,
+  ): void {
     if (this.pending.get(sessionId) !== pending) {
       return;
     }
@@ -295,20 +303,22 @@ export class OwnerDisconnectRelease {
       this.pending.delete(sessionId);
       return;
     }
-    pending.deferredSince ??= attemptAt;
-    const deferredMs = attemptAt - pending.deferredSince;
-    if (deferredMs >= this.maxDeferMs) {
+    if (!deferral) {
       this.pending.delete(sessionId);
-      logger.warn(
-        `[OwnerDisconnectRelease] Gave up releasing session ${sessionId} after it was deferred for ` +
-          `${deferredMs} ms; its heartbeat lease still governs it`,
+      logger.info(
+        `[OwnerDisconnectRelease] Release of session ${sessionId} left it held without a deferral; ` +
+          `its heartbeat lease still governs it`,
       );
       return;
     }
-    pending.retries += 1;
-    const delayMs = this.retryBackoff.delayForAttempt(pending.retries);
+    pending.deferred = true;
+    const delayMs = pending.rearmRequested
+      ? 0
+      : Math.max(0, deferral.deferredUntil - this.timer.now());
+    pending.rearmRequested = false;
     logger.debug(
-      `[OwnerDisconnectRelease] Release of session ${sessionId} was deferred; retrying in ${delayMs} ms`,
+      `[OwnerDisconnectRelease] Release of session ${sessionId} was deferred; retrying when its ` +
+        `executions end, or in ${delayMs} ms`,
     );
     pending.handle = this.timer.setTimeout(() => this.fire(sessionId), delayMs);
   }

@@ -1,5 +1,10 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join } from "node:path";
 import {
+  adbServerScope,
+  deviceAllocationClaimPath,
   ForwardLeaseForeignDeviceOwnership,
   type DeviceOwnershipFileSource,
 } from "../../src/daemon/foreignDeviceOwnership";
@@ -7,7 +12,14 @@ import type {
   ForwardLeaseOwnerProbe,
   ForwardLeaseOwnerReport,
 } from "../../src/features/observe/shared/ctrlProxyForwardLeaseOwnership";
-import type { LockContent } from "../../src/utils/fileLock";
+import {
+  readExclusiveLockContent,
+  releaseExclusiveLock,
+  takeOverExclusiveLock,
+  tryAcquireExclusiveLock,
+  type LockContent,
+} from "../../src/utils/fileLock";
+import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -26,6 +38,9 @@ class FakeOwnershipFiles implements DeviceOwnershipFileSource {
   }
   claimPath(deviceId: string): string {
     return `/claims/${deviceId}.lock`;
+  }
+  legacyClaimPath(deviceId: string): string {
+    return `/coord/device-allocations/${deviceId}.lock`;
   }
   read(path: string): LockContent | undefined {
     return this.files.get(path);
@@ -52,6 +67,12 @@ class FakeOwnershipFiles implements DeviceOwnershipFileSource {
     }
     this.files.set(path, { pid: owner.pid, token: owner.ownerToken, metadata: owner.metadata });
     return true;
+  }
+  release(path: string, owner: { pid: number; ownerToken: string }): void {
+    const held = this.files.get(path);
+    if (held?.pid === owner.pid && held.token === owner.ownerToken) {
+      this.files.delete(path);
+    }
   }
 }
 
@@ -196,6 +217,17 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
       expect(files.files.get("/claims/a.lock")?.pid).toBe(SELF_PID);
       expect(files.files.get("/claims/b.lock")?.pid).toBe(SELF_PID);
     });
+
+    test("release withdraws this daemon's claim but never another daemon's", async () => {
+      const { files, ownership } = harness();
+      expect(await ownership.claim("d")).toBe(true);
+      ownership.release("d");
+      expect(files.files.has("/claims/d.lock")).toBe(false);
+
+      files.files.set("/claims/e.lock", { pid: FOREIGN_PID, token: "t", metadata: metadata("/s") });
+      ownership.release("e");
+      expect(files.files.get("/claims/e.lock")?.pid).toBe(FOREIGN_PID);
+    });
   });
 
   test("logs and reports no owner when the ownership paths cannot be resolved", async () => {
@@ -213,6 +245,221 @@ describe("ForwardLeaseForeignDeviceOwnership", () => {
       await ownership.refresh(["emulator-5554"]);
       expect(ownership.foreignOwnerPid("emulator-5554")).toBeUndefined();
       expect(String(warn.mock.calls[0]?.[0])).toContain("no home directory");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("legacy 0.0.84 coordination-directory claims (#10708)", () => {
+  test("a live legacy claim is a foreign owner while its owner uses the device", async () => {
+    const { files, probe, ownerOf } = harness();
+    files.files.set("/coord/device-allocations/d.lock", {
+      pid: FOREIGN_PID,
+      token: "t",
+      metadata: metadata("/old"),
+    });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+    expect(await ownerOf("d")).toBe(FOREIGN_PID);
+
+    probe.reports.set("/old", status(FOREIGN_PID, null));
+    expect(await ownerOf("d")).toBeUndefined();
+  });
+
+  test("claim loses to a live legacy claim and never writes the legacy location", async () => {
+    const { files, probe, ownership } = harness();
+    files.files.set("/coord/device-allocations/d.lock", {
+      pid: FOREIGN_PID,
+      token: "t",
+      metadata: metadata("/old"),
+    });
+    probe.reports.set("/old", status(FOREIGN_PID, "old-session"));
+    expect(await ownership.claim("d")).toBe(false);
+    expect(files.files.has("/claims/d.lock")).toBe(false);
+
+    // Once the older daemon lets the device go, the claim goes to the new location only.
+    probe.reports.set("/old", status(FOREIGN_PID, null));
+    expect(await ownership.claim("d")).toBe(true);
+    expect(files.files.get("/claims/d.lock")?.pid).toBe(SELF_PID);
+    expect(files.files.get("/coord/device-allocations/d.lock")?.pid).toBe(FOREIGN_PID);
+  });
+});
+
+describe("adbServerScope", () => {
+  test.each([
+    ["no adb variables", {}],
+    ["the default port", { ANDROID_ADB_SERVER_PORT: "5037" }],
+    ["a loopback address", { ANDROID_ADB_SERVER_ADDRESS: "127.0.0.1" }],
+    ["a port-only socket spec", { ADB_SERVER_SOCKET: "tcp:5037" }],
+    ["a loopback socket spec", { ADB_SERVER_SOCKET: "tcp:127.0.0.1:5037" }],
+  ])("keys %s as the default local server", (_label, env) => {
+    expect(adbServerScope(env)).toBe("tcp-localhost-5037");
+  });
+
+  test("distinguishes servers by port and host", () => {
+    expect(adbServerScope({ ANDROID_ADB_SERVER_PORT: "5038" })).toBe("tcp-localhost-5038");
+    expect(adbServerScope({ ADB_SERVER_SOCKET: "tcp:build-host:5037" })).toBe(
+      "tcp-build-host-5037",
+    );
+    // ADB_SERVER_SOCKET wins over the address/port pair, as it does for adb.
+    expect(adbServerScope({ ADB_SERVER_SOCKET: "tcp:5039", ANDROID_ADB_SERVER_PORT: "5038" })).toBe(
+      "tcp-localhost-5039",
+    );
+  });
+
+  test("keys a non-TCP socket spec without path separators", () => {
+    const scope = adbServerScope({ ADB_SERVER_SOCKET: "localfilesystem:/tmp/adb.sock" });
+    expect(scope.startsWith("socket-")).toBe(true);
+    expect(scope).not.toContain("/");
+  });
+});
+
+describe("deviceAllocationClaimPath", () => {
+  test("ignores the coordination directory and follows the ADB server (#10708)", () => {
+    const a = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_COORDINATION_DIR: "/a" },
+      "/h",
+    );
+    const b = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_COORDINATION_DIR: "/b" },
+      "/h",
+    );
+    expect(a).toBe(b);
+    expect(a.startsWith(join("/h", ".auto-mobile", "adb-servers", "tcp-localhost-5037"))).toBe(
+      true,
+    );
+    expect(
+      deviceAllocationClaimPath("emulator-5554", { ANDROID_ADB_SERVER_PORT: "5038" }, "/h"),
+    ).not.toBe(a);
+  });
+
+  test("an explicit ADB-server coordination root replaces the account home", () => {
+    const path = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims" },
+      "/h",
+    );
+    expect(
+      path.startsWith(join("/shared/claims", "tcp-localhost-5037", "device-allocations")),
+    ).toBe(true);
+  });
+
+  test("the test preload keeps the default claim path off the real home", () => {
+    expect(process.env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR?.trim()).toBeTruthy();
+    const real = join(userInfo().homedir, ".auto-mobile");
+    expect(deviceAllocationClaimPath("emulator-5554").startsWith(real)).toBe(false);
+  });
+});
+
+describe("daemons in different coordination directories on one adb server (#10708)", () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /** Real lock files: each daemon's lease lives in its own coordination dir, claims are shared. */
+  function daemon(home: string, coordinationDir: string, alive: Set<number>) {
+    const env = { AUTOMOBILE_COORDINATION_DIR: coordinationDir };
+    const isProcessRunning = (pid: number) => alive.has(pid);
+    const source: DeviceOwnershipFileSource = {
+      leasePath: (deviceId) => join(coordinationDir, "ctrl-proxy-forwards", `${deviceId}.lock`),
+      claimPath: (deviceId) => deviceAllocationClaimPath(deviceId, env, home),
+      legacyClaimPath: (deviceId) =>
+        join(coordinationDir, "device-allocations", `${deviceId}.lock`),
+      read: (path) => readExclusiveLockContent(path),
+      isProcessRunning,
+      tryAcquire: (path, owner) => {
+        ensureSecureDirectorySync(dirname(path));
+        return tryAcquireExclusiveLock(path, { ...owner, isProcessRunning });
+      },
+      takeOver: (path, observed, owner) => takeOverExclusiveLock(path, observed, owner),
+      release: (path, owner) => releaseExclusiveLock(path, owner.pid, owner.ownerToken),
+    };
+    return source;
+  }
+
+  test("a second daemon sees and loses to the first daemon's claim", async () => {
+    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10708-"));
+    roots.push(root);
+    const home = join(root, "home");
+    const alive = new Set<number>([SELF_PID, FOREIGN_PID]);
+    const probe = new FakeOwnerProbe();
+    probe.reports.set("/sockets/first.sock", status(FOREIGN_PID, "first-session"));
+
+    const first = new ForwardLeaseForeignDeviceOwnership(
+      FOREIGN_PID,
+      daemon(home, join(root, "coord-a"), alive),
+      probe,
+      () => "/sockets/first.sock",
+      new FakeTimer(),
+    );
+    const second = new ForwardLeaseForeignDeviceOwnership(
+      SELF_PID,
+      daemon(home, join(root, "coord-b"), alive),
+      probe,
+      () => SELF_SOCKET,
+      new FakeTimer(),
+    );
+
+    expect(await first.claim("emulator-5554")).toBe(true);
+
+    await second.refresh(["emulator-5554"]);
+    expect(second.foreignOwnerPid("emulator-5554")).toBe(FOREIGN_PID);
+    expect(await second.claim("emulator-5554")).toBe(false);
+
+    // Once the first daemon stops using the device, the second takes the claim over.
+    probe.reports.set("/sockets/first.sock", status(FOREIGN_PID, null));
+    expect(await second.claim("emulator-5554")).toBe(true);
+    await first.refresh(["emulator-5554"]);
+    expect(first.foreignOwnerPid("emulator-5554")).toBeUndefined();
+  });
+
+  test("a session claim is written and withdrawn at the ADB-server location, never the legacy one (#10708, #10709)", async () => {
+    const root = mkdtempSync(join(tmpdir(), "foreign-ownership-10709-"));
+    roots.push(root);
+    const home = join(root, "home");
+    const coordinationDir = join(root, "coord");
+    const ownership = new ForwardLeaseForeignDeviceOwnership(
+      SELF_PID,
+      daemon(home, coordinationDir, new Set([SELF_PID])),
+      new FakeOwnerProbe(),
+      () => SELF_SOCKET,
+      new FakeTimer(),
+    );
+    const claimPath = deviceAllocationClaimPath(
+      "emulator-5554",
+      { AUTOMOBILE_COORDINATION_DIR: coordinationDir },
+      home,
+    );
+    const legacyPath = join(coordinationDir, "device-allocations", "emulator-5554.lock");
+
+    expect(await ownership.claim("emulator-5554")).toBe(true);
+    expect(readExclusiveLockContent(claimPath)?.pid).toBe(SELF_PID);
+    expect(existsSync(legacyPath)).toBe(false);
+
+    ownership.release("emulator-5554");
+    expect(existsSync(claimPath)).toBe(false);
+    expect(existsSync(legacyPath)).toBe(false);
+  });
+
+  test("an unwritable claim directory is logged and does not block allocation", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const files = new FakeOwnershipFiles();
+      files.tryAcquire = () => {
+        throw new Error("EACCES: permission denied");
+      };
+      const ownership = new ForwardLeaseForeignDeviceOwnership(
+        SELF_PID,
+        files,
+        new FakeOwnerProbe(),
+      );
+      expect(await ownership.claim("emulator-5554")).toBe(true);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("EACCES");
     } finally {
       warn.mockRestore();
     }

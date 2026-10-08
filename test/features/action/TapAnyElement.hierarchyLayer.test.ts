@@ -66,6 +66,19 @@ describe("tapAny layer (#9305)", () => {
     expect(service.getTapHistory()).toEqual([]);
   });
 
+  test("default layer refuses an app pick a full-screen overlay covers, before dispatch (#10715)", async () => {
+    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+    const result = await command.execute({
+      action: "tap",
+      // App-only container: the overview action buttons sit in the app window under the overlay.
+      container: { elementId: "com.google.android.apps.nexuslauncher:id/action_buttons" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("covered by an AutoMobile overlay window");
+    expect(service.getTapHistory()).toEqual([]);
+  });
+
   test('"overlay" with no overlay showing is an actionable error', async () => {
     const { command, service } = createCommand(capturedTwoWindowHierarchy());
     const result = await command.execute({ action: "tap", layer: "overlay" });

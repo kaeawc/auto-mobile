@@ -70,6 +70,7 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
+import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionIdleTimeoutMs,
@@ -363,6 +364,11 @@ export interface Session {
   preCliLiveness?: PreCliLivenessSnapshot;
   /** Recovery-only metadata that must survive the active-row upsert. */
   persistenceMetadata?: SessionPersistenceMetadata;
+  /**
+   * The name the holding client registered with `daemon/registerSession`, for diagnostics only
+   * (`holderKind`, #10671). Not persisted and never used for admission or ownership.
+   */
+  clientName?: string;
 }
 
 interface SessionPersistenceMetadata {
@@ -597,6 +603,13 @@ export type ActiveSessionExecutionChecker = (
   sessionId: string,
   query?: ActiveSessionExecutionQuery,
 ) => boolean;
+
+/**
+ * The latest request deadline among a session's in-flight executions, on the session manager's
+ * clock; `Number.POSITIVE_INFINITY` or undefined when some execution carries no deadline. Same
+ * contract as `SessionExecutionProbe.latestExecutionDeadlineMs` (#10712).
+ */
+export type SessionExecutionDeadlineLookup = (sessionId: string) => number | undefined;
 
 export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
 
@@ -1120,6 +1133,9 @@ export class SessionManager {
   >();
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
   private readonly rotationRestoreBackoff: BackoffPolicy;
+  /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
+  private readonly abandonedRotations = new Map<string, RotationSessionState>();
+  private readonly abandonedRotationRetries = new Map<string, Promise<void>>();
   /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
   private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
   private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
@@ -1130,11 +1146,25 @@ export class SessionManager {
   private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
   private readonly screenReaderRemovalGenerations = new Map<string, number>();
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
-  private observerSessions?: Pick<ObserverSessionStore, "release">;
+  private observerSessions?: Pick<ObserverSessionStore, "release"> &
+    Partial<Pick<ObserverSessionStore, "list">>;
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
-  setObserverSessionRegistry(registry: Pick<ObserverSessionStore, "release">): void {
+  setObserverSessionRegistry(
+    registry: Pick<ObserverSessionStore, "release"> & Partial<Pick<ObserverSessionStore, "list">>,
+  ): void {
     this.observerSessions = registry;
+  }
+
+  /**
+   * Record the name a client registered for an existing device session (#10671). Diagnostic
+   * only: it feeds `holderKind` and never changes ownership, liveness or deadlines.
+   */
+  recordSessionClientName(sessionId: string, clientName: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.clientName = clientName;
+    }
   }
 
   private deviceHealth?: {
@@ -1273,6 +1303,8 @@ export class SessionManager {
   }
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
+  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
 
   // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
   // tool call, env-overridable (see `./sessionLivenessWindows`).
@@ -1516,6 +1548,15 @@ export class SessionManager {
   }
 
   /**
+   * Sibling of {@link setActiveSessionExecutionChecker}: how the idle sweep learns the request
+   * deadline that bounds an in-flight execution's veto, so it judges the veto with the same
+   * shared policy as the heartbeat and owner-disconnect paths (#10712, #10713).
+   */
+  setSessionExecutionDeadlineLookup(lookup: SessionExecutionDeadlineLookup): void {
+    this.sessionExecutionDeadlineLookup = lookup;
+  }
+
+  /**
    * Register cleanup for a device a session stopped using without ending that
    * session. This intentionally excludes session-wide cleanup and transport
    * unbinding, which must remain attached to a real session release.
@@ -1601,7 +1642,8 @@ export class SessionManager {
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await creation.promise;
-      // Natural point to retry a screen reader an earlier release could not restore.
+      // Natural point to retry a rotation or screen reader an earlier release could not restore.
+      await this.retryAbandonedRotationRestore(created.assignedDevice);
       await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
       return created;
     } finally {
@@ -1640,6 +1682,13 @@ export class SessionManager {
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
     this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
+    // A client that registered as an observer before acquiring a device keeps its name (#10671).
+    const observerClientName = this.observerSessions
+      ?.list?.()
+      .find((observer) => observer.sessionId === session.sessionId)?.clientName;
+    if (observerClientName !== undefined && session.clientName === undefined) {
+      session.clientName = observerClientName;
+    }
     this.observerSessions?.release(session.sessionId, "promotion");
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
@@ -1691,12 +1740,31 @@ export class SessionManager {
     };
   }
 
-  /** A tool call started, joined or ended against a session waiting out a device restart. */
+  /**
+   * A tool call started, joined or ended against a session waiting out a device restart.
+   *
+   * The in-memory mark applies at once (see {@link readPersistedSession}); the durable write
+   * (#10713) lets the extended expiry survive a daemon restart during the device restart, which
+   * would otherwise fall back to the expiry stored at the device loss.
+   */
   private recordRestartRecoveryActivity(sessionId: string): void {
-    this.restartRecoveryActivityAt.set(
-      sessionId,
-      Math.max(this.restartRecoveryActivityAt.get(sessionId) ?? 0, this.timer.now()),
+    const activityAt = Math.max(
+      this.restartRecoveryActivityAt.get(sessionId) ?? 0,
+      this.timer.now(),
     );
+    this.restartRecoveryActivityAt.set(sessionId, activityAt);
+    void this.getBarrier()
+      .track(async () => {
+        await this.deviceSessionRepository.recordRestartRecoveryActivity?.(sessionId, activityAt);
+      })
+      .catch((error) => {
+        // The in-memory mark still governs this process; only a daemon restart before the next
+        // activity write would fall back to the stored expiry.
+        logger.warn(
+          `[SessionManager] Failed to persist restart-recovery activity for ${sessionId}: ` +
+            errorMessage(error),
+        );
+      });
   }
 
   /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */
@@ -3445,6 +3513,7 @@ export class SessionManager {
       keepScreenAwake?.applied === true ||
       Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
       this.abandonedScreenReaders.has(session.assignedDevice) ||
+      this.abandonedRotations.has(session.assignedDevice) ||
       Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
     );
   }
@@ -3512,9 +3581,17 @@ export class SessionManager {
     const pendingClockRestoration = session.cacheData.clock
       ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
       : null;
-    const pendingRotationRestoration = session.cacheData.rotation
+    // Snapshot before this release's own restore can record a fresh abandon: that one
+    // waits for the next start or release instead of an immediate repeat attempt.
+    const hadAbandonedRotation = this.abandonedRotations.has(session.assignedDevice);
+    const ownRotationRestoration = session.cacheData.rotation
       ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups))).pending
       : null;
+    const pendingRotationRestoration = hadAbandonedRotation
+      ? ownBudget(() =>
+          this.retryAbandonedRotationAfter(session.assignedDevice, ownRotationRestoration),
+        )
+      : ownRotationRestoration;
     const ownScreenReaderRestoration = session.cacheData.screenReader
       ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
           .pending
@@ -4451,8 +4528,13 @@ export class SessionManager {
       `Gave up restoring rotation settings on ${deviceId} ${when} ` +
         `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
         `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
-        `A fold or display change during the session can make the recorded settings unverifiable.`,
+        `A fold or display change during the session can make the recorded settings unverifiable. ` +
+        `Will try once more at the next session start or release on this device.`,
     );
+    // An older abandoned baseline is the truer original; keep it over a newer session's.
+    if (!this.abandonedRotations.has(deviceId)) {
+      this.abandonedRotations.set(deviceId, target.state);
+    }
     target.clear();
     const targets = this.pendingRotationRestores.get(deviceId);
     if (targets?.get(target.state) === target) {
@@ -4461,6 +4543,76 @@ export class SessionManager {
         this.pendingRotationRestores.delete(deviceId);
       }
     }
+  }
+
+  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
+  private async retryAbandonedRotationAfter(
+    deviceId: string,
+    own: Promise<void> | null,
+  ): Promise<void> {
+    try {
+      await own;
+    } finally {
+      await this.retryAbandonedRotationRestore(deviceId);
+    }
+  }
+
+  /**
+   * One bounded attempt at rotation settings an earlier release gave up on, awaited
+   * before the device is handed to a new session; never on a timer. A transient failure
+   * keeps the record for the next start or release. A window-manager-managed outcome is
+   * definitively unrecoverable, so the record is dropped. Either way the device proceeds.
+   */
+  private retryAbandonedRotationRestore(deviceId: string): Promise<void> {
+    const state = this.abandonedRotations.get(deviceId);
+    if (!state) {
+      return Promise.resolve();
+    }
+    const inFlight = this.abandonedRotationRetries.get(deviceId);
+    if (inFlight) {
+      return inFlight;
+    }
+    const controller = new AbortController();
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const forget = () => {
+      if (this.abandonedRotations.get(deviceId) === state) {
+        this.abandonedRotations.delete(deviceId);
+      }
+    };
+    const attempt = (async () => {
+      try {
+        await raceWithDeadline(
+          this.rotationRestorerFactory(device).restore(state, controller.signal),
+          {
+            timer: this.timer,
+            timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+            label: "Abandoned rotation restoration",
+          },
+        );
+        forget();
+        logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
+      } catch (error) {
+        controller.abort();
+        if (isNonRetryableRotationRestoreError(error)) {
+          forget();
+          logger.warn(
+            `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
+              `dropping the abandoned restore: ${errorMessage(error)}`,
+          );
+          return;
+        }
+        logger.warn(
+          `Rotation settings on ${deviceId} are still not restored; ` +
+            `will try again at the next session start or release: ${errorMessage(error)}`,
+        );
+      }
+    })().finally(() => {
+      if (this.abandonedRotationRetries.get(deviceId) === attempt) {
+        this.abandonedRotationRetries.delete(deviceId);
+      }
+    });
+    this.abandonedRotationRetries.set(deviceId, attempt);
+    return attempt;
   }
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
@@ -4476,6 +4628,7 @@ export class SessionManager {
       target.clear();
     }
     this.pendingRotationRestores.delete(deviceId);
+    this.abandonedRotations.delete(deviceId);
   }
 
   /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */
@@ -6368,10 +6521,44 @@ export class SessionManager {
     // A session whose owner has been heartbeating is held a further suspect
     // window past its deadline (#10051), so an owner that missed a beat can
     // still restore it.
-    return (
-      !this.activeSessionExecutionChecker(session.sessionId) &&
-      this.timer.now() > session.expiresAt + suspectGraceMsFor(session)
-    );
+    const idleDeadline = session.expiresAt + suspectGraceMsFor(session);
+    if (this.timer.now() <= idleDeadline) {
+      return false;
+    }
+    return !isReleaseVetoedByExecutions({
+      hasActiveExecutions: this.activeSessionExecutionChecker(session.sessionId),
+      now: this.timer.now(),
+      ...this.idleExecutionVetoBoundInput(session),
+    });
+  }
+
+  /**
+   * The facts the shared unsettled-execution policy (#10712) bounds an idle-release veto by
+   * (#10713). Every call start refreshes `expiresAt`, so the veto has held since the idle deadline
+   * passed: it lasts until the vetoing calls' request deadline plus grace, or, when some call has
+   * no deadline, the ceiling after the idle deadline — the same bound the heartbeat and
+   * owner-disconnect paths apply (#10663).
+   */
+  private idleExecutionVetoBoundInput(session: Session): {
+    vetoedSince: number;
+    latestDeadlineMs: number | undefined;
+  } {
+    return {
+      vetoedSince: session.expiresAt + suspectGraceMsFor(session),
+      latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
+    };
+  }
+
+  /**
+   * What bounds an in-flight execution's idle-release veto for `sessionId`, or undefined when
+   * nothing is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
+   * policy the idle sweep applies (#10671, #10712, #10713).
+   */
+  getIdleReleaseExecutionVeto(sessionId: string): { latestDeadlineMs?: number } | undefined {
+    if (!this.sessions.has(sessionId) || !this.activeSessionExecutionChecker(sessionId)) {
+      return undefined;
+    }
+    return { latestDeadlineMs: this.sessionExecutionDeadlineLookup(sessionId) };
   }
 
   /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
@@ -6484,6 +6671,13 @@ export class SessionManager {
       const session = this.sessions.get(sessionId);
       if (!session) {
         continue;
+      }
+      if (this.activeSessionExecutionChecker(sessionId)) {
+        logger.warn(
+          `Session ${sessionId} was kept past its idle deadline by executions that never ` +
+            `settled; releasing it anyway past their request deadline plus grace, or the ` +
+            `unsettled-execution ceiling when a call has no deadline`,
+        );
       }
       const release = this.releaseSession(
         sessionId,

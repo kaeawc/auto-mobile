@@ -180,13 +180,6 @@ class CaptureEntry {
       request.flexibleHints,
     );
     if (
-      request.options.onFrameMetrics &&
-      !this.request.options.onFrameMetrics &&
-      !this.fansOutFrameMetricsWithoutCreator()
-    ) {
-      conflicts.push("onFrameMetrics");
-    }
-    if (
       request.options.audioEnabled &&
       request.options.onAudioData &&
       !this.request.options.onAudioData
@@ -210,9 +203,6 @@ class CaptureEntry {
    * joiner needing them cannot attach to an entry created without. Android sources never
    * produce frame metrics, so wiring the fan-out costs nothing and every consumer can share.
    */
-  private fansOutFrameMetricsWithoutCreator(): boolean {
-    return this.request.device.platform !== "ios";
-  }
   add(request: DeviceCaptureRequest): CaptureHandle {
     const handle = new CaptureHandle(this, request.options, request.hasConsumers ?? true);
     this.handles.add(handle);
@@ -517,12 +507,12 @@ class CaptureEntry {
       // iOS computes snapshots only when this callback exists. Preserve creator-only work there;
       // elsewhere always wire the fan-out so later consumers share this capture (#9798).
       onFrameMetrics:
-        this.request.options.onFrameMetrics || this.fansOutFrameMetricsWithoutCreator()
-          ? (metrics) => {
-              this.frameMetrics = metrics;
-              this.fanout((options) => options.onFrameMetrics?.(metrics));
-            }
-          : undefined,
+        // Always produce metrics (LatestFrameQueue.metrics() is O(1)) so a late joiner on any
+        // platform can share this capture instead of forcing a second one (#10711).
+        (metrics) => {
+          this.frameMetrics = metrics;
+          this.fanout((options) => options.onFrameMetrics?.(metrics));
+        },
       onAudioData: this.request.options.onAudioData
         ? (chunk) => this.fanout((options) => options.onAudioData?.(chunk))
         : undefined,

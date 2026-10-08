@@ -388,6 +388,26 @@ describe("SetPosture", () => {
     },
   );
 
+  // #10715: a plain (non-foldable) AVD refuses fold, accepts the numeric fallback, and stays put.
+  test("reports a non-foldable emulator when the fallback leaves the posture unchanged", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
+    adb.setCommandResponse("emu fold", createExecResult("KO: Device is not foldable\r\n", ""));
+    adb.setCommandResponse("emu posture 1", createExecResult("OK\r\n", ""));
+    const { feature } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+      ...observation,
+      display: { ...display, posture: "unknown" },
+    });
+    const attempt = feature.execute("closed");
+    await expect(attempt).rejects.toThrow(
+      "This emulator is not foldable: the console answered 'emu fold' with 'KO: Device is not foldable', and the 'emu posture 1' fallback did not change the posture to 'closed'",
+    );
+    await expect(attempt).rejects.not.toThrow("device_state override");
+  });
+
   test("a not-foldable refusal of the fallback posture command is still reported", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

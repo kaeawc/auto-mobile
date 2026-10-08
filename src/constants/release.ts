@@ -57,6 +57,12 @@ export interface ReleaseChecksumEntry {
    * their prior, explicit development-only fallback behavior.
    */
   screenCaptureHelperSha256?: string;
+  /**
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator overlay-agent dylib
+   * (`AutoMobileOverlayAgent.dylib`, #10564/#10565). Optional: releases that
+   * predate it degrade to "overlay agent unavailable for this build".
+   */
+  overlayAgentSha256?: string;
 }
 
 /**
@@ -923,6 +929,30 @@ export function resolveVideoJarChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
+}
+
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator overlay agent (#10564). */
+export const OVERLAY_AGENT_DYLIB_FILENAME = "AutoMobileOverlayAgent.dylib";
+
+/** Download URL for the iOS-simulator overlay-agent dylib. */
+export function resolveOverlayAgentUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    OVERLAY_AGENT_DYLIB_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected overlay-agent dylib SHA-256 for the pinned version; "" when unknown. */
+export function resolveOverlayAgentChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.overlayAgentSha256 ?? "";
 }
 
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */

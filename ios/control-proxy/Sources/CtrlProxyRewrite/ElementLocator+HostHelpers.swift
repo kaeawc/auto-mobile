@@ -4,10 +4,22 @@ struct KeyboardFocus {
     enum Source {
         case snapshot
         case liveQuery
+        /// The captured tree's `hasKeyboardFocus` attribute, which the live predicate also reads.
+        case capturedAttribute
     }
 
     let frame: CGRect
     let source: Source
+}
+
+/// Keyboard focus read from the `hasKeyboardFocus` attribute of an already-captured tree.
+enum CapturedKeyboardFocus: Equatable {
+    /// The capture does not carry the attribute, so only a live query can answer.
+    case unavailable
+    /// The capture carries the attribute and no descendant has keyboard focus.
+    case notFocused
+    /// The frame of the first descendant, in pre-order, with keyboard focus.
+    case focused(CGRect)
 }
 
 enum KeyboardFocusDecision: Equatable {
@@ -257,8 +269,8 @@ extension ElementLocator {
     /// node there is nothing a focus frame could annotate — the extra live query
     /// (a main-thread IPC round trip) is pure overhead and is skipped. With usable
     /// inputs, `keyboardFocusDecision` prefers captured focus and only queries live
-    /// when the captured keyboard is visible but no input reports focus. The live
-    /// lookup also requires a foreground app and an existing match before snapshotting.
+    /// when the captured keyboard is visible but no input reports focus. That lookup
+    /// reads the captured `hasKeyboardFocus` attribute before any live query.
     nonisolated static func shouldQueryKeyboardFocus(textInputSnapshotCount: Int) -> Bool {
         return textInputSnapshotCount > 0
     }
@@ -302,13 +314,42 @@ extension ElementLocator {
         }
     }
 
+    /// Mirror the live `descendants(matching: .any)` query for `hasKeyboardFocus == true` on a
+    /// captured tree. The root is the application, not a descendant, so it is not matched; it
+    /// only reports whether the capture carries the attribute at all (issue #9290).
+    nonisolated static func capturedKeyboardFocus<Node>(
+        _ root: Node,
+        hasKeyboardFocus: (Node) -> Bool?,
+        frame: (Node) -> CGRect,
+        children: (Node) -> [Node]
+    )
+        -> CapturedKeyboardFocus
+    {
+        guard hasKeyboardFocus(root) != nil else {
+            return .unavailable
+        }
+        func firstFocusedFrame(in nodes: [Node]) -> CGRect? {
+            for node in nodes {
+                if hasKeyboardFocus(node) == true {
+                    return frame(node)
+                }
+                if let found = firstFocusedFrame(in: children(node)) {
+                    return found
+                }
+            }
+            return nil
+        }
+        return firstFocusedFrame(in: children(root)).map { .focused($0) } ?? .notFocused
+    }
+
     /// Skip when no usable input exists, reuse the first non-empty focused snapshot
     /// frame without IPC, or query live only when the captured keyboard is visible
     /// and no usable input reports focus. Otherwise rely on snapshot.hasFocus.
     /// Snapshot focus works for some fields, but iPhone UIKit may require the live
     /// keyboard-focus predicate. Reusing captured focus avoids another remote
-    /// resolution that can block when the app backgrounds (issue #9082). Live lookup
-    /// is gated on foreground state and a no-wait existence check before snapshotting.
+    /// resolution that can block when the app backgrounds (issue #9082). `.liveQuery`
+    /// first reads `hasKeyboardFocus` from the capture and queries live only when the
+    /// capture does not carry it (issue #9290).
     /// Evaluate captured keyboard visibility only when usable inputs lack captured focus.
     /// A hardware keyboard or an iPad floating/undocked keyboard can be absent from the
     /// app's tree while SpringBoard still hosts it, so SpringBoard is consulted when the
@@ -351,7 +392,7 @@ extension ElementLocator {
             && abs(nodeFrame.width - focusFrame.width) < epsilon
             && abs(nodeFrame.height - focusFrame.height) < epsilon
         switch keyboardFocus.source {
-        case .liveQuery:
+        case .liveQuery, .capturedAttribute:
             return framesMatch && isTextInput
         case .snapshot:
             return (framesMatch && isTextInput) || snapshotHasFocus

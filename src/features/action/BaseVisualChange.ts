@@ -171,7 +171,10 @@ interface ObservedChangeOptions {
    * coordinates the caller chose. When the caller last saw an older display generation, an
    * unscoped action (no `display`, `previousObservation` or `skipPreviousObserve`) takes one
    * fresh read and proceeds only if that read is at the current display revision, instead of
-   * refusing every retry until a manual observe (#9847). Raw-coordinate actions must not set it.
+   * refusing every retry until a manual observe (#9847). A `previousObservation` the action read
+   * itself during this call stands in for that read when it was recorded at the current display
+   * revision, so the block's coordinates come from it (#10710). Raw-coordinate actions must not
+   * set it.
    */
   resolvesTargetFromRead?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
@@ -374,11 +377,11 @@ export class BaseVisualChange {
     let observedGeneration =
       this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
-    // An unscoped selector action re-reads the display instead of trusting a caller stamp.
+    // An unscoped selector action re-reads the display instead of trusting a caller stamp; an
+    // in-call read it passes in is checked against the current revision below.
     const reresolvesTarget =
       options.resolvesTargetFromRead === true &&
       options.display === undefined &&
-      !options.previousObservation &&
       !options.skipPreviousObserve;
     let refreshForDisplayChange = false;
     if (

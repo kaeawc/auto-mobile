@@ -667,16 +667,21 @@ async function performMutation(
   const client = clientFactory(device);
   const shown = store.status(scope).overlays.find((entry) => entry.id === target.id);
   const previouslyShown = shown !== undefined;
-  if (args.action === "show") {
+  const inPlace = args.action === "show" && previouslyShown && args.reset !== true;
+  if (args.action === "show" && !inPlace) {
     events.show(scope, target.id!, client);
   }
-  const inPlace = args.action === "show" && previouslyShown && args.reset !== true;
   const resolved = await resolveMutationDisplay(inPlace, client, device, args, dependencies);
   const { displayId } = resolved;
   const stage: AssetStage = resolved.failure
     ? { uploaded: [], prepared: [], failure: resolved.failure }
     : await stageAssets(client, args, assetReaders, signal);
   const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
+  if (inPlace && result.success) {
+    // Start the new epoch only once the replacement landed: a failed in-place show leaves the old
+    // overlay on screen, so its buffered events and sequence high-water mark must survive.
+    events.show(scope, target.id!, client);
+  }
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);

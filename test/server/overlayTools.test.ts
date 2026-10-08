@@ -284,6 +284,22 @@ describe("overlay MCP tool", () => {
     );
   });
 
+  test("a failed same-id show keeps the events buffered before it", async () => {
+    await call({ action: "show", spec });
+    client.emitOverlayEvent(event(1));
+    const show = spyOn(client, "requestShowOverlay").mockResolvedValue({
+      success: false,
+      error: "refused",
+    });
+    try {
+      await call({ action: "show", spec });
+    } finally {
+      show.mockRestore();
+    }
+    const { payload } = await call({ action: "awaitEvent", id: "panel" });
+    expect(payload).toMatchObject({ success: true, event: { id: "panel", sequence: 1 } });
+  });
+
   test("a failed replacement show preserves the shown overlay's last known state", async () => {
     await call({ action: "show", spec });
     client.emitOverlayEvent({ ...event(1), pages: { pager: 2 } });

@@ -214,7 +214,9 @@ describe("uploadOverlayAssets", () => {
     expect(outcome.uploaded.map((asset) => asset.id)).toEqual(["a"]);
     expect(outcome.error).toContain("'b' failed. Device refused the upload: store full");
     expect(outcome.error).toContain("Already uploaded: a");
-    expect(outcome.error).toContain("The overlay was not shown.");
+    expect(outcome.error).toContain(
+      "The new spec was not sent; an overlay already showing stays as it was.",
+    );
     expect(calls).toBe(2);
   });
 
@@ -229,7 +231,9 @@ describe("uploadOverlayAssets", () => {
     const outcome = await uploadOverlayAssets(client, assets("a"), { action: "show" });
     expect(outcome.error).toContain("Outcome is indeterminate");
     expect(outcome.error).toContain("No assets were uploaded.");
-    expect(outcome.error).toContain("The overlay was not shown.");
+    expect(outcome.error).toContain(
+      "The new spec was not sent; an overlay already showing stays as it was.",
+    );
   });
 
   test("an old device's actionable error fails the call with nothing uploaded", async () => {

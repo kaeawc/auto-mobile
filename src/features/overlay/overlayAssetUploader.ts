@@ -185,7 +185,7 @@ function describeUploaded(uploaded: readonly UploadedOverlayAsset[]): string {
 }
 
 const OUTCOME_AFTER_STOP = {
-  show: "The overlay was not shown.",
+  show: "The new spec was not sent; an overlay already showing stays as it was.",
   resend: "The overlay stays as first sent, with placeholders for the missing assets.",
 } as const;
 

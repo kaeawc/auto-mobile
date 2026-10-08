@@ -2298,6 +2298,15 @@ resource has no input, so its `run-as` fallback reads the same default user.
 
 ### iOS UserDefaults preferences
 
+For a simulator check with an app that does not embed the SDK, run
+`bash scripts/ios/userdefaults-no-sdk-smoke.sh <booted-simulator-udid>`.
+It installs and removes a disposable probe app, exercises the real container route
+for standard and custom suites, and checks the app's own `UserDefaults` after cold
+relaunch. It covers an absent runner and the old/new SDK-refusal messages injected
+at the transport seam; it does not build or exercise a live CtrlProxy runner.
+Run it on a dedicated simulator. Xcode and the repository's Bun dependencies are
+required.
+
 `getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),
 `key`, and optional `suite`. Unlike `setKeyValue`, these tools reject `name` and
 `fileName`; use `suite` to select a custom UserDefaults suite. Omit it, pass an

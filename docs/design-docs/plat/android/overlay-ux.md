@@ -427,8 +427,14 @@ Conditions nest to a depth of 8 (`MAX_OVERLAY_CONDITION_DEPTH` in the shared
 contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle` and `increment` validate their `key` against the declared `state`
-(`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
-no-ops at runtime if the key's type was changed by other means. List templates
+(`root.onTap[0].key`), and are no-ops at runtime if the key's type was changed by
+other means. After an `onTap` action list finishes, if `setState`, `toggle` or
+`increment` changed state, the device emits exactly one `change` event carrying
+the final state (#10622), so host `status` follows button taps. A single changed
+key sends `{key, value}`; several send `{keys, values}`. `emit` actions still fire
+in order with the state at that point, a list that nets no change emits nothing,
+and a switch or checkbox tap keeps its own `{key, value}` change before its
+`onTap` runs. Wire patches from the host stay silent. List templates
 and a `decrement` alias are later slices of #10440.
 
 ### Conditional style: styleWhen

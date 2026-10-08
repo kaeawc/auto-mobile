@@ -1453,7 +1453,9 @@ Physical iOS has no production `putAppFile` app-container or media-library
 provider. user_files writes support Android Downloads and iOS Simulator managed
 fixture-app namespaces; user_files list/read resources remain Android-only.
 Media libraries have no list/read resource.
-Use `storage/capabilities` for provider-derived operations and prerequisite states;
+Use `sdk/capabilities` to read the app SDK's capability states and capture policy
+(see [SDK capabilities](using/sdk-capabilities.md)). Use `storage/capabilities` for
+provider-derived operations and prerequisite states;
 inspect structured per-file `effects` for indexing/import/discoverability outcomes.
 These provider contracts do not establish device verification of legacy replacement.
 

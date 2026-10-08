@@ -85,7 +85,7 @@ class RealLayoutDataSource(
           screenHeight = observeResult.screenSize?.height ?: 2340,
           timestamp = observeResult.updatedAt ?: System.currentTimeMillis(),
           rotation = observeResult.rotation ?: 0,
-        )
+        ),
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")
@@ -249,7 +249,7 @@ private data class HierarchyNodeDto(
           try {
             listOf(
               Json { ignoreUnknownKeys = true }
-                .decodeFromJsonElement(serializer<HierarchyNodeDto>(), nodeElement)
+                .decodeFromJsonElement(serializer<HierarchyNodeDto>(), nodeElement),
             )
           } catch (e: Exception) {
             emptyList()

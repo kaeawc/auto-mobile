@@ -74,7 +74,7 @@ class AvailableDeviceImagesSectionUiTest {
                     DeviceType.AndroidEmulator,
                     connectedAt = 0,
                     stableId = bootedImage.identity.stableId,
-                  )
+                  ),
                 ),
               onBootDevice = { booted = it },
               filterFile = filterFile,
@@ -95,7 +95,7 @@ class AvailableDeviceImagesSectionUiTest {
       onNodeWithText("Google APIs").performClick()
       onNodeWithText("Pixel Plain").assertIsDisplayed()
       onNodeWithContentDescription("Minimum Android API").performSemanticsAction(
-        SemanticsActions.SetProgress
+        SemanticsActions.SetProgress,
       ) {
         it(35f)
       }
@@ -162,7 +162,7 @@ class AvailableDeviceImagesSectionUiTest {
     onNodeWithText("iPhone Old").assertDoesNotExist()
     onNodeWithText("iPhone Mid").assertIsDisplayed()
     onNodeWithContentDescription("Minimum iOS version").performSemanticsAction(
-      SemanticsActions.SetProgress
+      SemanticsActions.SetProgress,
     ) {
       it(2f)
     }

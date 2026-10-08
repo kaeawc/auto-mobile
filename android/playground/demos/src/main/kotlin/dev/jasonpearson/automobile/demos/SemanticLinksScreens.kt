@@ -71,7 +71,7 @@ fun XmlSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       AndroidView(
         modifier = Modifier.fillMaxSize().padding(paddingValues),
@@ -121,7 +121,7 @@ fun ComposeSemanticLinksDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

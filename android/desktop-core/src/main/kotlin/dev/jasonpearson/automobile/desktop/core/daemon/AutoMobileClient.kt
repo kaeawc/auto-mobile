@@ -499,12 +499,12 @@ internal fun negotiateProtocolVersion(result: JsonObject): String {
     result["protocolVersion"]?.jsonPrimitive?.content
       ?: throw McpConnectionException(
         "Daemon's initialize response omitted protocolVersion. Expected one of " +
-          "${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile daemon."
+          "${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile daemon.",
       )
   if (negotiated !in SUPPORTED_MCP_PROTOCOL_VERSIONS) {
     throw McpConnectionException(
       "Daemon negotiated unsupported MCP protocol version '$negotiated'. This desktop build " +
-        "speaks ${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile desktop app."
+        "speaks ${SUPPORTED_MCP_PROTOCOL_VERSIONS.sorted()}. Update the AutoMobile desktop app.",
     )
   }
   return negotiated

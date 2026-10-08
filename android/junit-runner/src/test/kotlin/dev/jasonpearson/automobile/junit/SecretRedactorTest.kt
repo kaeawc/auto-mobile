@@ -376,7 +376,7 @@ class SecretRedactorTest {
               put("type", "text")
               // The hierarchy JSON as a string value → one encoding layer here …
               put("text", hierarchy.toString())
-            }
+            },
           )
         },
       )

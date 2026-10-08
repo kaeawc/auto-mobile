@@ -99,7 +99,7 @@ class CrashEventWireTest {
     assertTrue(
       "broadcastCrashEvent must call crashEventResponse with timestamp = crashEventTimestamp(timestamp, ...)",
       Regex(
-          """\bcrashEventResponse\s*\(\s*timestamp\s*=\s*crashEventTimestamp\s*\(\s*timestamp\s*,"""
+          """\bcrashEventResponse\s*\(\s*timestamp\s*=\s*crashEventTimestamp\s*\(\s*timestamp\s*,""",
         )
         .containsMatchIn(body),
     )
@@ -124,7 +124,7 @@ class CrashEventWireTest {
     assertTrue(
       "broadcastHandledExceptionEvent must call handledExceptionEventResponse with timestamp = crashEventTimestamp(timestamp, ...)",
       Regex(
-          """\bhandledExceptionEventResponse\s*\(\s*timestamp\s*=\s*crashEventTimestamp\s*\(\s*timestamp\s*,"""
+          """\bhandledExceptionEventResponse\s*\(\s*timestamp\s*=\s*crashEventTimestamp\s*\(\s*timestamp\s*,""",
         )
         .containsMatchIn(body),
     )

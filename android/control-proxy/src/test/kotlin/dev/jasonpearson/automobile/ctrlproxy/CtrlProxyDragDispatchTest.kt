@@ -44,7 +44,7 @@ class CtrlProxyDragDispatchTest {
       PerfProvider.createForTesting(
         object : TimeProvider {
           override fun currentTimeMillis() = 0L
-        }
+        },
       )
     ReflectionHelpers.setField(fixture.service, "perfProvider", perf)
     fixture.service.dragResultReporter = { id, outcome ->
@@ -56,7 +56,7 @@ class CtrlProxyDragDispatchTest {
           outcome.totalTimeMs,
           outcome.gestureTimeMs,
           null,
-        )
+        ),
       )
     }
   }
@@ -91,7 +91,7 @@ class CtrlProxyDragDispatchTest {
     assertTrue(result.getValue("totalTimeMs").jsonPrimitive.content.toLong() >= 0L)
     assertTrue(
       result.getValue("totalTimeMs").jsonPrimitive.content.toLong() >=
-        result.getValue("gestureTimeMs").jsonPrimitive.content.toLong()
+        result.getValue("gestureTimeMs").jsonPrimitive.content.toLong(),
     )
     val root = requireNotNull(perf.flush("drag")).jsonArray.single().jsonObject
     assertEquals("performDrag", root.getValue("name").jsonPrimitive.content)
@@ -136,7 +136,7 @@ class CtrlProxyDragDispatchTest {
       assertTrue(frames.isEmpty())
       shadow.complete()
       assertTrue(
-        Json.parseToJsonElement(frames.single()).jsonObject["success"]!!.jsonPrimitive.boolean
+        Json.parseToJsonElement(frames.single()).jsonObject["success"]!!.jsonPrimitive.boolean,
       )
     }
   }
@@ -204,7 +204,7 @@ class CtrlProxyDragDispatchTest {
     assertEquals(1_600L, description.getStroke(0).duration)
     shadow.complete()
     assertTrue(
-      Json.parseToJsonElement(frames.single()).jsonObject["success"]!!.jsonPrimitive.boolean
+      Json.parseToJsonElement(frames.single()).jsonObject["success"]!!.jsonPrimitive.boolean,
     )
   }
 

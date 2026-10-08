@@ -83,7 +83,7 @@ fun DeviceListSection(
           val daemonClient =
             withContext(Dispatchers.IO) {
               dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createFromProcess(
-                connectedProcess
+                connectedProcess,
               )
             }
           dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient(daemonClient)
@@ -139,7 +139,7 @@ fun DeviceListSection(
         compareByDescending<BootedDeviceInfo> {
             (it.runtime.deviceId ?: it.identity.stableId) in favoriteDeviceIds
           }
-          .thenBy { it.name }
+          .thenBy { it.name },
       )
     }
 

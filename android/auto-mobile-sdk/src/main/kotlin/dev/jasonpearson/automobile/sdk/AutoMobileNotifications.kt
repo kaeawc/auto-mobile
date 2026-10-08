@@ -255,7 +255,7 @@ object AutoMobileNotifications {
     if (trimmed.startsWith("content://")) {
       return try {
         decodeBitmapFromStream(
-          context.contentResolver.openInputStream(android.net.Uri.parse(trimmed))
+          context.contentResolver.openInputStream(android.net.Uri.parse(trimmed)),
         )
       } catch (e: Exception) {
         AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }

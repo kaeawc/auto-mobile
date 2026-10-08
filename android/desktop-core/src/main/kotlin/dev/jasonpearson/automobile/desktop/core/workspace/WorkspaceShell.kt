@@ -438,7 +438,7 @@ private fun HealthSheetOverlay(
             indication = null,
           ) {}
           .padding(16.dp)
-          .semantics { contentDescription = "Health sheet" }
+          .semantics { contentDescription = "Health sheet" },
     ) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("Health", style = MaterialTheme.typography.titleMedium)
@@ -553,7 +553,7 @@ private fun CompareOverlay(
             indication = null,
           ) {}
           .padding(16.dp)
-          .semantics { contentDescription = "Compare devices" }
+          .semantics { contentDescription = "Compare devices" },
     ) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -625,7 +625,7 @@ private fun EmptyState(onOpenPicker: () -> Unit, onBrowseHistory: () -> Unit, mo
         Modifier.clickable { onOpenPicker() }
           .semantics { contentDescription = "Open Devices" }
           .background(Accent, RoundedCornerShape(6.dp))
-          .padding(horizontal = 20.dp, vertical = 10.dp)
+          .padding(horizontal = 20.dp, vertical = 10.dp),
     ) {
       Text("Open Devices", color = Color.White)
     }
@@ -671,7 +671,7 @@ private fun OfflineBrowseOverlay(onDismiss: () -> Unit, content: @Composable () 
             indication = null,
           ) {}
           .padding(16.dp)
-          .semantics { contentDescription = "Offline navigation browser" }
+          .semantics { contentDescription = "Offline navigation browser" },
     ) {
       Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("Navigation history", style = MaterialTheme.typography.titleMedium)
@@ -742,7 +742,7 @@ private fun DeviceColumnView(
         .border(
           width = if (focused) 2.dp else 1.dp,
           color = if (focused) Accent else MaterialTheme.colorScheme.outlineVariant,
-        )
+        ),
   ) {
     DeviceColumnHeader(column, displayName, onAction)
     val tool = column.activeTool
@@ -1203,7 +1203,7 @@ private fun ToggleCell(text: String, description: String, active: Boolean, onCli
             if (active) Accent else Color.Transparent,
             RoundedCornerShape(4.dp),
           )
-          .padding(horizontal = 6.dp, vertical = 3.dp)
+          .padding(horizontal = 6.dp, vertical = 3.dp),
     ) {
       Text(text)
     }
@@ -1221,7 +1221,7 @@ private fun Glyph(text: String, description: String, active: Boolean, onClick: (
             if (active) Accent.copy(alpha = 0.35f) else Color.Transparent,
             RoundedCornerShape(4.dp),
           )
-          .padding(horizontal = 4.dp, vertical = 2.dp)
+          .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
       Text(text)
     }

@@ -129,7 +129,7 @@ object CircuitAdapter : NavigationFrameworkAdapter {
         source = NavigationSource.CIRCUIT,
         arguments = arguments,
         metadata = metadata,
-      )
+      ),
     )
   }
 }

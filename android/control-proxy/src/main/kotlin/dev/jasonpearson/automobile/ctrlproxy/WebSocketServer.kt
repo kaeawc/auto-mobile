@@ -596,8 +596,8 @@ class WebSocketServer(
                             id = connectionId,
                             supportedCommands = supportedCommands(),
                           ),
-                        )
-                      )
+                        ),
+                      ),
                     )
                   }
                   if (!greetingSent) {

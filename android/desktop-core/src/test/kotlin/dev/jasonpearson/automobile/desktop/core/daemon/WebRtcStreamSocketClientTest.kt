@@ -187,7 +187,7 @@ class WebRtcStreamSocketClientTest {
   fun `list is empty when nothing is publishing`() {
     server("""{"action":"list","streams":[]}""").use { s ->
       assertTrue(
-        WebRtcStreamSocketClient(socketPathValue = s.socketPath.toString()).listStreams().isEmpty()
+        WebRtcStreamSocketClient(socketPathValue = s.socketPath.toString()).listStreams().isEmpty(),
       )
     }
   }
@@ -227,7 +227,7 @@ class WebRtcStreamSocketClientTest {
     assertTrue(
       assertFailsWith<McpConnectionException> { client.listStreams() }
         .message!!
-        .contains("/tmp/no-webrtc-am.sock")
+        .contains("/tmp/no-webrtc-am.sock"),
     )
   }
 

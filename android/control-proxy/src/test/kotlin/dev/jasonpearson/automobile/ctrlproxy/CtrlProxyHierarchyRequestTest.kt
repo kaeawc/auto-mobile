@@ -49,7 +49,7 @@ class CtrlProxyHierarchyRequestTest {
       CoroutineScope(
         test.backgroundScope.coroutineContext +
           dispatcher +
-          checkNotNull(oldScope.coroutineContext[kotlinx.coroutines.CoroutineExceptionHandler])
+          checkNotNull(oldScope.coroutineContext[kotlinx.coroutines.CoroutineExceptionHandler]),
       )
     val debouncer =
       HierarchyDebouncer(scope = scope, extractHierarchy = { _, options -> extract(options) })

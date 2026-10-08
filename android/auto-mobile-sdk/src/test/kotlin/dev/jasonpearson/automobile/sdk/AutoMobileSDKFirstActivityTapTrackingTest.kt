@@ -338,7 +338,7 @@ class AutoMobileSDKFirstActivityTapTrackingTest {
     assertTrue(AutoMobileSDK.isTrackingEnabled)
     assertTrue(activity.touchActions.isEmpty())
     assertTrue(
-      ShadowLog.getLogsForTag("AutoMobileClickTracker").none { it.msg.startsWith("_auto_tap ") }
+      ShadowLog.getLogsForTag("AutoMobileClickTracker").none { it.msg.startsWith("_auto_tap ") },
     )
     val downTime = SystemClock.uptimeMillis()
     val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, 10f, 10f, 0)

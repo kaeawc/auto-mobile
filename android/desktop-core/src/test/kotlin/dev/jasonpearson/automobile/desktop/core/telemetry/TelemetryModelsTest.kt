@@ -31,7 +31,7 @@ class TelemetryModelsTest {
   fun `navigation map with nested value retains remaining fields`() {
     val data =
       Json.parseToJsonElement(
-          """{"destination":"screen","arguments":{"id":"42","options":{"tab":"home"}},"metadata":null}"""
+          """{"destination":"screen","arguments":{"id":"42","options":{"tab":"home"}},"metadata":null}""",
         )
         .jsonObject
     val mismatches = mutableListOf<String>()
@@ -82,7 +82,7 @@ class TelemetryModelsTest {
   fun `storage string set wire value is preserved`() {
     val data =
       Json.parseToJsonElement(
-          """{"fileName":"settings.xml","key":"tags","value":["a","b"],"valueType":"STRING_SET","changeType":"modify"}"""
+          """{"fileName":"settings.xml","key":"tags","value":["a","b"],"valueType":"STRING_SET","changeType":"modify"}""",
         )
         .jsonObject
     val mismatches = mutableListOf<String>()
@@ -422,14 +422,14 @@ class TelemetryModelsTest {
                   put("fileName", "UserRepo.kt")
                   put("lineNumber", 42)
                   put("isAppCode", true)
-                }
+                },
               )
               add(
                 buildJsonObject {
                   put("className", "android.os.Handler")
                   put("methodName", "dispatch")
                   put("isAppCode", false)
-                }
+                },
               )
             }
           },

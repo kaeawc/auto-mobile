@@ -51,7 +51,7 @@ class OverlayStateLogicTest {
     assertNull(OverlayIncrementAction("name").nextValue(state))
     assertNull(
       OverlayIncrementAction("count", by = Double.MAX_VALUE)
-        .nextValue(mapOf("count" to OverlayScalar.Numeric(Double.MAX_VALUE)))
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(Double.MAX_VALUE))),
     )
   }
 
@@ -66,7 +66,7 @@ class OverlayStateLogicTest {
     assertNull(OverlayDecrementAction("missing").nextValue(state))
     assertNull(
       OverlayDecrementAction("count", by = Double.MAX_VALUE)
-        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE)))
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE))),
     )
   }
 
@@ -100,7 +100,7 @@ class OverlayStateLogicTest {
       resolveOverlayStyle(
         OverlayStyle(elevation = 4.0, gradient = gradient, aspectRatio = 2.0),
         listOf(
-          OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5))
+          OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5)),
         ),
         state,
       )
@@ -114,7 +114,7 @@ class OverlayStateLogicTest {
           OverlayStyleWhen(
             eq("on", OverlayScalar.BooleanValue(true)),
             OverlayStyle(elevation = 8.0, aspectRatio = 1.0),
-          )
+          ),
         ),
         state,
       )

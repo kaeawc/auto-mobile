@@ -78,7 +78,7 @@ object DisplayControl {
         method.parameterTypes.any { it == virtualDisplayConfigClass }
     }
       ?: throw NoSuchMethodException(
-        "No createVirtualDisplay overload accepts VirtualDisplayConfig"
+        "No createVirtualDisplay overload accepts VirtualDisplayConfig",
       )
   }
 

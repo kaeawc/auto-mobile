@@ -217,8 +217,8 @@ private fun RenderOverlayNodeContent(
             .defaultMinSize(24.dp, 24.dp)
             .background(
               overlayThemedColor(node.style.background, node.style.source.background)
-                ?: Color.LightGray
-            )
+                ?: Color.LightGray,
+            ),
         )
     }
     "image" -> OverlayImageContent(node, modifier)
@@ -416,7 +416,7 @@ private fun RenderOverlaySheet(
     Box(
       Modifier.fillMaxSize()
         .background(source.scrim?.let(::overlayColor) ?: Color(0x66000000))
-        .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) }
+        .clickable { interact(OverlayInteraction.SheetDismiss(source.openWhen)) },
     )
     Column(
       modifier
@@ -428,7 +428,7 @@ private fun RenderOverlaySheet(
           // fill would cover them, so the surface is only the fallback when neither is authored.
           if (node.style.source.background == null && node.style.source.gradient == null)
             Modifier.background(MaterialTheme.colorScheme.surface)
-          else Modifier
+          else Modifier,
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
@@ -450,14 +450,14 @@ private fun RenderOverlaySheet(
         .clickable {
           if (!source.onTap.isNullOrEmpty())
             interact(OverlayInteraction.Tap(source.onTap.orEmpty()))
-        }
+        },
     ) {
       if (source.dragHandle)
         Box(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(Color.Gray, RoundedCornerShape(2.dp))
+            .background(Color.Gray, RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
         RenderOverlayNode(it, interact, columnWeight(it), it.weightAxis(OverlayWeightAxis.VERTICAL))
@@ -543,7 +543,7 @@ private fun overlayNodeModifier(
             "cutout" -> WindowInsets.displayCutout
             "ime" -> WindowInsets.ime
             else -> WindowInsets(0, 0, 0, 0)
-          }
+          },
         )
     }
     val sides =

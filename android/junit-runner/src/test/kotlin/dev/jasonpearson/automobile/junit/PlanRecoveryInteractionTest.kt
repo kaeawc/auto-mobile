@@ -158,7 +158,7 @@ class PlanRecoveryInteractionTest {
       payload.with(
         "deviceMapping" to
           JsonObject(
-            mapOf("A" to JsonPrimitive("emulator-5554"), "B" to JsonPrimitive("emulator-5556"))
+            mapOf("A" to JsonPrimitive("emulator-5554"), "B" to JsonPrimitive("emulator-5556")),
           ),
         failedStep = { it.with("device" to JsonPrimitive("B")) },
       )
@@ -256,9 +256,9 @@ class PlanRecoveryInteractionTest {
               .jsonObject
               .getValue("text")
               .jsonPrimitive
-              .content
+              .content,
           )
-          .jsonObject
+          .jsonObject,
       )
     return planResponse(payload)
   }
@@ -313,10 +313,10 @@ private fun planResponse(payload: JsonObject): DaemonResponse {
         "content" to
           JsonArray(
             listOf(
-              JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text)))
-            )
-          )
-      )
+              JsonObject(mapOf("type" to JsonPrimitive("text"), "text" to JsonPrimitive(text))),
+            ),
+          ),
+      ),
     )
   return DaemonResponse(id = "t", type = "mcp_response", success = true, result = result)
 }
@@ -388,9 +388,9 @@ private class PlanInteractionDaemon : DaemonToolClient {
             mapOf(
               "success" to JsonPrimitive(true),
               "message" to (step["text"]?.let { JsonPrimitive(it.toString()) } ?: JsonNull),
-            )
+            ),
           ),
-      )
+      ),
     )
 
   private fun isSkipped(step: Map<*, *>) = step["optional"] == true
@@ -411,8 +411,8 @@ private class PlanInteractionDaemon : DaemonToolClient {
               "stepIndex" to JsonPrimitive(index),
               "tool" to JsonPrimitive(step["tool"].toString()),
               "error" to JsonPrimitive("Element not found"),
-            )
-          )
+            ),
+          ),
         )
       } else {
         completed.add(entry(index, step))
@@ -433,8 +433,8 @@ private class PlanInteractionDaemon : DaemonToolClient {
           "deviceId" to JsonPrimitive("emulator-5554"),
           "skippedSteps" to skipped,
           "toolResults" to completed,
-        )
-      )
+        ),
+      ),
     )
   }
 
@@ -452,15 +452,15 @@ private class PlanInteractionDaemon : DaemonToolClient {
                 "stepIndex" to JsonPrimitive(failAt),
                 "tool" to JsonPrimitive(steps[failAt]["tool"].toString()),
                 "error" to JsonPrimitive("Element not found"),
-              )
+              ),
             ),
           "error" to JsonPrimitive("Element not found"),
           "platform" to JsonPrimitive("android"),
           "deviceId" to JsonPrimitive("emulator-5554"),
           "skippedSteps" to skipped,
           "toolResults" to completed,
-        )
-      )
+        ),
+      ),
     )
   }
 }

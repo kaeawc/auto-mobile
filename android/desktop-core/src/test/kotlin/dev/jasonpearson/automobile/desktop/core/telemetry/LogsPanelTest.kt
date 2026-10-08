@@ -310,7 +310,7 @@ class LogsPanelTest {
             setOf(LogLevel.Info, LogLevel.Error),
             "net",
             "connected",
-          )
+          ),
         ),
         deserializeLogsSavedViews(settings.logsSavedViews),
       )
@@ -949,7 +949,7 @@ class LogsPanelTest {
     // message would break this even though the row lookup stays green.
     onNode(
         hasText("the full message body reachable only via detail") and
-          hasAnyAncestor(hasContentDescription("Log event detail"))
+          hasAnyAncestor(hasContentDescription("Log event detail")),
       )
       .assertIsDisplayed()
   }

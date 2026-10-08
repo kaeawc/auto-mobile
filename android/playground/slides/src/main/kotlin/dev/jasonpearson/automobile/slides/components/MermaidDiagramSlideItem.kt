@@ -145,7 +145,7 @@ fun MermaidDiagramSlideItem(
                     {
                       // Get the content width
                       view.evaluateJavascript(
-                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();"
+                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
                       ) { result ->
                         try {
                           val cleanResult = result?.replace("\"", "") ?: ""
@@ -173,7 +173,7 @@ fun MermaidDiagramSlideItem(
                     {
                       // Get content dimensions via JavaScript
                       view.evaluateJavascript(
-                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();"
+                        "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
                       ) { result ->
                         try {
                           val cleanResult = result?.replace("\"", "") ?: ""
@@ -209,7 +209,7 @@ fun MermaidDiagramSlideItem(
                                   // Use JavaScript to get the actual rendered
                                   // dimensions after zoom
                                   view.evaluateJavascript(
-                                    "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();"
+                                    "(function() { return JSON.stringify({width: document.body.scrollWidth, height: document.body.scrollHeight}); })();",
                                   ) { dimensionResult ->
                                     try {
                                       val cleanDimResult = dimensionResult?.replace("\"", "") ?: ""

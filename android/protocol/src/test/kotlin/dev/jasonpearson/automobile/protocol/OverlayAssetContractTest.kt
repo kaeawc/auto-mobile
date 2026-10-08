@@ -22,7 +22,7 @@ class OverlayAssetContractTest {
   fun `caps are mutually consistent and far below the frame limit`() {
     assertTrue(
       OverlayAssetContract.MAX_OVERLAY_ASSET_BYTES <=
-        OverlayAssetContract.MAX_OVERLAY_ASSET_TOTAL_BYTES
+        OverlayAssetContract.MAX_OVERLAY_ASSET_TOTAL_BYTES,
     )
     // Base64 text of the largest asset must sit well inside the 64 MiB inbound frame cap.
     val largestFrame = OverlayAssetContract.MAX_OVERLAY_ASSET_BYTES * 4L / 3 + 1024

@@ -74,7 +74,7 @@ internal class AutoMobileWebSocketListener(
           frameType = type,
           payloadSize = size,
           success = true,
-        )
+        ),
       )
     } catch (error: Exception) {
       // Custom loggers are user supplied, so logging must not break host callbacks either.

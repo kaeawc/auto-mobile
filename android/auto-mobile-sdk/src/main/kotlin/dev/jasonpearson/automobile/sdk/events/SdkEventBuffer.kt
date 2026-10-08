@@ -252,7 +252,7 @@ internal class SdkEventBuffer(
                   logger.w("SdkEventBuffer", error) { "Could not resolve shutdown delivery" }
                 }
               }
-            }
+            },
           )
         }
       }
@@ -414,7 +414,7 @@ internal class SdkEventBuffer(
               // Best-effort retry; FLUSH_ERROR already accounts for this failed delivery.
             }
           }
-        }
+        },
       )
       repeat(unsent.sumOf { it.first.size }) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
     }

@@ -16,7 +16,7 @@ class KeyboardProfilesTest {
       assertTrue(style.keyCornerRadiusDp > 0f)
     }
     assertTrue(
-      KeyboardProfiles.GBOARD.style.accentArgb != KeyboardProfiles.SAMSUNG.style.accentArgb
+      KeyboardProfiles.GBOARD.style.accentArgb != KeyboardProfiles.SAMSUNG.style.accentArgb,
     )
   }
 

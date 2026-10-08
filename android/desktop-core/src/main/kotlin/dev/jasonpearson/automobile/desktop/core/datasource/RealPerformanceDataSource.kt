@@ -74,7 +74,7 @@ class RealPerformanceDataSource(
               testName = null,
               value = entry.metrics.jankCount?.toFloat() ?: 0f,
               threshold = 5f, // Default threshold
-            )
+            ),
           )
         }
       }
@@ -93,7 +93,7 @@ class RealPerformanceDataSource(
             thresholdCritical = 33f, // ~30fps
             trend = calculateTrend(p50Values),
             history = p50Values.sortedBy { it.timestamp },
-          )
+          ),
         )
       }
 
@@ -110,7 +110,7 @@ class RealPerformanceDataSource(
             thresholdCritical = 40f,
             trend = calculateTrend(p90Values),
             history = p90Values.sortedBy { it.timestamp },
-          )
+          ),
         )
       }
 
@@ -127,7 +127,7 @@ class RealPerformanceDataSource(
             thresholdCritical = 10f,
             trend = calculateTrend(jankCounts),
             history = jankCounts.sortedBy { it.timestamp },
-          )
+          ),
         )
       }
 
@@ -144,7 +144,7 @@ class RealPerformanceDataSource(
             thresholdCritical = 200f,
             trend = calculateTrend(touchLatencies),
             history = touchLatencies.sortedBy { it.timestamp },
-          )
+          ),
         )
       }
 
@@ -169,7 +169,7 @@ class RealPerformanceDataSource(
           metrics = metrics,
           anomalies = anomalies,
           screensAnalyzed = screensAnalyzed.toList(),
-        )
+        ),
       )
     } catch (e: McpConnectionException) {
       Result.Error(e, "MCP server not available: ${e.message}")

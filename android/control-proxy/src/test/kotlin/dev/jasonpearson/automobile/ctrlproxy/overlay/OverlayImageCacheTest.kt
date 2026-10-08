@@ -294,7 +294,7 @@ class OverlayImageCacheTest {
           OverlayWindow(OverlayFullscreenPlacement()),
           root =
             OverlayColumnNode(
-              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b"))
+              children = listOf(OverlayImageNode(asset = "a"), OverlayImageNode(asset = "b")),
             ),
         )
       sessionStore.put("a", "image/png", OverlayAssetBytes.png())

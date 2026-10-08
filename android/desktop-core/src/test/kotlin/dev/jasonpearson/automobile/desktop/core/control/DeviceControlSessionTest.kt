@@ -245,12 +245,12 @@ class DeviceControlSessionTest {
       )
     val staleSnapshot =
       assertNotNull(
-        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
       )
     assertTrue(session.tap(staleSnapshot, point))
     val freshSnapshot =
       assertNotNull(
-        session.evaluate(paired(captureSequence = 8L, sourceSequence = 12L)).snapshotOrNull
+        session.evaluate(paired(captureSequence = 8L, sourceSequence = 12L)).snapshotOrNull,
       )
 
     assertTrue(session.tap(freshSnapshot, point))
@@ -513,7 +513,7 @@ class DeviceControlSessionTest {
               width = 1080,
               height = 2340,
               rotation = 0,
-            )
+            ),
         )
     val mirrored = assertNotNull(session.evaluate(withMirror).snapshotOrNull)
     assertEquals(10L, mirrored.sequence, "ordered by the observation counter, not the mirror's")
@@ -563,7 +563,7 @@ class DeviceControlSessionTest {
             width = 720,
             height = 1560,
             data = newPixels,
-          )
+          ),
       )
     assertNull(
       session.evaluate(screenshotOnly).snapshotOrNull,
@@ -729,7 +729,7 @@ class DeviceControlSessionTest {
               sequence = 20L,
               captureSequence = 8L,
               coordinateSpace = CoordinateSpace.Pixels,
-            )
+            ),
         )
       assertNull(session.evaluate(flipped).snapshotOrNull)
 
@@ -765,7 +765,7 @@ class DeviceControlSessionTest {
               sequence = 20L,
               captureSequence = 8L,
               coordinateSpace = CoordinateSpace.Pixels,
-            )
+            ),
         )
       assertNull(session.evaluate(flipped).snapshotOrNull)
 
@@ -813,7 +813,7 @@ class DeviceControlSessionTest {
             sequence = 20L,
             captureSequence = 8L,
             coordinateSpace = CoordinateSpace.Pixels,
-          )
+          ),
       )
     session.evaluate(flipped)
     advanceUntilIdle()
@@ -926,7 +926,7 @@ class DeviceControlSessionTest {
 
       session.onObservationSpaceDeclared(null, captureSequence = 7L)
       assertNotNull(
-        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+        session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
       )
       assertNotNull(session.interactionSnapshot)
 
@@ -1050,7 +1050,7 @@ class DeviceControlSessionTest {
 
     session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(
-      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
     )
     val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
 
@@ -1107,7 +1107,7 @@ class DeviceControlSessionTest {
 
     session.onObservationSpaceDeclared(null, captureSequence = 7L)
     assertNotNull(
-      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull
+      session.evaluate(paired(captureSequence = 7L, sourceSequence = 10L)).snapshotOrNull,
     )
     val clickedBeforeFlip = assertNotNull(session.interactionSnapshot)
 
@@ -1164,7 +1164,7 @@ class DeviceControlSessionTest {
             sequence = 20L,
             captureSequence = 8L,
             coordinateSpace = CoordinateSpace.Unrecognized("pt"),
-          )
+          ),
       )
     assertNull(session.evaluate(flipped).snapshotOrNull)
     assertNull(
@@ -1331,7 +1331,7 @@ class DeviceControlSessionTest {
     // clients publish this hierarchy before beginning the next screenshot capture.
     val mismatchedRotation =
       clicked.copy(
-        hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1)
+        hierarchy = clicked.hierarchy?.copy(sequence = 11L, captureSequence = 8L, rotation = 1),
       )
     val decision = session.evaluate(mismatchedRotation)
     assertEquals(
@@ -1453,12 +1453,12 @@ class DeviceControlSessionTest {
         snapshot,
         DevicePoint(x = 540, y = 1800, inBounds = true),
         DevicePoint(x = 540, y = 400, inBounds = true),
-      )
+      ),
     )
     assertEquals(2, clients.size, "each queued command captures its client")
 
     session.evaluate(
-      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1)),
     )
     advanceUntilIdle()
 
@@ -1530,7 +1530,7 @@ class DeviceControlSessionTest {
 
     // The consumer passed its pre-IO check but is suspended before the daemon call.
     session.evaluate(
-      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1))
+      initial.copy(screenshot = initial.screenshot?.copy(sequence = 11L, rotation = 1)),
     )
     ioScheduler.advanceUntilIdle()
     advanceUntilIdle()
@@ -1604,7 +1604,7 @@ class DeviceControlSessionTest {
             height = 2340,
             rotation = 1,
           ),
-      )
+      ),
     )
 
     // Orientation is re-proven to 1 from the live frame alone: a rotation-1 tap dispatches,

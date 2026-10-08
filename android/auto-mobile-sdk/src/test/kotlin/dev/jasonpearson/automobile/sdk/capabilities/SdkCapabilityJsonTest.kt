@@ -44,7 +44,7 @@ class SdkCapabilityJsonTest {
     val registry = SdkCapabilityRegistry()
     registry.markInitialized()
     registry.register(
-      SdkCapabilityDescriptor("host.extra", SdkCapabilityState.SUPPORTED, "Host hook")
+      SdkCapabilityDescriptor("host.extra", SdkCapabilityState.SUPPORTED, "Host hook"),
     )
 
     val snapshot = registry.snapshot()

@@ -173,7 +173,7 @@ class WorkspaceViewModel(
           content.columns.map { column ->
             val next = locked[column.deviceId] ?: return@map column
             if (next == column.locked) column else column.copy(locked = next)
-          }
+          },
       )
     }
   }
@@ -193,7 +193,7 @@ class WorkspaceViewModel(
             val refreshed = sessionUuids[column.deviceId] ?: return@map column
             if (refreshed == column.deviceSessionUuid) column
             else column.copy(deviceSessionUuid = refreshed)
-          }
+          },
       )
     }
   }
@@ -296,7 +296,7 @@ class WorkspaceViewModel(
     _state.update { current ->
       val content = current as? WorkspaceUiState.Content ?: return@update current
       content.copy(
-        columns = content.columns.map { if (it.deviceId == deviceId) transform(it) else it }
+        columns = content.columns.map { if (it.deviceId == deviceId) transform(it) else it },
       )
     }
   }

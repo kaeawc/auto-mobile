@@ -235,7 +235,7 @@ private fun HierarchyDiffStrip(
     modifier
       .background(MaterialTheme.colorScheme.surface)
       .padding(horizontal = 12.dp, vertical = 8.dp)
-      .semantics { contentDescription = "Hierarchy diff" }
+      .semantics { contentDescription = "Hierarchy diff" },
   ) {
     if (diff == null) {
       Text(

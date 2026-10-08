@@ -546,7 +546,7 @@ class McpHttpClient(
       }
     if (rpcResponse.error != null) {
       throw McpConnectionException(
-        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+        "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}",
       )
     }
     rpcResponse.resultFor(request.method)
@@ -614,7 +614,7 @@ class McpHttpClient(
       resetSession()
       throw McpConnectionException(
         "MCP session lost: $endpoint answered 404 Session not found again after re-initializing; " +
-          "the daemon is not keeping the new session"
+          "the daemon is not keeping the new session",
       )
     }
     return replayed
@@ -658,7 +658,7 @@ class McpHttpClient(
       }
     }
     throw McpConnectionException(
-      "MCP HTTP event stream ended without a reply to ${request.method} (id ${request.id})"
+      "MCP HTTP event stream ended without a reply to ${request.method} (id ${request.id})",
     )
   }
 
@@ -705,5 +705,5 @@ class McpHttpClient(
 internal fun JsonRpcResponse.resultFor(method: String): JsonElement =
   result
     ?: throw McpConnectionException(
-      "JSON-RPC $method response contained no result; check the MCP server response."
+      "JSON-RPC $method response contained no result; check the MCP server response.",
     )

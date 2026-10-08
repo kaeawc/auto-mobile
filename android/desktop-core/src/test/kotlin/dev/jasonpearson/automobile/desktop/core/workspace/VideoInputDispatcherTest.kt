@@ -316,7 +316,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -353,7 +353,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))
@@ -383,13 +383,13 @@ class VideoInputDispatcherTest {
     assertNotNull(
         scope
           .streamingDispatcher(clientA, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     assertNotNull(
         scope
           .streamingDispatcher(clientB, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
       .end(DevicePoint(x = 360, y = 1400, inBounds = true))
     advanceUntilIdle()
@@ -415,7 +415,7 @@ class VideoInputDispatcherTest {
       assertNotNull(
         scope
           .streamingDispatcher(client, testScheduler)
-          .beginGestureStream(testSnapshot(), inBounds)
+          .beginGestureStream(testSnapshot(), inBounds),
       )
     handle.move(DevicePoint(x = 360, y = 1000, inBounds = true))
     handle.end(DevicePoint(x = 360, y = 1400, inBounds = true))

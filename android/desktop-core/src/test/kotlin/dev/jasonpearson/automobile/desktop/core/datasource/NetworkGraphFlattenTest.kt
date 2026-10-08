@@ -36,7 +36,7 @@ class NetworkGraphFlattenTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val rows = flattenNetworkGraph(hosts)
@@ -62,7 +62,7 @@ class NetworkGraphFlattenTest {
           "users":{"paths":{"{id}[GET]":{"method":"GET","success":5,"errors":0,"p50":8,"p95":15}}}
         }}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val rows = flattenNetworkGraph(hosts)
@@ -81,7 +81,7 @@ class NetworkGraphFlattenTest {
           "items[archived]":{"paths":{"detail[GET]":{"method":"GET","success":4,"errors":0,"p50":5,"p95":9}}}
         }}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val rows = flattenNetworkGraph(hosts)
@@ -101,7 +101,7 @@ class NetworkGraphFlattenTest {
           "[GET]":{"method":"GET","success":2,"errors":0,"p50":1,"p95":2}
         }}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val rows = flattenNetworkGraph(hosts)

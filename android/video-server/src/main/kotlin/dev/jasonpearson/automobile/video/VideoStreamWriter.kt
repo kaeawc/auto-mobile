@@ -289,7 +289,7 @@ class VideoStreamWriter(
     if (nowMs() - startedAt < WRITE_STALL_TIMEOUT_MS) return false
     val client = clientSocket ?: return false
     println(
-      "VIDEO_CLIENT_WRITE_STALL socket=$socketName force-closing after ${nowMs() - startedAt}ms"
+      "VIDEO_CLIENT_WRITE_STALL socket=$socketName force-closing after ${nowMs() - startedAt}ms",
     )
     try {
       client.close()
@@ -341,7 +341,7 @@ class VideoStreamWriter(
       if (peerUid !in ALLOWED_PEER_UIDS) {
         println(
           "VIDEO_CLIENT_REJECTED socket=$socketName uid=$peerUid not in allowed set " +
-            "$ALLOWED_PEER_UIDS; disconnecting"
+            "$ALLOWED_PEER_UIDS; disconnecting",
         )
         try {
           client.close()
@@ -360,7 +360,7 @@ class VideoStreamWriter(
       if (!connectionRateLimiter.tryAdmit()) {
         println(
           "VIDEO_CLIENT_RATE_LIMITED socket=$socketName exceeded " +
-            "$MAX_ACCEPTS_PER_RATE_WINDOW accepts/${ACCEPT_RATE_WINDOW_MS}ms; disconnecting"
+            "$MAX_ACCEPTS_PER_RATE_WINDOW accepts/${ACCEPT_RATE_WINDOW_MS}ms; disconnecting",
         )
         try {
           client.close()
@@ -427,7 +427,7 @@ class VideoStreamWriter(
       is VideoHandshake.Result.Accepted -> true
       is VideoHandshake.Result.Rejected -> {
         println(
-          "VIDEO_CLIENT_HANDSHAKE_REJECTED socket=$socketName reason=${result.reason}; disconnecting"
+          "VIDEO_CLIENT_HANDSHAKE_REJECTED socket=$socketName reason=${result.reason}; disconnecting",
         )
         false
       }

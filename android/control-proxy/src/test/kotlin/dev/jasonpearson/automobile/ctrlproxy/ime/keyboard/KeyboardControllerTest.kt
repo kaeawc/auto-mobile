@@ -66,7 +66,7 @@ class KeyboardControllerTest {
       EditorConfig(
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
         imeOptions = 0,
-      )
+      ),
     )
 
     assertEquals(ShiftState.SHIFTED, controller.uiState().shiftState)
@@ -123,7 +123,7 @@ class KeyboardControllerTest {
   fun `multiline input overrides editor action label`() {
     val controller = KeyboardController()
     controller.configure(
-      EditorConfig(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 3)
+      EditorConfig(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE, 3),
     )
     assertEquals("↵", controller.uiState().enterLabel)
   }

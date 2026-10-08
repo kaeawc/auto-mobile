@@ -219,7 +219,7 @@ class ToolResultParserTest {
           "properties" to
             JsonObject(mapOf("success" to JsonObject(mapOf("type" to JsonPrimitive("boolean"))))),
           "required" to JsonArray(listOf(JsonPrimitive("success"))),
-        )
+        ),
       )
 
     val sample = SchemaSampleGenerator.generate(fakeSchema).jsonObject

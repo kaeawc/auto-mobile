@@ -124,7 +124,7 @@ fun TimelineCanvas(
               onEventClicked(nearest.event)
             }
           }
-        }
+        },
   ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
       val canvasWidth = size.width

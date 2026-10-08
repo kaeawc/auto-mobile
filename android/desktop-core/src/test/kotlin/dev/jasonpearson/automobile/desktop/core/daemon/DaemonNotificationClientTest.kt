@@ -76,7 +76,7 @@ class DaemonNotificationClientTest {
   fun `a tools list_changed push is surfaced`() = runBlocking {
     val server =
       daemon(
-        pushes = listOf("""{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}""")
+        pushes = listOf("""{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}"""),
       )
     val client = client(server)
     val seen = mutableListOf<ListChangedKind>()
@@ -96,7 +96,7 @@ class DaemonNotificationClientTest {
     val server =
       daemon(
         pushes =
-          listOf("""{"type":"daemon_notification","method":"$RESOURCES_LIST_CHANGED_METHOD"}""")
+          listOf("""{"type":"daemon_notification","method":"$RESOURCES_LIST_CHANGED_METHOD"}"""),
       )
     val client = client(server)
     val seen = mutableListOf<ListChangedKind>()
@@ -139,7 +139,7 @@ class DaemonNotificationClientTest {
     // The daemon deliberately omits `id` on pushes; a strict model would fail to decode them.
     val server =
       daemon(
-        pushes = listOf("""{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}""")
+        pushes = listOf("""{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}"""),
       )
     val client = client(server)
     val seen = mutableListOf<ListChangedKind>()
@@ -162,7 +162,7 @@ class DaemonNotificationClientTest {
           listOf(
             """{"type":"daemon_notification","method":"notifications/something/else"}""",
             """{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}""",
-          )
+          ),
       )
     val client = client(server)
     val seen = mutableListOf<ListChangedKind>()
@@ -186,7 +186,7 @@ class DaemonNotificationClientTest {
           listOf(
             "{not json",
             """{"type":"daemon_notification","method":"$TOOLS_LIST_CHANGED_METHOD"}""",
-          )
+          ),
       )
     val client = client(server)
     val seen = mutableListOf<ListChangedKind>()
@@ -274,7 +274,7 @@ class DaemonNotificationClientTest {
             connectionCount++
             val reader =
               BufferedReader(
-                InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8)
+                InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8),
               )
             val out = Channels.newOutputStream(socket)
             val requestLine = reader.readLine() ?: return@use

@@ -93,7 +93,7 @@ class OverlayControllerTest {
               window = OverlayWindow(OverlayFullscreenPlacement(), 30),
               state = mapOf("name" to OverlayScalar.Text("Jason")),
             ),
-      )
+      ),
     )
     assertResult("spec", true)
     assertEquals(30, host.requests.last().opacityPercent)

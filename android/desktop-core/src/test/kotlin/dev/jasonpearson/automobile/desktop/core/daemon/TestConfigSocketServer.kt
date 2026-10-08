@@ -55,11 +55,11 @@ class TestConfigSocketServer(
       serverChannel.accept().use { channel ->
         val reader =
           BufferedReader(
-            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+            InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
           )
         val writer =
           BufferedWriter(
-            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+            OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
           )
         val request = json.parseToJsonElement(reader.readLine()).jsonObject
         captured = request

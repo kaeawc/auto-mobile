@@ -53,8 +53,9 @@ class InboundFrameLimitsTest {
     // The syntax error precedes the type, so the type is never reached.
     assertNull(
       limits.check(
-        """{"dataBase64":"${"A".repeat(200)}" "x","type":"put_overlay_asset"}""".encodeToByteArray()
-      )
+        """{"dataBase64":"${"A".repeat(200)}" "x","type":"put_overlay_asset"}"""
+          .encodeToByteArray(),
+      ),
     )
   }
 

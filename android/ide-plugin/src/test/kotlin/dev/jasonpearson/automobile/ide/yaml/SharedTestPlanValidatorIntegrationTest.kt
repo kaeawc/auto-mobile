@@ -16,7 +16,7 @@ class SharedTestPlanValidatorIntegrationTest {
         steps:
           - tool: observe
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertTrue("The plugin classpath must expose the shared schema", result.valid)
@@ -32,7 +32,7 @@ class SharedTestPlanValidatorIntegrationTest {
         steps:
           - tool: notATool
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertFalse(result.valid)

@@ -156,7 +156,7 @@ class ObservationStreamClientTest {
         val error =
           "session unknown is not an active daemon session; register with daemon/registerSession"
         client.handleMessage(
-          """{"id":"${subscribe.id}","type":"error","success":false,"error":"$error"}"""
+          """{"id":"${subscribe.id}","type":"error","success":false,"error":"$error"}""",
         )
         repeat(3) {
           client.connect("emulator-5554")
@@ -251,7 +251,7 @@ class ObservationStreamClientTest {
             }
             .last()
         client.handleMessage(
-          """{"id":"${subscription.id}","type":"subscription_response","success":true}"""
+          """{"id":"${subscription.id}","type":"subscription_response","success":true}""",
         )
       }
       invoke(client)
@@ -361,7 +361,7 @@ class ObservationStreamClientTest {
           "rotation": 1
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
       val update = awaitItem()
@@ -399,7 +399,7 @@ class ObservationStreamClientTest {
           "frameContext": "ios:41"
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       val update = awaitItem()
       assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
@@ -420,7 +420,7 @@ class ObservationStreamClientTest {
           "frameContext": "ios:41"
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       val update = awaitItem()
       assertEquals(CoordinateSpace.Pixels, update.coordinateSpace)
@@ -448,7 +448,7 @@ class ObservationStreamClientTest {
           "screenHeight": 200
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       assertNull(awaitItem().coordinateSpace)
 
@@ -464,7 +464,7 @@ class ObservationStreamClientTest {
           "coordinateSpace": "dp"
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       assertEquals(CoordinateSpace.Unrecognized("dp"), awaitItem().coordinateSpace)
     }
@@ -486,7 +486,7 @@ class ObservationStreamClientTest {
           "rotation": 1
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
       val update = awaitItem()
@@ -513,7 +513,7 @@ class ObservationStreamClientTest {
           "data": { "packageName": "com.example" }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
       assertEquals(null, awaitItem().diff)
@@ -552,7 +552,7 @@ class ObservationStreamClientTest {
           "data": { "packageName": "com.example" }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       client.handleMessage(
         """
@@ -565,7 +565,7 @@ class ObservationStreamClientTest {
           "screenHeight": 200
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
       client.handleMessage(
         """
@@ -583,7 +583,7 @@ class ObservationStreamClientTest {
           }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
       client.hierarchyUpdates.test {
@@ -626,7 +626,7 @@ class ObservationStreamClientTest {
         "data": { "packageName": "com.example" }
       }
       """
-        .trimIndent()
+        .trimIndent(),
     )
     client.handleMessage(
       """
@@ -639,7 +639,7 @@ class ObservationStreamClientTest {
         "screenHeight": 200
       }
       """
-        .trimIndent()
+        .trimIndent(),
     )
 
     // Before reset, a new subscriber replays the buffered frame.
@@ -674,7 +674,7 @@ class ObservationStreamClientTest {
           )
 
         client.handleMessage(
-          """{"id":"${subscribe.id}","type":"subscription_response","success":false,"error":"retired epoch"}"""
+          """{"id":"${subscribe.id}","type":"subscription_response","success":false,"error":"retired epoch"}""",
         )
 
         assertFalse(

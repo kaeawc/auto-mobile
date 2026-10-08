@@ -109,7 +109,7 @@ class PickerModelsTest {
         booted =
           listOf(
             booted("Unknown (emulator-5554)", "emulator-5554", true)
-              .copy(identity = DeviceIdentity("Unknown (emulator-5554)"))
+              .copy(identity = DeviceIdentity("Unknown (emulator-5554)")),
           ),
         images = listOf(image("Pixel", "avd_a")),
         sourceImageToRuntimeId = mapOf("avd_a" to "emulator-5554"),
@@ -133,7 +133,7 @@ class PickerModelsTest {
                     deviceSessionUuid = "epoch-new",
                     lifecycle = DeviceLifecycle("booted", true),
                   ),
-              )
+              ),
           ),
         images = listOf(image("Pixel", "avd_a"), image("Pixel", "avd_b")),
         sourceImageToRuntimeId = mapOf("avd_a" to "emulator-5554"),
@@ -221,7 +221,7 @@ class PickerModelsTest {
                   connectionId = "udid-1",
                   lifecycle = DeviceLifecycle("booted", true),
                 ),
-            )
+            ),
           ),
         images = emptyList(),
       )
@@ -292,7 +292,7 @@ class PickerModelsTest {
                   deviceSessionUuid = "epoch-a",
                   lifecycle = DeviceLifecycle("booted", true),
                 ),
-            )
+            ),
           ),
         images = emptyList(),
       )

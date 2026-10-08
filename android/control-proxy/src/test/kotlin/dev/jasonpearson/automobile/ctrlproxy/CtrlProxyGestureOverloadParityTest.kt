@@ -221,7 +221,7 @@ class CtrlProxyGestureOverloadParityTest {
       assertTrue(
         ShadowLog.getLogs().drop(logsBefore).any {
           it.msg == "WebSocket server not running, skipping $resultName result broadcast"
-        }
+        },
       )
     }
   }

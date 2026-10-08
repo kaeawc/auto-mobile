@@ -132,7 +132,7 @@ class RecoveryLoopTest {
     // The daemon reports the device the plan ran on as the payload's top-level deviceId;
     // `failedStep.device` is only a plan device LABEL (multi-device plans), never an id (#10089).
     fakeDaemonClient.responses.add(
-      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554")
+      buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", deviceId = "emulator-5554"),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -164,7 +164,7 @@ class RecoveryLoopTest {
         listOf(
           JsonObject(mapOf("stepIndex" to JsonPrimitive(0), "tool" to JsonPrimitive("observe"))),
           JsonObject(mapOf("stepIndex" to JsonPrimitive(2), "tool" to JsonPrimitive("tapOn"))),
-        )
+        ),
       )
     fakeDaemonClient.responses.add(
       buildFailureResponse(
@@ -172,7 +172,7 @@ class RecoveryLoopTest {
         failedTool = "swipe",
         error = "No scrollable container",
         toolResults = toolResults,
-      )
+      ),
     )
     fakeDaemonClient.responses.add(buildSuccessResponse())
     fakeAgent.recoveryOutcome =
@@ -222,8 +222,8 @@ class RecoveryLoopTest {
           "success" to JsonPrimitive(true),
           "executedSteps" to JsonPrimitive(5),
           "totalSteps" to JsonPrimitive(5),
-        )
-      )
+        ),
+      ),
     )
   }
 
@@ -272,11 +272,11 @@ class RecoveryLoopTest {
                   mapOf(
                     "type" to JsonPrimitive("text"),
                     "text" to JsonPrimitive(textPayload),
-                  )
-                )
-              )
-            )
-        )
+                  ),
+                ),
+              ),
+            ),
+        ),
       )
     return DaemonResponse(
       id = "test",
@@ -369,7 +369,7 @@ private class FakeFileSystemOps : AutoMobileAgent.FileSystemOperations {
 
 private class FakeAIAgentFactory : AutoMobileAgent.AIAgentFactory {
   override fun createAIAgent(
-    config: AutoMobileAgent.ModelConfig
+    config: AutoMobileAgent.ModelConfig,
   ): ai.koog.agents.core.agent.AIAgent<String, String> {
     throw UnsupportedOperationException("Not used in recovery tests")
   }

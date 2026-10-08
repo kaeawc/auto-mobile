@@ -37,7 +37,7 @@ class ChatViewModel : ViewModel() {
           isFromUser = false,
           profileImageUrl = null,
         ),
-      )
+      ),
     )
   val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 

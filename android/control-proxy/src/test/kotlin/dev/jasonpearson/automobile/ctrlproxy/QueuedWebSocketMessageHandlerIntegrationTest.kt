@@ -104,7 +104,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         started.await()
         first.send(Frame.Text("""{"type":"request_clipboard","requestId":"next","action":"get"}"""))
         second.send(
-          Frame.Text("""{"type":"request_clipboard","requestId":"other","action":"get"}""")
+          Frame.Text("""{"type":"request_clipboard","requestId":"other","action":"get"}"""),
         )
         assertEquals("other", requestId(second.incoming.receive()))
         assertFalse(held.isCompleted)
@@ -244,7 +244,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         this,
         handler { request ->
           fixture.server.broadcast(
-            CorrelatedErrorReporter.frame(request.requestId, "terminal reply")
+            CorrelatedErrorReporter.frame(request.requestId, "terminal reply"),
           )
           throw IllegalStateException("after reply")
         },
@@ -349,7 +349,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
                     put("partialApplication", true)
                     put("committedUnits", 2)
                   }
-                    .toString()
+                    .toString(),
                 )
               }
               is RequestCancelImeCommit -> cancelSeen = true
@@ -412,7 +412,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
                       put("partialApplication", true)
                       put("committedUnits", 2)
                     }
-                      .toString()
+                      .toString(),
                   )
                 }
               request is RequestCancelImeCommit -> cancelSeen = true
@@ -544,7 +544,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       handler { request ->
         if (request is SetHierarchyInterval) error("hierarchy failed")
         CorrelatedErrorReporter.frame(request.requestId, "barrier")
-      }
+      },
     ) { fixture ->
       send(fixture.first, SetHierarchyInterval(requestId = "failure"))
       val failure = fixture.first.incoming.receive() as Frame.Text
@@ -649,7 +649,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       handler { request ->
         if (request is RequestClipboard) error("owned failure")
         event
-      }
+      },
     ) { fixture ->
       send(fixture.first, RequestClipboard(requestId = "owned", action = "get"))
       val failure = fixture.first.incoming.receive() as Frame.Text

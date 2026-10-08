@@ -56,7 +56,7 @@ class DeviceControlInputForwarderTest {
           deviceId = "emulator-5554",
           duration = null,
           frameContext = TEST_FRAME_CONTEXT,
-        )
+        ),
       ),
       fake.inputTapCalls,
     )
@@ -165,7 +165,7 @@ class DeviceControlInputForwarderTest {
           deviceId = "sim-udid",
           durationMs = 300,
           frameContext = TEST_FRAME_CONTEXT,
-        )
+        ),
       ),
       fake.inputSwipeCalls,
     )

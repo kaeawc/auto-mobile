@@ -98,7 +98,7 @@ fun IcTraceScreen() {
                 }
               context.startActivity(Intent.createChooser(send, "Export IC trace"))
             }
-          }
+          },
         ) {
           Text("Export")
         }

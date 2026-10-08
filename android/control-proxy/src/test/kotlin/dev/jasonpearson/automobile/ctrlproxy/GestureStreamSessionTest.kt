@@ -700,7 +700,7 @@ class GestureStreamSessionTest {
       assertTrue(
         h.dispatcher.dispatched.all {
           it.from.x >= 0f && it.from.y >= 0f && it.to.x >= 0f && it.to.y >= 0f
-        }
+        },
       )
       assertEquals(true, h.finishedSuccess)
     }
@@ -718,7 +718,7 @@ class GestureStreamSessionTest {
     assertTrue(
       h.dispatcher.dispatched.all {
         it.from == GesturePoint(0f, 0f) && it.to == GesturePoint(0f, 0f)
-      }
+      },
     )
     assertEquals(true, h.finishedSuccess)
   }

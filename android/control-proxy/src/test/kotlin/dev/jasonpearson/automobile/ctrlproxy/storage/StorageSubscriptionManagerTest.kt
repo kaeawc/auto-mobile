@@ -424,7 +424,7 @@ class StorageSubscriptionManagerTest {
         putBoolean("success", false)
         putString("errorType", "FileNotFound")
         putString("error", "Preferences file not found: auth")
-      }
+      },
     )
 
     manager.subscribe("com.example.app", "auth")
@@ -657,7 +657,7 @@ class StorageSubscriptionManagerTest {
                     sequenceNumber = sequence,
                   )
                 },
-              )
+              ),
             ),
           )
         }
@@ -697,7 +697,7 @@ class StorageSubscriptionManagerTest {
       putString(
         "result",
         StorageProtocolSerializer.responseToJson(
-          StorageResponse.SubscriptionResult("auth", subscribed = true, processToken = token)
+          StorageResponse.SubscriptionResult("auth", subscribed = true, processToken = token),
         ),
       )
     }
@@ -721,7 +721,7 @@ class StorageSubscriptionManagerTest {
               )
             },
             processToken = token,
-          )
+          ),
         ),
       )
     }
@@ -1520,7 +1520,7 @@ class StorageSubscriptionManagerTest {
             sequences.map { sequence ->
               StorageChangeEvent(fileName, "key-$sequence", "$sequence", "LONG", sequence, sequence)
             },
-          )
+          ),
         ),
       )
     }
@@ -1541,7 +1541,7 @@ class StorageSubscriptionManagerTest {
                 StorageResponse.Changes(
                   "auth",
                   listOf(StorageChangeEvent("auth", "key", "value", "STRING", 1L, 1L)),
-                )
+                ),
               ),
             )
           }

@@ -84,7 +84,7 @@ private fun AppSelectorDropdown(
           Box(
             modifier =
               Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
-                .padding(horizontal = 4.dp, vertical = 1.dp)
+                .padding(horizontal = 4.dp, vertical = 1.dp),
           ) {
             Text(
               "FG",
@@ -114,7 +114,7 @@ private fun AppSelectorDropdown(
                 .heightIn(max = 200.dp) // Show ~5 items, scroll for more
                 .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
                 .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(rememberScrollState()),
           ) {
             // Installed apps - foreground first
             val sortedApps = installedApps.sortedByDescending { it.isForeground }
@@ -177,7 +177,7 @@ private fun AppDropdownItem(
       Box(
         modifier =
           Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
-            .padding(horizontal = 4.dp, vertical = 1.dp)
+            .padding(horizontal = 4.dp, vertical = 1.dp),
       ) {
         Text(
           "FG",

@@ -103,7 +103,7 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
             isEditingEmail = true
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

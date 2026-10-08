@@ -257,7 +257,7 @@ class DevicePickerViewModel(
               it.platform.equals(image.platform, ignoreCase = true) &&
                 (it.runtime.deviceId ?: it.identity.stableId) == image.identity.stableId
             }
-        }
+        },
       ) {
         "Device inventory changed during discovery; refresh to get its current state"
       }
@@ -272,7 +272,7 @@ class DevicePickerViewModel(
           }
           .map {
             it.copy(
-              inventoryUncertain = discoverySource(it.platform, it.isVirtual) !in completeSources
+              inventoryUncertain = discoverySource(it.platform, it.isVirtual) !in completeSources,
             )
           }
       // A runtime whose AVD name probe failed may be one of these saved images. Neither
@@ -287,7 +287,7 @@ class DevicePickerViewModel(
               it.knownSourceImageId() == null &&
               (it.name == deviceId || it.name == "Unknown ($deviceId)") &&
               deviceId !in bootedImageRuntimeIds[Platform.Android].orEmpty().values
-          }
+          },
       ) {
         "Android emulator identity is unavailable; refresh after its AVD name can be discovered"
       }
@@ -327,7 +327,7 @@ class DevicePickerViewModel(
             check(
               it.observationComplete ||
                 it.platformObservations.isNotEmpty() ||
-                it.sourceObservations.isNotEmpty()
+                it.sourceObservations.isNotEmpty(),
             ) {
               "Device discovery is incomplete; retaining the previous inventory"
             }
@@ -622,7 +622,7 @@ class DevicePickerViewModel(
   }
 
   private fun updateContent(
-    transform: (DevicePickerUiState.Content) -> DevicePickerUiState.Content
+    transform: (DevicePickerUiState.Content) -> DevicePickerUiState.Content,
   ) {
     _state.update { current ->
       (current as? DevicePickerUiState.Content)?.let(transform) ?: current

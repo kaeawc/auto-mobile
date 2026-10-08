@@ -47,7 +47,7 @@ class IcTraceRecorder(
         readValue,
         droppedEvents,
         metadata,
-      )
+      ),
     )
     mutableEvents.value = buffer.toList()
   }

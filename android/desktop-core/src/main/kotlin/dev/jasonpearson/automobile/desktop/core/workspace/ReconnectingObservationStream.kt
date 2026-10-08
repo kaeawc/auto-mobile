@@ -134,7 +134,7 @@ fun rememberReconnectingObservationState(
             s.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
             observationState =
               observationState.copy(
-                connectionGeneration = observationState.connectionGeneration + 1
+                connectionGeneration = observationState.connectionGeneration + 1,
               )
           }
         }

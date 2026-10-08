@@ -14,7 +14,7 @@ sealed class DatabaseError(message: String) : Exception(message) {
   /** DatabaseInspector was not initialized with a context. */
   class NotInitialized :
     DatabaseError(
-      "DatabaseInspector not initialized. Call AutoMobileSDK.initialize(context) first."
+      "DatabaseInspector not initialized. Call AutoMobileSDK.initialize(context) first.",
     )
 
   /** A named application-provided driver was not registered. */

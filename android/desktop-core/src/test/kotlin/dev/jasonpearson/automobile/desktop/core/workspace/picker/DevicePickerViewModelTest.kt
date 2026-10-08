@@ -66,7 +66,7 @@ class DevicePickerViewModelTest {
       assertEquals(setOf("android:shared", "ios:shared"), twins.map { it.uiKey }.toSet())
       viewModel.onAction(DevicePickerAction.ToggleSelect("shared"))
       assertTrue(
-        content(viewModel).selectedIds.isEmpty()
+        content(viewModel).selectedIds.isEmpty(),
       ) // ambiguous legacy input cannot target a sibling
       viewModel.onAction(DevicePickerAction.ToggleSelect("ios:shared"))
       assertEquals(setOf("ios:shared"), content(viewModel).selectedIds)
@@ -137,14 +137,14 @@ class DevicePickerViewModelTest {
       val client = fake()
       client.bootedDevicesResponse =
         bootedResponse(
-          bootedEntry("USB iPhone", "physical-ios", platform = "ios", isVirtual = false)
+          bootedEntry("USB iPhone", "physical-ios", platform = "ios", isVirtual = false),
         )
       val viewModel = vm(client)
       client.bootedDevicesResponse =
         """{"totalCount":0,"androidCount":0,"iosCount":0,"virtualCount":0,"physicalCount":0,"lastUpdated":"x","observationComplete":false,"platformObservations":{"android":{"observationComplete":true},"ios":{"observationComplete":false}},"sourceObservations":{"ios-simulator":{"observationComplete":true},"ios-physical":{"observationComplete":false}},"devices":[]}"""
       viewModel.onAction(DevicePickerAction.SilentRefresh)
       assertTrue(
-        content(viewModel).devices.any { it.id == "physical-ios" && it.inventoryUncertain }
+        content(viewModel).devices.any { it.id == "physical-ios" && it.inventoryUncertain },
       )
       assertTrue(content(viewModel).devices.any { it.id == "iphone-15" && !it.inventoryUncertain })
       // Reversing the failed source authoritatively removes the physical device, but cannot
@@ -238,7 +238,7 @@ class DevicePickerViewModelTest {
       assertTrue(
         content(viewModel).devices.any {
           it.id == "emulator-5554" && it.state == DeviceState.Booted
-        }
+        },
       )
     }
 
@@ -277,7 +277,7 @@ class DevicePickerViewModelTest {
           "unavailable-iphone",
           platform = "ios",
           lifecycleState = "unavailable",
-        )
+        ),
       )
 
     val devices = content(vm(client)).devices
@@ -297,7 +297,7 @@ class DevicePickerViewModelTest {
             "booting-iphone",
             platform = "ios",
             lifecycleState = "booting",
-          )
+          ),
         )
 
       val state = vm(client).state.value
@@ -306,7 +306,7 @@ class DevicePickerViewModelTest {
       assertTrue(
         (state as DevicePickerUiState.Error)
           .message
-          .contains("Device inventory changed during discovery")
+          .contains("Device inventory changed during discovery"),
       )
     }
 
@@ -433,7 +433,7 @@ class DevicePickerViewModelTest {
         fake().apply {
           bootedDevicesResponse =
             bootedResponse(
-              bootedEntry("Pixel 8 API 35", "emulator-5554", apiLevel = 35, locked = true)
+              bootedEntry("Pixel 8 API 35", "emulator-5554", apiLevel = 35, locked = true),
             )
         }
       val vm =
@@ -585,7 +585,7 @@ class DevicePickerViewModelTest {
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
       val c = content(v)
       assertTrue(
-        "android:emulator-5556" !in c.selectedIds
+        "android:emulator-5556" !in c.selectedIds,
       ) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
@@ -658,7 +658,7 @@ class DevicePickerViewModelTest {
       boot.complete() // reloadAfterBoot fetches -> device booted -> auto-observe by runtime id
       val c = content(v)
       assertTrue(
-        "android:emulator-5556" !in c.selectedIds
+        "android:emulator-5556" !in c.selectedIds,
       ) // auto-observed, not auto-selected (#5220)
       assertTrue(c.bootingIds.isEmpty())
       assertTrue(c.devices.any { it.id == "emulator-5556" && it.state == DeviceState.Booted })
@@ -730,7 +730,7 @@ class DevicePickerViewModelTest {
 
       boot.complete() // reloadAfterBoot fetches fresh, emits + auto-observes the booted device
       assertTrue(
-        "android:emulator-5556" !in content(v).selectedIds
+        "android:emulator-5556" !in content(v).selectedIds,
       ) // auto-observed, not selected (#5220)
 
       staleGate.complete(Unit) // stale Refresh resumes with the OLD (shut-down) list — dropped
@@ -756,7 +756,7 @@ class DevicePickerViewModelTest {
       val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
       // Initial load is healthy: Pixel 8 booted, Pixel 6 shut down.
       assertTrue(
-        content(v).devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted }
+        content(v).devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted },
       )
 
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
@@ -917,7 +917,7 @@ class DevicePickerViewModelTest {
         val columns = (awaitItem() as DevicePickerEffect.Observe).columns
         assertEquals(listOf("emulator-5556"), columns.map { it.deviceId })
         assertTrue(
-          "android:emulator-5556" !in content(v).selectedIds
+          "android:emulator-5556" !in content(v).selectedIds,
         ) // observed, not left selected
         cancelAndIgnoreRemainingEvents()
       }
@@ -959,7 +959,7 @@ class DevicePickerViewModelTest {
         }
       val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
       assertTrue(
-        content(v).devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted }
+        content(v).devices.any { it.id == "emulator-5554" && it.state == DeviceState.Booted },
       )
 
       v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33"))
@@ -1030,7 +1030,7 @@ class DevicePickerViewModelTest {
           "emulator-5554",
           stableId = "Pixel_8_API_35",
           apiLevel = 35,
-        )
+        ),
       )
 
     val TWO_BOOTED_PIXEL8_AND_6 =

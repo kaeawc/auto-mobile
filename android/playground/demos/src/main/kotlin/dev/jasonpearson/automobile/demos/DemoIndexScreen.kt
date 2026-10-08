@@ -152,7 +152,7 @@ fun DemoIndexScreen(
           },
           colors = TopAppBarDefaults.topAppBarColors(),
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

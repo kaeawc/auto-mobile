@@ -94,7 +94,7 @@ internal fun replayEventBatches(
                 logger.w("EventBatchReplay", error) { "Could not update pending batch $batchId" }
               }
               if (stop) onComplete() else submit(index + 1)
-            }
+            },
           )
         } catch (error: Exception) {
           logger.w("EventBatchReplay", error) { "Could not schedule replay completion" }

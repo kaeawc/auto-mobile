@@ -29,7 +29,7 @@ class VideoStreamClientPolicyTest {
           VideoStreamPermission.ScreenRecordingNeedsApproval,
           "AutoMobile",
         )
-        .autoReconnects()
+        .autoReconnects(),
     )
     assertTrue(!VideoStreamState.Idle.autoReconnects())
     assertTrue(!VideoStreamState.Connecting.autoReconnects())
@@ -69,7 +69,7 @@ class VideoStreamClientPolicyTest {
     assertEquals(
       refused,
       subscribeFailureCause(
-        "Video stream subscribe rejected: session x is not an active daemon session (unknown or expired)."
+        "Video stream subscribe rejected: session x is not an active daemon session (unknown or expired).",
       ),
     )
   }

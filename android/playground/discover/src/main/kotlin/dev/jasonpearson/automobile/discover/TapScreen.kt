@@ -614,7 +614,7 @@ private fun PressDurationTracker() {
                 finalDurationMs = elapsed
               }
               isPressing = false
-            }
+            },
           )
         }
         .semantics { testTag = "press_duration_tracker" },

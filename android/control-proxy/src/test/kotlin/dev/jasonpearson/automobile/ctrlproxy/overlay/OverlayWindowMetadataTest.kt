@@ -53,7 +53,7 @@ class OverlayWindowMetadataTest {
     assertEquals(
       OverlayWindowMetadata("fullscreen", false),
       overlayWindowMetadata(
-        mapOverlaySpec(spec(OverlayFullscreenPlacement(scrim = "#FF000000"), background = null))
+        mapOverlaySpec(spec(OverlayFullscreenPlacement(scrim = "#FF000000"), background = null)),
       ),
     )
   }
@@ -127,7 +127,7 @@ class OverlayWindowMetadataTest {
     assertEquals(
       "floating",
       metadata(
-          spec(OverlayFloatingPlacement(gravity = "topStart", offset = OverlayOffset(0.0, 0.0)))
+          spec(OverlayFloatingPlacement(gravity = "topStart", offset = OverlayOffset(0.0, 0.0))),
         )
         .placement,
     )
@@ -148,7 +148,7 @@ class OverlayWindowMetadataTest {
     assertTrue(isInteractiveOverlayWindow(appLayer, title, "own.pkg", "own.pkg"))
     // SystemUI's type-3 windows share the type but never the title or package.
     assertFalse(
-      isInteractiveOverlayWindow(appLayer, "NotificationShade", "com.android.systemui", "own.pkg")
+      isInteractiveOverlayWindow(appLayer, "NotificationShade", "com.android.systemui", "own.pkg"),
     )
     assertFalse(isInteractiveOverlayWindow(appLayer, title, "com.android.systemui", "own.pkg"))
     assertFalse(isInteractiveOverlayWindow(appLayer, null, "own.pkg", "own.pkg"))
@@ -158,7 +158,7 @@ class OverlayWindowMetadataTest {
         title,
         "own.pkg",
         "own.pkg",
-      )
+      ),
     )
   }
 
@@ -179,7 +179,7 @@ class OverlayWindowMetadataTest {
     assertTrue(encoded.contains("\"overlayOpaque\":true"))
     assertEquals(overlay, wire.decodeFromString(WindowInfo.serializer(), encoded))
     assertNull(
-      wire.decodeFromString(WindowInfo.serializer(), """{"id":3,"type":4}""").overlayPlacement
+      wire.decodeFromString(WindowInfo.serializer(), """{"id":3,"type":4}""").overlayPlacement,
     )
   }
 

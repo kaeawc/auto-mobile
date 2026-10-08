@@ -174,9 +174,9 @@ fun AutoMobileDesktopApp(
           graph.autoMobileClient,
           foregroundAppResolver =
             ObservationForegroundAppResolver(
-              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+              sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
             ),
-        )
+        ),
       ) {
         onUserInteraction(it)
       }
@@ -494,7 +494,7 @@ fun AutoMobileDesktopApp(
                 onGetStarted = {
                   settings.hasSeenOnboarding = true
                   showOnboarding = false
-                }
+                },
               )
             // The device grid is the home surface whenever nothing is observed (true on launch),
             // and
@@ -579,7 +579,7 @@ fun AutoMobileDesktopApp(
                   },
                   observationStreamFactory = {
                     ObservationStreamClient(
-                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                     )
                   },
                   sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },

@@ -72,7 +72,7 @@ fun ProfileTopAppBar(name: String, email: String, scrollProgress: Float, onEmail
           tint = MaterialTheme.colorScheme.primary,
         )
       }
-    }
+    },
   )
 }
 

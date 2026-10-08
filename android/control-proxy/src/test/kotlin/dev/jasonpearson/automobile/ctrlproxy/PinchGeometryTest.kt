@@ -198,7 +198,7 @@ class PinchGeometryTest {
             p.startX2 to p.startY2,
             p.endX1 to p.endY1,
             p.endX2 to p.endY2,
-          )
+          ),
         )
       val expected = sortedPoints(v.expected)
       actual.zip(expected).forEach { (a, e) ->

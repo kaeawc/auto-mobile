@@ -57,7 +57,7 @@ fun decodeSdkCapabilitySnapshot(json: String): SdkCapabilitySnapshotResult {
       snapshotJson.decodeFromJsonElement(
         SdkCapabilityDocument.serializer(),
         normalizeUnknownStates(document),
-      )
+      ),
     )
   } catch (error: SerializationException) {
     SdkCapabilitySnapshotResult.Failure(error.message ?: "Malformed capability snapshot")
@@ -67,7 +67,7 @@ fun decodeSdkCapabilitySnapshot(json: String): SdkCapabilitySnapshotResult {
 private fun normalizeUnknownStates(document: JsonObject): JsonObject {
   val capabilities = document["capabilities"] as? JsonArray ?: return document
   return JsonObject(
-    document + ("capabilities" to JsonArray(capabilities.map(::normalizeUnknownState)))
+    document + ("capabilities" to JsonArray(capabilities.map(::normalizeUnknownState))),
   )
 }
 

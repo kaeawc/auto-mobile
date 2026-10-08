@@ -52,7 +52,7 @@ class McpDaemonClientInputTest {
             ),
             SocketResponse("""{"tools":[]}""", null),
             SocketResponse("""{"content":[]}""", null),
-          )
+          ),
       )
       .use { server ->
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
@@ -85,7 +85,7 @@ class McpDaemonClientInputTest {
             SocketResponse(resultJson = "{}"),
             SocketResponse(resultJson = "{}"),
             SocketResponse(resultJson = "{}"),
-          )
+          ),
       )
       .use { server ->
         val client =
@@ -111,7 +111,7 @@ class McpDaemonClientInputTest {
           requests[1].params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content,
         )
         assertFalse(
-          "sessionUuid" in (requests[2].params["arguments"]?.jsonObject ?: JsonObject(emptyMap()))
+          "sessionUuid" in (requests[2].params["arguments"]?.jsonObject ?: JsonObject(emptyMap())),
         )
       }
   }
@@ -125,7 +125,7 @@ class McpDaemonClientInputTest {
           listOf(
             SocketResponse(resultJson = acquisitionResult),
             SocketResponse(resultJson = acquisitionResult),
-          )
+          ),
       )
       .use { server ->
         val client = McpDaemonClient(socketPathValue = server.socketPath.toString())
@@ -152,11 +152,11 @@ class McpDaemonClientInputTest {
         responses =
           listOf(
             SocketResponse(
-              resultJson = "{\"accepted\":true,\"heartbeatTimeoutMs\":10000,\"expiresAtMs\":10000}"
+              resultJson = "{\"accepted\":true,\"heartbeatTimeoutMs\":10000,\"expiresAtMs\":10000}",
             ),
             SocketResponse(resultJson = "{\"heartbeat\":true}"),
             SocketResponse(resultJson = "{\"released\":true}"),
-          )
+          ),
       )
       .use { server ->
         val session =
@@ -164,7 +164,7 @@ class McpDaemonClientInputTest {
             McpDaemonClient(
               socketPathValue = server.socketPath.toString(),
               sessionUuid = "desktop-session",
-            )
+            ),
           )
 
         assertEquals("desktop-session", session.sessionUuid)
@@ -257,7 +257,7 @@ class McpDaemonClientInputTest {
           listOf(
             SocketResponse("""{ "action": "input/tap", "success": true }"""),
             SocketResponse("""{ "content": [] }"""),
-          )
+          ),
       )
       .use { server ->
         val client =
@@ -384,7 +384,7 @@ class McpDaemonClientInputTest {
   fun `button text and key helpers serialize to their input socket methods`() {
     val pressButton =
       captureInputRequest(
-        """{ "action": "input/pressButton", "success": true, "button": "back" }"""
+        """{ "action": "input/pressButton", "success": true, "button": "back" }""",
       ) { client ->
         client.inputPressButton(
           button = "back",
@@ -395,7 +395,7 @@ class McpDaemonClientInputTest {
       }
     val typeText =
       captureInputRequest(
-        """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }"""
+        """{ "action": "input/typeText", "success": true, "textLength": 5, "submitted": true }""",
       ) { client ->
         client.inputTypeText(
           text = "hello",
@@ -475,7 +475,7 @@ class McpDaemonClientInputTest {
             SocketResponse(resultJson = """{ "capabilities": ["input/typeText.mode:append"] }"""),
             SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
             SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
-          )
+          ),
       )
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
@@ -504,7 +504,7 @@ class McpDaemonClientInputTest {
           listOf(
             SocketResponse(error = "Unsupported daemon method: daemon/capabilities"),
             SocketResponse(resultJson = """{ "action": "input/typeText", "success": true }"""),
-          )
+          ),
       )
       .use { server ->
         val result =
@@ -531,7 +531,7 @@ class McpDaemonClientInputTest {
           listOf(
             SocketResponse(error = "Unsupported daemon method: daemon/capabilities"),
             SocketResponse(error = "input/typeText unsupported params: mode"),
-          )
+          ),
       )
       .use { server ->
         val result =
@@ -621,7 +621,7 @@ class McpDaemonClientInputTest {
           listOf(
             SocketResponse(resultJson = """{ "success": true }"""),
             SocketResponse(resultJson = """{ "success": true }"""),
-          )
+          ),
       )
       .use { server ->
         McpDaemonClient(socketPathValue = server.socketPath.toString())
@@ -812,11 +812,11 @@ class McpDaemonClientInputTest {
           serverChannel.accept().use { channel ->
             val reader =
               BufferedReader(
-                InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8)
+                InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8),
               )
             val writer =
               BufferedWriter(
-                OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8)
+                OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8),
               )
             val requestLine = reader.readLine()
             val request = json.parseToJsonElement(requestLine).jsonObject
@@ -826,7 +826,7 @@ class McpDaemonClientInputTest {
                 params = request.getValue("params").jsonObject,
                 clientVersion = request["clientVersion"]?.jsonPrimitive?.content,
                 timeoutMs = request["timeoutMs"]?.jsonPrimitive?.content?.toLong(),
-              )
+              ),
             )
             writer.write(responseLine(request.getValue("id").jsonPrimitive.content, response))
             writer.newLine()

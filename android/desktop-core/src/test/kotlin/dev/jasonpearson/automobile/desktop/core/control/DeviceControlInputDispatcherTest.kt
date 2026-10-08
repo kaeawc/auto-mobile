@@ -170,7 +170,7 @@ class DeviceControlInputDispatcherTest {
             is DeviceControlInputCommand.TypeText -> "text${cmd.token}"
             is DeviceControlInputCommand.SendKey -> "key${cmd.token}"
             is DeviceControlInputCommand.StreamGesture -> "stream${cmd.token}"
-          }
+          },
         )
       }
 
@@ -184,7 +184,7 @@ class DeviceControlInputDispatcherTest {
         platform = "android",
         snapshot = testSnapshot(),
         token = 1L,
-      )
+      ),
     )
     dispatcher.enqueue(
       DeviceControlInputCommand.TypeText(
@@ -193,7 +193,7 @@ class DeviceControlInputDispatcherTest {
         platform = "android",
         snapshot = testSnapshot(),
         token = 2L,
-      )
+      ),
     )
     dispatcher.enqueue(
       DeviceControlInputCommand.SendKey(
@@ -202,7 +202,7 @@ class DeviceControlInputDispatcherTest {
         platform = "android",
         snapshot = testSnapshot(),
         token = 3L,
-      )
+      ),
     )
     dispatcher.enqueue(
       DeviceControlInputCommand.PressButton(
@@ -211,7 +211,7 @@ class DeviceControlInputDispatcherTest {
         platform = "android",
         snapshot = testSnapshot(),
         token = 4L,
-      )
+      ),
     )
     advanceUntilIdle()
 

@@ -79,7 +79,7 @@ internal object AutoMobileOsEvents {
         applicationId = applicationId,
         kind = kind,
         details = details,
-      )
+      ),
     )
   }
 

@@ -59,10 +59,10 @@ class ImeActionStepTest {
       CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, true, true, connection),
     )
     assertNull(
-      CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, false, true, connection)
+      CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, false, true, connection),
     )
     assertNull(
-      CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, true, false, connection)
+      CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, true, false, connection),
     )
     assertNull(CtrlProxyIme.dispatchNavigationAction(EditorInfo.IME_ACTION_NEXT, true, true, null))
     for (actionId in

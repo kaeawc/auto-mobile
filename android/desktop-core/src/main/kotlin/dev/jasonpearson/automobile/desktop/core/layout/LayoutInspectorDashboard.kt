@@ -67,7 +67,7 @@ fun LayoutInspectorDashboard(
   // Logger for dashboard - initialized early
   val dashboardLog =
     dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory.getLogger(
-      "LayoutInspectorDashboard"
+      "LayoutInspectorDashboard",
     )
 
   val streamClient = observationStream
@@ -83,11 +83,11 @@ fun LayoutInspectorDashboard(
     }
     collectorGeneration = connectionGeneration
     dashboardLog.info(
-      "Starting hierarchy updates collection from stream client: ${streamClient.hashCode()}"
+      "Starting hierarchy updates collection from stream client: ${streamClient.hashCode()}",
     )
     streamClient.hierarchyUpdates.collect { update ->
       dashboardLog.info(
-        "Received hierarchy update in dashboard - deviceId=${update.deviceId}, hasData=${update.data != null}"
+        "Received hierarchy update in dashboard - deviceId=${update.deviceId}, hasData=${update.data != null}",
       )
       update.data?.let { hierarchyJson ->
         val frameGeneration = state.frameGeneration
@@ -103,7 +103,7 @@ fun LayoutInspectorDashboard(
         if (result != null) {
           if (frameGeneration != state.frameGeneration) return@let
           dashboardLog.info(
-            "Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}"
+            "Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}",
           )
           state.updateConnectionStatus(ConnectionStatus.Connected)
           state.applyHierarchyUpdate(
@@ -132,11 +132,11 @@ fun LayoutInspectorDashboard(
       snapshotFlow { collectorGeneration }.first { it == connectionGeneration }
     }
     dashboardLog.info(
-      "Starting screenshot updates collection from stream client: ${streamClient.hashCode()}"
+      "Starting screenshot updates collection from stream client: ${streamClient.hashCode()}",
     )
     streamClient.screenshotUpdates.collect { update ->
       dashboardLog.info(
-        "Received screenshot update in dashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}"
+        "Received screenshot update in dashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}",
       )
       update.screenshotBase64?.let { base64 ->
         val frameGeneration = state.frameGeneration
@@ -274,7 +274,7 @@ fun LayoutInspectorDashboard(
     // Left panel: Device Screen (flexible - expands when others collapse)
     Box(
       modifier =
-        Modifier.weight(1f).fillMaxHeight().background(colors.text.normal.copy(alpha = 0.02f))
+        Modifier.weight(1f).fillMaxHeight().background(colors.text.normal.copy(alpha = 0.02f)),
     ) {
       DeviceScreenView(
         screenshotData = state.screenshotData,

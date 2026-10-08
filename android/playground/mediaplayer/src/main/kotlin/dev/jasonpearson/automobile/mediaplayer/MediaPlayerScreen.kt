@@ -72,7 +72,7 @@ fun MediaPlayerScreen() {
               titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ),
         )
-      }
+      },
     ) { paddingValues ->
       LazyColumn(
         modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp),
@@ -154,7 +154,7 @@ fun FullscreenMediaPlayer() {
         indication = null,
       ) {
         showControls = !showControls
-      }
+      },
   ) {
 
     // Media controls overlay
@@ -294,7 +294,7 @@ fun MediaTypeCard(mediaType: MediaType, isSelected: Boolean, onClick: () -> Unit
             MaterialTheme.colorScheme.primaryContainer
           } else {
             MaterialTheme.colorScheme.surface
-          }
+          },
       ),
     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
   ) {

@@ -102,7 +102,7 @@ class ImeCommitDriverTest {
   @Test
   fun `visible text password field commits and prior IME is restored`() {
     assertPasswordCommits(
-      InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+      InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
     )
   }
 

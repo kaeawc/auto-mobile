@@ -312,7 +312,7 @@ fun ThreePaneShell(
           }
           else -> false
         }
-      }
+      },
     ) {
       // macOS title bar spacer
       TitleBarSpacer()
@@ -335,14 +335,14 @@ fun ThreePaneShell(
             Modifier.width(leftPaneWidth)
               .fillMaxHeight()
               .focusRequester(leftFocusRequester)
-              .focusTarget()
+              .focusTarget(),
           ) {
             leftPaneContent()
           }
           VerticalDividerStub(
             onDrag = { delta ->
               leftPaneWidth = (leftPaneWidth + delta).coerceIn(150.dp, 400.dp)
-            }
+            },
           )
         }
 
@@ -372,13 +372,13 @@ fun ThreePaneShell(
           VerticalDividerStub(
             onDrag = { delta ->
               rightPaneWidth = (rightPaneWidth - delta).coerceIn(200.dp, 500.dp)
-            }
+            },
           )
           Box(
             Modifier.width(rightPaneWidth)
               .fillMaxHeight()
               .focusRequester(rightFocusRequester)
-              .focusTarget()
+              .focusTarget(),
           ) {
             rightPaneContent()
           }
@@ -390,7 +390,7 @@ fun ThreePaneShell(
         HorizontalDividerStub(
           onDrag = { delta ->
             bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
-          }
+          },
         )
         Box(Modifier.fillMaxWidth().height(bottomPaneHeight)) {
           bottomPaneContent()
@@ -484,7 +484,7 @@ private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) 
       }
       .pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onReset() })
-      }
+      },
   )
 }
 
@@ -504,7 +504,7 @@ private fun HorizontalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}
       }
       .pointerInput(Unit) {
         detectTapGestures(onDoubleTap = { onReset() })
-      }
+      },
   )
 }
 

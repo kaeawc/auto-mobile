@@ -125,7 +125,7 @@ class McpStatusTimeoutTest {
   fun `HTTP observe tool error propagates connection exception`() {
     val client =
       httpClientForResponse(
-        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Error: no device"}],"isError":true}}"""
+        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Error: no device"}],"isError":true}}""",
       )
 
     val error = assertFailsWith<McpConnectionException> { client.observe("android") }
@@ -137,7 +137,7 @@ class McpStatusTimeoutTest {
   fun `HTTP malformed observe payload becomes connection exception`() {
     val client =
       httpClientForResponse(
-        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"not json"}]}}"""
+        """{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"not json"}]}}""",
       )
 
     val error = assertFailsWith<McpConnectionException> { client.observe("android") }
@@ -174,7 +174,7 @@ class McpStatusTimeoutTest {
   fun `STDIO observe tool error propagates connection exception`() {
     val client =
       stdioClientForResult(
-        """{"content":[{"type":"text","text":"Error: no device"}],"isError":true}"""
+        """{"content":[{"type":"text","text":"Error: no device"}],"isError":true}""",
       )
     try {
       val error = assertFailsWith<McpConnectionException> { client.observe("android") }
@@ -261,7 +261,7 @@ class McpStatusTimeoutTest {
             jsonrpc = "2.0",
             result =
               (if (responses++ == 0) initialization else result)?.let(
-                DaemonJson::parseToJsonElement
+                DaemonJson::parseToJsonElement,
               ),
           )
         },

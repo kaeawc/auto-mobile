@@ -15,7 +15,7 @@ class NetworkControlContractReceiver : BroadcastReceiver() {
         putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, true)
         putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, ERROR_TYPE)
         putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_EXPIRES_AT, Long.MAX_VALUE)
-      }
+      },
     )
   }
 

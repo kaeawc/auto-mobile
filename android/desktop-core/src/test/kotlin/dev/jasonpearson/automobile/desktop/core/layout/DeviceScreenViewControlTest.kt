@@ -187,7 +187,7 @@ class DeviceScreenViewControlTest {
    * through, and returns what the view reported.
    */
   private fun dragReporting(
-    swapMidDrag: Boolean
+    swapMidDrag: Boolean,
   ): Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint> {
     var reported: Triple<DeviceFrameSnapshot, DevicePoint, DevicePoint>? = null
     runComposeUiTest {
@@ -393,7 +393,7 @@ class DeviceScreenViewControlTest {
 
   /** Clicks [at] in control mode and returns the device coordinate it mapped to. */
   private fun controlTapAt(
-    at: (androidx.compose.ui.test.TouchInjectionScope) -> Offset
+    at: (androidx.compose.ui.test.TouchInjectionScope) -> Offset,
   ): DevicePoint {
     var tapped: DevicePoint? = null
     runComposeUiTest {

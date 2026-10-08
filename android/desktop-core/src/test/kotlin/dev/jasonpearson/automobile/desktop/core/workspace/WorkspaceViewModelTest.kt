@@ -73,8 +73,8 @@ class WorkspaceViewModelTest {
           platform = Platform.Android,
           activeTool = Tool.Storage,
           deviceSessionUuid = "epoch-a",
-        )
-      )
+        ),
+      ),
     )
 
     vm.onAction(WorkspaceAction.SetFirstPaneFraction("a", 0.5f))
@@ -86,8 +86,8 @@ class WorkspaceViewModelTest {
           name = "Device a (restarted)",
           platform = Platform.Android,
           deviceSessionUuid = "epoch-b",
-        )
-      )
+        ),
+      ),
     )
 
     val state = vm.state.value as WorkspaceUiState.Content
@@ -123,8 +123,8 @@ class WorkspaceViewModelTest {
           platform = Platform.Android,
           activeTool = Tool.Storage,
           deviceSessionUuid = "epoch-a",
-        )
-      )
+        ),
+      ),
     )
     vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
 
@@ -133,8 +133,8 @@ class WorkspaceViewModelTest {
         mapOf(
           "a" to "epoch-b",
           "not-open" to "unreachable",
-        )
-      )
+        ),
+      ),
     )
 
     val state = vm.state.value as WorkspaceUiState.Content
@@ -232,7 +232,7 @@ class WorkspaceViewModelTest {
             Platform.Ios,
             EmulatorControl.Snapshot,
             Orientation.Portrait,
-          )
+          ),
         ),
         exec.requests,
       )

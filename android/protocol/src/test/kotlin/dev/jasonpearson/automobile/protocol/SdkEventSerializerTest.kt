@@ -133,7 +133,7 @@ class SdkEventSerializerTest {
           timestamp = 0L,
           destination = "",
           source = NavigationSourceType.CUSTOM,
-        )
+        ),
       ),
     )
     assertEquals(
@@ -144,7 +144,7 @@ class SdkEventSerializerTest {
           exceptionClass = "",
           exceptionMessage = null,
           stackTrace = "",
-        )
+        ),
       ),
     )
     assertEquals(
@@ -155,7 +155,7 @@ class SdkEventSerializerTest {
           notificationId = "",
           actionId = "",
           actionLabel = "",
-        )
+        ),
       ),
     )
     assertEquals(
@@ -164,7 +164,7 @@ class SdkEventSerializerTest {
         SdkRecompositionSnapshotEvent(
           timestamp = 0L,
           snapshotJson = "",
-        )
+        ),
       ),
     )
   }

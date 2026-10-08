@@ -239,7 +239,7 @@ internal constructor(
 
       val unifiedHierarchy = processedElement?.let {
         UIElementInfo(
-          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId))
+          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId)),
         )
       }
 
@@ -413,7 +413,7 @@ internal constructor(
               displayId,
               panelUniqueId,
               rootNode.packageName?.toString(),
-            )
+            ),
           )
           val element =
             extractNodeInfo(
@@ -482,7 +482,7 @@ internal constructor(
                 hierarchy = processedElement,
                 windowBounds = ElementBounds(windowBounds),
                 isOwnInteractiveOverlay = hasInteractiveOverlayTitle(window.type, window.title),
-              )
+              ),
             )
           }
         } catch (e: Exception) {
@@ -797,7 +797,7 @@ internal constructor(
             bounds = bounds,
             reason = CONTENT_HIDDEN_REASON_COMPOSE_INTEROP,
             areaPercent = areaPercent,
-          )
+          ),
         )
         return
       }
@@ -1002,7 +1002,7 @@ internal constructor(
           isFocused = it.isFocused,
           isActive = it.isActive,
         )
-      }
+      },
     )
 
   /**
@@ -2002,7 +2002,7 @@ internal constructor(
           windowKey = windowKey,
           order = start,
           subtreeEnd = end,
-        )
+        ),
       )
     }
 

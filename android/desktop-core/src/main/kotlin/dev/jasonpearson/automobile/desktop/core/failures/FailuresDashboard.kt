@@ -452,7 +452,7 @@ private fun FailureListView(
                     )
                     .clickable { dateRange = range }
                     .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
               ) {
                 Text(
                   range.label,
@@ -496,7 +496,7 @@ private fun FailureListView(
                       )
                       .clickable { timeAggregation = agg }
                       .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp)
+                      .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
                   Text(
                     agg.label,
@@ -537,7 +537,7 @@ private fun FailureListView(
                     )
                     .clickable { dateRange = range }
                     .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
               ) {
                 Text(
                   range.label,
@@ -581,7 +581,7 @@ private fun FailureListView(
                       )
                       .clickable { timeAggregation = agg }
                       .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp)
+                      .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
                   Text(
                     agg.label,
@@ -628,7 +628,7 @@ private fun FailureListView(
             Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(6.dp))
               .clickable(onClick = onTriggerFakeFailure)
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 12.dp, vertical = 8.dp)
+              .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
           Text(
             "Trigger Failure",
@@ -647,7 +647,7 @@ private fun FailureListView(
         modifier =
           Modifier.fillMaxWidth()
             .background(Color(0xFFFF9800).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(12.dp)
+            .padding(12.dp),
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -684,7 +684,7 @@ private fun FailureListView(
         modifier =
           Modifier.fillMaxWidth()
             .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-            .padding(12.dp)
+            .padding(12.dp),
       ) {
         Row(
           verticalAlignment = Alignment.CenterVertically,
@@ -860,7 +860,7 @@ private fun FilterChip(
         .border(1.dp, borderColor, RoundedCornerShape(4.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 10.dp, vertical = 4.dp)
+        .padding(horizontal = 10.dp, vertical = 4.dp),
   ) {
     Text(displayText, fontSize = 11.sp, maxLines = 1)
   }
@@ -945,7 +945,7 @@ private fun EventTrendsSection(
     modifier =
       Modifier.fillMaxWidth()
         .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     // Stats row - responsive to width
     BoxWithConstraints(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
@@ -1027,7 +1027,7 @@ private fun FailureBarChart(
               .then(
                 if (onBarClick != null) {
                   Modifier.clickable(onClick = onBarClick).pointerHoverIcon(PointerIcon.Hand)
-                } else Modifier
+                } else Modifier,
               ),
           verticalArrangement = Arrangement.Bottom,
         ) {
@@ -1046,7 +1046,7 @@ private fun FailureBarChart(
                     .background(
                       FailureType.NonFatal.color.copy(alpha = 0.8f),
                       RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
-                    )
+                    ),
               )
             }
             if (point.toolFailures > 0) {
@@ -1054,7 +1054,7 @@ private fun FailureBarChart(
                 modifier =
                   Modifier.fillMaxWidth()
                     .height((chartHeight.value * toolHeight).dp)
-                    .background(FailureType.ToolCallFailure.color.copy(alpha = 0.8f))
+                    .background(FailureType.ToolCallFailure.color.copy(alpha = 0.8f)),
               )
             }
             if (point.anrs > 0) {
@@ -1062,7 +1062,7 @@ private fun FailureBarChart(
                 modifier =
                   Modifier.fillMaxWidth()
                     .height((chartHeight.value * anrHeight).dp)
-                    .background(FailureType.ANR.color.copy(alpha = 0.8f))
+                    .background(FailureType.ANR.color.copy(alpha = 0.8f)),
               )
             }
             if (point.crashes > 0) {
@@ -1073,7 +1073,7 @@ private fun FailureBarChart(
                     .background(
                       FailureType.Crash.color.copy(alpha = 0.8f),
                       RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp),
-                    )
+                    ),
               )
             }
           }
@@ -1277,7 +1277,7 @@ internal fun FailureDetailView(
       modifier =
         Modifier.fillMaxWidth()
           .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-          .padding(12.dp)
+          .padding(12.dp),
     ) {
       Text(
         failure.message,
@@ -1295,7 +1295,7 @@ internal fun FailureDetailView(
         modifier =
           Modifier.fillMaxWidth()
             .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-            .padding(8.dp)
+            .padding(8.dp),
       ) {
         failure.stackTraceElements.forEach { element ->
           StackTraceLine(element = element, onNavigateToSource = onNavigateToSource)
@@ -1327,7 +1327,7 @@ internal fun FailureDetailView(
       if (failure.screenBreakdown.size > 5) {
         ViewAllLink(
           if (expandedState.isExpanded(FailureSection.Screens)) "Show less"
-          else "View all ${failure.screenBreakdown.size} screens"
+          else "View all ${failure.screenBreakdown.size} screens",
         ) {
           expandedState = expandedState.toggle(FailureSection.Screens)
         }
@@ -1347,12 +1347,12 @@ internal fun FailureDetailView(
               count = device.count,
               percentage = device.percentage,
             )
-          }
+          },
       )
       if (failure.deviceBreakdown.size > 5) {
         ViewAllLink(
           if (expandedState.isExpanded(FailureSection.Devices)) "Show less"
-          else "View all ${failure.deviceBreakdown.size} devices"
+          else "View all ${failure.deviceBreakdown.size} devices",
         ) {
           expandedState = expandedState.toggle(FailureSection.Devices)
         }
@@ -1372,12 +1372,12 @@ internal fun FailureDetailView(
               count = version.count,
               percentage = version.percentage,
             )
-          }
+          },
       )
       if (failure.versionBreakdown.size > 5) {
         ViewAllLink(
           if (expandedState.isExpanded(FailureSection.Versions)) "Show less"
-          else "View all ${failure.versionBreakdown.size} versions"
+          else "View all ${failure.versionBreakdown.size} versions",
         ) {
           expandedState = expandedState.toggle(FailureSection.Versions)
         }
@@ -1420,7 +1420,7 @@ internal fun FailureDetailView(
         if (failure.affectedTests.size > 5) {
           ViewAllLink(
             if (expandedState.isExpanded(FailureSection.Tests)) "Show less"
-            else "View all ${failure.affectedTests.size} tests"
+            else "View all ${failure.affectedTests.size} tests",
           ) {
             expandedState = expandedState.toggle(FailureSection.Tests)
           }
@@ -1479,7 +1479,7 @@ private fun Badge(text: String, color: Color) {
   Box(
     modifier =
       Modifier.background(color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-        .padding(horizontal = 8.dp, vertical = 4.dp)
+        .padding(horizontal = 8.dp, vertical = 4.dp),
   ) {
     Text(text, fontSize = 11.sp, color = color)
   }
@@ -1538,7 +1538,7 @@ private fun StackTraceLine(
                 onNavigateToSource(element.fileName!!, element.lineNumber!!)
               }
               .pointerHoverIcon(PointerIcon.Hand)
-          else Modifier
+          else Modifier,
         )
         .padding(vertical = 2.dp, horizontal = 4.dp),
   )
@@ -1579,7 +1579,7 @@ private fun ToolCallDetailsSection(
       if (sortedCodes.size > 5) {
         ViewAllLink(
           if (expandedState.isExpanded(FailureSection.ErrorCodes)) "Show less"
-          else "View all ${sortedCodes.size} error codes"
+          else "View all ${sortedCodes.size} error codes",
         ) {
           onToggle(FailureSection.ErrorCodes)
         }
@@ -1618,7 +1618,7 @@ private fun ToolCallDetailsSection(
       if (params.size > 5) {
         ViewAllLink(
           if (expandedState.isExpanded(FailureSection.Parameters)) "Show less"
-          else "View all ${params.size} parameters"
+          else "View all ${params.size} parameters",
         ) {
           onToggle(FailureSection.Parameters)
         }
@@ -1690,7 +1690,7 @@ private fun ScreenBreakdownSection(
                     if (isFailureScreen) Color(0xFFE53935).copy(alpha = 0.3f)
                     else colors.text.normal.copy(alpha = 0.15f),
                     RoundedCornerShape(2.dp),
-                  )
+                  ),
             )
           }
 
@@ -1751,7 +1751,7 @@ private fun BreakdownList(items: List<BreakdownItem>) {
                   .background(
                     Color(0xFF2196F3).copy(alpha = 0.4f),
                     RoundedCornerShape(2.dp),
-                  )
+                  ),
             )
           }
 
@@ -1875,7 +1875,7 @@ private fun ScreenChip(
         .border(1.dp, borderColor, RoundedCornerShape(4.dp))
         .clickable(onClick = onClick)
         .pointerHoverIcon(PointerIcon.Hand)
-        .padding(horizontal = 10.dp, vertical = 6.dp)
+        .padding(horizontal = 10.dp, vertical = 6.dp),
   ) {
     Text(name, fontSize = 12.sp, color = textColor)
   }

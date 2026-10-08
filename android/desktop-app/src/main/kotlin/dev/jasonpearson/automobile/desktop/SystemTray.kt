@@ -141,7 +141,7 @@ internal fun detectDarkMenuBar(
             "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
             "/v",
             "SystemUsesLightTheme",
-          )
+          ),
         )
         ?.let { interpretWindowsAppearance(it.exitCode, it.output) } ?: DEFAULT_DARK_MENU_BAR
     else -> DEFAULT_DARK_MENU_BAR

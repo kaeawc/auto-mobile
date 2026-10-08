@@ -165,7 +165,7 @@ class ConfigurableTypingPolicy(private val behavior: TypingBehavior) : TypingPol
       when (behavior.backspaceStrategy) {
         BackspaceStrategy.DELETE_SURROUNDING -> ImeOp.DeleteSurroundingText(deletedWidth, 0)
         BackspaceStrategy.KEY_EVENT -> ImeOp.SendKey(KEYCODE_DEL)
-      }
+      },
     )
   }
 

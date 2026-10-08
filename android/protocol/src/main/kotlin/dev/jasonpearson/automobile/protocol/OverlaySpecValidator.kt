@@ -19,7 +19,7 @@ object OverlaySpecValidator {
   private val colorPattern = Regex("^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
   private val blankTextPattern =
     Regex(
-      "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$"
+      "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$",
     )
   private val numberTokenPattern = Regex("^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$")
   private val json = Json { ignoreUnknownKeys = false }
@@ -30,7 +30,7 @@ object OverlaySpecValidator {
             "Missing overlay structural contract"
           }
           .bufferedReader()
-          .use { it.readText() }
+          .use { it.readText() },
       )
       .jsonObject
   private val definitions = contract.getValue("definitions").jsonObject
@@ -144,8 +144,8 @@ object OverlaySpecValidator {
     return try {
       OverlaySpecValidation.Success(
         json.decodeFromJsonElement<OverlaySpec>(
-          normalizeIntegers(value, definitions.getValue("spec").jsonObject)
-        )
+          normalizeIntegers(value, definitions.getValue("spec").jsonObject),
+        ),
       )
     } catch (_: SerializationException) {
       OverlaySpecValidation.Failure(fail("", "Internal model/contract mismatch"))
@@ -172,12 +172,12 @@ object OverlaySpecValidator {
         JsonObject(
           (value as JsonObject).mapValues { (key, child) ->
             normalizeIntegers(child, fields.getValue(key).jsonObject.getValue("rule").jsonObject)
-          }
+          },
         )
       }
       "array" ->
         JsonArray(
-          (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) }
+          (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
         )
       "number" ->
         if (rule.flag("integer")) JsonPrimitive(value.jsonPrimitive.double.toInt()) else value

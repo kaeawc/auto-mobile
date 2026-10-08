@@ -23,7 +23,7 @@ class MacScreenRecordingSettingsLauncher(
   override fun openScreenRecording(): Result<Unit> {
     if (!isMacOs()) {
       return Result.failure(
-        IllegalStateException("Screen Recording settings are only available on macOS.")
+        IllegalStateException("Screen Recording settings are only available on macOS."),
       )
     }
     return runCatching {

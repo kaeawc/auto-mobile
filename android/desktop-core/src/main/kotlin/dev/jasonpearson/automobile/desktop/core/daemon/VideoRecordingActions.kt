@@ -62,7 +62,7 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
         buildJsonObject {
           put("action", JsonPrimitive("start"))
           put("deviceId", JsonPrimitive(deviceId))
-        }
+        },
       )
       .recordings
 
@@ -73,7 +73,7 @@ class McpVideoRecordingActions(private val clientProvider: () -> AutoMobileClien
           put("action", JsonPrimitive("stop"))
           put("deviceId", JsonPrimitive(deviceId))
           if (recordingId != null) put("recordingId", JsonPrimitive(recordingId))
-        }
+        },
       )
     return VideoRecordingStopResult(
       recordings = response.recordings,
@@ -106,7 +106,7 @@ internal data class VideoRecordingToolResponse(
 /** In-memory [VideoRecordingActions] for previews and tests. */
 class FakeVideoRecordingActions(
   /** Segments produced by the next stop; more than one mimics a long, split recording. */
-  private val segmentsPerStop: Int = 1
+  private val segmentsPerStop: Int = 1,
 ) : VideoRecordingActions {
   private var active: String? = null
 

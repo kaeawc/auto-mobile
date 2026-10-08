@@ -22,7 +22,7 @@ class CtrlProxyInsetsTest {
         ObservationInsetsInfo(
           systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),
           systemGestures = SystemInsetsInfo(left = 32, right = 32),
-        )
+        ),
       )
 
     assertEquals(SystemInsetsInfo(top = 24, bottom = 48, left = 32, right = 32), result)

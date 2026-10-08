@@ -260,7 +260,7 @@ fun rememberWorkspaceDeviceControl(
       hierarchy = layoutState.hierarchyFacts,
       // WebRTC/video has no capture identity; control maps and renders the paired screenshot.
       liveFrame = null,
-    )
+    ),
   )
 
   // Geometry retention — the crux of the decoupling. Keep the last snapshot INDEFINITELY: device

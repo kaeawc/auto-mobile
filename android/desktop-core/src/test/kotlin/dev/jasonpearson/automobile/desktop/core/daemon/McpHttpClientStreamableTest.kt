@@ -311,7 +311,7 @@ class McpHttpClientStreamableTest {
             override fun onError(throwable: Throwable) = throw throwable
 
             override fun onComplete() = Unit
-          }
+          },
         )
       return out.toString(Charsets.UTF_8)
     }

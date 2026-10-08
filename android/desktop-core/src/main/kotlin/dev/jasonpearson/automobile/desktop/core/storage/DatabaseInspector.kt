@@ -172,9 +172,9 @@ fun DatabaseInspector(
           Modifier.fillMaxWidth()
             .background(
               if (isError) Color(0xFFFF5722).copy(alpha = 0.1f)
-              else Color(0xFF2196F3).copy(alpha = 0.1f)
+              else Color(0xFF2196F3).copy(alpha = 0.1f),
             )
-            .padding(12.dp)
+            .padding(12.dp),
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
           Text(
@@ -333,7 +333,7 @@ fun DatabaseInspector(
                     executionTimeMs = 15,
                     rowsAffected = StorageMockData.mockQueryResult.rowCount,
                     success = true,
-                  )
+                  ),
                 ) + queryHistory
             }
           },
@@ -409,7 +409,7 @@ private fun <T> DropdownSelector(
           modifier =
             Modifier.width(180.dp)
               .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-              .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
+              .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp)),
         ) {
           items.forEach { item ->
             Box(
@@ -422,9 +422,9 @@ private fun <T> DropdownSelector(
                   .pointerHoverIcon(PointerIcon.Hand)
                   .background(
                     if (item == selectedItem) Color(0xFF2196F3).copy(alpha = 0.3f)
-                    else Color.Transparent
+                    else Color.Transparent,
                   )
-                  .padding(horizontal = 12.dp, vertical = 10.dp)
+                  .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
               Text(
                 itemLabel(item),
@@ -467,7 +467,7 @@ private fun ViewModeTabs(
         modifier =
           Modifier.clip(RoundedCornerShape(4.dp))
             .background(
-              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent
+              if (isSelected) colors.text.normal.copy(alpha = 0.1f) else Color.Transparent,
             )
             .clickable { onModeSelected(mode) }
             .pointerHoverIcon(PointerIcon.Hand)
@@ -530,7 +530,7 @@ private fun DataView(
         Modifier.fillMaxWidth()
           .background(colors.text.normal.copy(alpha = 0.05f))
           .horizontalScroll(scrollState)
-          .padding(vertical = 8.dp)
+          .padding(vertical = 8.dp),
     ) {
       result.columns.forEachIndexed { colIndex, column ->
         Box(modifier = Modifier.width(150.dp).padding(horizontal = 8.dp)) {
@@ -554,7 +554,7 @@ private fun DataView(
 
     Box(
       modifier =
-        Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f))
+        Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f)),
     )
 
     // Table rows
@@ -564,7 +564,7 @@ private fun DataView(
           (result.columns.getOrNull(pkIdx) ?: "") to row.getOrNull(pkIdx)
         }
         Row(
-          modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState).padding(vertical = 4.dp)
+          modifier = Modifier.fillMaxWidth().horizontalScroll(scrollState).padding(vertical = 4.dp),
         ) {
           row.forEachIndexed { colIndex, cell ->
             val isEditing = editingCell == Pair(rowIndex, colIndex)
@@ -666,7 +666,7 @@ private fun DataView(
         }
         Box(
           modifier =
-            Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f))
+            Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f)),
         )
       }
     }
@@ -749,7 +749,7 @@ private fun StructureView(table: TableInfo) {
       modifier =
         Modifier.fillMaxWidth()
           .background(colors.text.normal.copy(alpha = 0.05f))
-          .padding(vertical = 8.dp, horizontal = 12.dp)
+          .padding(vertical = 8.dp, horizontal = 12.dp),
     ) {
       Text(
         "Column",
@@ -785,7 +785,7 @@ private fun StructureView(table: TableInfo) {
 
     Box(
       modifier =
-        Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f))
+        Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f)),
     )
 
     LazyColumn {
@@ -834,7 +834,7 @@ private fun StructureView(table: TableInfo) {
         }
         Box(
           modifier =
-            Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f))
+            Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f)),
         )
       }
     }
@@ -865,7 +865,7 @@ private fun SQLView(
             .height(120.dp)
             .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
             .border(1.dp, colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-            .padding(8.dp)
+            .padding(8.dp),
       ) {
         BasicTextField(
           value = queryText,
@@ -930,7 +930,7 @@ private fun SQLView(
               .clickable { onSaveQuery("Query ${savedQueries.size + 1}") }
               .pointerHoverIcon(PointerIcon.Hand)
               .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-              .padding(horizontal = 10.dp, vertical = 6.dp)
+              .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
           Text("\u2606", fontSize = 14.sp, color = colors.text.normal.copy(alpha = 0.6f)) // Star
         }
@@ -964,7 +964,7 @@ private fun SQLView(
                 modifier =
                   Modifier.width(220.dp)
                     .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
-                    .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp)),
               ) {
                 savedQueries.forEach { query ->
                   Box(
@@ -975,7 +975,7 @@ private fun SQLView(
                           showSavedQueries = false
                         }
                         .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(10.dp)
+                        .padding(10.dp),
                   ) {
                     Column {
                       Text(query.name, fontSize = 11.sp, color = Color.White)
@@ -1000,7 +1000,7 @@ private fun SQLView(
               .background(Color(0xFF6200EE))
               .clickable { onExecute() }
               .pointerHoverIcon(PointerIcon.Hand)
-              .padding(horizontal = 16.dp, vertical = 8.dp)
+              .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
           Text("Execute", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Medium)
         }
@@ -1011,14 +1011,14 @@ private fun SQLView(
     if (queryResult != null) {
       Box(
         modifier =
-          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f))
+          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f)),
       )
 
       val queryError = queryResult.error
       if (queryError != null) {
         Box(
           modifier =
-            Modifier.fillMaxWidth().background(Color(0xFFFF5722).copy(alpha = 0.1f)).padding(12.dp)
+            Modifier.fillMaxWidth().background(Color(0xFFFF5722).copy(alpha = 0.1f)).padding(12.dp),
         ) {
           Text(
             queryError,
@@ -1053,7 +1053,7 @@ private fun QueryHistoryView(
             .clickable { onLoadQuery(entry) }
             .pointerHoverIcon(PointerIcon.Hand)
             .background(
-              if (entry.success) Color.Transparent else Color(0xFFFF5722).copy(alpha = 0.05f)
+              if (entry.success) Color.Transparent else Color(0xFFFF5722).copy(alpha = 0.05f),
             )
             .padding(12.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1104,7 +1104,7 @@ private fun QueryHistoryView(
       }
       Box(
         modifier =
-          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f))
+          Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.05f)),
       )
     }
   }

@@ -84,7 +84,7 @@ class BreadcrumbTrailTest {
                 System.nanoTime(),
                 BreadcrumbCategory.CUSTOM,
                 "t$t-i$i",
-              )
+              ),
             )
           }
         } finally {

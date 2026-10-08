@@ -144,7 +144,7 @@ class SdkEventBatchProcessorTest {
         metadata = emptyMap(),
         applicationId = null,
         timestamp = 0L,
-      )
+      ),
     )
     legacyBroadcastStarted.await()
     assertTrue(processor.enqueue(batch("batched")))

@@ -31,25 +31,25 @@ class StaleFrameContextRejectionWiringTest {
     mapOf(
       "TAP" to
         Regex(
-          """broadcastTapCoordinatesResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""
+          """broadcastTapCoordinatesResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)""",
         ),
       "SWIPE" to
         Regex(
-          """broadcastSwipeResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)"""
+          """broadcastSwipeResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)""",
         ),
       "DRAG" to
         Regex(
-          """broadcastDragResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)"""
+          """broadcastDragResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*,\s*null\s*\)""",
         ),
       "SET_TEXT" to
         Regex("""broadcastSetTextResult\(\s*requestId\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""),
       "IME_ACTION" to
         Regex(
-          """broadcastImeActionResult\(\s*requestId\s*,\s*action\.wireName\s*,\s*false\s*,\s*error\s*,\s*0\s*\)"""
+          """broadcastImeActionResult\(\s*requestId\s*,\s*action\.wireName\s*,\s*false\s*,\s*error\s*,\s*0\s*\)""",
         ),
       "GLOBAL_ACTION" to
         Regex(
-          """(?s)GlobalActionResult\(\s*timestamp\s*=\s*System\.currentTimeMillis\(\)\s*,\s*requestId\s*=\s*requestId\s*,\s*success\s*=\s*false\s*,.*?\berror\s*=\s*error\s*,"""
+          """(?s)GlobalActionResult\(\s*timestamp\s*=\s*System\.currentTimeMillis\(\)\s*,\s*requestId\s*=\s*requestId\s*,\s*success\s*=\s*false\s*,.*?\berror\s*=\s*error\s*,""",
         ),
     )
 
@@ -144,7 +144,7 @@ class StaleFrameContextRejectionWiringTest {
 
   private fun typedActionCallSites(source: String): Set<String> =
     Regex(
-        """rejectStaleFrameContext\(\s*requestId\s*,\s*frameContext\s*,\s*StaleFrameContextAction\.([A-Z_]+)\s*\)"""
+        """rejectStaleFrameContext\(\s*requestId\s*,\s*frameContext\s*,\s*StaleFrameContextAction\.([A-Z_]+)\s*\)""",
       )
       .findAll(source)
       .map { it.groupValues[1] }

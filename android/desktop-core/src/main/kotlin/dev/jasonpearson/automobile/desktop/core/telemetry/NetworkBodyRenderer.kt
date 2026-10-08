@@ -111,7 +111,7 @@ private fun JsonBodyBlock(body: String, textColor: Color) {
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
         .horizontalScroll(rememberScrollState())
-        .padding(8.dp)
+        .padding(8.dp),
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -125,7 +125,7 @@ private fun PlainBodyBlock(body: String, textColor: Color) {
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
         .horizontalScroll(rememberScrollState())
-        .padding(8.dp)
+        .padding(8.dp),
   ) {
     Text(
       body,
@@ -159,7 +159,7 @@ private fun ImageBodyBlock(body: String, contentType: String, textColor: Color) 
       modifier =
         Modifier.fillMaxWidth()
           .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
-          .padding(8.dp)
+          .padding(8.dp),
     ) {
       Image(
         bitmap = bitmap,
@@ -212,7 +212,7 @@ private fun XmlBodyBlock(body: String, textColor: Color) {
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
         .horizontalScroll(rememberScrollState())
-        .padding(8.dp)
+        .padding(8.dp),
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -250,7 +250,7 @@ private fun YamlBodyBlock(body: String, textColor: Color) {
       Modifier.fillMaxWidth()
         .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
         .horizontalScroll(rememberScrollState())
-        .padding(8.dp)
+        .padding(8.dp),
   ) {
     Text(annotated, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
@@ -286,16 +286,16 @@ fun HeaderDataTable(headers: Map<String, String>, textColor: Color) {
 
   Column(
     modifier =
-      Modifier.fillMaxWidth().background(textColor.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+      Modifier.fillMaxWidth().background(textColor.copy(alpha = 0.03f), RoundedCornerShape(4.dp)),
   ) {
     headers.entries.forEachIndexed { index, (key, value) ->
       Row(
         modifier =
           Modifier.fillMaxWidth()
             .then(
-              if (index % 2 == 0) Modifier.background(textColor.copy(alpha = 0.04f)) else Modifier
+              if (index % 2 == 0) Modifier.background(textColor.copy(alpha = 0.04f)) else Modifier,
             )
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
       ) {
         Text(
           key,

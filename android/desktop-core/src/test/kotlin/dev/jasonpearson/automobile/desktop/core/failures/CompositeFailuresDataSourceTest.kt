@@ -36,7 +36,7 @@ class CompositeFailuresDataSourceTest {
 
     val mcpDataSource =
       FakeFailuresDataSourceImpl(
-        getFailureGroupsResult = Result.Error(RuntimeException("MCP unavailable"))
+        getFailureGroupsResult = Result.Error(RuntimeException("MCP unavailable")),
       )
     val streamingDataSource =
       FakeStreamingFailuresDataSource(getFailureGroupsResult = Result.Success(streamingGroups))
@@ -91,7 +91,7 @@ class CompositeFailuresDataSourceTest {
     val notification = createTestNotification(1)
     val streamingDataSource =
       FakeStreamingFailuresDataSource(
-        notificationsFlowResult = flowOf(Result.Success(listOf(notification)))
+        notificationsFlowResult = flowOf(Result.Success(listOf(notification))),
       )
 
     val composite = CompositeFailuresDataSource(null, streamingDataSource)
@@ -116,7 +116,7 @@ class CompositeFailuresDataSourceTest {
     val totals = FailureTotals(crashes = 1, anrs = 0, toolFailures = 0, nonfatals = 0)
     val streamingDataSource =
       FakeStreamingFailuresDataSource(
-        failureGroupsFlowResult = flowOf(Result.Success(FailureGroupsWithTotals(groups, totals)))
+        failureGroupsFlowResult = flowOf(Result.Success(FailureGroupsWithTotals(groups, totals))),
       )
 
     val composite = CompositeFailuresDataSource(null, streamingDataSource)
@@ -148,7 +148,7 @@ class CompositeFailuresDataSourceTest {
         TimelineData(
           emptyList(),
           PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
-        )
+        ),
       ),
   ) : FailuresDataSource {
     override suspend fun getFailureGroups(): Result<List<FailureGroup>> = getFailureGroupsResult
@@ -166,7 +166,7 @@ class CompositeFailuresDataSourceTest {
         TimelineData(
           emptyList(),
           PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0),
-        )
+        ),
       ),
     private val notificationsFlowResult: Flow<Result<List<FailureNotification>>> = emptyFlow(),
     private val failureGroupsFlowResult: Flow<Result<FailureGroupsWithTotals>> = emptyFlow(),

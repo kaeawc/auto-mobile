@@ -49,7 +49,7 @@ class InboundFrameLimits internal constructor(private val maxBytesByType: Map<St
         mapOf(
           "put_overlay_asset" to OverlayAssetLimits().maxEncodedLength + ENVELOPE_ALLOWANCE_BYTES,
           "remove_overlay_asset" to ENVELOPE_ALLOWANCE_BYTES,
-        )
+        ),
       )
   }
 }

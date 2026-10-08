@@ -32,7 +32,7 @@ class SdkManifestQueriesTest {
       elements.any {
         it.tagName.startsWith("uses-permission") &&
           it.getAttributeNS(ANDROID_NAMESPACE, "name") == "android.permission.QUERY_ALL_PACKAGES"
-      }
+      },
     )
   }
 

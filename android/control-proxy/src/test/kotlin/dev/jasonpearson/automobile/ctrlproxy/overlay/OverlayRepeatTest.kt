@@ -37,11 +37,11 @@ class OverlayRepeatTest {
         spec(
           list(
             OverlayTextNode(
-              text = "{index}: {item.label} costs {item.price} ({item.on}) {other.x}"
+              text = "{index}: {item.label} costs {item.price} ({item.on}) {other.x}",
             ),
             OverlayRowNode(children = listOf(OverlayTextNode(text = "{item.label}!"))),
-          )
-        )
+          ),
+        ),
       )
     val rows = model.root.children
     assertEquals(
@@ -80,12 +80,12 @@ class OverlayRepeatTest {
                   listOf(
                     OverlayCondition("picked", equals = OverlayScalar.Text("{item.id}")),
                     OverlayCondition(
-                      not = OverlayCondition("slot", equals = OverlayScalar.Text("{index}"))
+                      not = OverlayCondition("slot", equals = OverlayScalar.Text("{index}")),
                     ),
-                  )
+                  ),
               ),
               OverlayStyle(background = "#2255CC"),
-            )
+            ),
           ),
         onTap =
           listOf(
@@ -172,11 +172,11 @@ class OverlayRepeatTest {
           "b" to OverlayScalar.Numeric(1e15),
           "c" to OverlayScalar.Numeric(1e21),
           "d" to OverlayScalar.Numeric(-2.5),
-        )
+        ),
       )
     val model =
       mapOverlaySpec(
-        spec(list(OverlayTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big))
+        spec(list(OverlayTextNode(text = "{item.a} {item.b} {item.c} {item.d}"), repeat = big)),
       )
     assertEquals(
       "999999999999999 1000000000000000 1000000000000000000000 -2.5",
@@ -194,7 +194,7 @@ class OverlayRepeatTest {
     assertEquals("root.children[0].onTap[0].name", failure.error.path)
     assertEquals("Expanded emit name is empty for item 1", failure.error.message)
     assertTrue(
-      OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success
+      OverlaySpecValidator.validate(json("row-{item.id}")) is OverlaySpecValidation.Success,
     )
   }
 }

@@ -42,7 +42,7 @@ class IcTraceEditText(context: Context, attrs: AttributeSet? = null) : EditText(
         inputType = outAttrs.inputType,
         imeOptions = outAttrs.imeOptions,
         privateImeOptions = outAttrs.privateImeOptions,
-      )
+      ),
     )
     return LoggingInputConnection(base, activeRecorder, { captureText }) {
       intArrayOf(

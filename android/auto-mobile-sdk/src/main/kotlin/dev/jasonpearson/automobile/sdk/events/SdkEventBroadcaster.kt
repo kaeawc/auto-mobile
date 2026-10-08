@@ -268,7 +268,7 @@ object SdkEventBroadcaster {
         timestamp = System.currentTimeMillis(),
         applicationId = applicationId,
         events = events,
-      )
+      ),
     )
 
   private fun scheduler(): BatchDeliveryScheduler =

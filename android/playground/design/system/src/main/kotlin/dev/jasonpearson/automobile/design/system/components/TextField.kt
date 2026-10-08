@@ -141,7 +141,7 @@ private fun AutoMobileTextFieldPreview() {
       )
 
       androidx.compose.foundation.layout.Spacer(
-        modifier = Modifier.height(AutoMobileDimensions.spacing4)
+        modifier = Modifier.height(AutoMobileDimensions.spacing4),
       )
 
       AutoMobileOutlinedTextField(

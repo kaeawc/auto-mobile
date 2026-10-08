@@ -17,16 +17,16 @@ class DevicePickerBootstrapMessageTest {
       "Starting AutoMobile 0.0.67…",
       loadingMessage(
         DaemonBootstrapState.Working(
-          DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67")
-        )
+          DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67"),
+        ),
       ),
     )
     assertEquals(
       "Updating the AutoMobile daemon to 0.0.67…",
       loadingMessage(
         DaemonBootstrapState.Working(
-          DaemonLifecyclePhase.LaunchingDaemon(action = "restart", version = "0.0.67")
-        )
+          DaemonLifecyclePhase.LaunchingDaemon(action = "restart", version = "0.0.67"),
+        ),
       ),
     )
     assertEquals(

@@ -330,7 +330,7 @@ class WorkspaceShellUiTest {
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
         1,
         1,
-      )
+      ),
     )
     waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 9" }
     waitUntil(timeoutMillis = 5_000L) {
@@ -385,7 +385,7 @@ class WorkspaceShellUiTest {
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
         1,
         1,
-      )
+      ),
     )
     waitUntil(timeoutMillis = 5_000L) { savedName == "Pixel 8" }
   }
@@ -1155,7 +1155,7 @@ class WorkspaceShellUiTest {
           statusDetail = "Daemon unreachable",
           bootstrapState =
             DaemonBootstrapState.Working(
-              DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67")
+              DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.67"),
             ),
           healthSheetContent = { Text("fake-health-body") },
         )

@@ -80,7 +80,7 @@ class WebSocketServerIntegrationTest {
                   }
                 enqueueHighlightResponse(requestId, error == null, error)
               }
-            }
+            },
           ),
       )
   }
@@ -760,8 +760,8 @@ class WebSocketServerIntegrationTest {
 
         send(
           Frame.Text(
-            """{"type":"request_tap_coordinates","requestId":"req-out-of-range","x":1e309,"y":10}"""
-          )
+            """{"type":"request_tap_coordinates","requestId":"req-out-of-range","x":1e309,"y":10}""",
+          ),
         )
 
         val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
@@ -903,7 +903,7 @@ class WebSocketServerIntegrationTest {
               override fun requestScreenshot(requestId: String?) {
                 throw RuntimeException("kaboom")
               }
-            }
+            },
           ),
       )
     startAndWait(throwingServer)
@@ -947,7 +947,7 @@ class WebSocketServerIntegrationTest {
               override fun requestScreenshot(requestId: String?) {
                 throw RuntimeException("kaboom")
               }
-            }
+            },
           ),
       )
     startAndWait(throwingServer)
@@ -1047,7 +1047,7 @@ class WebSocketServerIntegrationTest {
               override fun requestScreenshot(requestId: String?) {
                 order.add("screenshot")
               }
-            }
+            },
           ),
       )
     startAndWait(orderedServer)
@@ -1091,7 +1091,7 @@ class WebSocketServerIntegrationTest {
                   rawSuccessServer.broadcast("""{"type":"screenshot","requestId":"$requestId"}""")
                 }
               }
-            }
+            },
           ),
       )
     startAndWait(rawSuccessServer)
@@ -1122,16 +1122,16 @@ class WebSocketServerIntegrationTest {
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-raw-success"}"""))
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerReceivedRaw.complete(Unit)
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerReceivedProbe.complete(Unit)
               readLateSequence.await()
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1147,12 +1147,12 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               bystanderReceivedProbe.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1166,7 +1166,7 @@ class WebSocketServerIntegrationTest {
           ownerReceivedProbe.await()
           bystanderReceivedProbe.await()
           rawSuccessServer.broadcast(
-            ErrorResponse(requestId = "req-raw-success", error = "late correlated failure")
+            ErrorResponse(requestId = "req-raw-success", error = "late correlated failure"),
           )
           rawSuccessServer.broadcast("""{"type":"probe","sequence":2}""")
           readLateSequence.complete(Unit)
@@ -1220,11 +1220,11 @@ class WebSocketServerIntegrationTest {
                       value = "value",
                       found = true,
                       totalTimeMs = 1L,
-                    )
+                    ),
                   )
                 }
               }
-            }
+            },
           ),
       )
     startAndWait(typedSuccessServer)
@@ -1255,16 +1255,16 @@ class WebSocketServerIntegrationTest {
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-typed-success"}"""))
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerReceivedTyped.complete(Unit)
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerReceivedProbe.complete(Unit)
               readLateSequence.await()
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1280,12 +1280,12 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               bystanderReceivedProbe.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1299,7 +1299,7 @@ class WebSocketServerIntegrationTest {
           ownerReceivedProbe.await()
           bystanderReceivedProbe.await()
           typedSuccessServer.broadcast(
-            ErrorResponse(requestId = "req-typed-success", error = "late correlated failure")
+            ErrorResponse(requestId = "req-typed-success", error = "late correlated failure"),
           )
           typedSuccessServer.broadcast("""{"type":"probe","sequence":2}""")
           readLateSequence.complete(Unit)
@@ -1363,7 +1363,7 @@ class WebSocketServerIntegrationTest {
                   throw RuntimeException("async boom")
                 }
               }
-            }
+            },
           ),
       )
     runnerHolder[0] =
@@ -1420,7 +1420,7 @@ class WebSocketServerIntegrationTest {
             timestamp = 1234,
             requestId = "sync_1234_external",
             error = "Hierarchy extraction failed",
-          )
+          ),
         )
 
         val responseFrame = withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text
@@ -1447,7 +1447,7 @@ class WebSocketServerIntegrationTest {
                   throw RuntimeException("async boom")
                 }
               }
-            }
+            },
           ),
       )
     runnerHolder[0] =
@@ -1552,7 +1552,7 @@ class WebSocketServerIntegrationTest {
                   hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")
                 }
               }
-            }
+            },
           ),
       )
     startAndWait(hierarchyServer)
@@ -1582,15 +1582,15 @@ class WebSocketServerIntegrationTest {
               sendOwnerMessage.await()
               send(Frame.Text("""{"type":"request_hierarchy","requestId":"req-hierarchy"}"""))
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               ownerReceivedUpdate.complete(Unit)
               readLateSequence.await()
               ownerMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1606,12 +1606,12 @@ class WebSocketServerIntegrationTest {
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
               bystanderReceivedUpdate.complete(Unit)
               readLateSequence.await()
               bystanderMessages.add(
-                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText()
+                (withTimeout(FRAME_TIMEOUT_MS) { incoming.receive() } as Frame.Text).readText(),
               )
             }
           }
@@ -1623,7 +1623,7 @@ class WebSocketServerIntegrationTest {
           ownerReceivedUpdate.await()
           bystanderReceivedUpdate.await()
           hierarchyServer.broadcast(
-            ErrorResponse(requestId = "req-hierarchy", error = "late correlated failure")
+            ErrorResponse(requestId = "req-hierarchy", error = "late correlated failure"),
           )
           hierarchyServer.broadcast("""{"type":"probe"}""")
           readLateSequence.complete(Unit)

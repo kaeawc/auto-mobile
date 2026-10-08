@@ -741,7 +741,7 @@ fun AutoMobileContent(
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
     LOG.info(
-      "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded"
+      "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded",
     )
   }
 
@@ -803,7 +803,7 @@ fun AutoMobileContent(
   // Log when connectedMcpProcess changes
   LaunchedEffect(connectedMcpProcess) {
     LOG.info(
-      "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}"
+      "connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}",
     )
   }
 
@@ -819,7 +819,7 @@ fun AutoMobileContent(
             ?: processes.firstOrNull { it.connectionType == McpConnectionType.StreamableHttp }
         if (preferred != null) {
           LOG.info(
-            "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})"
+            "Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})",
           )
           connectedMcpProcess = preferred
         }
@@ -841,7 +841,7 @@ fun AutoMobileContent(
   val clientProvider: (() -> AutoMobileClient)? =
     remember(connectedMcpProcess, dataSourceMode, desktopDaemonSession) {
       LOG.info(
-        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+        "clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}",
       )
       connectedMcpProcess?.let { process ->
         {
@@ -889,7 +889,7 @@ fun AutoMobileContent(
     remember(dataSourceMode, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real) {
         AppearanceSocketClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
         )
       } else {
         null
@@ -909,7 +909,7 @@ fun AutoMobileContent(
           (desktopDaemonSession == null || desktopSessionReady)
       ) {
         WebRtcStreamSocketClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
         )
       } else {
         null
@@ -926,7 +926,7 @@ fun AutoMobileContent(
       ) {
         videoStreamSourceFactory?.invoke()
           ?: VideoStreamClient(
-            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+            sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
           )
       } else {
         null
@@ -1054,7 +1054,7 @@ fun AutoMobileContent(
                 realDevice = firstDevice
                 activeDeviceId = firstDevice.id
                 LOG.info(
-                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}"
+                  "Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}",
                 )
               }
             }
@@ -1097,7 +1097,7 @@ fun AutoMobileContent(
         if (consecutiveFailures <= 1) baseDelayMs
         else
           (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(
-            maxDelayMs
+            maxDelayMs,
           )
       kotlinx.coroutines.delay(delayMs)
       kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -1307,7 +1307,7 @@ fun AutoMobileContent(
     remember(dataSourceMode, isFailuresPanelCollapsed, desktopDaemonSession) {
       if (dataSourceMode == DataSourceMode.Real && !isFailuresPanelCollapsed)
         StreamingFailuresDataSource(
-          FailuresStreamSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider)
+          FailuresStreamSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider),
         )
       else null
     }
@@ -1374,10 +1374,10 @@ fun AutoMobileContent(
     ) {
       obsClient =
         ObservationStreamClient(
-          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
+          sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
         )
       LOG.info(
-        "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})"
+        "Connecting observation stream for device: $deviceId (client: ${obsClient.hashCode()})",
       )
       // Cadence starts at the daemon default; the focus-aware effect below raises it while the
       // live layout inspector is active and relaxes it otherwise.
@@ -1447,7 +1447,7 @@ fun AutoMobileContent(
   LaunchedEffect(observationStreamClient, isLiveLayoutMode) {
     val client = observationStreamClient ?: return@LaunchedEffect
     client.setCadence(
-      screenshotIntervalMs = if (isLiveLayoutMode) LIVE_SCREENSHOT_INTERVAL_MS else null
+      screenshotIntervalMs = if (isLiveLayoutMode) LIVE_SCREENSHOT_INTERVAL_MS else null,
     )
   }
 
@@ -1721,7 +1721,7 @@ fun AutoMobileContent(
                 buildJsonObject {
                   put("type", event::class.simpleName ?: "unknown")
                   put("timestamp", event.timestamp)
-                }
+                },
               )
             }
           }
@@ -1737,7 +1737,7 @@ fun AutoMobileContent(
         onOpenSettings = { showSettings = true },
         onTakeScreenshot = takeScreenshot,
         onToggleLiveLayout = { showNavigationView = !showNavigationView },
-      )
+      ),
     )
   }
 
@@ -1775,7 +1775,7 @@ fun AutoMobileContent(
                   label = label,
                   preview = preview,
                   onSelect = {},
-                )
+                ),
               )
             }
           // Navigation screens from mock data
@@ -1793,7 +1793,7 @@ fun AutoMobileContent(
                   label = screen.name,
                   preview = "${screen.type} · ${screen.packageName}",
                   onSelect = {},
-                )
+                ),
               )
             }
           // Installed apps as hierarchy elements
@@ -1808,7 +1808,7 @@ fun AutoMobileContent(
                   label = app.packageName.substringAfterLast('.'),
                   preview = app.packageName,
                   onSelect = { selectedAppId = app.packageName },
-                )
+                ),
               )
             }
           return results
@@ -1890,7 +1890,7 @@ fun AutoMobileContent(
         } else {
           false
         }
-      }
+      },
   ) {
     ThreePaneShell(
       showLeftPane = showLeftPane,
@@ -1971,7 +1971,7 @@ fun AutoMobileContent(
                 // capture identity, so it is only an Inspector-mode rendering source and must not
                 // decide whether the independently paired screenshot is actionable.
                 liveFrame = null,
-              )
+              ),
             )
           // What a CLICK acts through. While a post-input refresh is pending this is the retained
           // frame rather than the live decision, so the coherent frame on screen stays clickable
@@ -2097,7 +2097,7 @@ fun AutoMobileContent(
                     (deviceControlDecision as? DeviceControlDecision.Blocked)?.reason
                   } else {
                     null
-                  }
+                  },
               )
 
               deviceControlTapError?.let { message ->
@@ -2227,7 +2227,7 @@ fun AutoMobileContent(
                     val client = clientProvider?.invoke()
                     val platform = device.toSidebarDeviceInfo().platform
                     LOG.info(
-                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}"
+                      "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
                     )
                     val result = client?.killDevice(device.name, device.id, platform)
                     if (result?.success == false)
@@ -2489,7 +2489,7 @@ private fun GlobalShellHeader(
                       )
                     }
                   }
-                }
+                },
               ) {
                 Box(
                   modifier =
@@ -2507,7 +2507,7 @@ private fun GlobalShellHeader(
                         }
                       }
                       .pointerHoverIcon(PointerIcon.Hand)
-                      .padding(horizontal = 8.dp, vertical = 4.dp)
+                      .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
                   Icon(
                     imageVector = PlatformIcons.logo(deviceIsIos),
@@ -2549,7 +2549,7 @@ private fun GlobalShellHeader(
                 )
                 .clickable(onClick = onSetupClick)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
           ) {
             Text(
               "Setup",
@@ -2630,14 +2630,14 @@ private fun RealDataSwitch(
           .background(trackColor)
           .clickable { onToggle(!isRealData) }
           .pointerHoverIcon(PointerIcon.Hand)
-          .padding(2.dp)
+          .padding(2.dp),
     ) {
       Box(
         modifier =
           Modifier.size(14.dp)
             .offset(x = if (isRealData) 14.dp else 0.dp)
             .clip(CircleShape)
-            .background(thumbColor)
+            .background(thumbColor),
       )
     }
   }
@@ -2661,7 +2661,7 @@ private fun DraggableTabs(
   var dragOffset by remember { mutableStateOf(0f) }
 
   BoxWithConstraints(
-    modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground)
+    modifier = Modifier.fillMaxWidth().background(SharedTheme.globalColors.panelBackground),
   ) {
     // Three modes: icons only (< 300dp), icon + text (300-600dp), text only (> 600dp)
     val useIconsOnly = maxWidth < 300.dp
@@ -2695,7 +2695,7 @@ private fun DraggableTabs(
                     Color(0xFF2196F3).copy(alpha = 0.5f),
                     RoundedCornerShape(6.dp),
                   )
-                else Modifier
+                else Modifier,
               )
               .clickable {
                 LOG.debug("Tab clicked via clickable: $index (${tabs[index]})")

@@ -167,7 +167,7 @@ fun main() {
     }
 
     CompositionLocalProvider(
-      LocalWindowExceptionHandlerFactory provides uiExceptionHandlerFactory
+      LocalWindowExceptionHandlerFactory provides uiExceptionHandlerFactory,
     ) {
       Window(
         onCloseRequest = { isWindowVisible = false },

@@ -108,8 +108,8 @@ class NavigationFacetTest {
           .copy(
             provenance =
               listOf(
-                ScreenProvenance(ProvenanceBuildKey(app, 2L, "hashB"), "dev-1", "epoch-1", 250L)
-              )
+                ScreenProvenance(ProvenanceBuildKey(app, 2L, "hashB"), "dev-1", "epoch-1", 250L),
+              ),
           )
       val source =
         StubNavigationDataSource(Result.Success(NavigationGraph(listOf(home), emptyList())))
@@ -172,7 +172,7 @@ class NavigationFacetTest {
                 observationStreamFactory = { fake },
                 navigationDataSourceProvider = {
                   StubNavigationDataSource(
-                    Result.Success(NavigationGraph(emptyList(), emptyList()))
+                    Result.Success(NavigationGraph(emptyList(), emptyList())),
                   )
                 },
               )
@@ -236,7 +236,7 @@ class NavigationFacetTest {
               observationStreamFactory = { fake },
               navigationDataSourceProvider = {
                 StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
                 )
               },
             )
@@ -304,7 +304,7 @@ class NavigationFacetTest {
       val gateB = CompletableDeferred<Unit>()
       val aSource =
         StubNavigationDataSource(
-          Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+          Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
         )
       val bSource =
         object : NavigationDataSource {
@@ -367,7 +367,7 @@ class NavigationFacetTest {
           if (calls.incrementAndGet() >= 2) {
             gate.await()
             return Result.Success(
-              NavigationGraph(listOf(screen("Home"), screen("Details")), emptyList())
+              NavigationGraph(listOf(screen("Home"), screen("Details")), emptyList()),
             )
           }
           return Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
@@ -458,7 +458,7 @@ class NavigationFacetTest {
               observationStreamFactory = { fake },
               navigationDataSourceProvider = {
                 StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                  Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
                 )
               },
             )
@@ -622,7 +622,7 @@ class NavigationFacetTest {
             observationStreamFactory = { controlled },
             navigationDataSourceProvider = {
               StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
               )
             },
             backoffDelay = { backoff.await() },
@@ -672,7 +672,7 @@ class NavigationFacetTest {
             observationStreamFactory = { fake },
             navigationDataSourceProvider = {
               StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
               )
             },
             backoffDelay = { reconnectMayStart.await() },
@@ -724,7 +724,7 @@ class NavigationFacetTest {
             observationStreamFactory = { fake },
             navigationDataSourceProvider = {
               StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList()))
+                Result.Success(NavigationGraph(listOf(screen("Home")), emptyList())),
               )
             },
             backoffDelay = { backoff.await() },
@@ -772,7 +772,7 @@ class NavigationFacetTest {
                 // Distinct graph per app so a stale render is detectable by screen name.
                 val label = if (appId == "com.example.b") "Beta" else "Alpha"
                 StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen(label)), emptyList()))
+                  Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
                 )
               },
               backoffDelay = { backoff.await() },
@@ -832,7 +832,7 @@ class NavigationFacetTest {
               observationStreamFactory = { fake },
               navigationDataSourceProvider = {
                 StubNavigationDataSource(
-                  Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+                  Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
                 )
               },
               backoffDelay = { backoff.await() },
@@ -985,7 +985,7 @@ class NavigationFacetTest {
             observationStreamFactory = { fake },
             navigationDataSourceProvider = {
               StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList()))
+                Result.Success(NavigationGraph(listOf(screen("Alpha")), emptyList())),
               )
             },
             backoffDelay = {},
@@ -1049,7 +1049,7 @@ class NavigationFacetTest {
             navigationDataSourceProvider = { appId ->
               val label = if (appId == "com.example.b") "Beta" else "Alpha"
               StubNavigationDataSource(
-                Result.Success(NavigationGraph(listOf(screen(label)), emptyList()))
+                Result.Success(NavigationGraph(listOf(screen(label)), emptyList())),
               )
             },
           )
@@ -1170,9 +1170,11 @@ class NavigationFacetTest {
     val fromReg2 = NavigationScreenshotLoaderRegistry()
     val used = mutableListOf<ScreenshotLoader>()
     val provider =
-      mutableStateOf<(String) -> ScreenshotLoader>({ id ->
-        fromReg1.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
-      })
+      mutableStateOf<(String) -> ScreenshotLoader>(
+        { id ->
+          fromReg1.forDevice(id) { FakeAutoMobileClient() }.also { used += it }
+        },
+      )
     setContent {
       CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
         MaterialTheme {
@@ -1249,7 +1251,7 @@ class NavigationFacetTest {
               NavigationGraph(
                 listOf(screenWithShot("Home", homeUri), screenWithShot("Details", detailsUri)),
                 emptyList(),
-              )
+              ),
             )
         }
       val loader = RecordingScreenshotLoader()

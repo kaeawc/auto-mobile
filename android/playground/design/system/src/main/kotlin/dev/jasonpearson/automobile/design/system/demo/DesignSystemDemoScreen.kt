@@ -61,7 +61,7 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
           title = { AutoMobileTitle("Design System Demo") },
           navigationIcon = { AutoMobileBackButton(onBackClick = onBackClick) },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -117,7 +117,7 @@ fun DesignSystemDemoScreen(onBackClick: () -> Unit = {}) {
           AutoMobileHeadline("Cards")
           Spacer(modifier = Modifier.height(AutoMobileDimensions.spacing2))
           AutoMobileBodyText(
-            "This is an outlined card variant. Cards follow flat design principles and avoid nesting."
+            "This is an outlined card variant. Cards follow flat design principles and avoid nesting.",
           )
         }
 

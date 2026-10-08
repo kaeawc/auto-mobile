@@ -44,7 +44,7 @@ class OverlayThemeTest {
   fun `the leading chain is searched when the root paints nothing`() {
     val nested =
       OverlayBoxNode(
-        children = listOf(OverlayBoxNode(style = styled("#101010"), children = emptyList()))
+        children = listOf(OverlayBoxNode(style = styled("#101010"), children = emptyList())),
       )
     assertNull(overlayAuthoredTheme(model(OverlaySpacerNode()).root))
     assertEquals(true, overlayAuthoredTheme(model(nested).root)?.dark)
@@ -94,7 +94,7 @@ class OverlayThemeTest {
   fun `a seed keeps its hue in the primary colour`() {
     val scheme = overlaySeedColorScheme(Color(0xFF0000FF), dark = false)
     assertTrue(
-      scheme.primary.blue > scheme.primary.red && scheme.primary.blue > scheme.primary.green
+      scheme.primary.blue > scheme.primary.red && scheme.primary.blue > scheme.primary.green,
     )
   }
 
@@ -151,7 +151,7 @@ class OverlayThemeTest {
               children = emptyList(),
             ),
             OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()),
-          )
+          ),
       )
     assertEquals(false, overlayAuthoredTheme(model(hidden).root)?.dark)
   }

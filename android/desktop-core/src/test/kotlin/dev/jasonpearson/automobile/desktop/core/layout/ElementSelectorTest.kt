@@ -41,7 +41,7 @@ class ElementSelectorTest {
           resourceId = "com.app:id/submit",
           text = "Submit",
           contentDescription = "Submit button",
-        )
+        ),
       )
     assertEquals("//Button[@resource-id='com.app:id/submit']", selector)
   }

@@ -87,7 +87,7 @@ object VideoServer {
           println("\nShutting down...")
           running = false
           shutdown()
-        }
+        },
       )
 
     try {
@@ -195,7 +195,7 @@ object VideoServer {
         medium  720p @ 4 Mbps @ 30fps
         high    1080p @ 8 Mbps @ 30fps
       """
-        .trimIndent()
+        .trimIndent(),
     )
   }
 
@@ -315,7 +315,7 @@ object VideoServer {
       // negotiate before connecting (issue #4729); a pre-handshake host simply ignores the field.
       println(
         "VIDEO_SESSION_READY token=$it pid=${android.os.Process.myPid()} " +
-          "socket=${session.socketName} proto=${VideoHandshake.PROTOCOL_VERSION}"
+          "socket=${session.socketName} proto=${VideoHandshake.PROTOCOL_VERSION}",
       )
     }
 
@@ -367,7 +367,7 @@ object VideoServer {
             }
             if (
               shouldCountVideoStatsFrame(
-                isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                isCodecConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0,
               )
             ) {
               stats.onFrame(bufferInfo.size)
@@ -465,7 +465,7 @@ object VideoServer {
     val (newWidth, newHeight) = next
     println(
       "VIDEO_ROTATION_SWAP rotation=${displayInfo.rotation} " +
-        "from=${current.first}x${current.second} to=${newWidth}x$newHeight"
+        "from=${current.first}x${current.second} to=${newWidth}x$newHeight",
     )
     // Atomic w.r.t. the writer: clear the stale replay cache before the old encoder is gone so no
     // reconnecting client can be replayed a new-SPS/old-IDR mismatch mid-swap.

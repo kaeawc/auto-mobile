@@ -22,7 +22,7 @@ class CorrelatedErrorReporterTest {
   private val logs = mutableListOf<Pair<String, Throwable>>()
 
   private fun reporter(
-    broadcastError: suspend (ErrorResponse) -> Unit = { broadcasts += it }
+    broadcastError: suspend (ErrorResponse) -> Unit = { broadcasts += it },
   ): CorrelatedErrorReporter =
     CorrelatedErrorReporter(broadcastError) { message, error -> logs += message to error }
 

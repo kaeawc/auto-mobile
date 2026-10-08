@@ -725,7 +725,7 @@ class DeviceControlSession(
    * through the one error claim and the one bounded queue rather than each re-deriving them.
    */
   private inline fun enqueue(
-    build: (client: AutoMobileClient?, platform: String, token: Long) -> DeviceControlInputCommand
+    build: (client: AutoMobileClient?, platform: String, token: Long) -> DeviceControlInputCommand,
   ): Boolean {
     val token = errorToken.incrementAndGet()
     publishError(null)

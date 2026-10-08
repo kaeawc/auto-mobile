@@ -155,11 +155,11 @@ class DaemonNotificationClient(
           channel = socket
           val reader =
             BufferedReader(
-              InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8)
+              InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8),
             )
           val writer =
             BufferedWriter(
-              OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8)
+              OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8),
             )
 
           if (!subscribe(reader, writer)) {

@@ -1044,7 +1044,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (perfTiming != null) {
           put("perfTiming", perfTiming)
         }
-      }
+      },
     )
 
   private val perfProvider = PerfProvider.instance
@@ -1636,7 +1636,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     SdkAnrBroadcastHandler(
       enqueue = { event ->
         sdkEventBatchProcessor.enqueue(
-          SdkEventBatch(timestamp = event.timestamp, events = listOf(event))
+          SdkEventBatch(timestamp = event.timestamp, events = listOf(event)),
         )
       },
       log =
@@ -2739,7 +2739,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             action = action.wireName,
             totalTimeMs = 0,
             error = error,
-          )
+          ),
         )
     }
 
@@ -3131,7 +3131,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             } else {
               "Stale frame context for input/key; observe a fresh frame before retrying"
             },
-        )
+        ),
       )
     }
   }
@@ -3222,7 +3222,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             timestamp = timeProvider.currentTimeMillis(),
             requestId = requestId,
             state = state,
-          )
+          ),
         )
       }
     }
@@ -3242,7 +3242,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             timestamp = timeProvider.currentTimeMillis(),
             requestId = requestId,
             state = state,
-          )
+          ),
         )
       }
     }
@@ -3425,7 +3425,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.e(TAG, "Failed to broadcast network mock rules", e)
       if (requestId != null) {
         replyNetworkMockRules(
-          networkMockRulesFailure(requestId, "Failed to broadcast network mock rules: ${e.message}")
+          networkMockRulesFailure(
+            requestId,
+            "Failed to broadcast network mock rules: ${e.message}",
+          ),
         )
       }
     }
@@ -3775,7 +3778,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     webSocketServer.broadcast(
       webSocketFrameJson("interaction_event", timestamp = interaction.timestamp) {
         put("event", jsonCompact.encodeToJsonElement(interaction))
-      }
+      },
     )
   }
 
@@ -3870,7 +3873,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           val metrics = windowManager.currentWindowMetrics
           val insets =
             metrics.windowInsets.getInsetsIgnoringVisibility(
-              android.view.WindowInsets.Type.systemBars()
+              android.view.WindowInsets.Type.systemBars(),
             )
           insets.top
         } else {
@@ -4096,7 +4099,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           action = action,
           totalTimeMs = totalTimeMs,
           error = if (!success) "Unsupported or failed action: $action" else null,
-        )
+        ),
       )
     }
   }
@@ -4123,7 +4126,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           wakefulness = getWakefulness(),
           foregroundActivity = foreground,
           totalTimeMs = totalTimeMs,
-        )
+        ),
       )
     }
   }
@@ -4282,7 +4285,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           snapshotOptions.isCancelled() ||
             commandJob?.isActive == false ||
             serviceScope.coroutineContext[Job]?.isActive == false
-        }
+        },
       )
     try {
       val hierarchy =
@@ -4590,7 +4593,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {
           append(
-            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
+            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
           )
           if (requestId != null) {
             append(""","requestId":${jsonCompact.encodeToString(requestId)}""")
@@ -4765,7 +4768,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             encodeDurationMs = encodeTime,
             byteLength = jpegBytes.size,
             base64Length = base64String.length,
-          )
+          ),
         )
       } catch (e: CancellationException) {
         // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
@@ -5417,7 +5420,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       if (success && dismissKeyboard) {
         try {
           softKeyboardController.setShowMode(
-            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN
+            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN,
           )
           Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
         } catch (e: CancellationException) {
@@ -5604,7 +5607,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (!matched) {
           rememberedInsert = null
           warnings.add(
-            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used"
+            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used",
           )
         }
       }
@@ -5619,7 +5622,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           )
         if (!observed) {
           warnings.add(
-            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten"
+            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten",
           )
         }
       }
@@ -5685,7 +5688,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val requiredActions =
         if (plan.usedFallbackCaret || plan.usedRememberedCaret) {
           mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT"
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
           )
         } else {
           mapOf(
@@ -5954,7 +5957,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             if (nextNode != null) {
               val focusSuccess =
                 nextNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
+                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
                 )
               nextNode.recycle()
               focusSuccess
@@ -5969,7 +5972,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             if (prevNode != null) {
               val focusSuccess =
                 prevNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS
+                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
                 )
               prevNode.recycle()
               focusSuccess
@@ -6465,7 +6468,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 perfProvider.startOperation("performPaste")
                 val pasteSuccess =
                   focusedNode.performAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE
+                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE,
                   )
                 focusedNode.recycle()
                 perfProvider.endOperation("performPaste")
@@ -6757,7 +6760,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val infos =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
           packageManager.getInstalledPackages(
-            android.content.pm.PackageManager.PackageInfoFlags.of(0L)
+            android.content.pm.PackageManager.PackageInfoFlags.of(0L),
           )
         } else {
           @Suppress("DEPRECATION") packageManager.getInstalledPackages(0)
@@ -6792,7 +6795,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             versionCode = versionCode,
             label = label,
             launchable = launchablePackages?.packageNames?.contains(info.packageName),
-          )
+          ),
         )
       }
       val totalTime = System.currentTimeMillis() - startTime
@@ -7358,7 +7361,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Approximate traversal must only include editors the user can reach.
     if (
       isImeFocusCandidate(
-        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled)
+        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled),
       )
     ) {
       // Create a copy to add to our list (we'll recycle the originals as we traverse)
@@ -7395,7 +7398,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * `observe`; the active window goes first so a bare id prefers the app over an IME/system window.
    */
   private fun findNodeInDisplayWindows(
-    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?
+    find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
   ): AccessibilityNodeInfo? =
     findNodeAcrossWindows(displayWindowsOrEmpty(), { rootInActiveWindow }, find)
 
@@ -7474,7 +7477,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Find the currently focused editable node. */
   private fun findFocusedEditableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?
+    root: android.view.accessibility.AccessibilityNodeInfo?,
   ): android.view.accessibility.AccessibilityNodeInfo? {
     if (root == null) return null
 
@@ -7491,7 +7494,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Recursively search for a focused editable node in the hierarchy. */
   private fun findFocusedEditableInHierarchy(
-    node: android.view.accessibility.AccessibilityNodeInfo?
+    node: android.view.accessibility.AccessibilityNodeInfo?,
   ): android.view.accessibility.AccessibilityNodeInfo? {
     if (node == null) return null
 
@@ -7817,7 +7820,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           found = found,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7841,7 +7844,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           key = key,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7865,7 +7868,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           entries = entries,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7889,7 +7892,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           packages = packages,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7933,7 +7936,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           mainActivity = mainActivity,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -7957,7 +7960,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           componentName = componentName,
           totalTimeMs = totalTimeMs,
           error = error,
-        )
+        ),
       )
     }
   }
@@ -8187,7 +8190,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               screenshotByteLength = screenshot.byteLength,
               screenshotBase64Length = screenshot.base64Length,
               frameContext = stableContext?.toString(),
-            )
+            ),
           )
           Log.d(TAG, "Broadcasted screenshot to ${webSocketServer.getConnectionCount()} clients")
         }
@@ -8196,7 +8199,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
           webSocketServer.broadcast(
-            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId))
+            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId)),
           )
         }
       }
@@ -8936,7 +8939,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -8970,7 +8973,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -9002,11 +9005,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
         if (subscriptionId != null) {
           append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}"""
+            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
           )
         } else {
           append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
           )
         }
         append("}")
@@ -9201,7 +9204,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   private suspend fun broadcastStorageChange(
-    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent
+    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")

@@ -115,7 +115,7 @@ class DeviceScreenViewKeyboardTest {
           }
           else -> false
         }
-      }
+      },
     ) {
       DeviceScreenView(
         screenshotData = null,
@@ -277,7 +277,7 @@ class DeviceScreenViewKeyboardTest {
         // matching KeyUp unconsumed, so counting both would make every case look half-swallowed.
         if (event.type == KeyEventType.KeyDown) observed.hostSaw.add(event.key)
         false
-      }
+      },
     ) {
       if (otherFocus != null) {
         Box(Modifier.focusRequester(otherFocus).focusable())

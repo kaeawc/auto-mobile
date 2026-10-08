@@ -86,7 +86,7 @@ fun KeyboardScreen(
           WindowInsets.navigationBars
             .union(WindowInsets.tappableElement)
             .union(WindowInsets.displayCutout)
-            .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal)
+            .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
         ),
     verticalArrangement = Arrangement.spacedBy(style.keyGapDp.dp),
   ) {

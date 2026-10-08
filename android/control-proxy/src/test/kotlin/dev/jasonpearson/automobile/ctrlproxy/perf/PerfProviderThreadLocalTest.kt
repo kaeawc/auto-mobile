@@ -117,7 +117,7 @@ class PerfProviderThreadLocalTest {
           startTime = 0L,
           requestId = "request-$index",
           endTime = 1L,
-        )
+        ),
       )
     }
 
@@ -137,7 +137,7 @@ class PerfProviderThreadLocalTest {
             startTime = 0L,
             requestId = "request-A",
             endTime = 1L,
-          )
+          ),
         )
       }
     }
@@ -159,7 +159,7 @@ class PerfProviderThreadLocalTest {
           provider.flush("request-A") {
             snapshotTaken.countDown()
             check(entryCompleted.await(5, TimeUnit.SECONDS))
-          }
+          },
         )
       } catch (failure: Throwable) {
         threadFailure.set(failure)
@@ -174,7 +174,7 @@ class PerfProviderThreadLocalTest {
         startTime = 0L,
         requestId = "request-A",
         endTime = 1L,
-      )
+      ),
     )
     entryCompleted.countDown()
 

@@ -225,7 +225,7 @@ class OverlayController(
     val blocked = lifecycle.isBlocked()
     check(
       if (blocked) host.dismiss()
-      else if (replace) host.replace(interactive) else host.show(interactive)
+      else if (replace) host.replace(interactive) else host.show(interactive),
     ) {
       "Overlay host failed to render window"
     }

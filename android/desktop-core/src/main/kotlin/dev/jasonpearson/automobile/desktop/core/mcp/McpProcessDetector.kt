@@ -178,7 +178,7 @@ class RealMcpProcessDetector(
           socketPath = resolvedSocketPath,
           uptimeMs = uptimeMs,
           commandLine = cmdLine,
-        )
+        ),
       )
     }
 

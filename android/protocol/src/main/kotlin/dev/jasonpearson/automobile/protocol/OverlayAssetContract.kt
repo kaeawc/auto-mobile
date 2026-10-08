@@ -23,7 +23,7 @@ object OverlayAssetContract {
             "Missing overlay asset contract"
           }
           .bufferedReader()
-          .use { it.readText() }
+          .use { it.readText() },
       )
       .jsonObject
   private val limits = contract.getValue("limits").jsonObject

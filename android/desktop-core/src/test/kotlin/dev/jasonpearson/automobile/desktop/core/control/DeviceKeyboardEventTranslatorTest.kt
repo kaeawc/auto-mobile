@@ -155,7 +155,7 @@ class DeviceKeyboardEventTranslatorTest {
           isMac = false,
           isLinux = true,
         )
-        .altComposesText
+        .altComposesText,
     )
 
     val ctrlAltShortcut =
@@ -174,7 +174,7 @@ class DeviceKeyboardEventTranslatorTest {
           composeEvent(ctrlAltShortcut),
           isMac = false,
           isLinux = true,
-        )
+        ),
       ),
     )
   }
@@ -195,7 +195,7 @@ class DeviceKeyboardEventTranslatorTest {
       resolvedAltComposition(
         DeviceKeyModifiers(ctrl = true, alt = true, meta = true),
         isMac = false,
-      )
+      ),
     )
   }
 

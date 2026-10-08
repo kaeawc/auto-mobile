@@ -77,7 +77,7 @@ internal class SdkEventBatchProcessor(
           metadata = metadata,
           applicationId = applicationId,
           timestamp = timestamp,
-        )
+        ),
       )
       .isSuccess
 
@@ -94,7 +94,7 @@ internal class SdkEventBatchProcessor(
             applicationId = event.applicationId,
             timestamp = event.timestamp,
             publishLatestEvent = false,
-          )
+          ),
         )
       }
     }

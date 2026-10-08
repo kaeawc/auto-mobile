@@ -159,7 +159,7 @@ class NetworkMockRuleStoreTest {
       listOf(
         rule(mockId = "bad", host = "[invalid"),
         rule(mockId = "good"),
-      )
+      ),
     )
 
     assertEquals(1, store.getRuleCount())
@@ -251,7 +251,7 @@ class NetworkMockRuleStoreTest {
         rule(mockId = "bad", path = "[invalid"),
         rule(mockId = "second"),
         rule(mockId = "posts", path = "/posts"),
-      )
+      ),
     )
 
     assertEquals(3, store.getRuleCount())
@@ -281,7 +281,7 @@ class NetworkMockRuleStoreTest {
           rule(mockId = "ok"),
           rule(mockId = "brace", path = "/items/{id}"),
           rule(mockId = "bracket", host = "[invalid"),
-        )
+        ),
       )
 
     assertEquals(listOf("brace", "bracket"), rejected.map { it.mockId })

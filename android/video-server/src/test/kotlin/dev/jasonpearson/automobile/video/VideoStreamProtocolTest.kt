@@ -353,19 +353,19 @@ class VideoStreamProtocolTest {
       CachedVideoPacket(
         VideoStreamProtocol.PACKET_FLAG_CONFIG or 10,
         byteArrayOf(0, 0, 0, 1, 0x67),
-      )
+      ),
     )
     cache.remember(
       CachedVideoPacket(
         VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 20,
         byteArrayOf(0, 0, 0, 1, 0x65, 1),
-      )
+      ),
     )
     cache.remember(
       CachedVideoPacket(
         VideoStreamProtocol.PACKET_FLAG_KEY_FRAME or 30,
         byteArrayOf(0, 0, 0, 1, 0x65, 2),
-      )
+      ),
     )
 
     val replay = cache.replay()

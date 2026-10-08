@@ -108,7 +108,7 @@ fun DevicePicker(
             onClick = {
               onRecoverDaemon()
               onAction(DevicePickerAction.Refresh)
-            }
+            },
           ) {
             Text("Retry")
           }
@@ -199,7 +199,7 @@ private fun FilterRail(
     Modifier.width(240.dp)
       .fillMaxHeight()
       .background(MaterialTheme.colorScheme.surfaceVariant)
-      .padding(12.dp)
+      .padding(12.dp),
   ) {
     OutlinedTextField(
       value = content.filters.query,
@@ -247,7 +247,7 @@ private fun OptionRow(opt: FilterOption, onClick: () -> Unit) {
         .background(
           if (opt.selected) Accent else MaterialTheme.colorScheme.surface,
           RoundedCornerShape(3.dp),
-        )
+        ),
     ) {
       if (opt.selected) Text("✓", color = Color.White, style = MaterialTheme.typography.labelSmall)
     }
@@ -412,10 +412,10 @@ private fun DeviceCard(
               val mods = windowInfo.keyboardModifiers
               onClick(mods.isShiftPressed || mods.isMetaPressed || mods.isCtrlPressed)
             }
-          else Modifier
+          else Modifier,
         )
         .semantics { contentDescription = cardDescription(displayName, booted, booting, error) }
-        .padding(12.dp)
+        .padding(12.dp),
   ) {
     thumbnail(device, booting)
     Spacer(Modifier.height(8.dp))

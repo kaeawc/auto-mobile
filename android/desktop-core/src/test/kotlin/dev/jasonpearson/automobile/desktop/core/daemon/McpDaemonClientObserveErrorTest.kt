@@ -44,6 +44,6 @@ class McpDaemonClientObserveErrorTest {
             success = true,
             result = DaemonJson.parseToJsonElement(result),
           )
-        }
+        },
     )
 }

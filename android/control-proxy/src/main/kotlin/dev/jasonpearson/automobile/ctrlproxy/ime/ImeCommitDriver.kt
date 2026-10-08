@@ -154,7 +154,7 @@ class ImeCommitDriver(
       if (index == segments.size) {
         complete(
           if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
-          else failure("Input connection lost while syncing editor state")
+          else failure("Input connection lost while syncing editor state"),
         )
         return
       }
@@ -264,7 +264,7 @@ class ImeCommitDriver(
     }
     complete(
       if (sink.syncEditorState()) ImeCommitResult(success = true, error = null)
-      else failure("Input connection lost while syncing editor state")
+      else failure("Input connection lost while syncing editor state"),
     )
   }
 

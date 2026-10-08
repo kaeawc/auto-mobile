@@ -75,7 +75,7 @@ class NavigationProvenanceUiTest {
             node(
               "Legacy",
               listOf(
-                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB")
+                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB"),
               ),
             ),
           ),
@@ -101,7 +101,7 @@ class NavigationProvenanceUiTest {
     }
     onNodeWithContentDescription("Home — active in current context").assertExists()
     onNodeWithContentDescription(
-        "Legacy — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250"
+        "Legacy — historical: build v2 (hashB), device emulator-9999, session session-1, last seen 250",
       )
       .assertExists()
   }
@@ -115,9 +115,9 @@ class NavigationProvenanceUiTest {
             node(
               "Legacy",
               listOf(
-                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB")
+                provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB"),
               ),
-            )
+            ),
           ),
         transitions = emptyList(),
       )
@@ -165,7 +165,7 @@ class NavigationProvenanceUiTest {
                 provenance(deviceId = "emulator-9999", versionCode = 2, contentHash = "hashB"),
                 provenance(deviceId = activeDevice),
               ),
-            )
+            ),
           ),
         transitions = emptyList(),
       )

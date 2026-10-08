@@ -51,7 +51,7 @@ fun NavigationGraphView(
       modifier
         .background(palette.background, shape)
         .border(1.dp, palette.border, shape)
-        .padding(8.dp)
+        .padding(8.dp),
   ) {
     if (summary == null || summary.nodes.isEmpty()) {
       Text(

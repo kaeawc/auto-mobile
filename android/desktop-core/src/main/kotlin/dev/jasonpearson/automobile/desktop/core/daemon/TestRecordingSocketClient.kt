@@ -55,7 +55,7 @@ internal constructor(
           command = "stop",
           recordingId = recordingId,
           planName = planName,
-        )
+        ),
       )
     ensureSuccess(response)
     return TestRecordingStopResult(
@@ -175,7 +175,7 @@ class FakeTestRecordingClient(
               startedAt = "2026-02-01T10:30:00Z",
               deviceId = "emulator-5554",
               platform = "android",
-            )
+            ),
           ),
         stopResponses =
           listOf(
@@ -189,7 +189,7 @@ class FakeTestRecordingClient(
               stepCount = 5,
               deviceId = "emulator-5554",
               platform = "android",
-            )
+            ),
           ),
       )
     }

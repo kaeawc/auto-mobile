@@ -62,7 +62,7 @@ internal suspend fun <T> OverlayMainThread.onMain(work: () -> T): T {
 
 /** The service supplies its own scope; the standalone host uses main for window-safe delivery. */
 class CoroutineOverlayScheduler(
-  private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+  private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob()),
 ) : OverlayScheduler {
   override fun schedule(millis: Long, action: suspend () -> Unit): OverlayScheduledTask {
     val job = scope.launch {

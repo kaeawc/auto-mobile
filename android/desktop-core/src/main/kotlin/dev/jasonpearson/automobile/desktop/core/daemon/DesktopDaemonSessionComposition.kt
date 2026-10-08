@@ -266,7 +266,7 @@ fun rememberDesktopDaemonSession(
                     }
                   LOG.info(
                     "Desktop session ${session.sessionUuid} was released by the daemon; " +
-                      "$next: ${result.message}"
+                      "$next: ${result.message}",
                   )
                   rotateSession = true
                 }
@@ -277,7 +277,7 @@ fun rememberDesktopDaemonSession(
                   // hold by rotating the session; the fresh session views the pick passively.
                   LOG.info(
                     "Device ${target.deviceId} is held by another session; releasing the " +
-                      "previously bound device before viewing it"
+                      "previously bound device before viewing it",
                   )
                   rotateSession = true
                 }
@@ -286,7 +286,7 @@ fun rememberDesktopDaemonSession(
                   viewingDeviceId = target.deviceId
                   LOG.info(
                     "Device ${target.deviceId} is held by another session; viewing only: " +
-                      "${result.message}"
+                      "${result.message}",
                   )
                   session.ensureRegistered()
                 }
@@ -299,7 +299,7 @@ fun rememberDesktopDaemonSession(
                       // with this UUID) and re-send the bind on the next heartbeat tick.
                       LOG.info(
                         "Binding ${target.deviceId} failed (attempt $failedBinds of " +
-                          "$MAX_BIND_ATTEMPTS), retrying: $message"
+                          "$MAX_BIND_ATTEMPTS), retrying: $message",
                       )
                       session.ensureRegistered()
                     }
@@ -310,7 +310,7 @@ fun rememberDesktopDaemonSession(
                       // fresh session shows this error without holding anything.
                       LOG.warn(
                         "Could not bind ${target.deviceId}: $message; releasing the previously " +
-                          "bound device"
+                          "bound device",
                       )
                       carriedBindError = target.deviceId to message
                       rotateSession = true

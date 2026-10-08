@@ -59,8 +59,8 @@ class RealDeviceBootController(
             LOG.warn("startDevice succeeded for ${device.name} but reported no runtime deviceId")
             Result.failure(
               IllegalStateException(
-                "Device booted but the daemon didn't report a runtime id; can't verify it"
-              )
+                "Device booted but the daemon didn't report a runtime id; can't verify it",
+              ),
             )
           }
           else -> Result.success(runtimeId)

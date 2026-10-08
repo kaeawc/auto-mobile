@@ -711,7 +711,7 @@ class AutoMobileAnrTest {
     val orderedEvents: List<SdkAnrEvent>
       get() = ordered.map {
         SdkEventSerializer.anrEventFromJson(
-          it.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!
+          it.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!,
         )!!
       }
 
@@ -806,8 +806,8 @@ class AutoMobileAnrTest {
       attempts++
       attemptedEvents.add(
         SdkEventSerializer.fromJson(
-          intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!
-        ) as SdkAnrEvent
+          intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)!!,
+        ) as SdkAnrEvent,
       )
       if (fail || attempts in failOnAttempts) throw IllegalStateException("Test broadcast failure")
       broadcasts.add(intent)

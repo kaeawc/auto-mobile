@@ -53,7 +53,7 @@ class DaemonConnectionProviderTest {
           { "first" },
           { throw ConnectException("Connection refused") },
           { "after-restart" },
-        )
+        ),
       )
     val provider = provider(connections::connect, { ensures++ })
 
@@ -96,7 +96,7 @@ class DaemonConnectionProviderTest {
             )
           },
           { "ok" },
-        )
+        ),
       )
     val provider = provider(connections::connect, { ensures++ })
 
@@ -262,22 +262,22 @@ class DaemonConnectionProviderTest {
     assertTrue(DaemonConnectFailures.indicatesDeadDaemon(DaemonSocketMissingException("/x.sock")))
     assertTrue(DaemonConnectFailures.indicatesDeadDaemon(ConnectException("Connection refused")))
     assertTrue(
-      DaemonConnectFailures.indicatesDeadDaemon(SocketException("No such file or directory"))
+      DaemonConnectFailures.indicatesDeadDaemon(SocketException("No such file or directory")),
     )
     assertTrue(
       DaemonConnectFailures.indicatesDeadDaemon(
-        DaemonUnavailableException("wrapped", ConnectException("Connection refused"))
-      )
+        DaemonUnavailableException("wrapped", ConnectException("Connection refused")),
+      ),
     )
     assertFalse(DaemonConnectFailures.indicatesDeadDaemon(SocketException("Too many open files")))
     assertFalse(DaemonConnectFailures.indicatesDeadDaemon(IOException("Permission denied")))
     assertFalse(DaemonConnectFailures.indicatesDeadDaemon(DaemonUnavailableException("timeout")))
     assertTrue(
       DaemonProbe.fromConnectFailure(ConnectException("Connection refused"))
-        is DaemonProbe.NotRunning
+        is DaemonProbe.NotRunning,
     )
     assertTrue(
-      DaemonProbe.fromConnectFailure(IOException("Too many open files")) is DaemonProbe.Unreachable
+      DaemonProbe.fromConnectFailure(IOException("Too many open files")) is DaemonProbe.Unreachable,
     )
   }
 

@@ -71,7 +71,7 @@ internal object DaemonSocketClientManager {
       connect = { DaemonSocketClient(DaemonSocketPaths.socketPath()) },
       daemonProcessAlive = {
         DaemonSocketPaths.isProcessAlive(
-          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath())
+          DaemonSocketPaths.readDaemonPidFromPidFile(DaemonSocketPaths.pidFilePath()),
         )
       },
       nowMs = System::currentTimeMillis,
@@ -91,7 +91,7 @@ internal object DaemonSocketClientManager {
 
   private fun ensureDaemonRunning() {
     DaemonLauncher.ensureRunning(
-      DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides())
+      DefaultDaemonLaunchEnvironment(resolveDaemonEnvironmentOverrides()),
     )
   }
 
@@ -190,7 +190,7 @@ internal object DaemonSocketClientManager {
     // Device pool is still empty after timeout - throw error
     throw DaemonUnavailableException(
       "Daemon device pool is empty after ${timeoutMs}ms. " +
-        "Start an emulator or connect a physical device before running tests."
+        "Start an emulator or connect a physical device before running tests.",
     )
   }
 
@@ -1140,7 +1140,7 @@ internal class DaemonSocketClient(
           if (!containsKey("sessionUuid")) {
             put("sessionUuid", JsonPrimitive(sessionUuid))
           }
-        }
+        },
       )
     return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))
   }

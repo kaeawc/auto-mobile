@@ -110,11 +110,11 @@ internal fun McpProcessesPanel(
     processes = detector.detectProcesses()
     isLoading = false
     LOG.debug(
-      "[McpProcessesPanel] Detected ${processes.size} MCP processes (useRealData=$useRealData)"
+      "[McpProcessesPanel] Detected ${processes.size} MCP processes (useRealData=$useRealData)",
     )
     processes.forEach { p ->
       LOG.debug(
-        "[McpProcessesPanel]   - ${p.name} (PID ${p.pid}, ${p.connectionType}, socket=${p.socketPath}, port=${p.port})"
+        "[McpProcessesPanel]   - ${p.name} (PID ${p.pid}, ${p.connectionType}, socket=${p.socketPath}, port=${p.port})",
       )
     }
   }
@@ -125,7 +125,7 @@ internal fun McpProcessesPanel(
   // Notify parent when connected process changes
   LaunchedEffect(connectedProcess) {
     LOG.debug(
-      "[McpProcessesPanel] LaunchedEffect(connectedProcess) triggered, connectedProcess=${connectedProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}"
+      "[McpProcessesPanel] LaunchedEffect(connectedProcess) triggered, connectedProcess=${connectedProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}",
     )
     onProcessConnected(connectedProcess)
   }
@@ -136,7 +136,7 @@ internal fun McpProcessesPanel(
     if (socketProcesses.size == 1 && connectedProcess == null) {
       val autoConnectProcess = socketProcesses.first()
       LOG.debug(
-        "[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})"
+        "[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})",
       )
       connectedProcess = autoConnectProcess
       // Call directly - don't rely on LaunchedEffect(connectedProcess) which may not
@@ -218,7 +218,7 @@ internal fun McpProcessesPanel(
       devicesError = null
       try {
         LOG.debug(
-          "[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}"
+          "[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}",
         )
 
         val client =
@@ -233,11 +233,11 @@ internal fun McpProcessesPanel(
         when (val result = client.readResource("automobile:devices/booted")) {
           is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
             LOG.debug(
-              "[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}..."
+              "[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}...",
             )
             val parsed =
               dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseBootedDevices(
-                result.content
+                result.content,
               )
             bootedDevices = parsed?.devices ?: emptyList()
             LOG.debug("[AutoMobile IDE] Parsed ${bootedDevices.size} booted devices")
@@ -253,11 +253,11 @@ internal fun McpProcessesPanel(
         when (val result = client.readResource("automobile:devices/images")) {
           is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
             LOG.debug(
-              "[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}..."
+              "[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}...",
             )
             val parsed =
               dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseDeviceImages(
-                result.content
+                result.content,
               )
             deviceImages = parsed?.images ?: emptyList()
             LOG.debug("[AutoMobile IDE] Parsed ${deviceImages.size} device images")
@@ -306,7 +306,7 @@ internal fun McpProcessesPanel(
             autoSelectDevice.platform,
           )
           LOG.debug(
-            "[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}"
+            "[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}",
           )
         } catch (e: Exception) {
           LOG.warn("[McpProcessesPanel] Failed to set active device on MCP: ${e.message}")
@@ -322,7 +322,7 @@ internal fun McpProcessesPanel(
     connectedProcess = if (wasConnected) null else process
     LOG.debug("[McpProcessesPanel] Connect button clicked for ${process.name} (PID ${process.pid})")
     LOG.debug(
-      "[McpProcessesPanel] ${if (wasConnected) "Disconnecting from" else "Connecting to"} process"
+      "[McpProcessesPanel] ${if (wasConnected) "Disconnecting from" else "Connecting to"} process",
     )
     LOG.debug("[McpProcessesPanel] connectedProcess is now: ${connectedProcess?.name ?: "null"}")
   }
@@ -404,7 +404,7 @@ internal fun McpProcessesPanel(
     { device ->
       val deviceId = device.runtime.deviceId ?: device.identity.stableId
       LOG.debug(
-        "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: $deviceId, platform: ${device.platform}"
+        "[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: $deviceId, platform: ${device.platform}",
       )
       selectingDevice = device
       selectError = null
@@ -436,7 +436,7 @@ internal fun McpProcessesPanel(
       scope.launch(Dispatchers.IO) {
         try {
           LOG.warn(
-            "[AutoMobile IDE] Killing device: ${device.name} ($deviceId, ${device.platform})"
+            "[AutoMobile IDE] Killing device: ${device.name} ($deviceId, ${device.platform})",
           )
           val result =
             graph.autoMobileClient.killDevice(
@@ -469,7 +469,7 @@ internal fun McpProcessesPanel(
       scope.launch(Dispatchers.IO) {
         try {
           LOG.warn(
-            "[AutoMobile IDE] Updating service for device: ${device.name} ($deviceId, ${device.platform})"
+            "[AutoMobile IDE] Updating service for device: ${device.name} ($deviceId, ${device.platform})",
           )
           val result = graph.autoMobileClient.updateService(deviceId, device.platform)
           if (result.success) {
@@ -519,7 +519,7 @@ internal fun McpProcessesPanel(
   val stdioProcesses = processes.filter { it.connectionType == McpConnectionType.Stdio }
 
   LOG.debug(
-    "[McpProcessesPanel] Process breakdown: streamable=${streamableProcesses.size}, socket=${socketProcesses.size}, stdio=${stdioProcesses.size}"
+    "[McpProcessesPanel] Process breakdown: streamable=${streamableProcesses.size}, socket=${socketProcesses.size}, stdio=${stdioProcesses.size}",
   )
 
   val scrollState = rememberScrollState()
@@ -539,7 +539,7 @@ internal fun McpProcessesPanel(
           Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
             .clickable { onStartDaemon() }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
       ) {
         Text(
           "Start Daemon",
@@ -633,9 +633,9 @@ internal fun McpProcessesPanel(
                     )
                     .clickable(enabled = !isDaemonStarting) { onStartDaemon() }
                     .pointerHoverIcon(
-                      if (isDaemonStarting) PointerIcon.Default else PointerIcon.Hand
+                      if (isDaemonStarting) PointerIcon.Default else PointerIcon.Hand,
                     )
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
               ) {
                 Text(
                   if (isDaemonStarting) "Starting..." else "Start Daemon",
@@ -696,7 +696,7 @@ internal fun McpProcessesPanel(
 
       // Devices section (when connected)
       LOG.debug(
-        "[McpProcessesPanel] connectedProcess=$connectedProcess, bootedDevices.size=${bootedDevices.size}"
+        "[McpProcessesPanel] connectedProcess=$connectedProcess, bootedDevices.size=${bootedDevices.size}",
       )
       if (connectedProcess != null) {
         LOG.debug("[McpProcessesPanel] Showing DevicesSection")
@@ -724,7 +724,7 @@ internal fun McpProcessesPanel(
         modifier =
           Modifier.fillMaxWidth()
             .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-            .padding(12.dp)
+            .padding(12.dp),
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
           Text(
@@ -812,7 +812,7 @@ private fun ProcessSection(
       Box(
         modifier =
           Modifier.background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
       ) {
         Text(
           "${processes.size}",
@@ -879,7 +879,7 @@ private fun McpProcessItem(
                     bottomEnd = if (showDetails) 0.dp else 6.dp,
                   ),
                 )
-              else Modifier
+              else Modifier,
             )
             .padding(10.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -892,7 +892,7 @@ private fun McpProcessItem(
               .background(
                 if (isConnected) Color(0xFF4CAF50) else Color(0xFF4CAF50).copy(alpha = 0.5f),
                 CircleShape,
-              )
+              ),
         )
 
         // Process info
@@ -1027,7 +1027,7 @@ private fun McpProcessItem(
                 )
                 .clickable(enabled = !isTesting) { onTest(process) }
                 .pointerHoverIcon(if (isTesting) PointerIcon.Default else PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
           ) {
             Text(
               when {
@@ -1058,7 +1058,7 @@ private fun McpProcessItem(
                 )
                 .clickable { onDetails(process) }
                 .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
           ) {
             Text(
               if (isCompressed) "📋" else if (showDetails) "Hide" else "Details",
@@ -1082,7 +1082,7 @@ private fun McpProcessItem(
                   onConnect(process)
                 }
                 .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
           ) {
             Text(
               when {
@@ -1287,7 +1287,7 @@ private fun McpProcessDetails(process: McpProcess) {
                     Color(0xFF2196F3).copy(alpha = 0.1f),
                     RoundedCornerShape(4.dp),
                   )
-                  .padding(horizontal = 6.dp, vertical = 3.dp)
+                  .padding(horizontal = 6.dp, vertical = 3.dp),
             ) {
               Text(resource.uri, fontSize = 9.sp, color = Color(0xFF2196F3))
             }
@@ -1356,7 +1356,7 @@ private fun McpProcessDetails(process: McpProcess) {
                         Color(0xFF9C27B0).copy(alpha = 0.1f),
                         RoundedCornerShape(4.dp),
                       )
-                      .padding(horizontal = 6.dp, vertical = 3.dp)
+                      .padding(horizontal = 6.dp, vertical = 3.dp),
                 ) {
                   Text(tool.name, fontSize = 9.sp, color = Color(0xFF9C27B0))
                 }

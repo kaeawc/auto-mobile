@@ -46,7 +46,7 @@ fun UxFlowStartScreen(
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -97,7 +97,7 @@ fun UxFlowDetailsScreen(
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -157,7 +157,7 @@ fun UxFlowSummaryScreen(
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

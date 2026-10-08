@@ -43,7 +43,7 @@ internal fun buildStorageChangedMessage(
   // change that lands after an existing row.
   if (event.previousValueType != null) {
     append(
-      ""","previousValue":${encodeTypedValue(event.previousValue, event.previousValueType, json)}"""
+      ""","previousValue":${encodeTypedValue(event.previousValue, event.previousValueType, json)}""",
     )
   }
   append(""","eventTimestamp":${event.timestamp}""")

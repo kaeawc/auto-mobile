@@ -64,7 +64,7 @@ class IcTraceComparisonTest {
             scenario = "scenario",
             keyboardId = referenceIdentity.id,
             keyboardVersion = referenceIdentity.version,
-          )
+          ),
       )
     val candidate =
       event(
@@ -92,14 +92,14 @@ class IcTraceComparisonTest {
     val droppedResult = IcTraceComparison.compare(listOf(dropped), listOf(event()))
     assertTrue(droppedResult is IcTraceComparison.Result.Inconclusive)
     assertTrue(
-      (droppedResult as IcTraceComparison.Result.Inconclusive).reasons.any { "dropped" in it }
+      (droppedResult as IcTraceComparison.Result.Inconclusive).reasons.any { "dropped" in it },
     )
 
     val sequenceGap =
       IcTraceComparison.compare(listOf(event(), event().copy(seq = 3)), listOf(event()))
     assertTrue(sequenceGap is IcTraceComparison.Result.Inconclusive)
     assertTrue(
-      (sequenceGap as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence gap" in it }
+      (sequenceGap as IcTraceComparison.Result.Inconclusive).reasons.any { "sequence gap" in it },
     )
 
     val afterClear =
@@ -118,7 +118,7 @@ class IcTraceComparisonTest {
     assertTrue(
       (changedKeyboard as IcTraceComparison.Result.Inconclusive).reasons.any {
         "keyboard identity" in it
-      }
+      },
     )
 
     val malformed =

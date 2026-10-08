@@ -43,7 +43,7 @@ class SdkApiSignature(private val javapExecutable: String = "javap") {
     try {
       val process =
         ProcessBuilder(
-            listOf(javapExecutable, "-public", "-constants", "-classpath", classpath) + classNames
+            listOf(javapExecutable, "-public", "-constants", "-classpath", classpath) + classNames,
           )
           .redirectErrorStream(true)
           .redirectOutput(outputFile.toFile())
@@ -83,7 +83,7 @@ class SdkApiSignature(private val javapExecutable: String = "javap") {
             declaration.groupValues[2],
             "public" in declaration.groupValues[1].split(' '),
             lines.joinToString("\n").trim(),
-          )
+          ),
         )
         lines.clear()
       }

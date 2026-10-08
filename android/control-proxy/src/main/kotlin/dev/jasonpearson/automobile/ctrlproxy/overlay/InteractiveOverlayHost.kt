@@ -621,8 +621,8 @@ private fun InteractiveOverlayWindowContent(
           .windowInsetsPadding(
             WindowInsets.systemBars
               .union(WindowInsets.displayCutout)
-              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
-          )
+              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+          ),
       ) {
         TextButton(
           onClick = { scope.launch { request.onHostDismiss() } },
@@ -638,7 +638,7 @@ private fun InteractiveOverlayWindowContent(
           .fillMaxWidth()
           .clipToBounds()
           .alpha(chrome.contentAlpha)
-          .background(fullscreen?.scrim ?: Color.Transparent)
+          .background(fullscreen?.scrim ?: Color.Transparent),
       ) {
         CompositionLocalProvider(LocalOverlayInsetFloor provides floor) { request.content() }
       }

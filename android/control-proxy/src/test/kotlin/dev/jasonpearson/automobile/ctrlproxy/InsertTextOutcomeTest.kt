@@ -47,7 +47,7 @@ class InsertTextOutcomeTest {
   fun `extra preceding-input warning is appended`() {
     val warning = "Preceding input was not observed"
     assertTrue(
-      insertTextOutcome(true, true, false, warning, true).warning.orEmpty().endsWith(" " + warning)
+      insertTextOutcome(true, true, false, warning, true).warning.orEmpty().endsWith(" " + warning),
     )
     assertEquals(warning, insertTextOutcome(true, true, true, warning).warning)
   }

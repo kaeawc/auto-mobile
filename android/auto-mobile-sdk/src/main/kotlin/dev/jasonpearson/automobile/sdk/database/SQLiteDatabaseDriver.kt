@@ -147,7 +147,7 @@ class SQLiteDatabaseDriver(private val context: Context) : DatabaseDriver {
               nullable = !notNull,
               primaryKey = isPrimaryKey,
               defaultValue = defaultValue,
-            )
+            ),
           )
         }
       }

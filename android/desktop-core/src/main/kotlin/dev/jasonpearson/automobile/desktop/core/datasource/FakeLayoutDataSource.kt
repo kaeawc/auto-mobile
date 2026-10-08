@@ -24,7 +24,7 @@ class FakeLayoutDataSource : LayoutDataSource {
         screenWidth = 1080,
         screenHeight = 2340,
         timestamp = System.currentTimeMillis(),
-      )
+      ),
     )
   }
 }

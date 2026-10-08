@@ -61,7 +61,7 @@ fun ContrastDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -130,7 +130,7 @@ fun TapTargetsDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

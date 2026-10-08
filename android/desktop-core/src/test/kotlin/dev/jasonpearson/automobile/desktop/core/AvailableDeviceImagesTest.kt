@@ -33,7 +33,7 @@ class AvailableDeviceImagesTest {
               name = "Pixel 8",
               type = DeviceType.AndroidEmulator,
               stableId = "Pixel_8",
-            )
+            ),
           ),
         platform = "android",
       )
@@ -55,7 +55,7 @@ class AvailableDeviceImagesTest {
               name = "iPhone 15",
               type = DeviceType.iOSSimulator,
               stableId = udid,
-            )
+            ),
           ),
         platform = "ios",
       )
@@ -75,7 +75,7 @@ class AvailableDeviceImagesTest {
               name = "Pixel 7",
               type = DeviceType.AndroidEmulator,
               stableId = "Pixel_7",
-            )
+            ),
           ),
         platform = "android",
       )
@@ -127,7 +127,7 @@ class AvailableDeviceImagesTest {
                 name = "Android device",
                 type = DeviceType.AndroidEmulator,
                 stableId = sharedStableId,
-              )
+              ),
             ),
           platform = "ios",
         )
@@ -150,7 +150,7 @@ class AvailableDeviceImagesTest {
                 name = "iOS device",
                 type = DeviceType.iOSSimulator,
                 stableId = sharedStableId,
-              )
+              ),
             ),
           platform = "android",
         )

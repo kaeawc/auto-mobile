@@ -58,7 +58,7 @@ object TestPlanValidator {
         Pattern.compile(
           "^(?:[-+]?[0-9]+(?:\\.[0-9]*)?(?:[eE][-+]?[0-9]+)?|" +
             "[-+]?\\.[0-9]+(?:[eE][-+]?[0-9]+)?|" +
-            "[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$"
+            "[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$",
         ),
         "-+0123456789.",
       )
@@ -116,7 +116,7 @@ object TestPlanValidator {
       javaClass.classLoader.getResourceAsStream("schemas/test-plan.schema.json")
         ?: throw IllegalStateException(
           "Could not find test-plan.schema.json in classpath resources. " +
-            "Ensure schemas/test-plan.schema.json is included in the resources."
+            "Ensure schemas/test-plan.schema.json is included in the resources.",
         )
 
     val schemaJson = schemaStream.bufferedReader().use { it.readText() }
@@ -151,7 +151,7 @@ object TestPlanValidator {
               field = "root",
               message = "YAML parsing failed: ${e.message}",
               severity = ValidationSeverity.ERROR,
-            )
+            ),
           ),
       )
     }
@@ -172,7 +172,7 @@ object TestPlanValidator {
                 field = "root",
                 message = "Failed to convert YAML to JSON: ${e.message}",
                 severity = ValidationSeverity.ERROR,
-              )
+              ),
             ),
         )
       }
@@ -195,7 +195,7 @@ object TestPlanValidator {
                 field = "root",
                 message = "Schema validation failed: ${e.message}",
                 severity = ValidationSeverity.ERROR,
-              )
+              ),
             ),
         )
       }
@@ -305,7 +305,7 @@ object TestPlanValidator {
             message =
               "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive, after offset normalization).",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
     }
@@ -369,7 +369,7 @@ object TestPlanValidator {
               severity = ValidationSeverity.ERROR,
               line = lineInfo?.line,
               column = lineInfo?.column,
-            )
+            ),
           )
         }
       }
@@ -434,7 +434,7 @@ object TestPlanValidator {
         message =
           "Plan uses multi-device features (device labels or criticalSection/barrier) but does not declare 'devices' field. Add a 'devices' array at the top level of your plan.",
         severity = ValidationSeverity.ERROR,
-      )
+      ),
     )
   }
 
@@ -514,7 +514,7 @@ object TestPlanValidator {
             field = "devices",
             message = "Invalid device label: \"$label\". Device labels must be non-empty strings.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
     }
@@ -526,7 +526,7 @@ object TestPlanValidator {
           message =
             "Plan 'devices' must be a list of labels or a list of objects with label/platform (do not mix formats).",
           severity = ValidationSeverity.ERROR,
-        )
+        ),
       )
     }
 
@@ -538,7 +538,7 @@ object TestPlanValidator {
           message =
             "Plan 'devices' array contains duplicate labels: [${rawLabels.joinToString(", ")}]",
           severity = ValidationSeverity.ERROR,
-        )
+        ),
       )
     }
 
@@ -600,7 +600,7 @@ object TestPlanValidator {
             field = "steps",
             message = "$label is missing a 'device' parameter, but the plan declares 'devices'.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
       device !is String || device !in declaredDevices -> {
@@ -610,7 +610,7 @@ object TestPlanValidator {
             message =
               "$label targets device \"$device\", which is not in the plan's declared devices [${declaredDevices.joinToString(", ")}].",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
     }
@@ -702,7 +702,7 @@ object TestPlanValidator {
             message =
               "barrier step for lock \"$lock\" is missing a 'device' parameter. Every barrier step must target a specific device.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
       declaredDevices != null && device !in declaredDevices -> {
@@ -712,7 +712,7 @@ object TestPlanValidator {
             message =
               "barrier step references device \"$device\" for lock \"$lock\", but the plan's declared devices are [${declaredDevices.joinToString(", ")}]. Every barrier device must be a declared device label.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
       else -> {
@@ -741,7 +741,7 @@ object TestPlanValidator {
         message =
           "barrier step for lock \"$lock\" declares deviceCount=$raw, which is outside the supported range (a positive integer representable in 64 bits). This is rejected rather than silently narrowed.",
         severity = ValidationSeverity.ERROR,
-      )
+      ),
     )
   }
 
@@ -781,7 +781,7 @@ object TestPlanValidator {
    * timeout nondeterministically.
    */
   private fun validateBarrierConsistentDeviceCount(
-    usageByLock: Map<String, BarrierLockUsage>
+    usageByLock: Map<String, BarrierLockUsage>,
   ): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
     for ((lock, usage) in usageByLock) {
@@ -795,7 +795,7 @@ object TestPlanValidator {
           message =
             "barrier lock \"$lock\" is reused with inconsistent deviceCount values ($counts). The runtime coordinator keeps a single shared expected count per lock name, so mixed-count reuse is racy and can deadlock depending on arrival order. Use a distinct lock name for each deviceCount instead.",
           severity = ValidationSeverity.ERROR,
-        )
+        ),
       )
     }
     return errors
@@ -810,7 +810,7 @@ object TestPlanValidator {
    * devices ever target a given lock across the whole plan, no round can ever complete.
    */
   private fun validateBarrierDistinctDeviceCounts(
-    usageByLock: Map<String, BarrierLockUsage>
+    usageByLock: Map<String, BarrierLockUsage>,
   ): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
     for ((lock, usage) in usageByLock) {
@@ -823,7 +823,7 @@ object TestPlanValidator {
               message =
                 "barrier lock \"$lock\" declares deviceCount=$deviceCount but only ${usage.devices.size} distinct device(s) ($deviceList) ever target it in this plan. No round can ever complete.",
               severity = ValidationSeverity.ERROR,
-            )
+            ),
           )
         }
       }
@@ -841,7 +841,7 @@ object TestPlanValidator {
    * and would deadlock forever.
    */
   private fun validateBarrierGenerationCompleteness(
-    usageByLock: Map<String, BarrierLockUsage>
+    usageByLock: Map<String, BarrierLockUsage>,
   ): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
     for ((lock, usage) in usageByLock) {
@@ -858,7 +858,7 @@ object TestPlanValidator {
           message =
             "barrier lock \"$lock\" has ${usage.arrivals} total arrival(s) across the plan, which is not a multiple of its deviceCount=$deviceCount. At least one generation is necessarily incomplete and would deadlock waiting for a device that never arrives.",
           severity = ValidationSeverity.ERROR,
-        )
+        ),
       )
     }
     return errors
@@ -882,7 +882,7 @@ object TestPlanValidator {
    * each device appears exactly 2 times -- feasible, and correctly accepted).
    */
   private fun validateBarrierExcessDeviceArrivals(
-    usageByLock: Map<String, BarrierLockUsage>
+    usageByLock: Map<String, BarrierLockUsage>,
   ): List<ValidationError> {
     val errors = mutableListOf<ValidationError>()
     for ((lock, usage) in usageByLock) {
@@ -907,7 +907,7 @@ object TestPlanValidator {
             message =
               "barrier lock \"$lock\" has $generations generation(s) available (deviceCount=$deviceCount, ${usage.arrivals} total arrivals), but device \"$device\" arrives $occurrences times. A device can participate in a lock at most once per generation, since each device's track executes sequentially, so this device would deadlock waiting for a generation that never admits it again.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
     }
@@ -1007,7 +1007,7 @@ object TestPlanValidator {
             index,
             effectiveCoordinationField(step, "device"),
             effectiveCoordinationField(step, "deviceCount"),
-          )
+          ),
         )
     }
     val messages = mutableListOf<String>()
@@ -1032,7 +1032,7 @@ object TestPlanValidator {
           "step ${it.stepIndex} deviceCount=${jsString(step, "deviceCount")}"
         }
       messages.add(
-        "criticalSection lock \"$lock\" has inconsistent deviceCount values: $detail. All steps sharing a lock must declare the same deviceCount."
+        "criticalSection lock \"$lock\" has inconsistent deviceCount values: $detail. All steps sharing a lock must declare the same deviceCount.",
       )
       return
     }
@@ -1042,7 +1042,7 @@ object TestPlanValidator {
       val plural = if (n == 1) "" else "s"
       val verb = if (n == 1) "s" else ""
       messages.add(
-        "criticalSection lock \"$lock\" declares deviceCount=$declared but $n step$plural reference$verb it. Every participating device needs its own criticalSection step with this lock."
+        "criticalSection lock \"$lock\" declares deviceCount=$declared but $n step$plural reference$verb it. Every participating device needs its own criticalSection step with this lock.",
       )
     }
     val devicesSeen = linkedMapOf<String, MutableList<Int>>()
@@ -1055,7 +1055,7 @@ object TestPlanValidator {
     for ((device, indices) in devicesSeen) {
       if (indices.size > 1) {
         messages.add(
-          "criticalSection lock \"$lock\" is entered twice by device \"$device\" (steps ${indices.joinToString(", ")}). Each device can participate in a given lock at most once."
+          "criticalSection lock \"$lock\" is entered twice by device \"$device\" (steps ${indices.joinToString(", ")}). Each device can participate in a given lock at most once.",
         )
       }
     }
@@ -1078,7 +1078,7 @@ object TestPlanValidator {
       val deviceCount = effectiveCoordinationField(step, "deviceCount")
       if (!isJsInteger(deviceCount) || (deviceCount as Number).toDouble() < 1) {
         messages.add(
-          "barrier step $index must declare a positive integer 'deviceCount', got ${jsonStringifyField(step, "deviceCount")}."
+          "barrier step $index must declare a positive integer 'deviceCount', got ${jsonStringifyField(step, "deviceCount")}.",
         )
       }
     }
@@ -1116,7 +1116,7 @@ object TestPlanValidator {
           message =
             "$tool step $index declares 'timeout' of $raw, which must be a positive integer no greater than setTimeout's usable range (${MAX_SETTIMEOUT_DELAY_MS}ms, ~24.8 days) -- Node/Bun clamp larger delays to 1ms instead of honoring them.",
           severity = ValidationSeverity.ERROR,
-        )
+        ),
       )
     }
     return errors
@@ -1145,7 +1145,7 @@ object TestPlanValidator {
             message =
               "step $index ($tool) sets '__lockNamespace', which is a reserved field injected internally by the plan executor. Authored plans must not set it.",
             severity = ValidationSeverity.ERROR,
-          )
+          ),
         )
       }
     }
@@ -1190,7 +1190,7 @@ object TestPlanValidator {
         message =
           "lock name(s) $names are used by both a criticalSection step and a barrier step. Both tools share the runtime coordinator's lock namespace and expected-count state, so mixing tool types on the same lock name is racy and can pair mismatched participants or overwrite the expected count. Use a distinct lock name per tool type.",
         severity = ValidationSeverity.ERROR,
-      )
+      ),
     )
   }
 
@@ -1248,7 +1248,7 @@ object TestPlanValidator {
         field = "steps",
         message = CoordinationScheduleFeasibility.formatDeadlock(deadlock),
         severity = ValidationSeverity.ERROR,
-      )
+      ),
     )
   }
 
@@ -1257,7 +1257,7 @@ object TestPlanValidator {
    * coordination step lacks a usable device/lock/deviceCount.
    */
   private fun collectCoordinationTracks(
-    steps: List<*>
+    steps: List<*>,
   ): List<CoordinationScheduleFeasibility.Track>? {
     val eventsByDevice = linkedMapOf<String, MutableList<CoordinationScheduleFeasibility.Event>>()
     for ((index, step) in steps.withIndex()) {

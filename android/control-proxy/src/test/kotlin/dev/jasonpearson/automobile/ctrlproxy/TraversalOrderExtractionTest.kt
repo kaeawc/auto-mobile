@@ -73,11 +73,11 @@ class TraversalOrderExtractionTest {
   fun `empty entry points omit truncation metadata`() {
     assertFalse(
       encoded(extractor.extractTraversalOrderFromActiveWindow(null))
-        .containsKey("truncationReasons")
+        .containsKey("truncationReasons"),
     )
     assertFalse(
       encoded(extractor.extractTraversalOrderFromAllWindows(emptyList(), null))
-        .containsKey("truncationReasons")
+        .containsKey("truncationReasons"),
     )
   }
 

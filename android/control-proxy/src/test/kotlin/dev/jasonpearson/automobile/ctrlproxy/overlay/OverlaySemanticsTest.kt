@@ -47,7 +47,7 @@ class OverlaySemanticsTest {
     assertNull(overlayContentDescription("row", "", null, true, listOf(icon, text)))
     assertNull(overlayContentDescription("box", "", null, true, listOf(text)))
     assertNull(
-      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text))
+      overlayContentDescription("box", "", null, true, listOf(icon.copy(visible = false), text)),
     )
   }
 

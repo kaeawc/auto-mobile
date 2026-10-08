@@ -147,8 +147,8 @@ class CoordinationScheduleFeasibilityTest {
   fun `returns null when there are no coordination events`() {
     assertNull(
       CoordinationScheduleFeasibility.findUnavoidableDeadlock(
-        listOf(CoordinationScheduleFeasibility.Track("A", emptyList()))
-      )
+        listOf(CoordinationScheduleFeasibility.Track("A", emptyList())),
+      ),
     )
   }
 

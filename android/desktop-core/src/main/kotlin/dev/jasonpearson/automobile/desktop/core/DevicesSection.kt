@@ -151,7 +151,7 @@ internal fun DevicesSection(
 
 @Composable
 private fun DaemonStatusInfo(
-  daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
+  daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse,
 ) {
   val colors = SharedTheme.globalColors
   Column(
@@ -380,7 +380,7 @@ private fun BootedDeviceRow(
                     Color(0xFFFFA726).copy(alpha = 0.2f),
                     RoundedCornerShape(3.dp),
                   )
-                  .padding(horizontal = 4.dp, vertical = 1.dp)
+                  .padding(horizontal = 4.dp, vertical = 1.dp),
             ) {
               Text(
                 "Physical",
@@ -408,10 +408,10 @@ private fun BootedDeviceRow(
               onClick = {
                 LOG.debug("[AutoMobile IDE] BootedDeviceRow Select clicked for: ${device.name}")
                 onSelect()
-              }
+              },
             )
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
       ) {
         Text(
           "Select",
@@ -431,7 +431,7 @@ private fun BootedDeviceRow(
             )
             .clickable(enabled = !isKilling, onClick = onKill)
             .pointerHoverIcon(if (isKilling) PointerIcon.Default else PointerIcon.Hand)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
       ) {
         Text(
           when {
@@ -496,7 +496,7 @@ private fun BootedDeviceRow(
                 )
                 .clickable(enabled = !isUpdatingService, onClick = onUpdateService)
                 .pointerHoverIcon(if (isUpdatingService) PointerIcon.Default else PointerIcon.Hand)
-                .padding(horizontal = 4.dp, vertical = 1.dp)
+                .padding(horizontal = 4.dp, vertical = 1.dp),
           ) {
             Text(
               if (isUpdatingService) "..." else "Update",
@@ -575,7 +575,7 @@ private fun DeviceImageRow(
             },
             RoundedCornerShape(4.dp),
           )
-          .padding(horizontal = 6.dp, vertical = 2.dp)
+          .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
       Text(
         when {

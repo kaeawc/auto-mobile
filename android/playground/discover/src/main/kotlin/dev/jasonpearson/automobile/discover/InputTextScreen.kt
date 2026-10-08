@@ -379,7 +379,7 @@ fun InputTextScreen() {
               append("Visit our website at ")
               pushStringAnnotation(tag = "URL", annotation = "https://www.example.com")
               withStyle(
-                style = SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline)
+                style = SpanStyle(color = Color.Blue, textDecoration = TextDecoration.Underline),
               ) {
                 append("example.com")
               }

@@ -435,7 +435,7 @@ object AutoMobileSDK {
           source = event.source.toProtocolType(),
           arguments = event.arguments.mapValues { it.value?.toString() ?: "null" },
           metadata = event.metadata,
-        )
+        ),
       )
     } catch (error: Exception) {
       logger.e(TAG, error) { "Failed to dispatch navigation event" }
@@ -524,7 +524,7 @@ object AutoMobileSDK {
         category = category,
         message = message,
         metadata = metadata,
-      )
+      ),
     )
   }
 
@@ -568,7 +568,7 @@ object AutoMobileSDK {
         applicationId = ctx.packageName,
         kind = "custom_event",
         details = details,
-      )
+      ),
     )
     addBreadcrumb(name, BreadcrumbCategory.CUSTOM, details)
   }

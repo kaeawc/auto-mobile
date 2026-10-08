@@ -52,7 +52,7 @@ internal fun DeviceIcon(
           )
         }
       }
-    }
+    },
   ) {
     Box(
       modifier =
@@ -61,7 +61,7 @@ internal fun DeviceIcon(
           .then(
             if (borderColor != Color.Transparent)
               Modifier.border(1.5.dp, borderColor, RoundedCornerShape(6.dp))
-            else Modifier
+            else Modifier,
           )
           .clickable(onClick = onClick)
           .pointerHoverIcon(PointerIcon.Hand),
@@ -95,7 +95,7 @@ private fun AndroidDeviceIcon(color: Color) {
               bottomStart = 3.dp,
               bottomEnd = 3.dp,
             ),
-          )
+          ),
     )
     // Head (smaller rounded rect on top)
     Box(
@@ -103,7 +103,7 @@ private fun AndroidDeviceIcon(color: Color) {
         Modifier.align(Alignment.TopCenter)
           .offset(y = 1.dp)
           .size(width = 10.dp, height = 5.dp)
-          .background(color, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+          .background(color, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)),
     )
   }
 }
@@ -113,6 +113,6 @@ private fun AppleDeviceIcon(color: Color) {
   // Simple iPhone shape (rounded rectangle with notch hint)
   Box(
     modifier =
-      Modifier.size(width = 10.dp, height = 16.dp).background(color, RoundedCornerShape(2.dp))
+      Modifier.size(width = 10.dp, height = 16.dp).background(color, RoundedCornerShape(2.dp)),
   )
 }

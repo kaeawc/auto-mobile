@@ -55,8 +55,8 @@ class DevicePickerUiTest {
           PickerDevice("sim-A", "iPhone", Platform.Ios, DeviceState.Shutdown),
           PickerDevice("sim-B", "iPhone", Platform.Ios, DeviceState.Shutdown),
           PickerDevice("pixel-1", "Pixel", Platform.Android, DeviceState.Booted),
-        )
-      )
+        ),
+      ),
     )
     onNodeWithText("iPhone (A)").assertIsDisplayed()
     onNodeWithText("iPhone (B)").assertIsDisplayed()
@@ -74,7 +74,7 @@ class DevicePickerUiTest {
         listOf(
           PickerDevice("shared", "Android twin", Platform.Android, DeviceState.Booted),
           PickerDevice("shared", "iOS twin", Platform.Ios, DeviceState.Booted),
-        )
+        ),
       ),
       onAction = { action = it },
     )
@@ -90,8 +90,8 @@ class DevicePickerUiTest {
         listOf(
           PickerDevice("shared", "Twin", Platform.Android, DeviceState.Booted),
           PickerDevice("shared", "Twin", Platform.Ios, DeviceState.Booted),
-        )
-      )
+        ),
+      ),
     )
     onNodeWithContentDescription("Observe Twin (android:shared)").assertIsDisplayed()
     onNodeWithContentDescription("Observe Twin (ios:shared)").assertIsDisplayed()

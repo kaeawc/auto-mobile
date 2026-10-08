@@ -292,7 +292,7 @@ class VideoInputDispatcher(
       if (!started.success) {
         LOG.warn(
           "gesture stream start rejected for $deviceId: ${started.error ?: started.action}; " +
-            "falling back to atomic swipe"
+            "falling back to atomic swipe",
         )
         startRejected = true
       } else {
@@ -508,7 +508,7 @@ class VideoInputDispatcher(
    * daemon-rejection is logged, not reflected in the return.
    */
   private inline fun dispatch(
-    crossinline send: (AutoMobileClient, String) -> InputActionResult
+    crossinline send: (AutoMobileClient, String) -> InputActionResult,
   ): Boolean {
     val platformName = platform()
     // Capture the deactivation generation at enqueue; the coroutine drops if [reset] bumped it
@@ -519,7 +519,7 @@ class VideoInputDispatcher(
     if (pendingDispatches.incrementAndGet() > MAX_PENDING_DISPATCHES) {
       pendingDispatches.decrementAndGet()
       LOG.warn(
-        "dropping video input for $deviceId: dispatch backlog full ($MAX_PENDING_DISPATCHES)"
+        "dropping video input for $deviceId: dispatch backlog full ($MAX_PENDING_DISPATCHES)",
       )
       return false
     }

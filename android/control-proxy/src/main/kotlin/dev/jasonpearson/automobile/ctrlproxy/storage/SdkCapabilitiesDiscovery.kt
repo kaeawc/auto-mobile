@@ -62,7 +62,7 @@ private fun readOwnUser(context: Context, authority: String): SdkCapabilitiesSta
     return unavailableSdkCapabilities("BRIDGE_NOT_INSTALLED")
   }
   return parseSnapshot(
-    context.contentResolver.call(Uri.parse("content://$authority"), "snapshot", null, null)
+    context.contentResolver.call(Uri.parse("content://$authority"), "snapshot", null, null),
   )
 }
 
@@ -80,7 +80,7 @@ private fun readOtherUser(context: Context, authority: String, userId: Int): Sdk
   // signal that the bridge is absent in that user.
   val client =
     context.contentResolver.acquireUnstableContentProviderClient(
-      Uri.parse("content://$userId@$authority")
+      Uri.parse("content://$userId@$authority"),
     ) ?: return unavailableSdkCapabilities("BRIDGE_NOT_INSTALLED")
   return client.use { parseSnapshot(it.call("snapshot", null, null)) }
 }

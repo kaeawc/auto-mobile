@@ -65,7 +65,7 @@ fun StartupDemoScreen(onNavigateBack: () -> Unit) {
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =
@@ -126,7 +126,7 @@ fun PerformanceListScreen(
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       LazyColumn(
         modifier =
@@ -194,7 +194,7 @@ fun PerformanceDetailScreen(
             }
           },
         )
-      }
+      },
     ) { paddingValues ->
       Column(
         modifier =

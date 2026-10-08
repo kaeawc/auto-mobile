@@ -655,7 +655,10 @@ async function prepareWindowOptions(
   if (!options.appLayer && !options.devicePersistence) {
     return undefined;
   }
-  if (!(await client.supportsCommand(OVERLAY_WINDOW_OPTIONS_CAPABILITY))) {
+  const supported = await client.supportsCommand(OVERLAY_WINDOW_OPTIONS_CAPABILITY);
+  // The lookup waits for connection and handshake; an abort during it must stop every variant.
+  signal?.throwIfAborted();
+  if (!supported) {
     return {
       success: false,
       error: new ActionableError(overlayWindowOptionsUnsupportedMessage(options)).message,
@@ -889,9 +892,7 @@ async function performMutation(
     : { id: args.action === "show" ? (args.spec as OverlaySpec).id : args.id };
   const client = clientFactory(device);
   const previouslyShown = store.status(scope).overlays.some((entry) => entry.id === target.id);
-  if (args.action === "show") {
-    events.show(scope, target.id!, client);
-  }
+  // Preflight first: a refused show must not reset the event epoch of an overlay still on screen.
   const { displayId, failure } = await preflightMutation(
     client,
     device,
@@ -899,6 +900,9 @@ async function performMutation(
     dependencies,
     signal,
   );
+  if (args.action === "show" && !failure) {
+    events.show(scope, target.id!, client);
+  }
   const stage: AssetStage = failure
     ? { uploaded: [], prepared: [], failure }
     : await stageAssets(client, args, assetReaders, signal);

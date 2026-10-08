@@ -205,7 +205,7 @@
     "js-yaml": "^5.1.0",
     "knip": "^6.0.0",
     "oxc-parser": "0.152.0",
-    "oxfmt": "0.71.0",
+    "oxfmt": "0.72.0",
     "oxlint": "1.86.0",
     "oxlint-tsgolint": "7.0.2003",
     "pixelmatch": "^7.1.0",

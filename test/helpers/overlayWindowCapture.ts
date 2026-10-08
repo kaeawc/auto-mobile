@@ -1,4 +1,5 @@
 import capture from "../fixtures/android-launcher/launcher-recents-emulator-5602.json";
+import appLayerCapture from "../fixtures/android-overlay-window/app-layer-overlay-over-playground.raw.json";
 import { CTRL_PROXY_PACKAGE } from "../../src/ctrlProxy/constants";
 import { CtrlProxyHierarchy } from "../../src/features/observe/android/CtrlProxyHierarchy";
 import type {
@@ -88,4 +89,28 @@ export function observationOf(viewHierarchy: ViewHierarchyResult): ObserveResult
     viewHierarchy,
     elements: new DefaultObserveElementCollector().collect(viewHierarchy, "android"),
   };
+}
+
+function convertCapture(json: string): ViewHierarchyResult {
+  return new CtrlProxyHierarchy({
+    timer: new FakeTimer(),
+  } as HierarchyDelegateContext).convertToViewHierarchyResult(
+    JSON.parse(json) as AccessibilityHierarchy,
+  );
+}
+
+/**
+ * Device captures of a real prototype overlay; see the README beside them in
+ * test/fixtures/android-overlay-window/. Window ids are the captured ones.
+ */
+export const PROTOTYPE_CAPTURE = {
+  appWindowId: 150,
+  statusBarWindowId: 157,
+  appLayerOverlayWindowId: 174,
+  appPackage: "dev.jasonpearson.automobile.playground",
+} as const;
+
+/** `window.layer: "app"` prototype (a TYPE_SYSTEM window without overlay metadata) over the Playground. */
+export function capturedAppLayerOverlayHierarchy(): ViewHierarchyResult {
+  return convertCapture(appLayerCapture.rawViewHierarchy.json);
 }

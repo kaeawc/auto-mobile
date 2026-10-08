@@ -22,6 +22,8 @@ import {
 } from "../../../src/utils/viewHierarchySearch";
 import {
   OVERLAY_CAPTURE,
+  PROTOTYPE_CAPTURE,
+  capturedAppLayerOverlayHierarchy,
   capturedOverlayHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
@@ -211,5 +213,39 @@ describe("scopeObserveResultToLayer (#9305)", () => {
     expect(overlayOnly).toContain("YouTube");
     expect(overlayOnly).not.toContain("Screenshot");
     expect(result.viewHierarchy).toEqual(captureWithOverlay());
+  });
+});
+
+describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
+  // Captured: CtrlProxy's TYPE_APPLICATION_OVERLAY window (a11y TYPE_SYSTEM, no overlay metadata)
+  // floating over the Playground, beside SystemUI's TYPE_SYSTEM status bar.
+  const selectByText = (hierarchy: ViewHierarchyResult, text: string) =>
+    new ResolverElementSelector().selectByText(hierarchy, text, { partialMatch: false }).element;
+
+  test("the captured app-layer window is AutoMobile's overlay and the status bar is not", () => {
+    const hierarchy = capturedAppLayerOverlayHierarchy();
+    expect(hasOwnOverlay(hierarchy)).toBe(true);
+    const overlay = scopeHierarchyForSelector(hierarchy, "overlay");
+    expect(rootWindowIds(overlay)).toEqual([PROTOTYPE_CAPTURE.appLayerOverlayWindowId]);
+    expect(selectByText(overlay, "Bump")).toBeDefined();
+  });
+
+  test('"app" excludes the app-layer overlay and keeps the app and status bar', () => {
+    const scoped = scopeHierarchyForSelector(capturedAppLayerOverlayHierarchy(), "app");
+    expect(rootWindowIds(scoped)).not.toContain(PROTOTYPE_CAPTURE.appLayerOverlayWindowId);
+    expect(rootWindowIds(scoped)).toEqual(
+      expect.arrayContaining([PROTOTYPE_CAPTURE.appWindowId, PROTOTYPE_CAPTURE.statusBarWindowId]),
+    );
+    expect(selectByText(scoped, "Bump")).toBeNull();
+    expect(scoped.packageName).toBe(PROTOTYPE_CAPTURE.appPackage);
+  });
+
+  test('"app" gestures inside the app-layer overlay are refused', () => {
+    const hierarchy = capturedAppLayerOverlayHierarchy();
+    const bump = selectByText(hierarchy, "Bump")!;
+    const point = { x: bump.bounds.left + 5, y: bump.bounds.top + 5 };
+    expect(() => assertAppGestureNotUnderOverlay(hierarchy, "app", point, "tap")).toThrow(
+      /overlay window covers that point/,
+    );
   });
 });

@@ -42,6 +42,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
+import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import {
@@ -365,6 +366,21 @@ function resolveTalkBackDependencies(
       new TalkBackTapStrategy({ timer, driverFactory: talkBackDriverFactory }),
     useContextualFocusTap: dependencies.talkBackDriverFactory === undefined,
   };
+}
+
+/**
+ * `layer` refusal for the resolved native point, checked against the pre-dispatch observation
+ * before any input is sent (issue #9305).
+ */
+function tapAtLayerRefusal(
+  options: TapAtOptions,
+  observation: ObserveResult,
+  point: { x: number; y: number },
+): string | undefined {
+  const action = options.action ?? "tap";
+  const verb =
+    action === "longPress" ? "long press" : action === "doubleTap" ? "double tap" : "tap";
+  return layerGestureRefusal(observation.viewHierarchy, options.layer, [point], verb);
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -1263,7 +1279,14 @@ export class TapAtCoordinate extends BaseVisualChange {
       return { x: inputPoint(options).x, y: inputPoint(options).y, error: gestureError };
     }
     const resolved = resolveTapAtCoordinates(options, observeResult, this.device.platform);
-    if (options.planContext && !("error" in resolved)) {
+    if ("error" in resolved) {
+      return resolved;
+    }
+    const layerRefusal = tapAtLayerRefusal(options, observeResult, resolved);
+    if (layerRefusal) {
+      return { ...resolved, error: layerRefusal };
+    }
+    if (options.planContext) {
       this.recordNativeGeometry(options.planContext, observeResult, resolved);
     }
     return resolved;

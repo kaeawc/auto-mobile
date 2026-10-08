@@ -1,5 +1,6 @@
 import type { ElementContainerSelector } from "./PinchOnOptions";
 import type { ElementSelectionStrategy } from "./ElementSelectionStrategy";
+import type { HierarchyLayer } from "./HierarchyLayer";
 
 /**
  * Options for swiping on screen or element
@@ -46,6 +47,12 @@ export interface SwipeOnOptions {
    * Default: false
    */
   focusTarget?: boolean;
+
+  /**
+   * Scope container, auto-target and lookFor resolution to the app or AutoMobile's overlay, and
+   * refuse a swipe whose start point lies on the other layer (issue #9305).
+   */
+  layer?: HierarchyLayer;
 
   // Execute a swipe that returns to the start point for dry-run testing (default false)
   boomerang?: boolean;

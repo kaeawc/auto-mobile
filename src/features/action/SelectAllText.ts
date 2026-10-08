@@ -9,6 +9,8 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
+import { focusedFieldLayerRefusal } from "../observe/hierarchyLayer";
 
 type SelectAllTextCtrlProxy = {
   requestSelectAll(): Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
@@ -30,14 +32,29 @@ export class SelectAllText extends BaseVisualChange {
     this.ctrlProxyFactory = ctrlProxyFactory;
   }
 
-  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<SelectAllTextResult> {
+  async execute(
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+    options: { layer?: HierarchyLayer } = {},
+  ): Promise<SelectAllTextResult> {
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("selectAllText");
 
     return this.observedInteraction(
-      async () => {
+      async (observation) => {
         throwIfAborted(signal);
+        // The device selects in whichever field holds input focus; refuse when that field is on
+        // the other layer (issue #9305). Checked against the pre-action read, before dispatch.
+        const layerRefusal = focusedFieldLayerRefusal(
+          observation?.viewHierarchy,
+          options.layer,
+          "select all text",
+        );
+        if (layerRefusal) {
+          perf.end();
+          return { success: false, error: layerRefusal };
+        }
         try {
           // Platform-specific select all execution
           switch (this.device.platform) {

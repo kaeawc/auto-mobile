@@ -26,6 +26,7 @@ import type {
 // optional since #5870, predating this pass, and fixing that pre-existing
 // mismatch is out of scope here.
 export interface SelectAllTextArgs {
+  layer?: HierarchyLayer;
   platform?: Platform;
 }
 
@@ -148,6 +149,7 @@ export interface SwipeOnArgs {
   apexPause?: number;
   returnSpeed?: number;
   speed?: "slow" | "normal" | "fast";
+  layer?: HierarchyLayer;
   platform?: Platform;
 }
 
@@ -162,6 +164,7 @@ export interface PinchOnArgs {
   includeSystemInsets?: boolean;
   container?: ElementContainerSelector;
   autoTarget?: boolean;
+  layer?: HierarchyLayer;
   platform?: Platform;
 }
 

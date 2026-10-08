@@ -651,6 +651,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .enum(["tap", "longPress", "doubleTap"])
         .optional()
         .describe("Coordinate gesture (default: tap)"),
+      layer: hierarchyLayerSchema.optional(),
       durationMs: z
         .number()
         .int()
@@ -905,6 +906,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
             `Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN}, <= ${SWIPE_RETURN_SPEED_MAX}; default: 1); return duration <= ${SWIPE_RETURN_DURATION_MAX_MS} ms and total boomerang <= ${SWIPE_BOOMERANG_MAX_MS} ms`,
           ),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
+        layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -975,6 +977,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
             "Nested container scope; selectionStrategy (first/random/unique) is supported only inside each container level, not at the top level",
           ),
         autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
+        layer: hierarchyLayerSchema.optional(),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -989,6 +992,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
 export const selectAllTextSchema = addDeviceTargetingToSchema(
   z
     .object({
+      layer: hierarchyLayerSchema.optional(),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
       // its own.
@@ -1686,6 +1690,7 @@ export async function swipeOnHandler(
       boomerang: args.boomerang,
       apexPause: args.apexPause,
       returnSpeed: args.returnSpeed,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -1751,6 +1756,7 @@ export async function pinchOnHandler(
       includeSystemInsets: args.includeSystemInsets,
       container: args.container,
       autoTarget: args.autoTarget,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2233,6 +2239,7 @@ export async function tapAtHandler(
       snapshotId: args.snapshotId,
       action: args.action,
       durationMs: args.durationMs,
+      layer: args.layer,
     },
     progress,
     signal,
@@ -2418,13 +2425,15 @@ export function resetSelectAllTextFactory(): void {
 
 export async function selectAllTextHandler(
   device: BootedDevice,
-  _args: SelectAllTextArgs,
+  args: SelectAllTextArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
   try {
     const selectAllText = selectAllTextFactory(device);
-    const result: SelectAllTextResult = await selectAllText.execute(progress, signal);
+    const result: SelectAllTextResult = await selectAllText.execute(progress, signal, {
+      layer: args.layer,
+    });
 
     const message = result.success
       ? "Selected all text in focused input field"

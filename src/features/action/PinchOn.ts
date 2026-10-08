@@ -39,6 +39,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { serverConfig } from "../../utils/ServerConfig";
+import { assertGestureOnLayer, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import {
   createGlobalPerformanceTracker,
@@ -76,7 +77,21 @@ type PinchTarget = {
   targetType: "screen" | "container";
   container?: PinchOnOptions["container"];
   warning?: string;
+  /** The unscoped capture the target was resolved from; the `layer` check reads its windows. */
+  hierarchy?: HierarchySnapshot["hierarchy"];
 };
+
+/**
+ * Where both fingers go down: the axis starts horizontal through the center (rotation only turns
+ * it during the gesture), each finger half the start distance from the center.
+ */
+function pinchStartPoints(geometry: PinchGeometry): Array<{ x: number; y: number }> {
+  const half = geometry.distanceStart / 2;
+  return [
+    { x: Math.round(geometry.centerX - half), y: Math.round(geometry.centerY) },
+    { x: Math.round(geometry.centerX + half), y: Math.round(geometry.centerY) },
+  ];
+}
 
 type PinchGeometry = Pick<
   PinchOnResult,
@@ -334,6 +349,7 @@ export class PinchOn extends BaseVisualChange {
       this.resolveTarget(options, signal, displayTarget?.observation),
     );
     const geometry = this.resolveGestureGeometry(options, target.bounds);
+    assertGestureOnLayer(target.hierarchy, options.layer, pinchStartPoints(geometry), "pinch");
     const pinchResult = await this.dispatchObservedPinch(options, geometry, {
       ...context,
       fence,
@@ -562,8 +578,10 @@ export class PinchOn extends BaseVisualChange {
       targetType: "screen",
     };
 
+    // `layer` scopes container and auto-target resolution; clipping keeps the whole capture.
+    const searchSnapshot = this.layerSnapshot(snapshot, options.layer);
     if (options.container) {
-      const containerElement = this.findContainerElement(options.container, snapshot);
+      const containerElement = this.findContainerElement(options.container, searchSnapshot);
       if (!containerElement) {
         throw new ActionableError("Container element not found for pinchOn");
       }
@@ -573,7 +591,7 @@ export class PinchOn extends BaseVisualChange {
         container: options.container,
       };
     } else if (options.autoTarget !== false) {
-      const autoTarget = this.selectAutoTargetElement(snapshot, screenBounds);
+      const autoTarget = this.selectAutoTargetElement(searchSnapshot, screenBounds);
       if (autoTarget) {
         const container = buildContainerFromElement(autoTarget);
         target = {
@@ -587,7 +605,28 @@ export class PinchOn extends BaseVisualChange {
       }
     }
 
-    return this.clipTarget(target, options, snapshot, originalObservation);
+    return {
+      ...this.clipTarget(target, options, snapshot, originalObservation),
+      hierarchy: snapshot.hierarchy,
+    };
+  }
+
+  /** The capture restricted to `layer` for selector resolution (issue #9305). */
+  private layerSnapshot(
+    snapshot: HierarchySnapshot,
+    layer: PinchOnOptions["layer"],
+  ): HierarchySnapshot {
+    const scoped = scopeHierarchyForSelector(snapshot.hierarchy, layer);
+    return scoped === snapshot.hierarchy
+      ? snapshot
+      : identifyObservedHierarchy(
+          this.device.platform,
+          scoped,
+          snapshot.requestedFreshness,
+          this.timer,
+          undefined,
+          snapshot.captureId,
+        );
   }
 
   private clipTarget(

@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "a",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "enabled": "yes"
+    },
+    "root": {
+      "type": "switch",
+      "stateKey": "enabled"
+    }
+  },
+  "expectedPath": "root.stateKey"
+}

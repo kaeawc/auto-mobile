@@ -89,6 +89,25 @@ export function buildMismatchHint(errorText: string | undefined): string | undef
   );
 }
 
+/**
+ * Turn a held-device refusal (`device_owned_by_other_session`, #10743/#10783/#10785) into the
+ * driver's remedy. The daemon's message already says a session holds the device; this names the
+ * flags this driver has. Returns undefined for unrelated errors.
+ */
+export function deviceOwnedHint(
+  payload: Record<string, unknown> | undefined,
+  tool: string,
+): string | undefined {
+  if (payload?.code !== "device_owned_by_other_session") {
+    return undefined;
+  }
+  const force = tool === "killDevice" || tool === "deleteDevice" ? ' Or pass {"force": true}.' : "";
+  return (
+    "device is held by another session: put a getAndroid/getApple step first so this plan " +
+    `holds it, or pass --session <uuid> of the holder.${force}`
+  );
+}
+
 /** The subset of the MCP client this driver needs; faked in tests. */
 export interface DriveClient {
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
@@ -193,6 +212,10 @@ export async function runDrive(options: DriveOptions, deps: DriveDeps): Promise<
         deps.log(`### ${step.tool} ERROR: ${failureText}`);
         if (options.json) {
           deps.log(JSON.stringify(envelope, null, 2));
+        }
+        const ownedHint = deviceOwnedHint(payload, step.tool);
+        if (ownedHint) {
+          deps.log(ownedHint);
         }
         if (hint) {
           deps.log(hint);

@@ -57,6 +57,8 @@ session: a command for it without `sessionUuid`, or naming a different session,
 fails with `code` `device_owned_by_other_session`. A device no session holds
 takes input from any client.
 
+The same rule applies to tool calls; see [Device ownership](device-ownership.md).
+
 In the table, `?` marks optional parameters.
 
 | `method`             | `params`                                                                                                                                      |

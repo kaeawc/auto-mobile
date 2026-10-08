@@ -35,10 +35,15 @@ const TIER_B: Record<string, string> = {
   systemTime: `setSystemTime(new Date(0));`,
   moduleSetter: `setObserveCacheStore(new FakeObserveCacheStore());`,
   moduleReset: `afterEach(() => resetAdbClientCaches());`,
+  spyOnAlias: `import { spyOn as spyOnOutputSchema } from "bun:test";\nspyOnOutputSchema(schema, "parse");`,
+  importedSingletonSetter: `import { serverConfig } from "../../src/utils/ServerConfig";\nserverConfig.setRawElementSearchEnabled(true);`,
+  importedNestedSetter: `import * as cfg from "../../src/cfg";\ncfg.shared.resetCache();`,
   staticResetForTests: `afterEach(() => AndroidAvdProvenanceCache.resetForTests());`,
 };
 
 const TIER_C = [
+  // Setters on a local fake are not shared state, even when the class is imported.
+  `import { FakeThing } from "../fakes/FakeThing";\nconst fake = new FakeThing();\nfake.setMode(1);\nfake.resetCalls();`,
   `import { FakeTimer } from "../fakes/FakeTimer";\nconst timer = new FakeTimer();\nexpect(parse(input)).toEqual(expected);`,
   // Comparisons and reads are not writes.
   `if (process.env.CI === "true") {}\nexpect(globalThis.fetch === original).toBe(true);`,

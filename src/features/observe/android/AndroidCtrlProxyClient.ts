@@ -72,6 +72,7 @@ import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/install
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
+import { isCtrlProxyHostPortFree } from "./ctrlProxyHostPortProbe";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
@@ -1517,6 +1518,9 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
+/** adb's bind failure for `forward`: "cannot bind listener: Address already in use". */
+const ADB_FORWARD_ADDRESS_IN_USE_PATTERN = /address already in use|EADDRINUSE/i;
+
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
   /** Optional observer for display and posture changes. */
   onDisplayTransition?: (event: AndroidDisplayTransition) => void;
@@ -1562,6 +1566,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   forwardClientProbe: ForwardClientConnectionProbe = new HostForwardClientConnectionProbe();
   private static readonly FORWARD_CLIENT_PROBES = 2;
+  private static readonly FORWARD_PORT_ATTEMPTS = 4;
   private static readonly FORWARD_CLIENT_REPROBE_INTERVAL_MS = 1_000;
   private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   /** Set when shutdown released this client's lease before its close finished. */
@@ -5115,6 +5120,48 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /**
+   * Run `adb forward` on a host port that was bind-probed just now, moving to the
+   * next free port when the probe fails or adb still reports the port in use
+   * (another forward or process claimed it after allocation, #10795).
+   */
+  private async forwardOnFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      const isLastAttempt = attempt >= AndroidCtrlProxyClient.FORWARD_PORT_ATTEMPTS;
+      if (!isLastAttempt && !(await isCtrlProxyHostPortFree(this.localPort))) {
+        logger.info(`[CTRL_PROXY] Local port ${this.localPort} is busy; selecting another port`);
+        await this.moveToNextFreeLocalPort(signal);
+        continue;
+      }
+      try {
+        await this.adb.execute(
+          ["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`],
+          { signal },
+        );
+        return;
+      } catch (error) {
+        if (isLastAttempt || !ADB_FORWARD_ADDRESS_IN_USE_PATTERN.test(errorMessage(error))) {
+          throw error;
+        }
+        logger.warn(
+          `[CTRL_PROXY] adb forward on tcp:${this.localPort} reported the port in use; retrying on the next port`,
+        );
+        await this.moveToNextFreeLocalPort(signal);
+      }
+    }
+  }
+
+  private async moveToNextFreeLocalPort(signal?: AbortSignal): Promise<void> {
+    const busyPort = this.localPort;
+    PortManager.release(this.portAllocationId);
+    this.localPort = PortManager.allocate(this.portAllocationId, {
+      reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, busyPort],
+    });
+    if (!(await this.removeCtrlProxyPortForward(this.localPort, signal))) {
+      throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+    }
+  }
+
+  /**
    * Acquire this device's cross-process forwarding lease, taking it over from a
    * live owner that reports it no longer uses the device (issue #10497).
    */
@@ -5188,11 +5235,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }
       }
 
-      await perf.track("setupPortForward", () =>
-        this.adb.execute(["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`], {
-          signal,
-        }),
-      );
+      await perf.track("setupPortForward", () => this.forwardOnFreeLocalPort(signal));
       this.ctrlProxyForwardLease.recordOwnedForward?.(this.localPort);
 
       if (this.closed) {

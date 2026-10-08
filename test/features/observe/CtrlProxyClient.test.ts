@@ -39,6 +39,7 @@ import {
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
+import { setCtrlProxyHostPortProbeForTesting } from "../../../src/features/observe/android/ctrlProxyHostPortProbe";
 import { PortManager } from "../../../src/utils/PortManager";
 import { logger } from "../../../src/utils/logger";
 import {
@@ -1231,6 +1232,53 @@ describe("AndroidCtrlProxyClient", function () {
     expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
     expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
     expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8767 tcp:8765");
+  });
+
+  test("bind-probes the host port right before adb forward and moves to the next free port (#10795)", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => "");
+    const probed: number[] = [];
+    setCtrlProxyHostPortProbeForTesting({
+      isPortFree: async (port) => {
+        probed.push(port);
+        return port !== 8765;
+      },
+    });
+    try {
+      await accessibilityServiceClient.setupPortForwarding();
+
+      expect(probed).toEqual([8765, 8767]);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+    } finally {
+      setCtrlProxyHostPortProbeForTesting({ isPortFree: async () => true });
+    }
+  });
+
+  test("retries adb forward on the next port when adb reports the address in use (#10795)", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => "");
+    fakeAdb.setCommandError(
+      "forward tcp:8765 tcp:8765",
+      new Error("adb: error: cannot bind listener: Address already in use"),
+    );
+
+    await accessibilityServiceClient.setupPortForwarding();
+
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8767);
+    expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
+  });
+
+  test("does not retry adb forward failures other than address-in-use (#10795)", async function () {
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(() => "");
+    fakeAdb.setCommandError("forward tcp:8765 tcp:8765", new Error("device offline"));
+
+    await expect(accessibilityServiceClient.setupPortForwarding()).rejects.toThrow(
+      "device offline",
+    );
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
   });
 
   test("reallocates a persistently busy removed port after three probe retries", async function () {

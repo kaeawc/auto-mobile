@@ -92,6 +92,8 @@ dependencies {
   testImplementation(libs.bundles.unit.test)
   testImplementation(projects.junitRunner)
   testImplementation(libs.robolectric)
+  // createComposeRule's mainClock drives overlay motion frame by frame (#10442).
+  testImplementation(libs.compose.ui.junit)
   testImplementation(libs.ktor.client.core)
   testImplementation(libs.ktor.client.cio)
   testImplementation(libs.ktor.client.websockets)

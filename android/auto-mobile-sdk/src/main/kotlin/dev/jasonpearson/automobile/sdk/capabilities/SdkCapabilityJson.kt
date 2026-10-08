@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.intOrNull
 
 /** A decoded snapshot, or an unavailable snapshot with a diagnostic reason. */
@@ -23,7 +24,7 @@ private val snapshotJson = Json {
 
 /** Encodes the complete snapshot, including default policy flags, without accessing SDK state. */
 fun SdkCapabilityDocument.toSnapshotJson(): String =
-  snapshotJson.encodeToString(SdkCapabilityDocument.serializer(), this)
+  snapshotJson.encodeToString<SdkCapabilityDocument>(this)
 
 /**
  * Decodes versions 1 and higher using the version 1 structure, preserving the supplied version.
@@ -54,10 +55,7 @@ fun decodeSdkCapabilitySnapshot(json: String): SdkCapabilitySnapshotResult {
       }
     }
     SdkCapabilitySnapshotResult.Success(
-      snapshotJson.decodeFromJsonElement(
-        SdkCapabilityDocument.serializer(),
-        normalizeUnknownStates(document),
-      ),
+      snapshotJson.decodeFromJsonElement<SdkCapabilityDocument>(normalizeUnknownStates(document)),
     )
   } catch (error: SerializationException) {
     SdkCapabilitySnapshotResult.Failure(error.message ?: "Malformed capability snapshot")

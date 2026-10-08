@@ -919,6 +919,7 @@ export class SetUIState extends BaseVisualChange {
           },
         },
         observation?.viewHierarchy,
+        fields[i].selected !== undefined,
       );
       if (element) {
         matches.push({ fieldSpec: fields[i], fieldIndex: i, element });
@@ -1351,6 +1352,7 @@ export class SetUIState extends BaseVisualChange {
         },
       },
       observation.viewHierarchy,
+      fieldSpec.selected !== undefined,
     );
     if (found) {
       return found;
@@ -1374,12 +1376,19 @@ export class SetUIState extends BaseVisualChange {
   private findElement(
     selector: ElementSelector & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
     viewHierarchy?: ViewHierarchyResult,
+    wantsCheckable = false,
   ): Element | null {
     if (!viewHierarchy) {
       return null;
     }
 
     if (selector.text) {
+      const control = wantsCheckable
+        ? this.findCheckableByText(selector.text, viewHierarchy, selector.screenSizeOptions)
+        : null;
+      if (control) {
+        return control;
+      }
       if (this.device.platform === "ios") {
         return (
           this.selector.selectByText(viewHierarchy, selector.text, {
@@ -1397,6 +1406,31 @@ export class SetUIState extends BaseVisualChange {
     }
 
     return null;
+  }
+
+  /**
+   * A `selected` request names a control by its visible label, which usually sits on a
+   * clickable row that owns the checkable widget (Settings switch and radio rows, #10616).
+   * The toggle intent resolves the checkable node the matched label or row encloses; a
+   * match that is not checkable falls back to the ordinary field lookup.
+   */
+  private findCheckableByText(
+    text: string,
+    viewHierarchy: ViewHierarchyResult,
+    screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
+  ): Element | null {
+    const android = this.device.platform !== "ios";
+    const element = this.selector.selectByText(viewHierarchy, text, {
+      intentAction: "inspect",
+      selectionIntent: "toggle",
+      ...(android ? { partialMatch: true, caseSensitive: false } : {}),
+      screenSizeOptions,
+    }).element;
+    if (!element) {
+      return null;
+    }
+    const fieldType = this.fieldTypeDetector.detect(element);
+    return fieldType === "toggle" || fieldType === "checkbox" ? element : null;
   }
 
   /**
@@ -1834,6 +1868,7 @@ export class SetUIState extends BaseVisualChange {
         },
       },
       observation.viewHierarchy,
+      fieldSpec.selected !== undefined,
     );
     // A text selector can name the field's current label/value, which changes
     // after input. Prefer the matched field's stable resource ID in the fresh

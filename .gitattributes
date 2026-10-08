@@ -27,6 +27,7 @@ test/fixtures/android-overlay-testtag/*.json text eol=lf
 test/fixtures/android-overlay-window/*.json text eol=lf
 test/fixtures/android-enabled/*.json text eol=lf
 test/fixtures/android-action-compact/*.json text eol=lf
+test/fixtures/android-settings/*.json text eol=lf
 test/fixtures/swipeon-auto-target/foldable.json text eol=lf
 test/fixtures/swipeon-auto-target/landscape.json text eol=lf
 test/fixtures/plan-schedule-feasibility/*.json text eol=lf

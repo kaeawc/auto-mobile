@@ -3636,3 +3636,51 @@ describe("SetUIState resolver lookups on captured hierarchies (#10269)", () => {
     ).toBeNull();
   });
 });
+
+describe("SetUIState selected on a captured Settings radio row (#10616)", () => {
+  const device: BootedDevice = { name: "test-device", platform: "android", deviceId: "device-1" };
+  // Real emulator capture of Settings > Apps > AutoMobile Playground > Open by default: each
+  // option is a clickable, focusable LinearLayout row owning an android:id/checkbox RadioButton
+  // and a sibling title TextView — the same row shape as the Airplane mode switch row.
+  const capture: ObserveResult = JSON.parse(
+    readFileSync(
+      new URL(
+        "../../fixtures/android-settings/open-by-default-radio-rows.observe.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  );
+
+  test.each([
+    ["In the app", true],
+    ["In your browser", false],
+  ] as const)(
+    "resolves %p to the row's checkable control, not a text field",
+    async (text, selected) => {
+      const tap = new FakeTapOnElement();
+      const observe = new FakeObserveScreenForSetUIState();
+      observe.setResult(capture);
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const action = new SetUIState(device, null, {
+        tapOnElement: tap,
+        inputText: new FakeInputText(),
+        clearText: new FakeClearText(),
+        swipeOn: new FakeSwipeOn(),
+        observeScreen: observe,
+        timer,
+      });
+
+      const result = await action.execute({ fields: [{ selector: { text }, selected }] });
+
+      expect(result.fields[0]).toMatchObject({
+        success: true,
+        skipped: true,
+        fieldType: "checkbox",
+      });
+      expect(result.success).toBe(true);
+      expect(tap.getCallCount()).toBe(0);
+    },
+  );
+});

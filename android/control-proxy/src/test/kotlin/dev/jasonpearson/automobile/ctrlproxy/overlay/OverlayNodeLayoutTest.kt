@@ -11,6 +11,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
@@ -27,10 +28,10 @@ import org.robolectric.Shadows.shadowOf
 class OverlayNodeLayoutTest {
   private val tap = listOf<OverlayAction>(OverlayEmitAction("tapped"))
 
-  private fun render(root: OverlayNode): SemanticsNode {
+  private fun render(root: OverlayNode, theme: OverlaySpecTheme? = null): SemanticsNode {
     val spec = OverlaySpec("panel", OverlayWindow(OverlayFullscreenPlacement()), root = root)
     val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
-    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root) }
+    activity.setContent { OverlaySpecContent(mapOverlaySpec(spec).root, theme) }
     shadowOf(Looper.getMainLooper()).idle()
     val view = checkNotNull(composeView(activity.window.decorView))
     return (view as RootForTest).semanticsOwner.unmergedRootSemanticsNode
@@ -142,6 +143,15 @@ class OverlayNodeLayoutTest {
     assertEquals(20.sp, input.style.fontSize)
     assertEquals(2f, input.density.fontScale)
   }
+
+  private fun SemanticsNode.textStyleOf(label: String) =
+    mutableListOf<TextLayoutResult>()
+      .also {
+        checkNotNull(labelled(label).config[SemanticsActions.GetTextLayoutResult].action)(it)
+      }
+      .single()
+      .layoutInput
+      .style
 
   @Test
   fun `weighted children without a width share the row`() {
@@ -261,5 +271,25 @@ class OverlayNodeLayoutTest {
     assertEquals(listOf("settings"), label("settings"))
     // Mixed content labels the container through its children, never as "row".
     assertNull(label("save"))
+  }
+
+  @Test
+  fun `plain text inherits the theme font family unless it names its own`() {
+    val root =
+      render(
+        OverlayColumnNode(
+          children =
+            listOf(
+              OverlayTextNode(text = "Plain"),
+              OverlayTextNode(
+                text = "Mono",
+                style = OverlayStyle(fontFamily = OverlayFontFamily.Named("monospace")),
+              ),
+            )
+        ),
+        OverlaySpecTheme(typography = OverlaySpecThemeTypography(fontFamily = "serif")),
+      )
+    assertEquals(FontFamily.Serif, root.textStyleOf("Plain").fontFamily)
+    assertEquals(FontFamily.Monospace, root.textStyleOf("Mono").fontFamily)
   }
 }

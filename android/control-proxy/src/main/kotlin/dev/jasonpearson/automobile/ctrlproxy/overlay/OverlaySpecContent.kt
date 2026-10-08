@@ -192,9 +192,9 @@ private fun RenderOverlayNodeContent(
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        fontFamily =
-          if (role == null || source.fontFamily != null) rememberOverlayFontFamily(node.style)
-          else null,
+        // Only an authored family overrides; otherwise the text inherits the theme's family through
+        // its role or the themed body style, as plain text in the prototyped app would (#10561).
+        fontFamily = if (source.fontFamily != null) rememberOverlayFontFamily(node.style) else null,
         textAlign = node.style.textAlign,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,

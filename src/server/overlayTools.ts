@@ -639,6 +639,17 @@ function startFreshShowEvents(
   }
 }
 
+function settleShowEvents(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  client: OverlayClient,
+  outcome: { target: { id?: string }; inPlace: boolean; success: boolean },
+): void {
+  if (outcome.inPlace && outcome.success) {
+    events.show(scope, outcome.target.id!, client);
+  }
+}
+
 function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
   const state = DaemonState.getInstance();
   if (!state.isInitialized()) {
@@ -691,9 +702,7 @@ async function performMutation(
     ? { uploaded: [], prepared: [], failure: resolved.failure }
     : await stageAssets(client, args, assetReaders, signal);
   const { result, warning } = await sendOverlay(client, args, stage, signal, displayId);
-  if (inPlace && result.success) {
-    events.show(scope, target.id!, client);
-  }
+  settleShowEvents(events, scope, client, { target, inPlace, success: result.success });
   clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);

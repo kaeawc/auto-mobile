@@ -35,6 +35,8 @@ data class OverlayRenderNode(
   val page: Int = 0,
   val selection: Int = 0,
   val sheetOpen: Boolean = false,
+  /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
+  val checked: Boolean = false,
 )
 
 data class OverlayRenderModel(
@@ -42,6 +44,7 @@ data class OverlayRenderModel(
   val opacityPercent: Int,
   val root: OverlayRenderNode,
   val hasTextField: Boolean = false,
+  val theme: OverlaySpecTheme? = null,
   val motion: String? = null,
 ) {
   fun request() =
@@ -50,7 +53,7 @@ data class OverlayRenderModel(
       opacityPercent = opacityPercent,
       hasTextField = hasTextField,
     ) {
-      OverlaySpecContent(root)
+      OverlaySpecContent(root, theme = theme)
     }
 }
 
@@ -89,6 +92,7 @@ fun mapOverlaySpec(spec: OverlaySpec, pages: Map<String, Int> = emptyMap()): Ove
     spec.window.opacity,
     mapped,
     hasVisibleTextField(mapped),
+    spec.theme,
     spec.motion,
   )
 }
@@ -111,6 +115,9 @@ private fun mapOverlayNode(
           "pageCount" to OverlayScalar.Numeric(context.second.toDouble()),
         )
   requireOverlayRenderSizes(node.style, path)
+  node.styleWhen?.forEachIndexed { index, entry ->
+    requireOverlayRenderSizes(entry.style, "$path.styleWhen[$index]")
+  }
   val role =
     when (node) {
       is OverlayBoxNode -> "box"
@@ -121,6 +128,9 @@ private fun mapOverlayNode(
       is OverlayIconNode -> "icon"
       is OverlaySpacerNode -> "spacer"
       is OverlayTextFieldNode -> "textField"
+      is OverlaySwitchNode -> "switch"
+      is OverlayCheckboxNode -> "checkbox"
+      is OverlayButtonNode -> "button"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -131,6 +141,9 @@ private fun mapOverlayNode(
     when (node) {
       is OverlayTextNode -> interpolateOverlayText(node.text, localState, context != null)
       is OverlayTextFieldNode -> (state[node.stateKey] as? OverlayScalar.Text)?.value.orEmpty()
+      is OverlaySwitchNode -> node.label.orEmpty()
+      is OverlayCheckboxNode -> node.label.orEmpty()
+      is OverlayButtonNode -> node.label
       is OverlayIconNode -> node.name
       else -> ""
     }
@@ -166,7 +179,7 @@ private fun mapOverlayNode(
     text,
     node.testTag,
     node.visibleWhen?.holds(localState) ?: true,
-    mapOverlayStyle(node.style ?: OverlayStyle()),
+    mapOverlayStyle(resolveOverlayStyle(node.style, node.styleWhen, localState)),
     node.safeAreaPadding,
     (node as? OverlayIconNode)?.name,
     children,
@@ -177,6 +190,8 @@ private fun mapOverlayNode(
     (node as? OverlayBottomSheetNode)?.let {
       state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
     } ?: false,
+    checked =
+      overlayToggleKey(node)?.let { state[it] == OverlayScalar.BooleanValue(true) } ?: false,
   )
 }
 
@@ -251,7 +266,8 @@ fun mapOverlayStyle(style: OverlayStyle): OverlayRenderStyle =
     style,
     style.background?.let(::overlayColor),
     style.border?.color?.let(::overlayColor),
-    style.color?.let(::overlayColor) ?: Color.Black,
+    // Unspecified: an unstyled node takes the theme's content colour, not a fixed black.
+    style.color?.let(::overlayColor) ?: Color.Unspecified,
     overlayAlignment(style.alignment),
     overlayHorizontalAlignment(style.alignment),
     overlayVerticalAlignment(style.alignment),
@@ -312,6 +328,11 @@ private fun requireOverlayRenderSizes(style: OverlayStyle?, path: String) {
     mapOf(
       "width.dp" to (style.width as? OverlayDimension.Dp)?.dp,
       "height.dp" to (style.height as? OverlayDimension.Dp)?.dp,
+      "weight" to style.weight,
+      "minWidth" to style.minWidth,
+      "maxWidth" to style.maxWidth,
+      "minHeight" to style.minHeight,
+      "maxHeight" to style.maxHeight,
       "padding.top" to style.padding?.top,
       "padding.bottom" to style.padding?.bottom,
       "padding.start" to style.padding?.start,

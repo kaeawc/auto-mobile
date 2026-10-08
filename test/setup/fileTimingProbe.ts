@@ -4,7 +4,9 @@ import { appendTimingEvent } from "./fileTimingEvents";
 const logPath = process.env.AUTOMOBILE_TEST_TIMING_LOG;
 if (logPath) {
   // Bun re-executes preloads per file under --isolate, with Bun.main set to that file.
-  const file = Bun.main;
+  // A shared (non-isolated) process runs preloads once, so the unit lane labels
+  // that one entry with its group instead of naming only the first file (#10583).
+  const file = process.env.AUTOMOBILE_TEST_TIMING_GROUP_LABEL || Bun.main;
   const started = Date.now();
   appendTimingEvent(logPath, { event: "start", file, t: started });
   afterAll(() => {

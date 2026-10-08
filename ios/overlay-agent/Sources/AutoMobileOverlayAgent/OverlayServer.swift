@@ -4,27 +4,46 @@ import Network
 /// Loopback TCP server speaking newline-delimited JSON: requests in, `overlay_result` replies
 /// and unsolicited `overlay_event` pushes out. The simulator shares the host's network stack,
 /// so the host connects to 127.0.0.1 directly.
+///
+/// Every connection must authenticate first (#10566): its first frame is
+/// `{type: "hello", token}` with the per-launch token, answered by `hello_result`. Until then it
+/// gets no replies and no events, and anything else closes it.
 final class OverlayServer {
     typealias Handler = (_ message: [String: Any], _ reply: @escaping ([String: Any]) -> Void) -> Void
 
-    private let port: UInt16
+    /// One accepted connection and its auth/framing state. Touched only on `queue`.
+    private final class Client {
+        let connection: NWConnection
+        var gate: OverlayConnectionGate
+        var framer = OverlayLineFramer()
+
+        init(connection: NWConnection, token: String) {
+            self.connection = connection
+            gate = OverlayConnectionGate(token: token)
+        }
+    }
+
+    private let configuration: OverlayAgentConfiguration
     private let handler: Handler
     private var listener: NWListener?
-    private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var clients: [ObjectIdentifier: Client] = [:]
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.overlay-agent")
 
-    init(port: UInt16, handler: @escaping Handler) {
-        self.port = port
+    init(configuration: OverlayAgentConfiguration, handler: @escaping Handler) {
+        self.configuration = configuration
         self.handler = handler
     }
 
     func start() {
         let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-        guard let endpointPort = NWEndpoint.Port(rawValue: port) else {
-            NSLog("[AutoMobileOverlayAgent] invalid port %d", port)
+        // Exclusive bind: endpoint reuse would let another local process listen on the same
+        // port and receive the host's per-launch auth token.
+        parameters.allowLocalEndpointReuse = false
+        guard let endpointPort = NWEndpoint.Port(rawValue: configuration.port) else {
+            NSLog("[AutoMobileOverlayAgent] invalid port %d", configuration.port)
             return
         }
+        // Loopback only: nothing off the host can reach the agent.
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: endpointPort)
         do {
             let listener = try NWListener(using: parameters)
@@ -39,49 +58,77 @@ final class OverlayServer {
         }
     }
 
+    /// Events go only to authenticated connections.
     func broadcast(_ message: [String: Any]) {
         queue.async {
-            self.connections.values.forEach { self.send(message, on: $0) }
+            self.clients.values
+                .filter(\.gate.isAuthenticated)
+                .forEach { self.send(message, on: $0.connection) }
         }
     }
 
     private func accept(_ connection: NWConnection) {
         let key = ObjectIdentifier(connection)
-        connections[key] = connection
+        let client = Client(connection: connection, token: configuration.token)
+        clients[key] = client
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
-            case .failed, .cancelled: self?.connections[key] = nil
+            case .failed, .cancelled: self?.clients[key] = nil
             default: break
             }
         }
         connection.start(queue: queue)
-        receive(on: connection, buffer: Data())
+        queue.asyncAfter(deadline: .now() + OverlayAgentProtocol.helloTimeoutSeconds) { [weak self, weak client] in
+            guard let self, let client, client.gate.state == .awaitingHello else { return }
+            self.perform(client.gate.fail(.helloTimeout), on: client)
+        }
+        receive(on: client)
     }
 
-    private func receive(on connection: NWConnection, buffer: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
-            guard let self else { return }
-            var pending = buffer
-            if let data { pending.append(data) }
-            while let newline = pending.firstIndex(of: 0x0A) {
-                let line = pending[pending.startIndex ..< newline]
-                pending = Data(pending[pending.index(after: newline)...])
-                self.dispatch(line, on: connection)
+    private func receive(on client: Client) {
+        client.connection
+            .receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, done, error in
+                guard let self else { return }
+                if let data { client.framer.append(data) }
+                self.drain(client)
+                if done || error != nil {
+                    client.connection.cancel()
+                } else if client.gate.state != .closed {
+                    self.receive(on: client)
+                }
             }
-            if done || error != nil {
-                connection.cancel()
-            } else {
-                self.receive(on: connection, buffer: pending)
+    }
+
+    private func drain(_ client: Client) {
+        while client.gate.state != .closed {
+            switch client.framer.nextLine(limit: client.gate.frameLimit) {
+            case .success(nil):
+                return
+            case let .success(line?):
+                perform(client.gate.receive(line: line), on: client)
+            case .failure:
+                perform(client.gate.fail(.frameTooLarge), on: client)
             }
         }
     }
 
-    private func dispatch(_ line: Data, on connection: NWConnection) {
-        guard !line.isEmpty else { return }
-        guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else {
-            send(["type": "overlay_result", "success": false, "error": "Request is not a JSON object"], on: connection)
-            return
+    private func perform(_ action: OverlayConnectionGate.Action, on client: Client) {
+        switch action {
+        case let .helloAccepted(result):
+            send(result, on: client.connection)
+        case let .dispatch(message):
+            dispatch(message, on: client.connection)
+        case let .rejectMalformed(result):
+            send(result, on: client.connection)
+        case let .close(reason):
+            NSLog("[AutoMobileOverlayAgent] closing connection: %@", String(describing: reason))
+            client.connection.cancel()
+        case .ignore:
+            break
         }
+    }
+
+    private func dispatch(_ message: [String: Any], on connection: NWConnection) {
         DispatchQueue.main.async {
             self.handler(message) { [weak self] reply in
                 self?.queue.async { self?.send(reply, on: connection) }

@@ -70,6 +70,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
     "android/junit-runner/src/test/resources/captured/**",
+    // generateMdmProfile.test.ts reads the bundle identifiers from the network-filter
+    // Info.plists to pin the profile payloads to the shipped app.
+    "ios/network-filter/Packaging/**",
   ] as const;
 
   interface TurboConfig {

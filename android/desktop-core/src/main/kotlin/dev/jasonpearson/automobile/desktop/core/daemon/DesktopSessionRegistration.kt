@@ -19,8 +19,18 @@ class DesktopSessionRegistration(
     }
   }
 
-  fun deviceBound() {
+  /**
+   * True once the daemon acknowledged a `setActiveDevice` for this session (#10659). A refused bind
+   * leaves the device with another session, so it must not count as a hold to release.
+   */
+  @Volatile
+  var holdsDevice: Boolean = false
+    private set
+
+  /** The session may authenticate streams; [held] is whether the daemon actually bound a device. */
+  fun deviceBound(held: Boolean = true) {
     ready.value = true
+    if (held) holdsDevice = true
   }
 
   fun heartbeat() {
@@ -29,5 +39,6 @@ class DesktopSessionRegistration(
 
   fun clear() {
     ready.value = false
+    holdsDevice = false
   }
 }

@@ -175,6 +175,16 @@ class OverlayRenderModelTest {
         "weight" to OverlayStyle(weight = Double.MAX_VALUE),
         "maxWidth" to OverlayStyle(maxWidth = Double.MAX_VALUE),
         "minHeight" to OverlayStyle(minHeight = Double.MAX_VALUE),
+        "elevation" to OverlayStyle(elevation = Double.MAX_VALUE),
+        "aspectRatio" to OverlayStyle(aspectRatio = Double.MAX_VALUE),
+        "gradient.angle" to
+          OverlayStyle(
+            gradient =
+              OverlayLinearGradient(
+                Double.MAX_VALUE,
+                listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")),
+              )
+          ),
       )
     for ((key, style) in styles) {
       val error =
@@ -183,6 +193,54 @@ class OverlayRenderModelTest {
         }
       assertTrue(error.message.orEmpty().contains("root.style.$key"))
     }
+  }
+
+  @Test
+  fun `linear gradient line runs corner to corner along the angle`() {
+    val (start, end) = overlayLinearGradientLine(0.0, 100f, 40f)
+    assertEquals(0f, start.x, 0.01f)
+    assertEquals(20f, start.y, 0.01f)
+    assertEquals(100f, end.x, 0.01f)
+    assertEquals(20f, end.y, 0.01f)
+    val (top, bottom) = overlayLinearGradientLine(90.0, 100f, 40f)
+    assertEquals(50f, top.x, 0.01f)
+    assertEquals(0f, top.y, 0.01f)
+    assertEquals(40f, bottom.y, 0.01f)
+  }
+
+  @Test
+  fun `gradient stop positions apply only when every stop authors one`() {
+    val even =
+      overlayGradientStops(
+        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff"))
+      )
+    assertEquals(listOf(Color(0xff000000), Color(0xffffffff)), even.first)
+    assertNull(even.second)
+    val explicit =
+      overlayGradientStops(
+        listOf(OverlayGradientStop("#000000", 0.2), OverlayGradientStop("#ffffff", 1.0))
+      )
+    assertEquals(listOf(0.2f, 1f), explicit.second)
+    val descending =
+      overlayGradientStops(
+        listOf(OverlayGradientStop("#000000", 0.8), OverlayGradientStop("#ffffff", 0.2))
+      )
+    assertEquals(listOf(0.8f, 0.8f), descending.second)
+  }
+
+  @Test
+  fun `elevation gradient and aspect ratio survive pure mapping`() {
+    val style =
+      OverlayStyle(
+        elevation = 4.5,
+        aspectRatio = 1.5,
+        gradient =
+          OverlayRadialGradient(
+            listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff"))
+          ),
+      )
+    val node = mapOverlaySpec(spec(OverlayTextNode(text = "t", style = style))).root
+    assertEquals(style, node.style.source)
   }
 
   @Test
@@ -209,7 +267,7 @@ class OverlayRenderModelTest {
         color = "#ff556677",
         textAlign = "justify",
         maxLines = 3,
-        fontFamily = "monospace",
+        fontFamily = OverlayFontFamily.Named("monospace"),
       )
     val safeArea =
       OverlaySafeAreaPadding(listOf("top", "start"), listOf("systemBars", "cutout", "ime"))
@@ -235,9 +293,12 @@ class OverlayRenderModelTest {
     )
     assertEquals(
       FontFamily.SansSerif,
-      mapOverlayStyle(OverlayStyle(fontFamily = "sansSerif")).fontFamily,
+      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("sansSerif"))).fontFamily,
     )
-    assertEquals(FontFamily.Serif, mapOverlayStyle(OverlayStyle(fontFamily = "serif")).fontFamily)
+    assertEquals(
+      FontFamily.Serif,
+      mapOverlayStyle(OverlayStyle(fontFamily = OverlayFontFamily.Named("serif"))).fontFamily,
+    )
     assertEquals(FontFamily.Default, mapOverlayStyle(OverlayStyle()).fontFamily)
     assertEquals(TextAlign.Center, mapOverlayStyle(OverlayStyle(textAlign = "center")).textAlign)
     assertEquals(TextAlign.End, mapOverlayStyle(OverlayStyle(textAlign = "end")).textAlign)

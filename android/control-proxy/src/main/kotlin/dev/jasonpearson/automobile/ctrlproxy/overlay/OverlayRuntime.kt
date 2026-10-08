@@ -56,6 +56,13 @@ sealed interface OverlayInteraction {
   data class Toggle(val key: String, val actions: List<OverlayAction> = emptyList()) :
     OverlayInteraction
 
+  /** A `radioGroup` option tap: binds the string key to the option's value, then runs actions. */
+  data class Choose(
+    val key: String,
+    val value: String,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
+
   /** A `slider` drag or accessibility set-progress: stores the (already snapped) number. */
   data class Slide(
     val key: String,
@@ -129,6 +136,12 @@ class OverlayRuntime(
         change(interaction.key, OverlayScalar.BooleanValue(!stored.value))
         tap(interaction.actions)
       }
+      is OverlayInteraction.Choose -> {
+        // The validator keeps the bound key a string; anything else leaves the group inert.
+        if (current.state[interaction.key] !is OverlayScalar.Text) return
+        change(interaction.key, OverlayScalar.Text(interaction.value))
+        tap(interaction.actions)
+      }
       is OverlayInteraction.Slide -> {
         val stored = current.state[interaction.key] as? OverlayScalar.Numeric ?: return
         if (stored.value == interaction.value) return
@@ -138,15 +151,37 @@ class OverlayRuntime(
     }
   }
 
+  /**
+   * Runs an action list in order. If any `setState`/`toggle`/`increment` changed state, exactly one
+   * `change` event carrying the final state follows the last action (#10622); `emit` actions fire
+   * in order with the state as it was at that point. A list that nets no change emits nothing.
+   */
   private suspend fun tap(actions: List<OverlayAction>) {
+    val baseline = current.state
+    val touched = LinkedHashSet<String>()
     for (action in actions) {
       if (!current.active) break
       when (action) {
         is OverlayEmitAction -> emit(OverlayEventKind.EMIT, action.name, action.payload)
-        is OverlaySetStateAction -> setState(action.key, action.value)
-        is OverlayToggleAction -> action.nextValue(current.state)?.let { setState(action.key, it) }
+        is OverlaySetStateAction -> {
+          setState(action.key, action.value)
+          touched += action.key
+        }
+        is OverlayToggleAction ->
+          action.nextValue(current.state)?.let {
+            setState(action.key, it)
+            touched += action.key
+          }
         is OverlayIncrementAction ->
-          action.nextValue(current.state)?.let { setState(action.key, it) }
+          action.nextValue(current.state)?.let {
+            setState(action.key, it)
+            touched += action.key
+          }
+        is OverlayDecrementAction ->
+          action.nextValue(current.state)?.let {
+            setState(action.key, it)
+            touched += action.key
+          }
         is OverlaySetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(
@@ -161,6 +196,28 @@ class OverlayRuntime(
         OverlayDismissAction -> dismiss()
       }
     }
+    if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
+  }
+
+  /**
+   * One key keeps the `{key, value}` payload of [change]. Several keys cannot fit it, so they send
+   * `{keys, values}` instead; the event's `state` always carries the full final state.
+   */
+  private suspend fun emitStateChange(keys: List<String>) {
+    if (keys.isEmpty()) return
+    val state = current.state
+    fun json(key: String) =
+      runtimeJson.encodeToJsonElement(OverlayScalar.serializer(), state.getValue(key))
+    val payload = buildJsonObject {
+      if (keys.size == 1) {
+        put("key", keys.single())
+        put("value", json(keys.single()))
+      } else {
+        put("keys", buildJsonArray { keys.forEach { add(JsonPrimitive(it)) } })
+        put("values", buildJsonObject { keys.forEach { put(it, json(it)) } })
+      }
+    }
+    emit(OverlayEventKind.EMIT, "change", payload)
   }
 
   private suspend fun setPage(id: String, requested: Int) {
@@ -200,7 +257,10 @@ class OverlayRuntime(
     }
   }
 
-  /** Changes emit once only for a changed value; setState actions and wire patches are silent. */
+  /**
+   * Changes emit once only for a changed value; wire patches are silent. A tap's action list
+   * reports its own mutations via [tap].
+   */
   private suspend fun change(key: String, value: OverlayScalar) {
     if (current.state[key] == value) return
     setState(key, value)

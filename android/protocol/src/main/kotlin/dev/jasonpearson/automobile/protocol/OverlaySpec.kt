@@ -74,6 +74,25 @@ data class OverlayBorder(
 )
 
 @Serializable
+data class OverlayGradientStop(
+  val color: String,
+  val position: Double? = null,
+)
+
+@Serializable sealed class OverlayGradient
+
+@SerialName("linear")
+@Serializable
+data class OverlayLinearGradient(
+  val angle: Double,
+  val stops: List<OverlayGradientStop>,
+) : OverlayGradient()
+
+@SerialName("radial")
+@Serializable
+data class OverlayRadialGradient(val stops: List<OverlayGradientStop>) : OverlayGradient()
+
+@Serializable
 data class OverlayStyle(
   val width: OverlayDimension? = null,
   val height: OverlayDimension? = null,
@@ -87,6 +106,9 @@ data class OverlayStyle(
   /** A dp number or a Material Shapes token. */
   val cornerRadius: OverlayCornerRadius? = null,
   val border: OverlayBorder? = null,
+  val elevation: Double? = null,
+  val gradient: OverlayGradient? = null,
+  val aspectRatio: Double? = null,
   val alpha: Double? = null,
   val alignment: String? = null,
   val arrangement: String? = null,
@@ -96,10 +118,17 @@ data class OverlayStyle(
   val color: String? = null,
   val textAlign: String? = null,
   val maxLines: Int? = null,
-  val fontFamily: String? = null,
+  val fontFamily: OverlayFontFamily? = null,
   /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
   val textStyle: String? = null,
 )
+
+/**
+ * A literal list template: the container's children are instantiated once per [items] entry, with
+ * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
+ */
+@Serializable
+data class OverlayRepeat(val items: List<Map<String, OverlayScalar>>, val `as`: String)
 
 @Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
 
@@ -175,6 +204,10 @@ data class OverlayToggleAction(val key: String) : OverlayAction()
 @Serializable
 data class OverlayIncrementAction(val key: String, val by: Double? = null) : OverlayAction()
 
+@SerialName("decrement")
+@Serializable
+data class OverlayDecrementAction(val key: String, val by: Double? = null) : OverlayAction()
+
 @SerialName("dismiss") @Serializable data object OverlayDismissAction : OverlayAction()
 
 @Serializable
@@ -204,6 +237,7 @@ data class OverlayBoxNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("row")
@@ -219,6 +253,7 @@ data class OverlayRowNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("column")
@@ -234,6 +269,7 @@ data class OverlayColumnNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val children: List<OverlayNode>,
+  val repeat: OverlayRepeat? = null,
 ) : OverlayNode()
 
 @SerialName("text")
@@ -360,6 +396,58 @@ data class OverlayButtonNode(
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val label: String,
   val variant: String = "filled",
+  val icon: String? = null,
+) : OverlayNode()
+
+@Serializable data class OverlayRadioOption(val value: String, val label: String)
+
+@SerialName("radioGroup")
+@Serializable
+data class OverlayRadioGroupNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val options: List<OverlayRadioOption>,
+) : OverlayNode()
+
+/** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
+@Serializable sealed class OverlayListItemTrailing
+
+@SerialName("switch")
+@Serializable
+data class OverlayListItemSwitch(val stateKey: String) : OverlayListItemTrailing()
+
+@SerialName("checkbox")
+@Serializable
+data class OverlayListItemCheckbox(val stateKey: String) : OverlayListItemTrailing()
+
+@SerialName("icon")
+@Serializable
+data class OverlayListItemIcon(val name: String) : OverlayListItemTrailing()
+
+@SerialName("listItem")
+@Serializable
+data class OverlayListItemNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val transition: String? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val headline: String,
+  val supporting: String? = null,
+  val leadingIcon: String? = null,
+  val trailing: OverlayListItemTrailing? = null,
 ) : OverlayNode()
 
 @SerialName("slider")

@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "spacer"
+        }
+      ],
+      "repeat": {
+        "items": [],
+        "as": "item"
+      }
+    }
+  },
+  "expectedPath": "root.repeat.items"
+}

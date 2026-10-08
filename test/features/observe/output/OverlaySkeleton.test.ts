@@ -77,6 +77,44 @@ describe("app rows behind a fullscreen overlay (#10446)", () => {
     expect(calendar?.occluded).toBeUndefined();
   });
 
+  test("stay actionable under a bounds-spanning overlay the APK reports as a sheet", () => {
+    const projection = project(
+      capturedOverlayHierarchy({
+        fullScreen: true,
+        overlayPlacement: "sheet",
+        overlayOpaque: true,
+      }),
+    );
+
+    const calendar = projection.skeleton.find((row) => row.label === "Calendar");
+    expect(calendar?.affordances).toContain("tap");
+    expect(calendar?.occluded).toBeUndefined();
+  });
+
+  test("stay actionable under a bounds-spanning fullscreen overlay the APK reports translucent", () => {
+    const projection = project(
+      capturedOverlayHierarchy({
+        fullScreen: true,
+        overlayPlacement: "fullscreen",
+        overlayOpaque: false,
+      }),
+    );
+
+    expect(projection.skeleton.find((row) => row.label === "Calendar")?.occluded).toBeUndefined();
+  });
+
+  test("are occluded by an opaque fullscreen overlay the APK reports, whatever its bounds", () => {
+    const projection = project(
+      capturedOverlayHierarchy({ overlayPlacement: "fullscreen", overlayOpaque: true }),
+    );
+
+    const calendar = projection.skeleton
+      .concat(projection.context)
+      .find((row) => row.label === "Calendar");
+    expect(calendar?.occluded).toBe(true);
+    expect(calendar?.affordances).toEqual([]);
+  });
+
   test("stay actionable when no overlay is present", () => {
     const hierarchy = capturedOverlayHierarchy({ fullScreen: true });
     hierarchy.windows = hierarchy.windows!.map((window) =>

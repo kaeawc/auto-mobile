@@ -21,9 +21,17 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.center
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.LinearGradientShader
+import androidx.compose.ui.graphics.RadialGradientShader
+import androidx.compose.ui.graphics.Shader
+import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +43,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
+import kotlin.math.hypot
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -48,6 +57,7 @@ val OverlayRole = SemanticsPropertyKey<String>("OverlayRole")
 internal fun OverlayRuntimeContent(
   runtime: OverlayRuntime,
   images: OverlayImageCache? = null,
+  fonts: OverlayFontCache? = null,
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
@@ -65,6 +75,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayFontCache provides fonts,
         LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(
@@ -165,7 +176,9 @@ private fun RenderOverlayNodeContent(
         fontSize =
           source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
         fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        fontFamily = if (role == null || source.fontFamily != null) node.style.fontFamily else null,
+        fontFamily =
+          if (role == null || source.fontFamily != null) rememberOverlayFontFamily(node.style)
+          else null,
         textAlign = node.style.textAlign,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,
@@ -210,6 +223,8 @@ private fun RenderOverlayNodeContent(
     "switch",
     "checkbox" -> RenderOverlayToggle(node, modifier, interact)
     "button" -> RenderOverlayButton(node, modifier, interact)
+    "radioGroup" -> RenderOverlayRadioGroup(node, modifier, interact)
+    "listItem" -> RenderOverlayListItem(node, modifier, interact)
     "slider" -> RenderOverlaySlider(node, modifier, interact)
     "chip" -> RenderOverlayChip(node, modifier, interact)
     "card" ->
@@ -385,9 +400,12 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(
-          overlayThemedColor(node.style.background, node.style.source.background)
-            ?: MaterialTheme.colorScheme.surface
+        .then(
+          // The authored background and gradient are already painted by `modifier`; a later opaque
+          // fill would cover them, so the surface is only the fallback when neither is authored.
+          if (node.style.source.background == null && node.style.source.gradient == null)
+            Modifier.background(MaterialTheme.colorScheme.surface)
+          else Modifier
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
@@ -434,7 +452,8 @@ private fun overlayNodeModifier(
     actions.isNotEmpty() &&
       node.role != "textField" &&
       node.role != "bottomSheet" &&
-      node.role !in OVERLAY_COMPONENT_ROLES
+      node.role !in OVERLAY_COMPONENT_ROLES &&
+      node.role !in OVERLAY_SELECTION_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
@@ -443,12 +462,16 @@ private fun overlayNodeModifier(
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
   modifier = sizeConstraintModifier(modifier, style)
+  style.aspectRatio?.let { modifier = modifier.aspectRatio(it.toFloat()) }
   val shape =
     overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
+  // Before clip/background/border so the shadow is drawn outside the clipped content.
+  style.elevation?.let { modifier = modifier.shadow(it.toFloat().dp, shape) }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   overlayThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(it, shape)
   }
+  style.gradient?.let { modifier = modifier.background(overlayGradientBrush(it), shape) }
   style.border?.let {
     val borderColor = overlayThemedColor(node.style.borderColor, it.color)
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(borderColor), shape)
@@ -573,3 +596,25 @@ private fun sizeConstraintModifier(modifier: Modifier, style: OverlayStyle): Mod
       maxWidth = style.maxWidth?.toFloat()?.dp ?: Dp.Unspecified,
       maxHeight = style.maxHeight?.toFloat()?.dp ?: Dp.Unspecified,
     )
+
+/** A shader brush so the gradient line is computed from the node's measured size. */
+private fun overlayGradientBrush(gradient: OverlayGradient): Brush =
+  object : ShaderBrush() {
+    override fun createShader(size: Size): Shader =
+      when (gradient) {
+        is OverlayLinearGradient -> {
+          val (colors, positions) = overlayGradientStops(gradient.stops)
+          val (from, to) = overlayLinearGradientLine(gradient.angle, size.width, size.height)
+          LinearGradientShader(from, to, colors, positions)
+        }
+        is OverlayRadialGradient -> {
+          val (colors, positions) = overlayGradientStops(gradient.stops)
+          RadialGradientShader(
+            size.center,
+            hypot(size.width, size.height) / 2f,
+            colors,
+            positions,
+          )
+        }
+      }
+  }

@@ -11,14 +11,26 @@ import kotlinx.serialization.json.jsonPrimitive
 internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int = 0) :
   DaemonRequestTransport {
   private val calls = CopyOnWriteArrayList<Pair<String, String?>>()
+  private val sessionCalls = CopyOnWriteArrayList<Pair<String, String?>>()
   private val failures = CopyOnWriteArrayList<String>()
   private var bindAttempts = 0
+
+  /**
+   * While true, every `setActiveDevice` is refused the way the daemon refuses a device another live
+   * session owns: an `isError` tool result naming the holder (#10660). Flip it to false to model
+   * the holder releasing the device.
+   */
+  @Volatile var heldByAnotherSession: Boolean = false
 
   fun failNext(key: String) {
     failures.add(key)
   }
 
   fun count(method: String) = calls.count { it.first == method }
+
+  /** Session ids carried by [method] requests, in order (#10659). */
+  fun sessionsFor(method: String): List<String?> =
+    sessionCalls.filter { it.first == method }.map { it.second }
 
   fun boundDevices(): List<String> =
     calls.filter { it.second != null }.map { requireNotNull(it.second) }
@@ -33,6 +45,7 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
         null
       }
     calls.add(request.method to device)
+    sessionCalls.add(request.method to request.params["sessionId"]?.jsonPrimitive?.content)
     if (failures.remove(key)) {
       return DaemonResponse(
         id = request.id,
@@ -51,13 +64,20 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
 
   private fun resultFor(key: String): String =
     when (key) {
-      "tools/call:setActiveDevice" -> {
-        bindAttempts++
-        val success = bindAttempts >= rejectBindsUntilAttempt
-        """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
-      }
+      "tools/call:setActiveDevice" ->
+        if (heldByAnotherSession) {
+          HELD_REFUSAL
+        } else {
+          bindAttempts++
+          val success = bindAttempts >= rejectBindsUntilAttempt
+          """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
+        }
       "daemon/registerSession" ->
         """{"accepted":true,"heartbeatTimeoutMs":10000,"expiresAtMs":12345}"""
       else -> "{}"
     }
 }
+
+private const val HELD_REFUSAL =
+  """{"isError":true,"content":[{"type":"text","text":""" +
+    """"Error: Device 'emulator-5554' is already assigned to session agent-session"}]}"""

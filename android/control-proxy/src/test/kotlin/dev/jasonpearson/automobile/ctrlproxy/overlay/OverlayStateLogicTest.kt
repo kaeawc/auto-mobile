@@ -56,6 +56,21 @@ class OverlayStateLogicTest {
   }
 
   @Test
+  fun `decrement subtracts by defaulting to one and refuses non finite results`() {
+    assertEquals(OverlayScalar.Numeric(2.0), OverlayDecrementAction("count").nextValue(state))
+    assertEquals(
+      OverlayScalar.Numeric(5.0),
+      OverlayDecrementAction("count", by = -2.0).nextValue(state),
+    )
+    assertNull(OverlayDecrementAction("name").nextValue(state))
+    assertNull(OverlayDecrementAction("missing").nextValue(state))
+    assertNull(
+      OverlayDecrementAction("count", by = Double.MAX_VALUE)
+        .nextValue(mapOf("count" to OverlayScalar.Numeric(-Double.MAX_VALUE)))
+    )
+  }
+
+  @Test
   fun `toggle flips booleans only`() {
     assertEquals(OverlayScalar.BooleanValue(false), OverlayToggleAction("on").nextValue(state))
     assertNull(OverlayToggleAction("count").nextValue(state))
@@ -79,6 +94,32 @@ class OverlayStateLogicTest {
     assertEquals(0.7, resolved.alpha!!, 0.0)
     assertEquals("#222222", resolved.background)
     assertEquals(OverlayCornerRadius.Dp(4.0), resolved.cornerRadius)
+    val gradient =
+      OverlayRadialGradient(listOf(OverlayGradientStop("#000000"), OverlayGradientStop("#ffffff")))
+    val kept =
+      resolveOverlayStyle(
+        OverlayStyle(elevation = 4.0, gradient = gradient, aspectRatio = 2.0),
+        listOf(
+          OverlayStyleWhen(eq("on", OverlayScalar.BooleanValue(true)), OverlayStyle(alpha = 0.5))
+        ),
+        state,
+      )
+    assertEquals(4.0, kept.elevation!!, 0.0)
+    assertEquals(gradient, kept.gradient)
+    assertEquals(2.0, kept.aspectRatio!!, 0.0)
+    val overridden =
+      resolveOverlayStyle(
+        OverlayStyle(elevation = 4.0),
+        listOf(
+          OverlayStyleWhen(
+            eq("on", OverlayScalar.BooleanValue(true)),
+            OverlayStyle(elevation = 8.0, aspectRatio = 1.0),
+          )
+        ),
+        state,
+      )
+    assertEquals(8.0, overridden.elevation!!, 0.0)
+    assertEquals(1.0, overridden.aspectRatio!!, 0.0)
     assertEquals(base, resolveOverlayStyle(base, null, state))
     assertEquals(OverlayStyle(), resolveOverlayStyle(null, entries.subList(1, 2), state))
   }

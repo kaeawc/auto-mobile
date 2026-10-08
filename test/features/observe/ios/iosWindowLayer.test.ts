@@ -85,12 +85,16 @@ describe("iOS window layers on a captured in-app overlay window", () => {
     });
   });
 
-  test("without the window layer the same overlay controls read as covered", () => {
+  test("without the window layer the toolbar-band overlay controls read as covered", () => {
     const hierarchy = convert();
     const stripped = JSON.parse(
       JSON.stringify(hierarchy).replaceAll(`"${IOS_WINDOW_LAYER_EXTRA}"`, '"unrelated"'),
     ) as ViewHierarchyResult;
-    expect(clip(stripped, "automobile-overlay-dismiss").coveredBy).toBe("navigation bar");
+    // A non-scrolling control wholly inside the navigation bar is bar-level content even
+    // without its layer (#10635); the toolbar band has no such exemption.
+    expect(clip(stripped, "automobile-overlay-dismiss")).toEqual({
+      bounds: entry(stripped, "automobile-overlay-dismiss").bounds!,
+    });
     expect(clip(stripped, "close-button").bounds).toEqual(
       expect.objectContaining({ top: 780, bottom: 788 }),
     );

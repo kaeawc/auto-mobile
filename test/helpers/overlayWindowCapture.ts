@@ -8,7 +8,10 @@ import type {
 import { DefaultObserveElementCollector } from "../../src/features/observe/ObserveElementCollector";
 import type { ElementBounds } from "../../src/models/ElementBounds";
 import type { ObserveResult } from "../../src/models/ObserveResult";
-import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+import type {
+  OwnOverlayPlacement,
+  ViewHierarchyResult,
+} from "../../src/models/ViewHierarchyResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -24,6 +27,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
  * overlay — TYPE_ACCESSIBILITY_OVERLAY reported by the CtrlProxy package — and,
  * for the full-screen case, its bounds widened to the screen. The node tree is
  * the unmodified capture.
+ *
+ * No capture of the new `overlayPlacement` / `overlayOpaque` window fields exists yet (that needs
+ * a device running an APK that advertises `overlay_window_metadata_v1`), so the optional
+ * `overlayPlacement` / `overlayOpaque` options add the two fields to this captured window entry.
  *
  * "Settings" is in both windows: the app's Settings task snapshot and the
  * overlay's predicted Settings icon. "YouTube" is overlay-only and "Screenshot"
@@ -49,7 +56,11 @@ export function capturedTwoWindowHierarchy(): ViewHierarchyResult {
 
 /** The converted capture with window 252 relabelled as the CtrlProxy overlay. */
 export function capturedOverlayHierarchy(
-  options: { fullScreen?: boolean } = {},
+  options: {
+    fullScreen?: boolean;
+    overlayPlacement?: OwnOverlayPlacement;
+    overlayOpaque?: boolean;
+  } = {},
 ): ViewHierarchyResult {
   const hierarchy = capturedTwoWindowHierarchy();
   hierarchy.windows = hierarchy.windows!.map((window) =>
@@ -59,6 +70,8 @@ export function capturedOverlayHierarchy(
           type: ACCESSIBILITY_WINDOW_TYPE_ACCESSIBILITY_OVERLAY,
           packageName: CTRL_PROXY_PACKAGE,
           ...(options.fullScreen ? { bounds: { ...OVERLAY_CAPTURE.screen } } : {}),
+          ...(options.overlayPlacement ? { overlayPlacement: options.overlayPlacement } : {}),
+          ...(options.overlayOpaque === undefined ? {} : { overlayOpaque: options.overlayOpaque }),
         }
       : window,
   );

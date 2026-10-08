@@ -219,7 +219,8 @@ class OverlayRuntimeTest {
       assertEquals(2, runtime.current.state.size)
       runtime.handle(tap(OverlaySetStateAction("flag", OverlayScalar.BooleanValue(true))))
       assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
-      assertTrue(events.isEmpty())
+      // Only the accepted setState reports; rejected ones never mutated or emitted.
+      assertEquals(listOf("change"), events.map { it.name })
     }
 
   @Test
@@ -241,8 +242,100 @@ class OverlayRuntimeTest {
       assertEquals(OverlayScalar.BooleanValue(!equals), runtime.current.state["open"])
       assertFalse(mapOverlaySpec(runtime.current.spec).root.sheetOpen)
     }
-    assertEquals(2, events.size)
+    // Per iteration: the opening setState tap and the single dismissal change.
+    assertEquals(4, events.size)
     assertTrue(events.all { it.kind == OverlayEventKind.EMIT && it.name == "change" })
+  }
+
+  @Test
+  fun `a tap that sets state emits one change with the final state`() = runTest {
+    val runtime = runtime(spec(state = mapOf("a" to OverlayScalar.Numeric(0.0))))
+    runtime.handle(tap(OverlaySetStateAction("a", OverlayScalar.Numeric(5.0))))
+    val event = events.single()
+    assertEquals("change", event.name)
+    assertEquals(Json.parseToJsonElement("""{"key":"a","value":5.0}"""), event.payload)
+    assertEquals(mapOf("a" to OverlayScalar.Numeric(5.0)), event.state)
+  }
+
+  @Test
+  fun `toggle only and increment only taps each emit one change`() = runTest {
+    val runtime =
+      runtime(
+        spec(
+          state =
+            mapOf("on" to OverlayScalar.BooleanValue(false), "n" to OverlayScalar.Numeric(1.0))
+        )
+      )
+    runtime.handle(tap(OverlayToggleAction("on")))
+    runtime.handle(tap(OverlayIncrementAction("n", 2.0)))
+    assertEquals(
+      listOf(
+        Json.parseToJsonElement("""{"key":"on","value":true}"""),
+        Json.parseToJsonElement("""{"key":"n","value":3.0}"""),
+      ),
+      events.map { it.payload },
+    )
+  }
+
+  @Test
+  fun `mixed emit then setState emits in order with a trailing change carrying the final state`() =
+    runTest {
+      val runtime = runtime(spec(state = mapOf("a" to OverlayScalar.Numeric(0.0))))
+      runtime.handle(
+        tap(
+          OverlayEmitAction("tapped"),
+          OverlaySetStateAction("a", OverlayScalar.Numeric(1.0)),
+          OverlayIncrementAction("a"),
+        )
+      )
+      assertEquals(listOf("tapped", "change"), events.map { it.name })
+      assertEquals(mapOf("a" to OverlayScalar.Numeric(0.0)), events[0].state)
+      assertEquals(mapOf("a" to OverlayScalar.Numeric(2.0)), events[1].state)
+      assertEquals(Json.parseToJsonElement("""{"key":"a","value":2.0}"""), events[1].payload)
+    }
+
+  @Test
+  fun `several mutated keys share one change event listing each key`() = runTest {
+    val runtime = runtime()
+    runtime.handle(
+      tap(
+        OverlaySetStateAction("x", OverlayScalar.Numeric(1.0)),
+        OverlaySetStateAction("y", OverlayScalar.Text("hi")),
+      )
+    )
+    assertEquals(
+      Json.parseToJsonElement("""{"keys":["x","y"],"values":{"x":1.0,"y":"hi"}}"""),
+      events.single().payload,
+    )
+  }
+
+  @Test
+  fun `no-op action lists emit nothing`() = runTest {
+    val runtime =
+      runtime(
+        spec(
+          state =
+            mapOf("a" to OverlayScalar.Numeric(1.0), "on" to OverlayScalar.BooleanValue(false))
+        )
+      )
+    runtime.handle(tap())
+    runtime.handle(tap(OverlaySetStateAction("a", OverlayScalar.Numeric(1.0))))
+    // Toggled back to the starting value: no net mutation.
+    runtime.handle(tap(OverlayToggleAction("on"), OverlayToggleAction("on")))
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
+  fun `switch tap emits exactly one change`() = runTest {
+    val runtime =
+      runtime(
+        spec(
+          OverlaySwitchNode(label = "Wi-Fi", stateKey = "on"),
+          mapOf("on" to OverlayScalar.BooleanValue(false)),
+        )
+      )
+    runtime.handle(OverlayInteraction.Toggle("on"))
+    assertEquals(listOf("change"), events.map { it.name })
   }
 
   @Test
@@ -333,32 +426,46 @@ class OverlayRuntimeTest {
   }
 
   @Test
-  fun `toggle and increment step state silently and ignore keys of the wrong type`() = runTest {
-    val runtime =
-      runtime(
-        spec(
-          state =
-            mapOf(
-              "flag" to OverlayScalar.BooleanValue(false),
-              "count" to OverlayScalar.Numeric(1.0),
-              "label" to OverlayScalar.Text("x"),
-            )
+  fun `toggle and increment step state, report one net change, and ignore keys of the wrong type`() =
+    runTest {
+      val runtime =
+        runtime(
+          spec(
+            state =
+              mapOf(
+                "flag" to OverlayScalar.BooleanValue(false),
+                "count" to OverlayScalar.Numeric(1.0),
+                "label" to OverlayScalar.Text("x"),
+              )
+          )
+        )
+      runtime.handle(
+        tap(
+          OverlayToggleAction("flag"),
+          OverlayIncrementAction("count"),
+          OverlayIncrementAction("count", by = -3.5),
+          OverlayToggleAction("count"),
+          OverlayIncrementAction("label"),
+          OverlayIncrementAction("count", by = Double.MAX_VALUE),
+          OverlayIncrementAction("count", by = Double.MAX_VALUE),
         )
       )
-    runtime.handle(
-      tap(
-        OverlayToggleAction("flag"),
-        OverlayIncrementAction("count"),
-        OverlayIncrementAction("count", by = -3.5),
-        OverlayToggleAction("count"),
-        OverlayIncrementAction("label"),
-        OverlayIncrementAction("count", by = Double.MAX_VALUE),
-        OverlayIncrementAction("count", by = Double.MAX_VALUE),
+      assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
+      assertEquals(OverlayScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])
+      assertEquals(OverlayScalar.Text("x"), runtime.current.state["label"])
+      val event = events.single()
+      assertEquals(
+        listOf("flag", "count"),
+        (event.payload as JsonObject).getValue("keys").jsonArray.map { it.jsonPrimitive.content },
       )
-    )
-    assertEquals(OverlayScalar.BooleanValue(true), runtime.current.state["flag"])
-    assertEquals(OverlayScalar.Numeric(Double.MAX_VALUE - 1.5), runtime.current.state["count"])
-    assertEquals(OverlayScalar.Text("x"), runtime.current.state["label"])
-    assertTrue(events.isEmpty())
+      assertEquals(runtime.current.state, event.state)
+    }
+
+  @Test
+  fun `decrement steps a numeric key down and reports one net change`() = runTest {
+    val runtime = runtime(spec(state = mapOf("count" to OverlayScalar.Numeric(5.0))))
+    runtime.handle(tap(OverlayDecrementAction("count"), OverlayDecrementAction("count", by = 2.5)))
+    assertEquals(OverlayScalar.Numeric(1.5), runtime.current.state["count"])
+    assertEquals(1, events.size)
   }
 }

@@ -982,6 +982,12 @@ export class DaemonMcpProxy {
     string,
     {
       claimSent: boolean;
+      /**
+       * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
+       * has named for {@link DAEMON_BOUND_SESSION_REPLAY_TTL_MS} is abandoned and evicted, so a
+       * conversation that moved to another device stops pinning the old one.
+       */
+      lastUsedAt: number;
       /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
       conflictSince?: number;
     }
@@ -992,6 +998,11 @@ export class DaemonMcpProxy {
   private readonly livenessConflictLogged = new Set<string>();
   /** How long a refused claim keeps retrying: the other owner's lease plus its grace (#10053). */
   private readonly ownershipConflictLeashMs: number;
+  /**
+   * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
+   * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
+   */
+  private latestBindingConflict: { sessionUuid: string; since: number } | undefined;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -1040,9 +1051,10 @@ export class DaemonMcpProxy {
   // a replacement socket without sharing the binding with other proxies.
   private boundSessionUuid: string | undefined;
   // When the binding above was last set/refreshed, on the injected clock. Once
-  // the daemon's session idle window elapses with no explicit-sessionUuid call
-  // refreshing it, the remembered UUID is treated as retired so a sessionless
-  // call is not rewritten to a released session (issue #4610).
+  // the daemon's session idle window elapses with no forwarded call (explicit or
+  // injected sessionUuid) refreshing it, the remembered UUID is treated as
+  // retired so a sessionless call is not rewritten to a released session (issue
+  // #4610). Heartbeat acks never refresh it: they prove liveness, not use (#10656).
   private boundSessionUuidAt: number | undefined;
   // Whether the current binding was minted by a device-acquisition RESULT
   // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
@@ -1062,6 +1074,14 @@ export class DaemonMcpProxy {
   // authorizes owner-routing; a session this connection never bound is absent, so
   // a foreign read still forwards this connection's own binding and stays denied.
   private readonly ownedDeviceSessions = new Set<string>();
+  /**
+   * Sessions this proxy may claim liveness ownership of and heartbeat (#10664): ones it minted
+   * from an acquisition RESULT, plus the startup `initialSessionUuid`. A session only NAMED in a
+   * tool call's `sessionUuid` arg is forwarded and bound for routing, but never claimed or
+   * heartbeated, so a proxy cannot inherit a session another proxy (or a CLI keeper) owns once
+   * that owner's lease lapses. The other owner keeps it alive or the daemon reaps it.
+   */
+  private readonly claimableSessions = new Set<string>();
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -1195,6 +1215,7 @@ export class DaemonMcpProxy {
       this.boundSessionUuidAt = this.timer.now();
       this.initialSessionBindingConfigured = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
+      this.claimableSessions.add(this.boundSessionUuid);
     }
     this.staticToolDefinitionsProvider =
       config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
@@ -1922,6 +1943,7 @@ export class DaemonMcpProxy {
     // daemon denies), matching the "released session remains denied" guarantee
     // (issue #5663).
     this.ownedDeviceSessions.delete(releasedSessionUuid);
+    this.claimableSessions.delete(releasedSessionUuid);
     this.dropHeldSession(releasedSessionUuid);
     if (
       releasedSessionUuid === this.boundSessionUuid ||
@@ -3735,6 +3757,7 @@ export class DaemonMcpProxy {
     this.initialSessionBindingConfigured = false;
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
+    this.latestBindingConflict = undefined;
     this.recoverableBoundSessionHandoff = undefined;
   }
 
@@ -3857,6 +3880,9 @@ export class DaemonMcpProxy {
     if (
       this.boundSessionUuid &&
       !this.terminalBoundSession &&
+      // An args-named latest binding is never heartbeated (#10664); the keeper still runs
+      // for the sessions this proxy holds besides it.
+      (this.latestBindingClaimable() || this.otherHeldSessions.size > 0) &&
       this.transportLive &&
       !this.closing
     ) {
@@ -3905,6 +3931,10 @@ export class DaemonMcpProxy {
       this.startBoundSessionHeartbeat();
       return;
     }
+    if (!this.latestBindingClaimable()) {
+      // Only named in a tool call's args: never claimed or heartbeated (#10664).
+      return;
+    }
     await this.sendFirstBoundSessionHeartbeat();
     // Re-validate after the awaited round-trip: a session-released notification or
     // close() landing mid-send may have terminally fenced this binding and stopped
@@ -3935,7 +3965,7 @@ export class DaemonMcpProxy {
    */
   private async sendFirstBoundSessionHeartbeat(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
-    if (!sessionUuid || this.terminalBoundSession || this.closing || !this.client) {
+    if (!sessionUuid || !this.latestBindingClaimable() || this.closing || !this.client) {
       return;
     }
     try {
@@ -3945,7 +3975,7 @@ export class DaemonMcpProxy {
       );
       if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
         this.livenessOwnershipClaimSent = true;
-        this.boundSessionUuidAt = this.timer.now();
+        // A heartbeat ack proves liveness, not use: it must not refresh the replay lease (#10656).
         this.livenessAcks.set(sessionUuid, this.timer.now());
       }
     } catch (error) {
@@ -4112,9 +4142,20 @@ export class DaemonMcpProxy {
 
   /** Every session this proxy heartbeats: the latest binding plus the ones it still holds. */
   private heldSessionUuids(): string[] {
-    const latest =
-      this.boundSessionUuid && !this.terminalBoundSession ? [this.boundSessionUuid] : [];
+    const latest = this.latestBindingClaimable() ? [this.boundSessionUuid!] : [];
     return [...latest, ...this.otherHeldSessions.keys()];
+  }
+
+  /**
+   * Whether the latest binding is one this proxy claims and heartbeats: live, and minted by this
+   * proxy or configured at startup, never merely named in a tool call's args (#10664).
+   */
+  private latestBindingClaimable(): boolean {
+    return (
+      this.boundSessionUuid !== undefined &&
+      !this.terminalBoundSession &&
+      this.claimableSessions.has(this.boundSessionUuid)
+    );
   }
 
   private createLivenessRecovery(): LivenessRecovery {
@@ -4142,7 +4183,7 @@ export class DaemonMcpProxy {
 
   private isHeldSession(sessionUuid: string): boolean {
     return (
-      (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) ||
+      (sessionUuid === this.boundSessionUuid && this.latestBindingClaimable()) ||
       this.otherHeldSessions.has(sessionUuid)
     );
   }
@@ -4405,6 +4446,7 @@ export class DaemonMcpProxy {
     }
     this.forgetSessionLivenessState(sessionUuid);
     this.ownedDeviceSessions.delete(sessionUuid);
+    this.claimableSessions.delete(sessionUuid);
     if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
       this.terminalBoundSession.reason = "session-not-found";
     }
@@ -4463,7 +4505,21 @@ export class DaemonMcpProxy {
       : undefined;
   }
 
+  /** Stop heartbeating held sessions no tool call has named within the idle window (#10657). */
+  private evictAbandonedHeldSessions(): void {
+    const now = this.timer.now();
+    for (const [sessionUuid, held] of [...this.otherHeldSessions]) {
+      if (now - held.lastUsedAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS) {
+        logger.info(
+          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${DAEMON_BOUND_SESSION_REPLAY_TTL_MS}ms; no longer heartbeating it`,
+        );
+        this.dropHeldSession(sessionUuid);
+      }
+    }
+  }
+
   private async heartbeatOtherHeldSessions(): Promise<void> {
+    this.evictAbandonedHeldSessions();
     await Promise.all(
       [...this.otherHeldSessions.keys()].map((sessionUuid) =>
         this.heartbeatHeldSession(sessionUuid),
@@ -4695,10 +4751,7 @@ export class DaemonMcpProxy {
       return;
     }
     this.forgetSessionLivenessState(sessionUuid, keepHandover);
-    if (
-      this.otherHeldSessions.size === 0 &&
-      (this.boundSessionUuid === undefined || this.terminalBoundSession)
-    ) {
+    if (this.otherHeldSessions.size === 0 && !this.latestBindingClaimable()) {
       void this.stopBoundSessionHeartbeat();
     }
   }
@@ -4707,14 +4760,19 @@ export class DaemonMcpProxy {
   private holdPreviousBinding(nextSessionUuid: string): void {
     const previous = this.boundSessionUuid;
     this.otherHeldSessions.delete(nextSessionUuid);
-    if (previous && previous !== nextSessionUuid) {
-      this.otherHeldSessions.set(previous, { claimSent: this.livenessOwnershipClaimSent });
+    this.latestBindingConflict = undefined;
+    // Only a session this proxy claims stays held: an args-named one was never heartbeated (#10664).
+    if (previous && previous !== nextSessionUuid && this.claimableSessions.has(previous)) {
+      this.otherHeldSessions.set(previous, {
+        claimSent: this.livenessOwnershipClaimSent,
+        lastUsedAt: this.boundSessionUuidAt ?? this.timer.now(),
+      });
     }
   }
 
   private async runLatestBindingHeartbeatTick(): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
-    if (!sessionUuid || this.terminalBoundSession || this.closing) {
+    if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
     // A caller that explicitly schedules heartbeats beyond the lease cannot
@@ -4731,7 +4789,7 @@ export class DaemonMcpProxy {
 
   private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
-    if (!sessionUuid || this.terminalBoundSession || this.closing) {
+    if (!sessionUuid || !this.latestBindingClaimable() || this.closing) {
       return;
     }
     try {
@@ -4800,9 +4858,32 @@ export class DaemonMcpProxy {
       // (no local acknowledgement either), the claim stays unsent so the next
       // tick retries it, and the keeper is not failed by the refusal.
       this.noteLivenessOwnerConflict(sessionUuid);
+      this.leashLatestBindingConflict(sessionUuid, isCurrent);
       return true;
     }
     return false;
+  }
+
+  /**
+   * Give the latest binding the same leash held sessions have (#10664): a refusal that outlasts
+   * the other owner's lease plus grace means this proxy cannot own the session, so it stops
+   * claiming and fences the binding instead of inheriting another proxy's session.
+   */
+  private leashLatestBindingConflict(sessionUuid: string, isCurrent: () => boolean): void {
+    if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
+    }
+    const now = this.timer.now();
+    if (this.latestBindingConflict?.sessionUuid !== sessionUuid) {
+      this.latestBindingConflict = { sessionUuid, since: now };
+    }
+    if (now - this.latestBindingConflict.since < this.ownershipConflictLeashMs) {
+      return;
+    }
+    logger.warn(
+      `[DaemonMcpProxy] Session ${sessionUuid} is owned by another live liveness owner; no longer claiming it`,
+    );
+    this.fenceBoundSessionUuid(sessionUuid, "liveness-owner-conflict");
   }
 
   private recordBoundSessionHeartbeatSuccess(
@@ -4817,7 +4898,9 @@ export class DaemonMcpProxy {
       this.livenessOwnershipClaimSent = true;
     }
     this.livenessConflictLogged.delete(sessionUuid);
-    this.boundSessionUuidAt = this.timer.now();
+    this.latestBindingConflict = undefined;
+    // Only a forwarded call refreshes the replay lease (`boundSessionUuidAt`); an ack proves the
+    // daemon still holds the session, not that the agent is using it (#10656).
     this.livenessAcks.set(sessionUuid, this.timer.now());
   }
 
@@ -5001,6 +5084,7 @@ export class DaemonMcpProxy {
     this.boundSessionUuid = mintedSessionUuid;
     this.boundSessionUuidAt = this.timer.now();
     this.ownedDeviceSessions.add(mintedSessionUuid);
+    this.claimableSessions.add(mintedSessionUuid);
     this.boundSessionFromResultMint = true;
     this.initialSessionBindingConfigured = false;
     this.livenessOwnershipClaimSent = false;

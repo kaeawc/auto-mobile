@@ -1,0 +1,92 @@
+{
+  "id": "settings",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "sound": "chime",
+    "sync": true,
+    "wifi": false
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "radioGroup",
+        "stateKey": "sound",
+        "testTag": "sound_group",
+        "options": [
+          {
+            "value": "chime",
+            "label": "Chime"
+          },
+          {
+            "value": "beep",
+            "label": "Beep"
+          },
+          {
+            "value": "silent",
+            "label": "Silent"
+          }
+        ],
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "soundPicked"
+          }
+        ]
+      },
+      {
+        "type": "listItem",
+        "headline": "Sync",
+        "supporting": "Keep alarms in step across devices",
+        "leadingIcon": "refresh",
+        "testTag": "sync_row",
+        "trailing": {
+          "type": "switch",
+          "stateKey": "sync"
+        }
+      },
+      {
+        "type": "listItem",
+        "headline": "Wi-Fi only",
+        "trailing": {
+          "type": "checkbox",
+          "stateKey": "wifi"
+        }
+      },
+      {
+        "type": "listItem",
+        "headline": "Advanced",
+        "trailing": {
+          "type": "icon",
+          "name": "chevron_right"
+        },
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "advanced"
+          }
+        ]
+      },
+      {
+        "type": "listItem",
+        "headline": "About"
+      },
+      {
+        "type": "button",
+        "label": "Save",
+        "variant": "tonal",
+        "icon": "check"
+      },
+      {
+        "type": "button",
+        "label": "Share",
+        "variant": "elevated",
+        "icon": "share"
+      }
+    ]
+  }
+}

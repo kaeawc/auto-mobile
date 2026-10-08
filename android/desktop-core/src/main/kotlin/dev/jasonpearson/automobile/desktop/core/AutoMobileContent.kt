@@ -106,6 +106,7 @@ import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
@@ -191,6 +192,25 @@ internal fun activeDeviceConnectionLostEvent(
     is DeviceStreamEvent.DeviceConnectionLost ->
       event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
   }
+}
+
+/**
+ * The daemon session binding for the studio/desktop pane (#10660). Binding reserves the device
+ * against CLI/MCP sessions, so it is derived only from an explicit user pick that is still the
+ * displayed device. The auto-selected first device is display-only: with a null binding the session
+ * loop takes the observer-only `ensureRegistered()` path and never calls `setActiveDevice`, so it
+ * cannot grab a device back after an agent releases it.
+ */
+internal fun desktopSessionBindingFor(
+  isRealMode: Boolean,
+  userSelectedDeviceId: String?,
+  activeDeviceId: String?,
+  isIos: Boolean,
+): DesktopDaemonSessionBinding? {
+  if (!isRealMode || userSelectedDeviceId == null || userSelectedDeviceId != activeDeviceId) {
+    return null
+  }
+  return DesktopDaemonSessionBinding(userSelectedDeviceId, if (isIos) "ios" else "android")
 }
 
 internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
@@ -711,8 +731,10 @@ fun AutoMobileContent(
   var activeDeviceId by activeDeviceIdState
   var isDevicePanelExpanded by isDevicePanelExpandedState
 
-  // Track when user explicitly navigates to device panel (to suppress auto-selection)
-  var userNavigatedToDevices by remember { mutableStateOf(false) }
+  // The device the user explicitly picked (sidebar click). Only this id may become an
+  // allocation-bearing daemon session binding (#10660); `activeDeviceId` also holds the
+  // display-only auto-selected first device, which must never reserve a device on its own.
+  var userSelectedDeviceId by remember { mutableStateOf<String?>(null) }
 
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
@@ -837,24 +859,14 @@ fun AutoMobileContent(
       }
     }
 
-  val selectedDeviceId = activeDeviceId
   val selectedBinding =
-    if (
-      dataSourceMode == DataSourceMode.Real && selectedDeviceId != null && clientProvider != null
-    ) {
-      DesktopDaemonSessionBinding(
-        selectedDeviceId,
-        if (
-          realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical
-        ) {
-          "ios"
-        } else {
-          "android"
-        },
-      )
-    } else {
-      null
-    }
+    desktopSessionBindingFor(
+      isRealMode = dataSourceMode == DataSourceMode.Real && clientProvider != null,
+      userSelectedDeviceId = userSelectedDeviceId,
+      activeDeviceId = activeDeviceId,
+      isIos =
+        realDevice?.type == DeviceType.iOSSimulator || realDevice?.type == DeviceType.iOSPhysical,
+    )
   SideEffect { desktopSessionBinding.value = selectedBinding }
   val desktopSessionReady =
     desktopSessionState.boundDeviceId == activeDeviceId && activeDeviceId != null
@@ -1115,6 +1127,12 @@ fun AutoMobileContent(
                 if (activeDeviceId != null && newDevices.none { it.id == activeDeviceId }) {
                   activeDeviceId = null
                   realDevice = null
+                }
+                if (
+                  userSelectedDeviceId != null && newDevices.none { it.id == userSelectedDeviceId }
+                ) {
+                  // A reappearing device must not silently inherit the old explicit pick.
+                  userSelectedDeviceId = null
                 }
               }
               is ResourceReadResult.Error -> {
@@ -2040,6 +2058,12 @@ fun AutoMobileContent(
               horizontalAlignment = Alignment.CenterHorizontally,
               verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+              // The picked device is held by another session: this pane only views it and never
+              // takes it on its own (#10660). Take control is the one explicit bind attempt.
+              if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
+                DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
+              }
+
               // Why control is unavailable (issue #4531). The policy's reason is surfaced only
               // when no interaction snapshot exists — while a post-input refresh retains one,
               // clicks still actuate the device, so a "blocked" notice would contradict what the
@@ -2147,6 +2171,7 @@ fun AutoMobileContent(
           dataSourceMode = dataSourceMode,
           onDataSourceModeChanged = { mode ->
             dataSourceMode = mode
+            userSelectedDeviceId = null
             if (mode == DataSourceMode.Real) {
               activeDeviceId = null
               isDevicePanelExpanded = true
@@ -2165,6 +2190,7 @@ fun AutoMobileContent(
             sidebarDevices
               .firstOrNull { it.id == deviceId }
               ?.let { device ->
+                userSelectedDeviceId = device.id
                 activeDeviceId = device.id
                 realDevice = device
                 isDevicePanelExpanded = false

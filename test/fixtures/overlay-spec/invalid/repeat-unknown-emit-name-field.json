@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "x",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "{item.zzz}"
+            }
+          ]
+        }
+      ],
+      "repeat": {
+        "items": [
+          {
+            "id": "a",
+            "label": "Alpha",
+            "price": 3,
+            "on": true
+          },
+          {
+            "id": "b",
+            "label": "Beta",
+            "price": 4.5,
+            "on": false
+          }
+        ],
+        "as": "item"
+      }
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].name"
+}

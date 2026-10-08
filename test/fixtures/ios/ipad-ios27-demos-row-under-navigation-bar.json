@@ -1,0 +1,3192 @@
+{
+  "deviceId": "0A31D779-CC2F-437A-AC7B-36090B8FD1FE",
+  "screenSize": {
+    "width": 834,
+    "height": 1210,
+    "units": "points"
+  },
+  "systemInsets": {
+    "bottom": 20,
+    "left": 0,
+    "right": 0,
+    "top": 32
+  },
+  "viewHierarchy": {
+    "hierarchy": {
+      "bounds": [
+        0,
+        0,
+        834,
+        1210
+      ],
+      "className": "XCUIApplication",
+      "extras": {
+        "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+        "sdk.hasTapTarget": "true"
+      },
+      "node": [
+        {
+          "bounds": [
+            0,
+            32,
+            834,
+            86
+          ],
+          "className": "UINavigationBar",
+          "extras": {
+            "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "node": {
+            "bounds": [
+              0,
+              0,
+              834,
+              86
+            ],
+            "className": "_UIBarBackground",
+            "extras": {
+              "sdk.accessibilityElementsHidden": "true",
+              "sdk.isUserInteractionEnabled": "false",
+              "sdk.source": "sdkWalker"
+            }
+          },
+          "resource-id": "Demos"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            834,
+            1210
+          ],
+          "className": "UICollectionView",
+          "extras": {
+            "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "node": [
+            {
+              "bounds": [
+                20,
+                -76,
+                814,
+                2
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  -76,
+                  814,
+                  2
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      46,
+                      -50,
+                      74,
+                      -23
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "extras": {
+                      "sdk.backgroundColor": "#F2F2F7FF",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "resource-id": "faceid",
+                    "role": "image",
+                    "text": "Face Id"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      -57,
+                      174,
+                      -35
+                    ],
+                    "className": "UILabel",
+                    "extras": {
+                      "sdk.backgroundColor": "#F2F2F7FF",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "role": "text",
+                    "text": "Biometrics",
+                    "view-id": "s2-febb7ed0cee15f04"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      -33,
+                      284,
+                      -17
+                    ],
+                    "className": "UILabel",
+                    "extras": {
+                      "sdk.backgroundColor": "#F2F2F7FF",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "role": "text",
+                    "text": "Test biometric override injection",
+                    "view-id": "s2-cabe7607b92e2245"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      -43,
+                      791,
+                      -31
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "extras": {
+                      "sdk.backgroundColor": "#F2F2F7FF",
+                      "sdk.isUserInteractionEnabled": "false"
+                    },
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Biometrics, Test biometric override injection",
+                "view-id": "s2-614cc03ef8e986e9"
+              },
+              "role": "listitem",
+              "view-id": "s2-8d1de28830ca36bc"
+            },
+            {
+              "bounds": [
+                20,
+                2,
+                814,
+                80
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.accessibilityElementsHidden": "true",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  2,
+                  814,
+                  80
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.accessibilityElementsHidden": "true",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      45,
+                      26,
+                      74,
+                      55
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "network",
+                    "role": "image",
+                    "text": "Network Nodes Connected By Lines"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      21,
+                      234,
+                      42
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Network Tracking",
+                    "view-id": "s2-60a907f702584148"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      44,
+                      289,
+                      61
+                    ],
+                    "className": "UILabel",
+                    "extras": {
+                      "sdk.gestureRecognizers": "_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerWithEarlyStartGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                      "sdk.hasTapTarget": "true"
+                    },
+                    "role": "text",
+                    "text": "Test network request monitoring",
+                    "view-id": "s2-7a93e185814e63c6"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      35,
+                      791,
+                      47
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "extras": {
+                      "sdk.gestureRecognizers": "_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerWithEarlyStartGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                      "sdk.hasTapTarget": "true"
+                    },
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Network Tracking, Test network request monitoring",
+                "view-id": "s2-26a93d6164fa1858"
+              },
+              "role": "listitem",
+              "view-id": "s2-7c8202935ce99a52"
+            },
+            {
+              "bounds": [
+                20,
+                97,
+                814,
+                138
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  97,
+                  814,
+                  138
+                ],
+                "className": "UILabel",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "role": "text",
+                "text": "Performance",
+                "view-id": "s2-b2c75c4c518145e2"
+              },
+              "role": "listitem",
+              "view-id": "s2-0484af598c3b4b96~177e04f1"
+            },
+            {
+              "bounds": [
+                20,
+                138,
+                814,
+                216
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  138,
+                  814,
+                  216
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      45,
+                      162,
+                      75,
+                      192
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "scroll.fill",
+                    "role": "image",
+                    "text": "Scroll Document, Filled"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      157,
+                      241,
+                      178
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Scroll Performance",
+                    "view-id": "s2-cba45693c8cf79df"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      180,
+                      275,
+                      197
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Test scrolling with many items",
+                    "view-id": "s2-5c7b27114fca591e"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      171,
+                      791,
+                      183
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Scroll Performance, Test scrolling with many items",
+                "view-id": "s2-de762f010df0258f"
+              },
+              "role": "listitem",
+              "view-id": "s2-56041701aa476844"
+            },
+            {
+              "bounds": [
+                20,
+                216,
+                814,
+                294
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  216,
+                  814,
+                  294
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      45,
+                      241,
+                      73,
+                      269
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "wand.and.stars",
+                    "role": "image",
+                    "text": "Magic Wand With Stars"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      235,
+                      182,
+                      256
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Animations",
+                    "view-id": "s2-3936ede5fe7459a2"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      258,
+                      312,
+                      275
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Various animation types and timings",
+                    "view-id": "s2-1f46d052866ed444"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      249,
+                      791,
+                      261
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Animations, Various animation types and timings",
+                "view-id": "s2-a80b9570040e4e17"
+              },
+              "role": "listitem",
+              "view-id": "s2-fbc6261c796068a3"
+            },
+            {
+              "bounds": [
+                20,
+                294,
+                814,
+                372
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  294,
+                  814,
+                  372
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      46,
+                      319,
+                      74,
+                      347
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "cpu.fill",
+                    "role": "image",
+                    "text": "Cpu Chip, Filled"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      313,
+                      247,
+                      334
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Heavy Computation",
+                    "view-id": "s2-447ef5dbe4f28635"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      336,
+                      319,
+                      353
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Stress test with intensive calculations",
+                    "view-id": "s2-b5930b2d8dec3822"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      327,
+                      791,
+                      339
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Heavy Computation, Stress test with intensive calculations",
+                "view-id": "s2-a9b3336f2d03e8ba"
+              },
+              "role": "listitem",
+              "view-id": "s2-b53b404a4fd1bdd7"
+            },
+            {
+              "bounds": [
+                20,
+                389,
+                814,
+                430
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  389,
+                  814,
+                  430
+                ],
+                "className": "UILabel",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "role": "text",
+                "text": "UI Components",
+                "view-id": "s2-e11c045a0127b90b"
+              },
+              "role": "listitem",
+              "view-id": "s2-0484af598c3b4b96~8b09b4df"
+            },
+            {
+              "bounds": [
+                20,
+                430,
+                814,
+                508
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  430,
+                  814,
+                  508
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      41,
+                      454,
+                      86,
+                      484
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "rectangle.and.pencil.and.ellipsis",
+                    "role": "image",
+                    "text": "Autofill"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      449,
+                      206,
+                      470
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Forms & Input",
+                    "view-id": "s2-4d8b6c99fb410ce1"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      472,
+                      280,
+                      489
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Text fields, pickers, and toggles",
+                    "view-id": "s2-e575e03a95b52761"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      463,
+                      791,
+                      475
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Forms & Input, Text fields, pickers, and toggles",
+                "view-id": "s2-324154a4ca15953e"
+              },
+              "role": "listitem",
+              "view-id": "s2-346e64290a98a423"
+            },
+            {
+              "bounds": [
+                20,
+                508,
+                814,
+                586
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  508,
+                  814,
+                  586
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      44,
+                      532,
+                      75,
+                      562
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "exclamationmark.bubble.fill",
+                    "role": "image",
+                    "text": "Report"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      527,
+                      214,
+                      548
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Alerts & Sheets",
+                    "view-id": "s2-0ef4e09ae1323123"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      550,
+                      291,
+                      567
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Modal presentations and dialogs",
+                    "view-id": "s2-0f7171f1c463f038"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      541,
+                      791,
+                      553
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Alerts & Sheets, Modal presentations and dialogs",
+                "view-id": "s2-2862cb18e7256893"
+              },
+              "role": "listitem",
+              "view-id": "s2-21fc94cb3f1be4d7"
+            },
+            {
+              "bounds": [
+                20,
+                603,
+                814,
+                644
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  603,
+                  814,
+                  644
+                ],
+                "className": "UILabel",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "role": "text",
+                "text": "Accessibility",
+                "view-id": "s2-ada43a6393f41eb4-1"
+              },
+              "role": "listitem",
+              "view-id": "s2-0484af598c3b4b96~e8ba0802"
+            },
+            {
+              "bounds": [
+                20,
+                644,
+                814,
+                722
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  644,
+                  814,
+                  722
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      43,
+                      666,
+                      77,
+                      700
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "scope",
+                    "role": "image",
+                    "text": "Scope Reticle"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      663,
+                      209,
+                      684
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Tap At Targets",
+                    "view-id": "s2-dfbf1fa8c94f6770"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      686,
+                      331,
+                      703
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Measure visual coordinate tap accuracy",
+                    "view-id": "s2-1c6eb66397e96064"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      677,
+                      791,
+                      689
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Tap At Targets, Measure visual coordinate tap accuracy",
+                "view-id": "s2-2a35aa124b3c1f2f"
+              },
+              "role": "listitem",
+              "view-id": "s2-2767a8d9bda3d648"
+            },
+            {
+              "bounds": [
+                20,
+                722,
+                814,
+                800
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  722,
+                  814,
+                  800
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      45,
+                      746,
+                      74,
+                      775
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "accessibility.fill",
+                    "role": "image",
+                    "text": "Accessibility Logo, Filled"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      741,
+                      189,
+                      762
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Accessibility",
+                    "view-id": "s2-ada43a6393f41eb4-2"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      764,
+                      264,
+                      781
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "VoiceOver and Dynamic Type",
+                    "view-id": "s2-55198a5898867dc4"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      755,
+                      791,
+                      767
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Accessibility, VoiceOver and Dynamic Type",
+                "view-id": "s2-8659ddf560fae67d"
+              },
+              "role": "listitem",
+              "view-id": "s2-0531c03278ef6034"
+            },
+            {
+              "bounds": [
+                20,
+                800,
+                814,
+                878
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  800,
+                  814,
+                  878
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      43,
+                      825,
+                      76,
+                      853
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "dial.medium.fill",
+                    "role": "image",
+                    "text": "Dial Turned To Medium, Filled"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      819,
+                      208,
+                      840
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Custom Rotors",
+                    "view-id": "s2-41d0d7ded9638020"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      842,
+                      254,
+                      859
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "VoiceOver rotor navigation",
+                    "view-id": "s2-fcbf3d1752857785"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      833,
+                      791,
+                      845
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Custom Rotors, VoiceOver rotor navigation",
+                "view-id": "s2-7c469f9766bcb2d7"
+              },
+              "role": "listitem",
+              "view-id": "s2-8e066d19823173be"
+            },
+            {
+              "bounds": [
+                20,
+                878,
+                814,
+                956
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  878,
+                  814,
+                  956
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      44,
+                      901,
+                      76,
+                      933
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "link",
+                    "role": "image",
+                    "text": "Link"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      897,
+                      287,
+                      918
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Semantic Links (SwiftUI)",
+                    "view-id": "s2-4cc4eab799427829"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      920,
+                      335,
+                      937
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "AttributedString inline accessibility links",
+                    "view-id": "s2-f897f92ad540e3db"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      911,
+                      791,
+                      923
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Semantic Links (SwiftUI), AttributedString inline accessibility links",
+                "view-id": "s2-08a4e1f80ba1ca8d"
+              },
+              "role": "listitem",
+              "view-id": "s2-328987ea232cadd4"
+            },
+            {
+              "bounds": [
+                20,
+                956,
+                814,
+                1034
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.backgroundColor": "#F2F2F7FF",
+                "sdk.isUserInteractionEnabled": "false"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  956,
+                  814,
+                  1034
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.backgroundColor": "#F2F2F7FF",
+                  "sdk.isUserInteractionEnabled": "false"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      45,
+                      980,
+                      74,
+                      1009
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "link.circle",
+                    "role": "image",
+                    "text": "Link"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      975,
+                      269,
+                      996
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Semantic Links (UIKit)",
+                    "view-id": "s2-1f94e56d3b856e52"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      998,
+                      304,
+                      1015
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "UITextView inline accessibility links",
+                    "view-id": "s2-40c798d8f6872b60"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      989,
+                      791,
+                      1001
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Semantic Links (UIKit), UITextView inline accessibility links",
+                "view-id": "s2-38aeda00b2da2969"
+              },
+              "role": "listitem",
+              "view-id": "s2-6c6f25d530f10c8f"
+            },
+            {
+              "bounds": [
+                20,
+                1051,
+                814,
+                1092
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+                "sdk.hasTapTarget": "true"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  1051,
+                  814,
+                  1092
+                ],
+                "className": "UILabel",
+                "extras": {
+                  "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+                  "sdk.hasTapTarget": "true"
+                },
+                "role": "text",
+                "text": "View Hierarchy",
+                "view-id": "s2-3a7f3fdb1785c6b4"
+              },
+              "role": "listitem",
+              "view-id": "s2-0484af598c3b4b96~cc97214d"
+            },
+            {
+              "bounds": [
+                20,
+                1092,
+                814,
+                1170
+              ],
+              "className": "UITableViewCell",
+              "clickable": "true",
+              "extras": {
+                "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+                "sdk.hasTapTarget": "true"
+              },
+              "node": {
+                "bounds": [
+                  20,
+                  1092,
+                  814,
+                  1170
+                ],
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                  "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+                  "sdk.hasTapTarget": "true"
+                },
+                "node": [
+                  {
+                    "bounds": [
+                      40,
+                      1118,
+                      79,
+                      1144
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "rectangle.3.group.fill",
+                    "role": "image",
+                    "text": "Rectangle 3 Group, Filled"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      1111,
+                      223,
+                      1132
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Hierarchy Debug",
+                    "view-id": "s2-c0f81bf3ee67aa50"
+                  },
+                  {
+                    "bounds": [
+                      92,
+                      1134,
+                      310,
+                      1151
+                    ],
+                    "className": "UILabel",
+                    "role": "text",
+                    "text": "Test SDK walker vs accessibility tree",
+                    "view-id": "s2-f525f0da8bfa5519"
+                  },
+                  {
+                    "bounds": [
+                      784,
+                      1125,
+                      791,
+                      1137
+                    ],
+                    "className": "UIImageView",
+                    "clickable": "true",
+                    "resource-id": "chevron.forward",
+                    "role": "image"
+                  }
+                ],
+                "role": "button",
+                "text": "Hierarchy Debug, Test SDK walker vs accessibility tree",
+                "view-id": "s2-e3bd6eea2d52e377"
+              },
+              "role": "listitem",
+              "view-id": "s2-55f8c0981c74dccd"
+            },
+            {
+              "bounds": [
+                801,
+                86,
+                831,
+                1180
+              ],
+              "className": "UIView",
+              "extras": {
+                "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+                "sdk.hasTapTarget": "true"
+              },
+              "text": "Vertical scroll bar, 2 pages",
+              "view-id": "s2-3b9b6552ae2ad908"
+            },
+            {
+              "bounds": [
+                0,
+                0,
+                834,
+                1210
+              ],
+              "className": "UITransitionView",
+              "extras": {
+                "sdk.source": "sdkWalker"
+              },
+              "node": {
+                "bounds": [
+                  0,
+                  0,
+                  834,
+                  1210
+                ],
+                "className": "UIDropShadowView",
+                "extras": {
+                  "sdk.source": "sdkWalker"
+                },
+                "node": {
+                  "bounds": [
+                    0,
+                    0,
+                    834,
+                    1210
+                  ],
+                  "className": "_UIHostingView<ModifiedContent<LazyView<ModifiedContent<ContentView, AutoMobileThemeModifier>>, RootModifier>>",
+                  "extras": {
+                    "sdk.backgroundColor": "#FFFFFFFF",
+                    "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                    "sdk.source": "sdkWalker"
+                  },
+                  "node": {
+                    "bounds": [
+                      0,
+                      0,
+                      834,
+                      1210
+                    ],
+                    "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<UIKitAdaptableTabView>>",
+                    "extras": {
+                      "sdk.source": "sdkWalker"
+                    },
+                    "node": {
+                      "bounds": [
+                        0,
+                        0,
+                        834,
+                        1210
+                      ],
+                      "className": "UILayoutContainerView",
+                      "extras": {
+                        "sdk.backgroundColor": "#FFFFFFFF",
+                        "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                        "sdk.source": "sdkWalker"
+                      },
+                      "node": [
+                        {
+                          "bounds": [
+                            0,
+                            0,
+                            834,
+                            1210
+                          ],
+                          "className": "UITransitionView",
+                          "extras": {
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [
+                              0,
+                              0,
+                              834,
+                              1210
+                            ],
+                            "className": "UIViewControllerWrapperView",
+                            "extras": {
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": {
+                              "bounds": [
+                                0,
+                                0,
+                                834,
+                                1210
+                              ],
+                              "className": "_UIHostingView<RootView>",
+                              "extras": {
+                                "sdk.backgroundColor": "#FFFFFFFF",
+                                "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                "sdk.source": "sdkWalker"
+                              },
+                              "node": {
+                                "bounds": [
+                                  0,
+                                  0,
+                                  834,
+                                  1210
+                                ],
+                                "className": "UIKitPlatformViewHost<PlatformViewControllerRepresentableAdaptor<NavigationStackRepresentable>>",
+                                "extras": {
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [
+                                    0,
+                                    0,
+                                    834,
+                                    1210
+                                  ],
+                                  "className": "UILayoutContainerView",
+                                  "extras": {
+                                    "sdk.gestureRecognizers": "_UIParallaxTransitionPanGestureRecognizer(enabled),_UIParallaxTransitionPanGestureRecognizer(enabled)",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": [
+                                    {
+                                      "bounds": [
+                                        0,
+                                        0,
+                                        834,
+                                        1210
+                                      ],
+                                      "className": "UINavigationTransitionView",
+                                      "extras": {
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": [
+                                          0,
+                                          0,
+                                          834,
+                                          1210
+                                        ],
+                                        "className": "UIViewControllerWrapperView",
+                                        "extras": {
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": {
+                                          "bounds": [
+                                            0,
+                                            0,
+                                            834,
+                                            1210
+                                          ],
+                                          "className": "HostingView",
+                                          "extras": {
+                                            "sdk.backgroundColor": "#FFFFFFFF",
+                                            "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "node": {
+                                            "bounds": [
+                                              0,
+                                              0,
+                                              834,
+                                              1210
+                                            ],
+                                            "className": "UIKitPlatformViewHost<ListRepresentable<CollectionViewListDataSource<Never>, SelectionManagerBox<Never>>>",
+                                            "extras": {
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": {
+                                              "bounds": [
+                                                0,
+                                                0,
+                                                834,
+                                                1210
+                                              ],
+                                              "className": "UpdateCoalescingCollectionView",
+                                              "extras": {
+                                                "sdk.backgroundColor": "#F2F2F7FF",
+                                                "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(enabled),UIScrollViewPanGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled),_UIMultiSelectOneFingerPanGesture(disabled),UITapGestureRecognizer(disabled),UIPanGestureRecognizer(disabled),_UISingleFingerTapExtensionGesture(disabled),UIHoverGestureRecognizer(disabled),UILongPressGestureRecognizer(disabled),UITapGestureRecognizer(disabled),_UIFocusSelectObserverGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),UIPinchGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerWithEarlyStartGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UISwipeActionPanGestureRecognizer(enabled),_UISwipeDismissalGestureRecognizer(disabled)",
+                                                "sdk.source": "sdkWalker"
+                                              },
+                                              "node": [
+                                                {
+                                                  "bounds": [
+                                                    -20,
+                                                    89,
+                                                    854,
+                                                    381
+                                                  ],
+                                                  "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#F2F2F7FF",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    -20,
+                                                    381,
+                                                    854,
+                                                    595
+                                                  ],
+                                                  "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#F2F2F7FF",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    -20,
+                                                    595,
+                                                    854,
+                                                    1043
+                                                  ],
+                                                  "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#F2F2F7FF",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    -20,
+                                                    1043,
+                                                    854,
+                                                    3602
+                                                  ],
+                                                  "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#F2F2F7FF",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    -20,
+                                                    -2701,
+                                                    854,
+                                                    89
+                                                  ],
+                                                  "className": "_UICollectionViewListLayoutSectionBackgroundColorDecorationView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#F2F2F7FF",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    -7,
+                                                    814,
+                                                    71
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": [
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        -7,
+                                                        814,
+                                                        71
+                                                      ],
+                                                      "className": "_UISystemBackgroundView",
+                                                      "extras": {
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          -7,
+                                                          814,
+                                                          71
+                                                        ],
+                                                        "className": "UIView",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    },
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        -7,
+                                                        814,
+                                                        71
+                                                      ],
+                                                      "className": "_UICollectionViewListCellContentView",
+                                                      "extras": {
+                                                        "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          -7,
+                                                          814,
+                                                          71
+                                                        ],
+                                                        "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                                                        "extras": {
+                                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                                          "sdk.source": "sdkWalker"
+                                                        },
+                                                        "node": {
+                                                          "bounds": [
+                                                            46,
+                                                            18,
+                                                            75,
+                                                            47
+                                                          ],
+                                                          "className": "ColorShapeLayer",
+                                                          "extras": {
+                                                            "sdk.isLayerNode": "true",
+                                                            "sdk.isUserInteractionEnabled": "false",
+                                                            "sdk.source": "sdkWalker"
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    130,
+                                                    814,
+                                                    208
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": [
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        130,
+                                                        814,
+                                                        208
+                                                      ],
+                                                      "className": "_UISystemBackgroundView",
+                                                      "extras": {
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          130,
+                                                          814,
+                                                          208
+                                                        ],
+                                                        "className": "UIView",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    },
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        130,
+                                                        814,
+                                                        208
+                                                      ],
+                                                      "className": "_UICollectionViewListCellContentView",
+                                                      "extras": {
+                                                        "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          130,
+                                                          814,
+                                                          208
+                                                        ],
+                                                        "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                                                        "extras": {
+                                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                                          "sdk.source": "sdkWalker"
+                                                        },
+                                                        "node": {
+                                                          "bounds": [
+                                                            45,
+                                                            154,
+                                                            76,
+                                                            184
+                                                          ],
+                                                          "className": "ColorShapeLayer",
+                                                          "extras": {
+                                                            "sdk.isLayerNode": "true",
+                                                            "sdk.isUserInteractionEnabled": "false",
+                                                            "sdk.source": "sdkWalker"
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    208,
+                                                    814,
+                                                    286
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      208,
+                                                      814,
+                                                      286
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        208,
+                                                        814,
+                                                        286
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    286,
+                                                    814,
+                                                    364
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": [
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        286,
+                                                        814,
+                                                        364
+                                                      ],
+                                                      "className": "_UISystemBackgroundView",
+                                                      "extras": {
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          286,
+                                                          814,
+                                                          364
+                                                        ],
+                                                        "className": "UIView",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    },
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        286,
+                                                        814,
+                                                        364
+                                                      ],
+                                                      "className": "_UICollectionViewListCellContentView",
+                                                      "extras": {
+                                                        "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          286,
+                                                          814,
+                                                          364
+                                                        ],
+                                                        "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                                                        "extras": {
+                                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                                          "sdk.source": "sdkWalker"
+                                                        },
+                                                        "node": {
+                                                          "bounds": [
+                                                            46,
+                                                            311,
+                                                            75,
+                                                            340
+                                                          ],
+                                                          "className": "ColorShapeLayer",
+                                                          "extras": {
+                                                            "sdk.isLayerNode": "true",
+                                                            "sdk.isUserInteractionEnabled": "false",
+                                                            "sdk.source": "sdkWalker"
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    422,
+                                                    814,
+                                                    500
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      422,
+                                                      814,
+                                                      500
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        422,
+                                                        814,
+                                                        500
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    500,
+                                                    814,
+                                                    578
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      500,
+                                                      814,
+                                                      578
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        500,
+                                                        814,
+                                                        578
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    636,
+                                                    814,
+                                                    714
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      636,
+                                                      814,
+                                                      714
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        636,
+                                                        814,
+                                                        714
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    714,
+                                                    814,
+                                                    792
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      714,
+                                                      814,
+                                                      792
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        714,
+                                                        814,
+                                                        792
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    792,
+                                                    814,
+                                                    870
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      792,
+                                                      814,
+                                                      870
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        792,
+                                                        814,
+                                                        870
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    870,
+                                                    814,
+                                                    948
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": [
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        870,
+                                                        814,
+                                                        948
+                                                      ],
+                                                      "className": "_UISystemBackgroundView",
+                                                      "extras": {
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          870,
+                                                          814,
+                                                          948
+                                                        ],
+                                                        "className": "UIView",
+                                                        "extras": {
+                                                          "sdk.backgroundColor": "#FFFFFFFF",
+                                                          "sdk.isUserInteractionEnabled": "false",
+                                                          "sdk.source": "sdkWalker"
+                                                        }
+                                                      }
+                                                    },
+                                                    {
+                                                      "bounds": [
+                                                        20,
+                                                        870,
+                                                        814,
+                                                        948
+                                                      ],
+                                                      "className": "_UICollectionViewListCellContentView",
+                                                      "extras": {
+                                                        "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                        "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": {
+                                                        "bounds": [
+                                                          20,
+                                                          870,
+                                                          814,
+                                                          948
+                                                        ],
+                                                        "className": "CellHostingView<ModifiedContent<_ViewList_View, CollectionViewCellModifier>>",
+                                                        "extras": {
+                                                          "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                                          "sdk.source": "sdkWalker"
+                                                        },
+                                                        "node": {
+                                                          "bounds": [
+                                                            45,
+                                                            893,
+                                                            77,
+                                                            925
+                                                          ],
+                                                          "className": "ColorShapeLayer",
+                                                          "extras": {
+                                                            "sdk.isLayerNode": "true",
+                                                            "sdk.isUserInteractionEnabled": "false",
+                                                            "sdk.source": "sdkWalker"
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    948,
+                                                    814,
+                                                    1026
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      948,
+                                                      814,
+                                                      1026
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        948,
+                                                        814,
+                                                        1026
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    20,
+                                                    1084,
+                                                    814,
+                                                    1162
+                                                  ],
+                                                  "className": "ListCollectionViewCell",
+                                                  "extras": {
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      20,
+                                                      1084,
+                                                      814,
+                                                      1162
+                                                    ],
+                                                    "className": "_UISystemBackgroundView",
+                                                    "extras": {
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": {
+                                                      "bounds": [
+                                                        20,
+                                                        1084,
+                                                        814,
+                                                        1162
+                                                      ],
+                                                      "className": "UIView",
+                                                      "extras": {
+                                                        "sdk.backgroundColor": "#FFFFFFFF",
+                                                        "sdk.isUserInteractionEnabled": "false",
+                                                        "sdk.source": "sdkWalker"
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    207,
+                                                    794,
+                                                    208
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    285,
+                                                    794,
+                                                    286
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    499,
+                                                    794,
+                                                    500
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    713,
+                                                    794,
+                                                    714
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    791,
+                                                    794,
+                                                    792
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    869,
+                                                    794,
+                                                    870
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    92,
+                                                    947,
+                                                    794,
+                                                    948
+                                                  ],
+                                                  "className": "_UICollectionViewListSeparatorView",
+                                                  "extras": {
+                                                    "sdk.backgroundColor": "#3C3C431E",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    828,
+                                                    346,
+                                                    831,
+                                                    1177
+                                                  ],
+                                                  "className": "_UIScrollViewScrollIndicator",
+                                                  "extras": {
+                                                    "sdk.accessibilityTraits": "adjustable",
+                                                    "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)",
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      828,
+                                                      346,
+                                                      831,
+                                                      1177
+                                                    ],
+                                                    "className": "UIView",
+                                                    "extras": {
+                                                      "sdk.backgroundColor": "#00000059",
+                                                      "sdk.cornerRadius": "1.5",
+                                                      "sdk.source": "sdkWalker"
+                                                    }
+                                                  },
+                                                  "text": "Vertical scroll bar, 2 pages"
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "bounds": [
+                                        0,
+                                        32,
+                                        834,
+                                        86
+                                      ],
+                                      "className": "UIKitNavigationBar",
+                                      "extras": {
+                                        "sdk.gestureRecognizers": "_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                                        "sdk.hasTapTarget": "true",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "resource-id": "Demos"
+                                    },
+                                    {
+                                      "bounds": [
+                                        0,
+                                        0,
+                                        834,
+                                        1210
+                                      ],
+                                      "className": "_UIFloatingBarContainerView",
+                                      "extras": {
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "resource-id": "Toolbar",
+                                      "text": "Toolbar"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          "bounds": [
+                            0,
+                            0,
+                            834,
+                            1210
+                          ],
+                          "className": "_UITabContainerView",
+                          "extras": {
+                            "sdk.gestureRecognizers": "UITapGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UIPanGestureRecognizer(enabled),UILongPressGestureRecognizer(disabled)",
+                            "sdk.hasTapTarget": "true",
+                            "sdk.source": "sdkWalker"
+                          },
+                          "node": {
+                            "bounds": [
+                              0,
+                              32,
+                              834,
+                              76
+                            ],
+                            "className": "_UIFloatingTabBar",
+                            "extras": {
+                              "sdk.gestureRecognizers": "_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerWithEarlyStartGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                              "sdk.hasTapTarget": "true",
+                              "sdk.source": "sdkWalker"
+                            },
+                            "node": [
+                              {
+                                "bounds": [
+                                  237,
+                                  32,
+                                  598,
+                                  76
+                                ],
+                                "className": "UIVisualEffectView",
+                                "extras": {
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": {
+                                  "bounds": [
+                                    237,
+                                    32,
+                                    598,
+                                    76
+                                  ],
+                                  "className": "_UIVisualEffectContentView",
+                                  "extras": {
+                                    "sdk.cornerRadius": "22.0",
+                                    "sdk.source": "sdkWalker"
+                                  },
+                                  "node": [
+                                    {
+                                      "bounds": [
+                                        237,
+                                        32,
+                                        598,
+                                        76
+                                      ],
+                                      "className": "_UIFloatingTabBarSelectionContainerView",
+                                      "extras": {
+                                        "sdk.cornerRadius": "22.0",
+                                        "sdk.source": "sdkWalker"
+                                      }
+                                    },
+                                    {
+                                      "bounds": [
+                                        237,
+                                        32,
+                                        598,
+                                        76
+                                      ],
+                                      "className": "UIView",
+                                      "extras": {
+                                        "sdk.cornerRadius": "22.0",
+                                        "sdk.gestureRecognizers": "UIScrollViewPanGestureRecognizer(disabled),_UIContinuousSelectionGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionHoverGestureRecognizer(enabled),_UIPointerInteractionPressGestureRecognizer(enabled)",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": [
+                                        {
+                                          "bounds": [
+                                            237,
+                                            32,
+                                            598,
+                                            76
+                                          ],
+                                          "className": "UIView",
+                                          "extras": {
+                                            "sdk.cornerRadius": "22.0",
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "node": {
+                                            "bounds": [
+                                              241,
+                                              32,
+                                              594,
+                                              76
+                                            ],
+                                            "className": "_UIFloatingTabBarCollectionView",
+                                            "extras": {
+                                              "sdk.accessibilityTraits": "tabBar",
+                                              "sdk.gestureRecognizers": "UIScrollViewDelayedTouchesBeganGestureRecognizer(disabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIScrollViewKnobLongPressGestureRecognizer(enabled),UIHoverGestureRecognizer(enabled),_UIDragAutoScrollGestureRecognizer(enabled),_UIPressGestureRecognizer(enabled),_UIMultiSelectOneFingerPanGesture(disabled),UITapGestureRecognizer(disabled),UIPanGestureRecognizer(disabled),_UISingleFingerTapExtensionGesture(disabled),UIHoverGestureRecognizer(disabled),UILongPressGestureRecognizer(disabled),UITapGestureRecognizer(disabled),_UIFocusSelectObserverGestureRecognizer(enabled),UIScrollViewPagingSwipeGestureRecognizer(disabled)",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": [
+                                              {
+                                                "bounds": [
+                                                  241,
+                                                  36,
+                                                  342,
+                                                  72
+                                                ],
+                                                "className": "_UIFloatingTabBarItemCell",
+                                                "extras": {
+                                                  "sdk.cornerRadius": "18.0",
+                                                  "sdk.isAccessibilityElement": "true",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": {
+                                                  "bounds": [
+                                                    241,
+                                                    36,
+                                                    342,
+                                                    72
+                                                  ],
+                                                  "className": "_UIFloatingTabBarItemView",
+                                                  "extras": {
+                                                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                    "sdk.isAccessibilityElement": "true",
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      257,
+                                                      44,
+                                                      326,
+                                                      65
+                                                    ],
+                                                    "className": "UILabel",
+                                                    "extras": {
+                                                      "sdk.accessibilityTraits": "staticText",
+                                                      "sdk.isAccessibilityElement": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "text": "Discover"
+                                                  },
+                                                  "resource-id": "magnifyingglass",
+                                                  "text": "Discover"
+                                                },
+                                                "resource-id": "magnifyingglass",
+                                                "text": "Discover"
+                                              },
+                                              {
+                                                "bounds": [
+                                                  341,
+                                                  36,
+                                                  428,
+                                                  72
+                                                ],
+                                                "className": "_UIFloatingTabBarItemCell",
+                                                "extras": {
+                                                  "sdk.accessibilityTraits": "selected",
+                                                  "sdk.cornerRadius": "18.0",
+                                                  "sdk.isAccessibilityElement": "true",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": {
+                                                  "bounds": [
+                                                    341,
+                                                    36,
+                                                    428,
+                                                    72
+                                                  ],
+                                                  "className": "_UIFloatingTabBarItemView",
+                                                  "extras": {
+                                                    "sdk.accessibilityTraits": "selected",
+                                                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                    "sdk.isAccessibilityElement": "true",
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      357,
+                                                      44,
+                                                      413,
+                                                      65
+                                                    ],
+                                                    "className": "UILabel",
+                                                    "extras": {
+                                                      "sdk.accessibilityTraits": "staticText",
+                                                      "sdk.isAccessibilityElement": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "text": "Demos"
+                                                  },
+                                                  "resource-id": "play.fill",
+                                                  "text": "Demos"
+                                                },
+                                                "resource-id": "play.fill",
+                                                "text": "Demos"
+                                              },
+                                              {
+                                                "bounds": [
+                                                  428,
+                                                  36,
+                                                  496,
+                                                  72
+                                                ],
+                                                "className": "_UIFloatingTabBarItemCell",
+                                                "extras": {
+                                                  "sdk.cornerRadius": "18.0",
+                                                  "sdk.isAccessibilityElement": "true",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": {
+                                                  "bounds": [
+                                                    428,
+                                                    36,
+                                                    496,
+                                                    72
+                                                  ],
+                                                  "className": "_UIFloatingTabBarItemView",
+                                                  "extras": {
+                                                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                    "sdk.isAccessibilityElement": "true",
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      444,
+                                                      44,
+                                                      480,
+                                                      65
+                                                    ],
+                                                    "className": "UILabel",
+                                                    "extras": {
+                                                      "sdk.accessibilityTraits": "staticText",
+                                                      "sdk.isAccessibilityElement": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "text": "Files"
+                                                  },
+                                                  "resource-id": "folder",
+                                                  "text": "Files"
+                                                },
+                                                "resource-id": "folder",
+                                                "text": "Files"
+                                              },
+                                              {
+                                                "bounds": [
+                                                  496,
+                                                  36,
+                                                  593,
+                                                  72
+                                                ],
+                                                "className": "_UIFloatingTabBarItemCell",
+                                                "extras": {
+                                                  "sdk.cornerRadius": "18.0",
+                                                  "sdk.isAccessibilityElement": "true",
+                                                  "sdk.source": "sdkWalker"
+                                                },
+                                                "node": {
+                                                  "bounds": [
+                                                    496,
+                                                    36,
+                                                    593,
+                                                    72
+                                                  ],
+                                                  "className": "_UIFloatingTabBarItemView",
+                                                  "extras": {
+                                                    "sdk.gestureRecognizers": "UILongPressGestureRecognizer(enabled)",
+                                                    "sdk.isAccessibilityElement": "true",
+                                                    "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": {
+                                                    "bounds": [
+                                                      512,
+                                                      44,
+                                                      577,
+                                                      65
+                                                    ],
+                                                    "className": "UILabel",
+                                                    "extras": {
+                                                      "sdk.accessibilityTraits": "staticText",
+                                                      "sdk.isAccessibilityElement": "true",
+                                                      "sdk.isUserInteractionEnabled": "false",
+                                                      "sdk.source": "sdkWalker"
+                                                    },
+                                                    "text": "Settings"
+                                                  },
+                                                  "resource-id": "gearshape.fill",
+                                                  "text": "Settings"
+                                                },
+                                                "resource-id": "gearshape.fill",
+                                                "text": "Settings"
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        {
+                                          "bounds": [
+                                            210,
+                                            36,
+                                            237,
+                                            72
+                                          ],
+                                          "className": "_UIFloatingTabBarPageButton",
+                                          "extras": {
+                                            "sdk.accessibilityTraits": "button",
+                                            "sdk.isAccessibilityElement": "true",
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "text": "Previous Page"
+                                        },
+                                        {
+                                          "bounds": [
+                                            597,
+                                            36,
+                                            624,
+                                            72
+                                          ],
+                                          "className": "_UIFloatingTabBarPageButton",
+                                          "extras": {
+                                            "sdk.accessibilityTraits": "button",
+                                            "sdk.isAccessibilityElement": "true",
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "text": "Next Page"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "bounds": [
+                                  237,
+                                  32,
+                                  598,
+                                  76
+                                ],
+                                "className": "_UIMultiLayer",
+                                "extras": {
+                                  "sdk.isLayerNode": "true",
+                                  "sdk.isUserInteractionEnabled": "false",
+                                  "sdk.source": "sdkWalker"
+                                },
+                                "node": [
+                                  {
+                                    "bounds": [
+                                      237,
+                                      32,
+                                      598,
+                                      76
+                                    ],
+                                    "className": "CALayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [
+                                        237,
+                                        32,
+                                        598,
+                                        76
+                                      ],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.cornerRadius": "22.0",
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": [
+                                        {
+                                          "bounds": [
+                                            237,
+                                            32,
+                                            598,
+                                            76
+                                          ],
+                                          "className": "CALayer",
+                                          "extras": {
+                                            "sdk.cornerRadius": "22.0",
+                                            "sdk.isLayerNode": "true",
+                                            "sdk.isUserInteractionEnabled": "false",
+                                            "sdk.source": "sdkWalker"
+                                          }
+                                        },
+                                        {
+                                          "bounds": [
+                                            237,
+                                            32,
+                                            598,
+                                            76
+                                          ],
+                                          "className": "CALayer",
+                                          "extras": {
+                                            "sdk.cornerRadius": "22.0",
+                                            "sdk.isLayerNode": "true",
+                                            "sdk.isUserInteractionEnabled": "false",
+                                            "sdk.source": "sdkWalker"
+                                          },
+                                          "node": {
+                                            "bounds": [
+                                              237,
+                                              32,
+                                              598,
+                                              76
+                                            ],
+                                            "className": "CALayer",
+                                            "extras": {
+                                              "sdk.cornerRadius": "22.0",
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": {
+                                              "bounds": [
+                                                241,
+                                                32,
+                                                594,
+                                                76
+                                              ],
+                                              "className": "CALayer",
+                                              "extras": {
+                                                "sdk.isLayerNode": "true",
+                                                "sdk.isUserInteractionEnabled": "false",
+                                                "sdk.source": "sdkWalker"
+                                              },
+                                              "node": [
+                                                {
+                                                  "bounds": [
+                                                    241,
+                                                    36,
+                                                    342,
+                                                    72
+                                                  ],
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                    "sdk.cornerRadius": "18.0",
+                                                    "sdk.isLayerNode": "true",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    341,
+                                                    36,
+                                                    428,
+                                                    72
+                                                  ],
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                    "sdk.cornerRadius": "18.0",
+                                                    "sdk.isLayerNode": "true",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    428,
+                                                    36,
+                                                    496,
+                                                    72
+                                                  ],
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                    "sdk.cornerRadius": "18.0",
+                                                    "sdk.isLayerNode": "true",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                },
+                                                {
+                                                  "bounds": [
+                                                    496,
+                                                    36,
+                                                    593,
+                                                    72
+                                                  ],
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                    "sdk.cornerRadius": "18.0",
+                                                    "sdk.isLayerNode": "true",
+                                                    "sdk.isUserInteractionEnabled": "false",
+                                                    "sdk.source": "sdkWalker"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    },
+                                    "resource-id": "UIVisualEffectView"
+                                  },
+                                  {
+                                    "bounds": [
+                                      237,
+                                      32,
+                                      598,
+                                      76
+                                    ],
+                                    "className": "CALayer",
+                                    "extras": {
+                                      "sdk.isLayerNode": "true",
+                                      "sdk.isUserInteractionEnabled": "false",
+                                      "sdk.source": "sdkWalker"
+                                    },
+                                    "node": {
+                                      "bounds": [
+                                        237,
+                                        32,
+                                        598,
+                                        76
+                                      ],
+                                      "className": "CALayer",
+                                      "extras": {
+                                        "sdk.isLayerNode": "true",
+                                        "sdk.isUserInteractionEnabled": "false",
+                                        "sdk.source": "sdkWalker"
+                                      },
+                                      "node": {
+                                        "bounds": [
+                                          237,
+                                          32,
+                                          598,
+                                          76
+                                        ],
+                                        "className": "CALayer",
+                                        "extras": {
+                                          "sdk.isLayerNode": "true",
+                                          "sdk.isUserInteractionEnabled": "false",
+                                          "sdk.source": "sdkWalker"
+                                        },
+                                        "node": [
+                                          {
+                                            "bounds": [
+                                              237,
+                                              32,
+                                              598,
+                                              76
+                                            ],
+                                            "className": "CABackdropLayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "node": {
+                                              "bounds": [
+                                                237,
+                                                32,
+                                                598,
+                                                76
+                                              ],
+                                              "className": "CASDFLayer",
+                                              "extras": {
+                                                "sdk.isLayerNode": "true",
+                                                "sdk.isUserInteractionEnabled": "false",
+                                                "sdk.source": "sdkWalker"
+                                              },
+                                              "resource-id": "@0"
+                                            }
+                                          },
+                                          {
+                                            "bounds": [
+                                              237,
+                                              32,
+                                              598,
+                                              76
+                                            ],
+                                            "className": "CASDFLayer",
+                                            "extras": {
+                                              "sdk.isLayerNode": "true",
+                                              "sdk.isUserInteractionEnabled": "false",
+                                              "sdk.source": "sdkWalker"
+                                            },
+                                            "resource-id": "SDF"
+                                          }
+                                        ],
+                                        "resource-id": "MaterialProvider"
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "role": "list",
+          "scrollable": "true",
+          "view-id": "s2-e82de9a3933d01e3"
+        },
+        {
+          "bounds": [
+            0,
+            0,
+            834,
+            1210
+          ],
+          "className": "UIToolbar",
+          "extras": {
+            "sdk.gestureRecognizers": "_UIFocusEngineJoystickGestureRecognizer(enabled),_UIFocusMovementShoulderButtonPressGestureRecognizer(enabled),_UIFocusMovementTabulatorPressGestureRecognizer(enabled),_UIFocusMovementDirectionalPressGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled),_UIDoubleTapInteractionGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIFlexInteractionPanGestureRecognizer(enabled),_UIPassthroughScrollGestureRecognizer(enabled),_UIPassthroughGateGestureRecognizer(enabled)",
+            "sdk.hasTapTarget": "true"
+          },
+          "resource-id": "Toolbar",
+          "text": "Toolbar"
+        },
+        {
+          "bounds": [
+            240,
+            36,
+            341,
+            72
+          ],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "sdk.cornerRadius": "18.0",
+            "sdk.isAccessibilityElement": "true"
+          },
+          "node": {
+            "bounds": [
+              240,
+              36,
+              341,
+              72
+            ],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.cornerRadius": "18.0",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "resource-id": "magnifyingglass",
+            "role": "button",
+            "text": "Discover"
+          },
+          "resource-id": "magnifyingglass",
+          "role": "button",
+          "text": "Discover"
+        },
+        {
+          "bounds": [
+            341,
+            36,
+            428,
+            72
+          ],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "sdk.accessibilityTraits": "selected",
+            "sdk.cornerRadius": "18.0",
+            "sdk.isAccessibilityElement": "true"
+          },
+          "node": {
+            "bounds": [
+              341,
+              36,
+              428,
+              72
+            ],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.accessibilityTraits": "selected",
+              "sdk.cornerRadius": "18.0",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "resource-id": "play.fill",
+            "role": "button",
+            "selected": "true",
+            "text": "Demos"
+          },
+          "resource-id": "play.fill",
+          "role": "button",
+          "selected": "true",
+          "text": "Demos"
+        },
+        {
+          "bounds": [
+            428,
+            36,
+            496,
+            72
+          ],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "sdk.cornerRadius": "18.0",
+            "sdk.isAccessibilityElement": "true"
+          },
+          "node": {
+            "bounds": [
+              428,
+              36,
+              496,
+              72
+            ],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.cornerRadius": "18.0",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "resource-id": "folder",
+            "role": "button",
+            "text": "Files"
+          },
+          "resource-id": "folder",
+          "role": "button",
+          "text": "Files"
+        },
+        {
+          "bounds": [
+            496,
+            36,
+            593,
+            72
+          ],
+          "className": "UIButton",
+          "clickable": "true",
+          "extras": {
+            "sdk.cornerRadius": "18.0",
+            "sdk.isAccessibilityElement": "true"
+          },
+          "node": {
+            "bounds": [
+              496,
+              36,
+              593,
+              72
+            ],
+            "className": "UIButton",
+            "clickable": "true",
+            "extras": {
+              "sdk.cornerRadius": "18.0",
+              "sdk.isAccessibilityElement": "true"
+            },
+            "resource-id": "gearshape.fill",
+            "role": "button",
+            "text": "Settings"
+          },
+          "resource-id": "gearshape.fill",
+          "role": "button",
+          "text": "Settings"
+        }
+      ],
+      "text": "Playground",
+      "view-id": "s2-d8385bfe20f0771a"
+    },
+    "insets": {
+      "available": true,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "safeArea": {
+        "bottom": 20,
+        "left": 0,
+        "right": 0,
+        "top": 32
+      },
+      "source": "ios-sdk-safe-area",
+      "systemChrome": {
+        "homeIndicatorAutoHideRequested": false,
+        "source": "ios-status-bar-manager",
+        "statusBar": "visible",
+        "visibility": "visible"
+      },
+      "units": "points"
+    },
+    "nativeScale": 2,
+    "packageName": "dev.jasonpearson.automobile.Playground",
+    "pixelHeight": 2420,
+    "pixelWidth": 1668,
+    "screenHeight": 1210,
+    "screenScale": 2,
+    "screenWidth": 834,
+    "systemInsets": {
+      "bottom": 20,
+      "left": 0,
+      "right": 0,
+      "top": 32
+    },
+    "updatedAt": 1791465028796,
+    "windowInfo": {
+      "bounds": [
+        0,
+        0,
+        834,
+        1210
+      ],
+      "id": 0,
+      "isActive": true,
+      "isFocused": true,
+      "type": 1
+    },
+    "windows": [
+      {
+        "bounds": [
+          0,
+          0,
+          834,
+          1210
+        ],
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      }
+    ],
+    "frameContext": "54B3BBB2-B9FC-4D36-9412-0F441CD44B99:4:f8b5419812c2b666",
+    "fresh": true
+  }
+}

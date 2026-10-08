@@ -10,6 +10,15 @@ import {
   type ScreenReaderRestoreState,
 } from "../features/accessibility/ScreenReaderRestore";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
+import { ExecNetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
+import {
+  IOS_APP_NETWORK_RULE_LEASE_MS,
+  IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+  IosAppNetworkRuleClient,
+  type IosAppNetworkRule,
+  type IosAppNetworkRuleCommandContext,
+} from "../features/network-filter/IosAppNetworkRuleClient";
+import { IosAppNetworkLeases, type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import {
   AndroidDeviceClockAdapter,
   restoreDeviceClock,
@@ -119,6 +128,24 @@ export interface BiometricEnrollmentRestorer {
  */
 export interface NetworkConditionSessionState {
   initialProfile: NetworkConditionProfile;
+  /**
+   * iOS Simulator only (#10264): the one app this session took offline through
+   * the network-extension filter. Restoring removes this session's rule rather
+   * than resetting the whole device.
+   */
+  iosAppRule?: IosAppNetworkRuleSessionState;
+}
+
+/** The per-app rule a session owns on an iOS Simulator (#10264). */
+export interface IosAppNetworkRuleSessionState {
+  udid: string;
+  bundleId: string;
+  /** Fixed for this session binding; a later binding allocates a newer one. */
+  ownerGeneration: number;
+  /** The newest revision this session has sent for the target (apply or reset). */
+  lastRevision: number;
+  /** The revision the provider acknowledged as installed, while it is believed active. */
+  installedRevision?: number;
 }
 
 /** What a pending network restore must write, resolved before any await. */
@@ -127,6 +154,11 @@ interface NetworkConditionRestoreTarget {
   sessionId: string;
   deviceId: string;
   profile: NetworkConditionProfile;
+  /**
+   * iOS Simulator: remove this exact rule, with a reset revision allocated when
+   * the target was captured — newer than any apply this session sent.
+   */
+  iosAppRule?: IosAppNetworkRule;
 }
 
 /** Original auto-time value recorded before the first session clock write. */
@@ -175,6 +207,8 @@ export interface DeviceStateRestorerFactories {
   screenReader?: (device: BootedDevice) => ScreenReaderRestorer;
   /** Delay before each screen-reader restore retry; defaults to a short exponential backoff. */
   screenReaderBackoff?: BackoffPolicy;
+  /** iOS Simulator per-app network rules (#10264); defaults to the installed controller. */
+  iosAppNetworkRule?: IosAppNetworkRuleRestorer;
 }
 
 /** The injected screen-reader restorer, else the real TalkBack/VoiceOver one. */
@@ -333,6 +367,24 @@ function rollbackSessionActivityIfCurrent(
   session.lastUsedAt = previousActivity.lastUsedAt;
   session.lastHeartbeat = previousActivity.lastHeartbeat;
   session.expiresAt = previousActivity.expiresAt;
+}
+
+/**
+ * Re-derive the idle deadline after a policy change widened `sessionTimeoutMs`, never shortening
+ * it. The deadline is anchored on the last tool activity (`lastUsedAt`), never on the current time:
+ * a liveness path may change the idle WINDOW but must not count as use (#10656, #10668).
+ */
+function widenIdleDeadlineFromLastActivity(session: Session): void {
+  session.expiresAt = Math.max(session.expiresAt, session.lastUsedAt + session.sessionTimeoutMs);
+}
+
+/**
+ * Re-derive the idle deadline after a policy change restored a shorter `sessionTimeoutMs`. Like
+ * {@link widenIdleDeadlineFromLastActivity} it is anchored on the last tool activity, so the
+ * liveness path that restores the policy cannot extend the deadline (#10656, #10668).
+ */
+function rebaseIdleDeadlineOnLastActivity(session: Session): void {
+  session.expiresAt = session.lastUsedAt + session.sessionTimeoutMs;
 }
 
 /** The heartbeat-policy timeouts `adoptCliLivenessPolicy` overwrote (#6870). */
@@ -873,6 +925,7 @@ export function getDefaultPreFirstHeartbeatGraceMs(): number {
 }
 
 export class SessionManager {
+  private stallProbe: (() => void) | undefined;
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
@@ -998,6 +1051,11 @@ export class SessionManager {
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
   /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
   private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
+  private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
+  /** Renews each session's installed iOS per-app rule (#10264). */
+  private readonly iosAppNetworkLeases: IosAppNetworkLeases;
+  /** Last owner generation handed out; see {@link allocateIosOwnerGeneration}. */
+  private lastIosOwnerGeneration = 0;
   private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
   private readonly screenReaderRemovalGenerations = new Map<string, number>();
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
@@ -1255,6 +1313,18 @@ export class SessionManager {
       networkConditionRestorerFactory,
     );
     this.screenReaderRestoreBackoff = screenReaderBackoffFrom(networkConditionRestorerFactory);
+    this.injectedIosAppNetworkRuleRestorer =
+      typeof networkConditionRestorerFactory === "function"
+        ? undefined
+        : networkConditionRestorerFactory.iosAppNetworkRule;
+    this.iosAppNetworkLeases = new IosAppNetworkLeases(
+      this.timer,
+      () => this.iosAppNetworkRuleRestorer,
+      {
+        leaseMs: IOS_APP_NETWORK_RULE_LEASE_MS,
+        renewIntervalMs: IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+      },
+    );
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -1644,6 +1714,7 @@ export class SessionManager {
     execution?: SessionExecutionMetadata,
     releaseExpired = true,
   ): Session | null {
+    this.stallProbe?.();
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return null;
     }
@@ -2497,6 +2568,7 @@ export class SessionManager {
     // for this session — it must not later fire against the now-released old
     // device (issue #6085 item 2).
     this.cancelNetworkConditionExpiry(existing.sessionId);
+    this.iosAppNetworkLeases.stop(existing.sessionId);
     const networkTarget = this.networkConditionRestoreTarget(existing);
     const pendingNetworkRestoration = networkTarget
       ? ((
@@ -3105,6 +3177,8 @@ export class SessionManager {
       // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
       // already cleared the slot) wins.
       this.cancelNetworkConditionExpiry(sessionId);
+      // Release removes the iOS app rule itself; stop renewing it first.
+      this.iosAppNetworkLeases.stop(sessionId);
       const pendingCleanup = await this.drainReleaseTeardown(sessionId, session);
       const deviceId = session.assignedDevice;
       // Setup/restoration awaits above are where a newer identity confirmation
@@ -4507,20 +4581,177 @@ export class SessionManager {
   private networkConditionRestoreTarget(session: Session): NetworkConditionRestoreTarget | null {
     const state = session.cacheData.networkCondition;
     // Keyed on the cache alone: the slot is only written by the Android emulator
-    // network path, so its presence is the authoritative evidence a device needs
-    // restoring — independent of whatever platform the caller declared.
+    // network path or the iOS Simulator per-app path (`iosAppRule`), so its
+    // presence is the authoritative evidence a device needs restoring —
+    // independent of whatever platform the caller declared.
     if (!state) {
       return null;
     }
+    const ios = state.iosAppRule;
     return {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
       incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
       profile: state.initialProfile,
+      // Each capture allocates a fresh reset revision, newer than every apply
+      // this session sent, so a late apply cannot outlive the restore.
+      ...(ios
+        ? {
+            iosAppRule: {
+              udid: ios.udid,
+              bundleId: ios.bundleId,
+              owner: session.sessionId,
+              ownerGeneration: ios.ownerGeneration,
+              revision: ++ios.lastRevision,
+            },
+          }
+        : {}),
     };
   }
 
+  /** The injected iOS per-app rule restorer, else one over the installed controller. */
+  private get iosAppNetworkRuleRestorer(): IosAppNetworkRuleRestorer {
+    this.injectedIosAppNetworkRuleRestorer ??= defaultIosAppNetworkRuleRestorer();
+    return this.injectedIosAppNetworkRuleRestorer;
+  }
+
+  /**
+   * Owner generations must increase across daemon restarts, because the
+   * provider keeps tombstones of released generations in memory. Seeding from
+   * the host clock (milliseconds) and never repeating a value keeps a new
+   * daemon's generations above an earlier daemon's.
+   */
+  private allocateIosOwnerGeneration(): number {
+    this.lastIosOwnerGeneration = Math.max(
+      this.lastIosOwnerGeneration + 1,
+      Math.floor(this.timer.now()),
+    );
+    return this.lastIosOwnerGeneration;
+  }
+
+  /**
+   * Publish this session's iOS per-app rule slot before an `apply` (#10264), so
+   * release, rebind and TTL expiry can remove it even if the apply is in flight.
+   * One app per session: a different app must be reset first.
+   */
+  beginIosAppNetworkRule(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): IosAppNetworkRuleCommandContext {
+    const state = session.cacheData.networkCondition;
+    const existing = state?.iosAppRule;
+    if (existing && (existing.udid !== target.udid || existing.bundleId !== target.bundleId)) {
+      throw new ActionableError(
+        `Session ${session.sessionId} already holds an offline rule for ${existing.bundleId}; ` +
+          `reset it with networkCondition { profile: "none", appId: "${existing.bundleId}" } first.`,
+      );
+    }
+    const rule: IosAppNetworkRuleSessionState = existing ?? {
+      udid: target.udid,
+      bundleId: target.bundleId,
+      ownerGeneration: this.allocateIosOwnerGeneration(),
+      lastRevision: 0,
+    };
+    if (!existing) {
+      session.cacheData.networkCondition = { initialProfile: "none", iosAppRule: rule };
+    }
+    return this.iosRuleContext(session, rule, ++rule.lastRevision);
+  }
+
+  /**
+   * Ownership for an explicit `reset` of `target`. A session that holds no rule
+   * for it still sends a reset (under a fresh generation it never stores): the
+   * provider then answers `reset` when no rule exists, or refuses to clear
+   * another session's rule.
+   */
+  prepareIosAppNetworkReset(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): IosAppNetworkRuleCommandContext {
+    const existing = session.cacheData.networkCondition?.iosAppRule;
+    if (existing && existing.udid === target.udid && existing.bundleId === target.bundleId) {
+      return this.iosRuleContext(session, existing, ++existing.lastRevision);
+    }
+    const transient: IosAppNetworkRuleSessionState = {
+      udid: target.udid,
+      bundleId: target.bundleId,
+      ownerGeneration: this.allocateIosOwnerGeneration(),
+      lastRevision: 1,
+    };
+    return this.iosRuleContext(session, transient, transient.lastRevision);
+  }
+
+  private iosRuleContext(
+    session: Session,
+    state: IosAppNetworkRuleSessionState,
+    revision: number,
+  ): IosAppNetworkRuleCommandContext {
+    return {
+      rule: {
+        udid: state.udid,
+        bundleId: state.bundleId,
+        owner: session.sessionId,
+        ownerGeneration: state.ownerGeneration,
+        revision,
+      },
+      nextRevision: () => ++state.lastRevision,
+    };
+  }
+
+  /**
+   * The provider acknowledged `rule` as installed: record it and renew its lease
+   * while this exact session still owns this exact revision.
+   */
+  confirmIosAppNetworkRule(session: Session, rule: IosAppNetworkRule): void {
+    const state = session.cacheData.networkCondition?.iosAppRule;
+    if (
+      this.sessions.get(session.sessionId) !== session ||
+      !state ||
+      state.ownerGeneration !== rule.ownerGeneration
+    ) {
+      return;
+    }
+    state.installedRevision = rule.revision;
+    this.iosAppNetworkLeases.start(session.sessionId, rule, () => {
+      const current = session.cacheData.networkCondition?.iosAppRule;
+      return (
+        this.isAdmittedForAutomation(session) &&
+        current === state &&
+        current.installedRevision === rule.revision
+      );
+    });
+  }
+
+  /**
+   * The session reset its rule (or the provider said it no longer holds one):
+   * stop renewing and drop the slot, so release does not reset it again.
+   */
+  finishIosAppNetworkReset(session: Session, rule: IosAppNetworkRule): void {
+    if (this.sessions.get(session.sessionId) !== session) {
+      return;
+    }
+    const state = session.cacheData.networkCondition?.iosAppRule;
+    if (!state || state.ownerGeneration !== rule.ownerGeneration) {
+      return;
+    }
+    this.iosAppNetworkLeases.stop(session.sessionId);
+    delete session.cacheData.networkCondition;
+  }
+
+  /** The iOS rule whose lease this session is renewing, if any (diagnostics and tests). */
+  activeIosAppNetworkLease(sessionId: string): IosAppNetworkRule | undefined {
+    return this.iosAppNetworkLeases.active(sessionId);
+  }
+
   private async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
+    if (target.iosAppRule) {
+      if (!this.restoreIncarnationIsCurrent(target)) {
+        return;
+      }
+      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
+      this.clearRestoreHealth(target, "network-condition");
+      return;
+    }
     const device: BootedDevice = {
       name: target.deviceId,
       platform: "android",
@@ -4902,6 +5133,7 @@ export class SessionManager {
     }
     if (session.cacheData.networkCondition) {
       delete session.cacheData.networkCondition;
+      this.iosAppNetworkLeases.stop(session.sessionId);
     }
   }
 
@@ -5440,7 +5672,15 @@ export class SessionManager {
   }
 
   /**
-   * Record a heartbeat for a session
+   * Record a liveness heartbeat for a session.
+   *
+   * A heartbeat proves the owner process is alive; it is not device use (#10656). It renews the
+   * owner lease (`lastHeartbeat`, `lastOwnerHeartbeat`), marks the session as heartbeating, and
+   * promotes an awaiting-owner session to owned. It must never write the tool-activity clocks
+   * (`lastUsedAt`, `expiresAt`): an idle but live owner — a stdio proxy whose keeper ticks every
+   * 5 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
+   * calls (`getOrCreateSession`) move the idle deadline. Guarded by
+   * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {
     const session = this.getSession(sessionId);
@@ -5452,20 +5692,17 @@ export class SessionManager {
       return;
     }
     const now = this.timer.now();
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
+    const previousLiveness = {
       lastHeartbeat: session.lastHeartbeat,
       lastOwnerHeartbeat: session.lastOwnerHeartbeat,
-      expiresAt: session.expiresAt,
       hasReceivedHeartbeat: session.hasReceivedHeartbeat,
       ownership: session.ownership,
       awaitingOwnerSince: session.awaitingOwnerSince,
     };
     session.lastHeartbeat = now;
-    // Only a heartbeat advances the owner lease; the handler admits one only from the owner.
+    // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
+    // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;
-    session.lastUsedAt = now;
-    session.expiresAt = now + session.sessionTimeoutMs;
     session.activityGeneration++;
     const capturedGeneration = session.activityGeneration;
     session.hasReceivedHeartbeat = true;
@@ -5477,7 +5714,7 @@ export class SessionManager {
       .track(() => this.recordSessionActivity(session))
       .catch((error) => {
         if (session.activityGeneration === capturedGeneration) {
-          Object.assign(session, previousActivity);
+          Object.assign(session, previousLiveness);
         }
         logger.warn(
           `[SessionManager] Failed to record session activity: ${errorMessage(error)}`,
@@ -5642,18 +5879,34 @@ export class SessionManager {
   }
 
   /**
+   * Register the detector that applies {@link forgiveDaemonStall} for a stall the monitor has not
+   * yet noticed. Every expiry judgement (lookup, sweep) runs it first, so which timer fires first
+   * after a stall or wake no longer decides the outcome. Pass undefined to detach.
+   */
+  setStallProbe(probe: (() => void) | undefined): void {
+    this.stallProbe = probe;
+  }
+
+  /**
    * Do not hold the daemon's own stall against any session (#10051).
    *
    * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
    * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
    * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
    * time is not counted against the owner while time the owner genuinely missed before the stall
-   * still is. Returns how many sessions were extended.
+   * still is. A stall at least as long as the session's idle window is sleep, not a hiccup, and
+   * is not forgiven (host sleep counts toward idle). Returns how many sessions were extended.
    */
   forgiveDaemonStall(resumedAt: number, lostMs: number): number {
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
+        continue;
+      }
+      // Idle time is wall-clock, host sleep included: a stall that alone outlasts the window
+      // (timeout plus suspect grace) is idleness the owner did not use, not a hiccup to forgive.
+      // Judged here so the monitor tick and every lazy lookup reach the same verdict.
+      if (lostMs >= session.sessionTimeoutMs + suspectGraceMsFor(session)) {
         continue;
       }
       const leaseStart = effectiveLastHeartbeat(session);
@@ -5751,14 +6004,16 @@ export class SessionManager {
     session.livenessPolicy = "cli-idle";
     session.heartbeatTimeoutMs = idleTimeoutMs;
     // Widen the ordinary expiry deadline too. An autolocked session is created
-    // with a 60 s `sessionTimeoutMs`, and the heartbeat monitor sweeps
-    // `cleanupExpiredSessions()` on every tick — so leaving `expiresAt` on the
-    // 60 s clock would release a CLI-owned session long before the CLI idle
-    // timeout the policy promises. `Math.max` keeps adoption from ever
-    // *shortening* the deadline of a session that already had a longer one
-    // (a plain 30-minute session stays at 30 minutes; the cli-idle policy still
-    // reaps it at the idle timeout, which is the stricter of the two).
+    // with a 60 s `sessionTimeoutMs`, and a later invocation's lookup expires a
+    // session past `expiresAt` — so leaving `expiresAt` on the 60 s clock would
+    // release a CLI-owned session long before the CLI idle timeout the policy
+    // promises. `Math.max` keeps adoption from ever *shortening* the deadline of
+    // a session that already had a longer one (a plain 30-minute session stays
+    // at 30 minutes; the cli-idle policy still reaps it at the idle timeout,
+    // which is the stricter of the two). The widened deadline is measured from
+    // the last tool call, never from this declaration (#10656).
     session.sessionTimeoutMs = Math.max(session.sessionTimeoutMs, idleTimeoutMs);
+    widenIdleDeadlineFromLastActivity(session);
     this.recordHeartbeat(sessionId);
     logger.debug(
       `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
@@ -5795,9 +6050,11 @@ export class SessionManager {
     session.heartbeatTimeoutSource = snapshot.heartbeatTimeoutSource;
     session.sessionTimeoutMs = snapshot.sessionTimeoutMs;
     delete session.preCliLiveness;
-    // Re-stamp the deadlines off the restored (shorter) timeouts: recordHeartbeat
-    // recomputes `expiresAt` from `sessionTimeoutMs`, so the widened deadline
-    // adoption installed does not outlive the policy that justified it.
+    // Re-derive the idle deadline from the restored (shorter) timeout, so the
+    // widened deadline adoption installed does not outlive the policy that
+    // justified it. It is measured from the last tool call: this heartbeat
+    // proves liveness, not use, and must not extend it (#10656).
+    rebaseIdleDeadlineOnLastActivity(session);
     this.recordHeartbeat(sessionId);
     logger.debug(
       `Session ${sessionId} restored the heartbeat liveness policy (timeout ${session.heartbeatTimeoutMs}ms)`,
@@ -5985,6 +6242,7 @@ export class SessionManager {
    * released promptly instead of waiting for the next 5-minute sweep.
    */
   cleanupExpiredSessions(): void {
+    this.stallProbe?.();
     const expiredSessions: string[] = [];
 
     for (const [sessionId, session] of this.sessions) {
@@ -6052,6 +6310,7 @@ export class SessionManager {
       this.timer.clearTimeout(entry.handle);
     }
     this.networkConditionExpiryTimers.clear();
+    this.iosAppNetworkLeases.stopAll();
     this.pendingNonTerminalReleaseSnapshots.clear();
   }
 
@@ -6205,4 +6464,29 @@ export class SessionManager {
       assignedDevices: this.getAssignedDevices().size,
     };
   }
+}
+
+/**
+ * Removes and renews iOS per-app rules through the installed controller. A
+ * reset that is not confirmed throws, so release keeps retrying and the device
+ * stays quarantined until the rule is gone or its lease ends it.
+ */
+function defaultIosAppNetworkRuleRestorer(): IosAppNetworkRuleRestorer {
+  const client = new IosAppNetworkRuleClient(new ExecNetworkFilterBridge());
+  return {
+    reset: async (rule) => {
+      const result = await client.reset(rule);
+      // Another session's rule for the same app is not ours to remove; ours is gone.
+      if (
+        result.kind === "reset" ||
+        (result.kind === "refused" && result.outcome === "owned_by_another_session")
+      ) {
+        return;
+      }
+      throw new Error(
+        `Failed to remove the offline rule for ${rule.bundleId} on ${rule.udid}: ${result.detail}`,
+      );
+    },
+    renew: (rule, leaseMs) => client.renew(rule, leaseMs),
+  };
 }

@@ -1397,14 +1397,24 @@ jobs:
           api='https://circleci.com/api/v2'
           project='project/gh/kaeawc/auto-mobile'
           if [[ -z "$CIRCLECI_TOKEN" ]]; then
-            echo '::error::CIRCLECI_TOKEN is required to run Swift coverage on CircleCI' >&2
-            exit 1
+            echo '::notice title=Swift coverage skipped::CIRCLECI_TOKEN is not configured; skipping the CircleCI Swift coverage badge (#9565).'
+            exit 0
           fi
-          pipeline_id="$(curl -fsS -X POST "$api/$project/pipeline" \
+          # A bad token or missing project access must skip with a notice, not
+          # fail On Merge. The response body is never printed (it can echo auth data).
+          create_body="$RUNNER_TEMP/circleci-pipeline.json"
+          http_status="$(curl -sS -o "$create_body" -w '%{http_code}' -X POST "$api/$project/pipeline" \
             -H "Circle-Token: $CIRCLECI_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data '{"branch":"main","parameters":{"run-swift-coverage-main":true}}' \
-            | jq -er '.id')"
+            --data '{"branch":"main","parameters":{"run-swift-coverage-main":true}}' 2>/dev/null || echo 000)"
+          case "$http_status" in
+            401|403|404)
+              echo "::notice title=Swift coverage skipped::CircleCI rejected the pipeline request (HTTP $http_status); check the CIRCLECI_TOKEN secret and project access. Skipping the Swift coverage badge."
+              exit 0 ;;
+            2[0-9][0-9]) ;;
+            *) echo "::error::CircleCI pipeline request failed (HTTP $http_status)" >&2; exit 1 ;;
+          esac
+          pipeline_id="$(jq -er '.id' "$create_body")"
           echo "CircleCI pipeline: $pipeline_id"
 
           job_number=''
@@ -1439,11 +1449,18 @@ jobs:
             sleep 30
           done
 
+          # Exit 3 means the CircleCI job produced no coverage artifact: skip with a notice.
+          rc=0
           bash scripts/ci/fetch-circleci-swift-badge.sh \
-            "$api" "$project" "$job_number" coverage/swift-coverage-badge.json
+            "$api" "$project" "$job_number" coverage/swift-coverage-badge.json || rc=$?
+          if (( rc == 3 )); then
+            echo "::notice title=Swift coverage skipped::CircleCI job $job_number has no Swift coverage badge artifact; skipping the badge upload."
+          elif (( rc != 0 )); then
+            exit "$rc"
+          fi
 
       - name: "Upload Swift Coverage Badge"
-        if: steps.filter-swift.outputs.ios == 'true'
+        if: steps.filter-swift.outputs.ios == 'true' && hashFiles('coverage/swift-coverage-badge.json') != ''
         uses: actions/upload-artifact@v6
         with:
           name: swift-coverage-badge

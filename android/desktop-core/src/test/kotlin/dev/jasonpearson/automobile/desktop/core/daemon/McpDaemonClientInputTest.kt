@@ -284,7 +284,7 @@ class McpDaemonClientInputTest {
     // the desktop session; a rotated session is read per frame.
     val inputResult = """{"action":"input/tap","platform":"android","success":true}"""
     TestDaemonSocket(
-        responses = listOf(SocketResponse(inputResult, null), SocketResponse(inputResult, null))
+        responses = listOf(SocketResponse(inputResult, null), SocketResponse(inputResult, null)),
       )
       .use { server ->
         var current: String? = "desktop-1"

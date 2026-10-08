@@ -223,6 +223,12 @@ export const elementSchema = z
     occlusionState: z.string().optional(),
     occludedBy: z.string().optional(),
     occludedByViewId: z.string().optional(),
+    occluded: z
+      .literal(true)
+      .optional()
+      .describe(
+        "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+      ),
     class: z.string().optional(),
     package: z.string().optional(),
     checkable: booleanOrString,
@@ -640,6 +646,7 @@ export const viewHierarchyNodeSchema: z.ZodType = z.lazy(() =>
       occlusionState: z.string().optional(),
       occludedBy: z.string().optional(),
       occludedByViewId: z.string().optional(),
+      occluded: z.literal(true).optional(),
       node: z.union([viewHierarchyNodeSchema, z.array(viewHierarchyNodeSchema)]).optional(),
     })
     .passthrough()

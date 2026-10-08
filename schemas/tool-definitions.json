@@ -210,6 +210,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -5482,6 +5487,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -5728,6 +5738,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -7080,6 +7095,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -9446,6 +9465,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -12477,6 +12500,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -12724,6 +12752,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -12970,6 +13003,11 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
             },
             "class": {
               "type": "string"
@@ -13245,6 +13283,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -13493,6 +13536,11 @@
               },
               "occludedByViewId": {
                 "type": "string"
+              },
+              "occluded": {
+                "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                "type": "boolean",
+                "const": true
               },
               "class": {
                 "type": "string"
@@ -16698,6 +16746,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -16944,6 +16997,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -18229,6 +18287,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -24868,6 +24930,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -25114,6 +25181,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -26393,6 +26465,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -30516,6 +30592,11 @@
             "occludedByViewId": {
               "type": "string"
             },
+            "occluded": {
+              "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+              "type": "boolean",
+              "const": true
+            },
             "class": {
               "type": "string"
             },
@@ -32310,6 +32391,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -32556,6 +32642,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -34094,6 +34185,11 @@
                   "occludedByViewId": {
                     "type": "string"
                   },
+                  "occluded": {
+                    "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                    "type": "boolean",
+                    "const": true
+                  },
                   "class": {
                     "type": "string"
                   },
@@ -34342,6 +34438,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [
@@ -36033,6 +36133,11 @@
                     "occludedByViewId": {
                       "type": "string"
                     },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
+                    },
                     "class": {
                       "type": "string"
                     },
@@ -36279,6 +36384,11 @@
                     },
                     "occludedByViewId": {
                       "type": "string"
+                    },
+                    "occluded": {
+                      "description": "Android full projection: an application window or AutoMobile overlay fully covers this row, so tapOn refuses it; its accessibility actions are omitted.",
+                      "type": "boolean",
+                      "const": true
                     },
                     "class": {
                       "type": "string"
@@ -37573,6 +37683,10 @@
             },
             "occludedByViewId": {
               "type": "string"
+            },
+            "occluded": {
+              "type": "boolean",
+              "const": true
             },
             "node": {
               "anyOf": [

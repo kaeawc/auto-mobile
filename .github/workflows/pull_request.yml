@@ -1484,6 +1484,15 @@ jobs:
           fi
           bash scripts/test-ts.sh stress
 
+      - name: "Upload Windows netstat capture (#10717)"
+        if: always() && !cancelled() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-netstat-capture
+          path: scratch/netstat-capture/
+          if-no-files-found: ignore
+          retention-days: 14
+
   mcp-build-and-test:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}

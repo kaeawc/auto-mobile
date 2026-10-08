@@ -202,7 +202,12 @@ opens the session to a new claim, including one from a previously used token.
 To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
-A stdio/HTTP proxy bound with `--initial-session-uuid` claims on its first
+A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
+(from a `getAndroid`, `getApple` or `startDevice` result) or was started with
+through `--initial-session-uuid`. A `sessionUuid` that is only passed to a tool
+call is forwarded with that call but never claimed or heartbeated, so a proxy
+cannot inherit a session another owner holds, even after that owner's lease
+lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
 heartbeat and restores the strict heartbeat policy. By default the proxy mints a
 new owner token per process, so a restarted proxy is a different token and is
 locked out while the previous process's lease is live. A harness that restarts

@@ -41,6 +41,7 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { OwnerDisconnectExecutionVeto } from "./ownerDisconnectRelease";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
@@ -670,6 +671,10 @@ export class Daemon {
     recoveryPolicy: ReturnType<typeof parseDeviceRecoveryPolicy>["policy"],
     recoveryPolicyEnvironment: NodeJS.ProcessEnv,
   ): DevicePool {
+    const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
+      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.timer,
+    );
     return DevicePool.create({
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
@@ -683,11 +688,9 @@ export class Daemon {
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
-          // Like the heartbeat monitor, leave a session with work in flight to its lease.
-          if (this.hasActiveSessionExecution(session.sessionId)) {
-            logger.info(
-              `[Daemon] Kept session ${session.sessionId} after its owner disconnected: executions are still active`,
-            );
+          // Never release mid-call (#5343): returning with the session still held defers the
+          // release, which is retried once the call settles. The veto is bounded (#10663).
+          if (ownerDisconnectExecutionVeto.keeps(session)) {
             return;
           }
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session);

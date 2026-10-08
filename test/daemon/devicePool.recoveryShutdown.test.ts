@@ -2150,8 +2150,7 @@ test("a client retrying through a cold boot keeps its session past the idle wind
 });
 
 test("a quiet client loses device-restart recovery two minutes after its last call ends", async () => {
-  const { timer, persistence, sessions, manager, pool } =
-    await setupPassiveRestartWithIdleWindow();
+  const { timer, persistence, sessions, manager, pool } = await setupPassiveRestartWithIdleWindow();
   try {
     const attempt = trackSettlement(
       sessions.getOrCreateSession("session", pool, "android", undefined, true, {

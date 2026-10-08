@@ -40,11 +40,7 @@ describe("Daemon tool-call-end idle wiring", () => {
       );
       const createdExpiry = session.expiresAt;
 
-      const execution = executionTracker.startExecution(
-        "tapOn",
-        undefined,
-        "tool-call-end-wiring",
-      );
+      const execution = executionTracker.startExecution("tapOn", undefined, "tool-call-end-wiring");
       timer.advanceTime(90_000);
       executionTracker.endExecution(execution.id);
 

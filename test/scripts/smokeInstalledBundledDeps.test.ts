@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
 import {
   formatFailures,
   importSkipReason,
+  isInsidePackage,
   smokeInstalledBundledDeps,
 } from "../../scripts/ci/smoke-installed-bundled-deps";
 
@@ -96,4 +97,18 @@ test("all import failures are collected with name, version, directory, and error
     "- pkg@1 (/installed/1/node_modules/pkg): missing entry\n- pkg@2 (/installed/2/node_modules/pkg): broken export",
   );
   expect(result.imported).toEqual([]);
+});
+
+test("isInsidePackage compares real paths when the install dir is under a symlink", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "smoke-symlink-"));
+  roots.push(root);
+  const real = path.join(root, "private", "pkg");
+  mkdirSync(real, { recursive: true });
+  writeFileSync(path.join(real, "index.js"), "");
+  symlinkSync(path.join(root, "private"), path.join(root, "var"));
+  writeFileSync(path.join(root, "private", "other.js"), "");
+  const linkedDirectory = path.join(root, "var", "pkg");
+  const resolvedReal = path.join(real, "index.js");
+  expect(isInsidePackage(resolvedReal, linkedDirectory)).toBe(true);
+  expect(isInsidePackage(path.join(root, "private", "other.js"), linkedDirectory)).toBe(false);
 });

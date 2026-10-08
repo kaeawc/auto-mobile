@@ -118,6 +118,8 @@ data class OverlayStyle(
   val textAlign: String? = null,
   val maxLines: Int? = null,
   val fontFamily: String? = null,
+  /** A Material 3 type role (`titleLarge`, ...); explicit size, weight and family still win. */
+  val textStyle: String? = null,
 )
 
 @Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
@@ -291,6 +293,8 @@ data class OverlayIconNode(
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
   val name: String,
+  /** One of filled (default), outlined, rounded, sharp, twoTone; closed by the contract. */
+  val variant: String? = null,
 ) : OverlayNode()
 
 @SerialName("spacer")
@@ -463,10 +467,22 @@ data class OverlaySpecThemeColors(
   val source: String? = null,
 )
 
+/** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */
+@Serializable
+data class OverlaySpecThemeTypography(
+  val scale: Double? = null,
+  val fontFamily: String? = null,
+)
+
+/** `corner` picks one of the Material corner families (none, small, medium, large, full). */
+@Serializable data class OverlaySpecThemeShapes(val corner: String? = null)
+
 @Serializable
 data class OverlaySpecTheme(
   val mode: String? = null,
   val colors: OverlaySpecThemeColors? = null,
+  val typography: OverlaySpecThemeTypography? = null,
+  val shapes: OverlaySpecThemeShapes? = null,
 )
 
 @Serializable

@@ -19,7 +19,7 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
 - A `sheet` window and a modal `bottomSheet` node are separate concepts.
-- Built-in icons come from a closed list; other artwork uses image assets.
+- Built-in icons come from a closed list (the bundled Material icon set); other artwork uses image assets.
 
 Earlier decisions still apply: the renderer is Compose; sizes and positions use
 dp; overlay opacity is a percentage; app-element anchoring is supported; observe
@@ -89,8 +89,19 @@ from. At least one of its fields is required:
 | `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
 | `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
 
-An explicit theme wins over the scheme inferred from backgrounds. Type and shape scales
-are a later slice (#10438).
+| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
+| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
+
+`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+inferred from backgrounds.
+
+A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
+in all) and so follows the theme's scale and family. It supplies size, weight and family; an
+explicit `textSize`, `fontWeight` or `fontFamily` on the same node still wins. Plain text
+without `textStyle` keeps its authored 14 sp default and is not scaled; it takes the theme's
+`typography.fontFamily` only when it names no `fontFamily` of its own. Colour tokens and
+`cornerRadius` tokens are a later slice (#10438).
 
 ## Windows
 
@@ -140,7 +151,7 @@ layout room.
 | `column`      | Required `children` array, possibly empty; vertical layout.                                                          |
 | `text`        | Required `text` string, possibly empty.                                                                              |
 | `image`       | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                            |
-| `icon`        | Required built-in `name` below.                                                                                      |
+| `icon`        | Required built-in `name`; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                  |
 | `spacer`      | No node-specific properties; size comes from style.                                                                  |
 | `textField`   | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.          |
 | `switch`      | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                            |
@@ -232,12 +243,15 @@ Start/end use layout direction, including RTL.
 
 ## Icons and images
 
-Built-in Material names (36): `home`, `search`, `settings`, `person`, `favorite`,
-`add`, `close`, `check`, `arrow_back`, `arrow_forward`, `chevron_left`,
-`chevron_right`, `menu`, `more_vert`, `share`, `edit`, `delete`, `info`, `warning`,
-`notifications`, `star`, `shopping_cart`, `help`, `refresh`, `done`, `cancel`,
-`play_arrow`, `pause`, `stop`, `mail`, `phone`, `location_on`, `calendar_today`,
-`visibility`, `lock`, `logout`.
+Built-in Material names are the 2,075 icons of `material-icons-extended`, written
+in snake_case (`home`, `timer`, `bedtime`, `alarm_add`, `add_a_photo`). The closed list is the
+`iconName` definition in `schemas/overlay-spec-contract.json`, shared by the TypeScript
+and JVM validators. The renderer already ships that library, so the full set adds no APK
+size beyond the list itself (about 10 KB measured). An icon node may set `variant`:
+`filled` (default), `outlined`, `rounded`, `sharp` or `twoTone`; nav items are always
+filled. Material Symbols names with no `material-icons-extended` counterpart are not
+available, and neither are symbol `weight` or `fill` axes or custom `fontFamily`
+assets, which would need a bundled variable font or an asset-transport extension.
 
 Unknown names reject the spec. #9301 pins ID-based assets, but no nested reference
 shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items

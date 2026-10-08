@@ -38,6 +38,11 @@ on:
       MACOS_NETWORK_FILTER_PROVIDER_PROFILE_BASE64:
         required: true
 
+    outputs:
+      sha256:
+        description: "SHA256 checksum of the notarized Network Filter archive"
+        value: ${{ jobs.build.outputs.sha256 }}
+
 permissions:
   contents: read
 
@@ -46,6 +51,8 @@ jobs:
     name: "Build notarized Network Filter identity probe"
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v6
@@ -100,12 +107,23 @@ jobs:
             echo "The signed probe build did not produce probe-stapled.zip" >&2
             exit 1
           fi
-          cp "${artifact}" "${RUNNER_TEMP}/network-filter-identity-probe.zip"
+          # probe-stapled.zip is packed with `ditto -c -k --keepParent` so the
+          # nested system extension keeps its signature; copy it byte-for-byte.
+          cp "${artifact}" /tmp/automobile-network-filter-macos-universal.zip
+
+      - name: "Calculate Network Filter archive SHA256"
+        id: checksum
+        run: |
+          # pipefail so a failing shasum is not masked by a succeeding cut (#4684).
+          set -euo pipefail
+          SHA256=$(shasum -a 256 /tmp/automobile-network-filter-macos-universal.zip | cut -d' ' -f1)
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "network-filter SHA256: ${SHA256}"
 
       - name: "Upload notarized Network Filter identity probe"
         if: ${{ inputs.upload-artifact }}
         uses: actions/upload-artifact@v6
         with:
-          name: network-filter-identity-probe
-          path: ${{ runner.temp }}/network-filter-identity-probe.zip
+          name: network-filter
+          path: /tmp/automobile-network-filter-macos-universal.zip
           retention-days: ${{ inputs.artifact-retention-days }}

@@ -4375,10 +4375,14 @@ export class SessionManager {
     if (target.removed) {
       return;
     }
-    const { userRotation, accelerometerRotation } = target.state;
+    const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
+    const lock =
+      deviceStateRotationLock === undefined
+        ? ""
+        : `, device_state_rotation_lock=${deviceStateRotationLock}`;
     logger.warn(
       `Gave up restoring rotation settings on ${deviceId} ${when} ` +
-        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"} ` +
+        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
         `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
         `A fold or display change during the session can make the recorded settings unverifiable.`,
     );

@@ -6,6 +6,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { RotationSettingManagedError } from "../../models/RotationSettingManagedError";
+import type { SettingsNamespace, SettingsValueType } from "../observe/android/types";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -28,7 +29,17 @@ import {
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
   userRotation: number | null;
+  /**
+   * Original `secure device_state_rotation_lock` (per-device-state lock map on foldables and
+   * resizable emulators), captured before the session's first rotation write. Turning
+   * auto-rotate off rewrites this map, and while it records a lock the window manager reverts
+   * `accelerometer_rotation=1`, so restore writes it back first. Absent when the device has no
+   * such setting.
+   */
+  deviceStateRotationLock?: string;
 }
+
+const DEVICE_STATE_ROTATION_LOCK = "device_state_rotation_lock";
 
 export interface RotationRestoreSlot {
   get(): RotationRestoreState | undefined;
@@ -158,11 +169,19 @@ export class Rotate extends BaseVisualChange {
    * @returns Promise with current orientation ("portrait" or "landscape")
    */
   private async readSystemSetting(key: string, signal?: AbortSignal): Promise<string | null> {
+    return this.readSetting("system", key, signal);
+  }
+
+  private async readSetting(
+    namespace: SettingsNamespace,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
     throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const a11yResult = await awaitWhileRequestIsLive(
-        a11y.requestSettingsGet("system", key),
+        a11y.requestSettingsGet(namespace, key),
         signal,
       );
       if (a11yResult.success) {
@@ -175,14 +194,14 @@ export class Rotate extends BaseVisualChange {
     throwIfAborted(signal);
     try {
       const result = await awaitWhileRequestIsLive(
-        this.adb.executeCommand(`shell settings get system ${key}`),
+        this.adb.executeCommand(`shell settings get ${namespace} ${key}`),
         signal,
       );
       const out = result.stdout.trim();
       return !out || out === "null" ? null : out;
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn(`Failed to read system setting ${key}: ${error}`);
+      logger.warn(`Failed to read ${namespace} setting ${key}: ${error}`);
       return null;
     }
   }
@@ -213,11 +232,32 @@ export class Rotate extends BaseVisualChange {
     }
     // No observation or device discovery is needed for a settings-only restoration.
     // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
+    const lock = state.deviceStateRotationLock;
     await runWithAbortSignal(signal, async () => {
       // Compare-and-skip: settings that already hold the restore values need no write and no
       // read-back, which a window manager owning a folded panel's rotation could never verify.
-      if (skipIfCurrent && (await this.settingsAlreadyMatch(targets, signal))) {
+      if (
+        skipIfCurrent &&
+        (await this.settingsAlreadyMatch(targets, signal)) &&
+        (lock === undefined ||
+          (await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal)) === lock)
+      ) {
         return;
+      }
+      // The per-state lock goes back first: while it still records the session's lock, the
+      // window manager reverts an accelerometer_rotation=1 write to 0 (mt-0083 D1). It is not
+      // read back itself; the accelerometer_rotation read-back below verifies its effect.
+      if (lock !== undefined) {
+        await this.writeSetting(
+          {
+            namespace: "secure",
+            key: DEVICE_STATE_ROTATION_LOCK,
+            value: lock,
+            valueType: "string",
+          },
+          signal,
+          cleanup,
+        );
       }
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
@@ -1101,12 +1141,26 @@ export class Rotate extends BaseVisualChange {
     signal?: AbortSignal,
     cleanup?: RotationSettingCleanup,
   ): Promise<void> {
+    await this.writeSetting({ namespace: "system", key, value, valueType: "int" }, signal, cleanup);
+  }
+
+  private async writeSetting(
+    setting: {
+      namespace: SettingsNamespace;
+      key: string;
+      value: string;
+      valueType: SettingsValueType;
+    },
+    signal?: AbortSignal,
+    cleanup?: RotationSettingCleanup,
+  ): Promise<void> {
+    const { namespace, key, value, valueType } = setting;
     throwIfAborted(signal);
     cleanup?.assertCurrentDevice?.();
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       cleanup?.assertCurrentDevice?.();
-      const write = a11y.requestSettingsPut("system", key, value, "int");
+      const write = a11y.requestSettingsPut(namespace, key, value, valueType);
       if (cleanup) {
         cleanup.pendingWrite = write;
       }
@@ -1121,7 +1175,7 @@ export class Rotate extends BaseVisualChange {
     }
     throwIfAborted(signal);
     cleanup?.assertCurrentDevice?.();
-    const write = this.adb.executeCommand(`shell settings put system ${key} ${value}`);
+    const write = this.adb.executeCommand(`shell settings put ${namespace} ${key} ${value}`);
     if (cleanup) {
       cleanup.pendingWrite = write;
     }
@@ -1439,6 +1493,17 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
+  /** Captured once, with the session's first originals, before any write can change it. */
+  private async captureDeviceStateRotationLock(
+    state: RotationRestoreState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const lock = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (lock !== null) {
+      state.deviceStateRotationLock = lock;
+    }
+  }
+
   private rotationCallSettings(
     autoRotateState: "locked" | "enabled" | "unknown",
     slot?: RotationRestoreSlot,
@@ -1468,6 +1533,9 @@ export class Rotate extends BaseVisualChange {
           });
           if (!settings.started && settings.previousUserRotation === null) {
             settings.previousUserRotation = state.userRotation;
+          }
+          if (!original) {
+            await this.captureDeviceStateRotationLock(state, signal);
           }
           throwIfAborted(signal);
           slot.get();

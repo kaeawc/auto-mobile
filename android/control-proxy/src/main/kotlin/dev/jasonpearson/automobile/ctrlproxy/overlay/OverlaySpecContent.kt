@@ -519,18 +519,30 @@ private fun overlayNodeModifier(
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
   if (tappable) modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
-  modifier = modifier.semantics {
-    if (node.role != "textField") text = AnnotatedString(node.text)
-    this[OverlayRole] = node.role
-    if (node.role == "icon" || node.role == "image") role = Role.Image
-    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
-    overlayContentDescription(node.role, node.text, node.iconName, tappable, node.children)?.let {
-      contentDescription = it
+  val description =
+    overlayContentDescription(
+      node.role,
+      node.text,
+      node.iconName,
+      tappable,
+      node.children,
+      node.contentDescription,
+    )
+  val state = overlayStateDescription(node.role, node.page, node.children.size)
+  // A layout container with nothing of its own to report gets no semantics node, so its children
+  // join the nearest reporting ancestor, as with Compose's own layouts (#10446).
+  if (!isSemanticsFreeContainer(node, tappable, description, state)) {
+    modifier = modifier.semantics {
+      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+        text = AnnotatedString(node.text)
+      }
+      this[OverlayRole] = node.role
+      if (node.role == "icon" || node.role == "image") role = Role.Image
+      // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+      description?.let { contentDescription = it }
+      state?.let { stateDescription = it }
+      node.testTag?.let { testTag = it }
     }
-    overlayStateDescription(node.role, node.page, node.children.size)?.let {
-      stateDescription = it
-    }
-    node.testTag?.let { testTag = it }
   }
   val insetFloor = LocalOverlayInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -576,11 +588,36 @@ private val SEMANTICS_FREE_CONTAINERS =
   setOf("box", "row", "column", "scroll", "pager", "spacer", "card")
 
 /**
- * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
- * its icon name, and so does a tappable layout container whose only content is an icon (a FAB). A
- * layout container is never labelled by its node kind ("box", "row") while it has content
- * (#10524, #10608): its children label it instead. Only a tappable container with no children at
- * all keeps its kind, as nothing else names it. Every other node keeps its kind as the label.
+ * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
+ * node kind ("tabBar") is never their label (#10446).
+ */
+private val CHILD_LABELLED_ROLES = setOf("tabBar", "bottomNav")
+
+/**
+ * Whether a node is a layout container with nothing to report: no label, text, tap, test tag or
+ * state. Such a node is merged away like an unannotated Compose layout instead of appearing in the
+ * accessibility tree as an empty wrapper (#10446).
+ */
+internal fun isSemanticsFreeContainer(
+  node: OverlayRenderNode,
+  tappable: Boolean,
+  description: String?,
+  state: String?,
+): Boolean =
+  node.role in SEMANTICS_FREE_CONTAINERS &&
+    !tappable &&
+    node.text.isEmpty() &&
+    node.testTag == null &&
+    description == null &&
+    state == null
+
+/**
+ * The accessible label for an overlay node. An authored `contentDescription` wins, then authored
+ * text; an icon-only tappable node reads as its icon name, and so does a tappable layout container
+ * whose only content is an icon (a FAB). A layout container or navigation bar is never labelled by
+ * its node kind ("box", "row", "tabBar") while it has content (#10524, #10608, #10446): its
+ * children label it instead. Only a tappable container with no children at all keeps its kind, as
+ * nothing else names it. Every other node keeps its kind as the label.
  */
 internal fun overlayContentDescription(
   role: String,
@@ -588,10 +625,13 @@ internal fun overlayContentDescription(
   iconName: String?,
   tappable: Boolean,
   children: List<OverlayRenderNode> = emptyList(),
+  authored: String? = null,
 ): String? =
   when {
+    !authored.isNullOrEmpty() -> authored
     text.isNotEmpty() -> text
     tappable && !iconName.isNullOrEmpty() -> iconName
+    role in CHILD_LABELLED_ROLES -> null
     role !in SEMANTICS_FREE_CONTAINERS -> role
     !tappable -> null
     children.isEmpty() -> role

@@ -146,20 +146,30 @@ the host refuses them for an older device instead of sending them.
 
 Every node has required `type`. All other common properties are optional:
 
-| Property          | Shape / meaning                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------- |
-| `id`              | Nonempty node ID; required and unique among pagers for `pager`. Other node IDs need not be unique. |
-| `testTag`         | Nonempty accessibility/test selector tag.                                                          |
-| `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
-| `style`           | Strict style object below.                                                                         |
-| `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
-| `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
-| `transition`      | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.            |
-| `anchor`          | Bounds or app-element anchor below.                                                                |
-| `safeAreaPadding` | Explicit inset selection below.                                                                    |
+| Property             | Shape / meaning                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | Nonempty node ID; required and unique among pagers for `pager`. Other node IDs need not be unique.                                           |
+| `testTag`            | Nonempty accessibility/test selector tag.                                                                                                    |
+| `contentDescription` | Nonempty accessible label read by `observe` and screen readers in place of the derived one. `{key}` state placeholders resolve as in `text`. |
+| `onTap`              | Nonempty ordered array of actions, run in order. See "Tap targets" below.                                                                    |
+| `style`              | Strict style object below.                                                                                                                   |
+| `styleWhen`          | Conditional style overrides (see Conditional style below). One to 8 entries.                                                                 |
+| `visibleWhen`        | Condition (see Conditions below). A false condition, or a missing key, means hidden.                                                         |
+| `transition`         | Optional `none`, `fade`, `expand` or `slide`: the `visibleWhen` enter/exit. See Motion.                                                      |
+| `anchor`             | Bounds or app-element anchor below.                                                                                                          |
+| `safeAreaPadding`    | Explicit inset selection below.                                                                                                              |
 
 Hidden and closed sheet content still counts toward all limits and references.
 No arbitrary extra metadata is allowed.
+
+Accessible labels: an authored `contentDescription` wins; otherwise a node is
+labelled by its text, and an icon-only tappable node (or a tappable container
+whose only content is one icon, such as a FAB) by its icon name. Layout
+containers (`box`, `row`, `column`, `scroll`, `pager`, `spacer`, `card`) and
+navigation bars are never labelled by their kind while they have content. A
+layout container with no label, text, `onTap`, `testTag` or state adds no
+accessibility node of its own, so its children join the nearest reporting
+ancestor, as with Compose's own layouts.
 
 Tap targets: a node with `onTap` responds across its whole drawn area, including
 its own `padding`, and its accessibility bounds are that drawn area. It also

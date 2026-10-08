@@ -182,6 +182,16 @@ the current owner (a restarted owner resuming). A session on the CLI idle policy
 never has a live lease for this purpose: its one-shot CLI owners exit between
 invocations, so the next invocation's new token can always claim it.
 
+Heartbeats prove liveness, not use. A heartbeat-policy session also has a
+30-minute idle window measured from its last tool call, and heartbeats never
+extend it: they renew only the owner lease and its grace window. An agent that
+acquires a device and then makes no tool calls for 30 minutes loses the session
+and its device even while its proxy stays open and keeps heartbeating; the
+release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
+The proxy's replay of a remembered session binding follows the same rule: only
+forwarded tool calls refresh it. `session-info` reports `lastUsedAt` as the last
+tool call and `expiresAt` as the idle deadline.
+
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
 session and changes nothing: the owner, policy, and every deadline stay as the
@@ -203,7 +213,7 @@ keeper for a one-shot CLI session can claim with
 `--daemon heartbeat S --liveness-owner-token T --claim-liveness-ownership`;
 that CLI claim adopts the CLI idle policy described below, and is refused on a
 proxy-owned session (see "Supported liveness stack"). Ordinary ticks from the
-current owner refresh deadlines without changing the policy.
+current owner renew its lease without changing the policy or the idle deadline.
 
 A displaced token's non-claiming `daemon/heartbeat` returns
 `{ success: false, code: "liveness_owner_superseded", error: "..." }` and changes

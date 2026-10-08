@@ -912,20 +912,38 @@ describe("DevicePool autolock", () => {
       expect(pool.getDevice("emulator-5554")!.sessionId).toBe("new-session");
     });
 
-    it("heartbeat before the idle timeout keeps the device locked", async () => {
+    it("tool activity before the idle timeout keeps the device locked", async () => {
       await initializeLiveAndroidDevice();
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android");
 
-      // Just before timeout, record activity.
+      // Just before timeout, a tool call resolves the session.
       timer.advanceTime(59 * 1000);
-      sessionManager.recordHeartbeat(sessionId!);
+      await sessionManager.getOrCreateSession(sessionId!);
 
-      // Another window passes; without the heartbeat this would have expired.
+      // Another window passes; without the tool call this would have expired.
       timer.advanceTime(30 * 1000);
 
       expect(sessionManager.getSession(sessionId!)).not.toBeNull();
       expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+    });
+
+    it("a liveness heartbeat alone does not keep an idle autolocked device (#10656, #10658)", async () => {
+      await initializeLiveAndroidDevice();
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android");
+
+      // A live owner keeps heartbeating, but makes no tool call.
+      timer.advanceTime(59 * 1000);
+      sessionManager.recordHeartbeat(sessionId!);
+
+      // Past the idle timeout and the suspect grace a heartbeating session earns.
+      timer.advanceTime(30 * 1000);
+
+      expect(sessionManager.getSession(sessionId!)).toBeNull();
+      await drainUntil(() => pool.getDevice("emulator-5554")!.status === "idle", {
+        description: "idle autolocked device released",
+      });
     });
 
     it("does not release a device re-locked by a different session", async () => {

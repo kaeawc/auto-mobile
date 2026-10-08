@@ -3,9 +3,14 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import {
+  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -87,12 +92,52 @@ describe("SessionHeartbeatMonitor", () => {
       );
       monitor.start();
 
-      // Past the pre-first-heartbeat grace on the first scan: reaped.
-      timer.advanceTime(10_000);
-      await Promise.resolve();
+      // Past the 5 s pre-first-heartbeat grace on the third 2 s scan: reaped once.
+      for (let scan = 0; scan < 3; scan++) {
+        timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+        await drainMicrotasks(10);
+      }
       expect(reaped).toEqual(["s1"]);
 
       monitor.stop();
+    });
+
+    it("a release still tearing down does not hold up other sessions' scans", async () => {
+      await sessionManager.createSession("slow", "emulator-5554", "android", 60_000, 1_000);
+      sessionManager.recordHeartbeat("slow");
+      await sessionManager.createSession("later", "emulator-5556", "android", 60_000, 1_000);
+      const reaped: Array<{ sessionId: string; at: number }> = [];
+      const slowTeardown = Promise.withResolvers<void>();
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId) => {
+          reaped.push({ sessionId, at: timer.now() });
+          if (sessionId === "slow") {
+            await slowTeardown.promise;
+          }
+        },
+        timer,
+      );
+      monitor.start();
+      // "slow" lapses first; its teardown never finishes during this test.
+      timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+      await drainMicrotasks(10);
+      expect(reaped.map((r) => r.sessionId)).toEqual(["slow"]);
+
+      // "later" heartbeats now and lapses while "slow" is still tearing down.
+      sessionManager.recordHeartbeat("later");
+      const lapsesAt = timer.now() + 1_000 + SUSPECT_GRACE_MS;
+      timer.advanceTime(1_000 + SUSPECT_GRACE_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+      await drainMicrotasks(10);
+
+      // Released on schedule, and "slow" is not released a second time meanwhile.
+      expect(reaped.map((r) => r.sessionId)).toEqual(["slow", "later"]);
+      expect(reaped[1]!.at - lapsesAt).toBeLessThanOrEqual(
+        DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
+      );
+      slowTeardown.resolve();
+      await monitor.stop();
     });
   });
 
@@ -184,7 +229,8 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      timer.advanceTime(30_000);
+      // The owner gets its own lease plus the suspect grace to come back.
+      timer.advanceTime(30_000 + SUSPECT_GRACE_MS);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
@@ -216,15 +262,17 @@ describe("SessionHeartbeatMonitor", () => {
         timer,
       );
 
-      timer.advanceTime(5_000);
+      // Judged only on the owner window (the default lease plus the suspect grace), never the 5 s
+      // pre-first-heartbeat grace: kept through the window, reaped just after it.
+      timer.advanceTime(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS - 1);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(2_000);
+      timer.advanceTime(1);
       await monitor.tick();
       expect(reaped).toEqual([]);
 
-      timer.advanceTime(3_001);
+      timer.advanceTime(1);
       await monitor.tick();
       expect(reaped).toEqual([
         { sessionId: "default-timeout-awaiting-owner", reason: "rehydration-owner-timeout" },

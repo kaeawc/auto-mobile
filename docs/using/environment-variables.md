@@ -146,19 +146,24 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 
 <div class="environment-variable-table" markdown>
 
-| Variable                                                                                              | Use and accepted values                                                                                    | Default    |
-| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------- |
-| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`                 | Heartbeat leash; positive base-10 integer milliseconds.                                                    | `10000` ms |
-| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`   | Heartbeat expiry sweep cadence; positive base-10 integer milliseconds.                                     | `10000` ms |
-| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`     | Initial grace for custom-heartbeat sessions before first heartbeat; positive base-10 integer milliseconds. | `20000` ms |
-| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS`, `AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | Grace for default-policy sessions that never heartbeat; positive base-10 integer milliseconds.             | `5000` ms  |
+| Variable                                                                                              | Use and accepted values                                                                                    | Default     |
+| ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------- |
+| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`                 | Heartbeat leash; positive base-10 integer milliseconds.                                                    | `4000` ms   |
+| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS`   | Heartbeat expiry sweep cadence; positive base-10 integer milliseconds.                                     | `2000` ms   |
+| `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`                           | Idle window after the last tool call ends; positive base-10 integer milliseconds.                          | `120000` ms |
+| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`, `AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS`     | Initial grace for custom-heartbeat sessions before first heartbeat; positive base-10 integer milliseconds. | `20000` ms  |
+| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS`, `AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | Grace for default-policy sessions that never heartbeat; positive base-10 integer milliseconds.             | `5000` ms   |
 
 </div>
 
 `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS` (alias
-`AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`) defaults to `10000` ms. It controls
+`AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`) defaults to `4000` ms. It controls
 the heartbeat leash for heartbeat-policy sessions, not `cli-idle` sessions.
-The proxy's default heartbeat cadence derives from this timeout.
+A device session is released about 10 s after its owner's last heartbeat: the
+4 s lease, then a 4 s suspect grace, then at most one 2 s expiry sweep. The
+proxy heartbeats every 2 s, so one late or lost beat never lapses the lease and
+an owner must miss four beats before its session can be released. When the
+timeout is set explicitly, the proxy's cadence is half of it.
 
 ```bash
 export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
@@ -172,7 +177,7 @@ reaps on, so a claim succeeds exactly when the session would otherwise be
 released. Only the owner's own heartbeats extend the owner's lease: a tool call
 that names the session, from any caller, keeps the session in use but does not
 keep a dead owner's lease alive, so a restarted proxy with a new token can claim
-once the lease plus the 10 s grace window have passed even while it is already
+once the lease plus the 4 s grace window have passed even while it is already
 working on the session. A healthy single proxy is unaffected, since its own
 heartbeats keep the lease live. Two claimants racing for a lapsed session are
 serialised: the first records the takeover and its lease in the same step, and
@@ -183,14 +188,26 @@ never has a live lease for this purpose: its one-shot CLI owners exit between
 invocations, so the next invocation's new token can always claim it.
 
 Heartbeats prove liveness, not use. A heartbeat-policy session also has a
-30-minute idle window measured from its last tool call, and heartbeats never
-extend it: they renew only the owner lease and its grace window. An agent that
-acquires a device and then makes no tool calls for 30 minutes loses the session
+2-minute idle window measured from the end of its last tool call, and heartbeats
+never extend it: they renew only the owner lease and its grace window. A tool
+call in flight is activity, so a session is never released mid-call however long
+the call runs, and the window restarts when the call ends. An agent that
+acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
 release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
-The proxy's replay of a remembered session binding follows the same rule: only
-forwarded tool calls refresh it. `session-info` reports `lastUsedAt` as the last
-tool call and `expiresAt` as the idle deadline.
+This includes a passive viewer, such as a desktop or IDE window that only watches
+the device: viewing is not use, so its session is released as `cleanup-expired`
+and the client acquires a fresh session when it next needs one.
+`AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` (alias `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`)
+changes the window, for example to check idle release live; a value that is not a
+positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
+environment. The proxy's replay of a remembered session binding and its eviction
+of held sessions nothing has named follow the same window: only forwarded tool
+calls refresh them. `session-info` reports `lastUsedAt` as the last tool activity
+and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
+waits up to three minutes for it to come back. Tool calls that start, wait on, or
+fail because of that recovery count as activity, so the idle window only ends the
+recovery once the client has made no calls for the whole window.
 
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
@@ -300,7 +317,10 @@ every deadline stay as the proxy left them. The command exits non-zero and print
 the message, the `[liveness_owner_is_proxy]` code, and the instruction to stop
 the keeper. This is distinct from `liveness_owner_conflict`, which is a
 different token's claim on a live lease and can succeed once the lease expires.
-Keeping a one-shot CLI session alive with `--daemon heartbeat` behaves as before.
+On a one-shot CLI session `--daemon heartbeat` still proves its owner is alive,
+but it no longer holds the device: the CLI idle timeout counts from the end of
+the last tool call, so a session with no tool calls is released when it elapses
+however often the keeper ticks.
 
 A harness checks a session's state with `--daemon session-info <session-id>`. It
 prints the session's `assignedDevice`, `platform`, `lastUsedAt`, `expiresAt` and,
@@ -313,13 +333,13 @@ left on the lease or grace window, or zero once lapsed.
 ### Stalled liveness: `daemon_stalled` and `proxy_stalled`
 
 When a lease expires the daemon does not release the session at once: it holds
-it as suspect for a 10 s grace window with its device still reserved for the
+it as suspect for a 4 s grace window with its device still reserved for the
 owner token. A heartbeat from the owner token inside the window restores the
 session with the same UUID; no tool call runs against a suspect session until
 then. The proxy uses that window for its own recovery, so a stall is reported to
 the harness only when recovery has failed. Recovery always fits inside the lease
-plus the grace window (20 s at the default 10 s timeout) at the 2 s and 5 s
-heartbeat cadences. The proxy applies this to every session it holds, one
+plus the grace window (8 s at the default 4 s timeout) at the default 2 s
+heartbeat cadence. The proxy applies this to every session it holds, one
 session at a time. The daemon does not hold its own stalls against owners: when
 its heartbeat monitor runs more than 2 s later than scheduled it moves every
 session's lease forward by exactly that lateness, so a daemon stall of a few
@@ -436,20 +456,22 @@ restarted proxy can win a session whose previous owner has gone.
 
 | Variable                                                                            | Use and accepted values                                                                    | Default     |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
-| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | CLI idle leash; positive base-10 integer milliseconds. Daemon adoption clamps to one hour. | `600000` ms |
+| `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`, `AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` | CLI idle leash; positive base-10 integer milliseconds. Daemon adoption clamps to one hour. | `120000` ms |
 
 </div>
 
 Each `--cli` invocation is its own process, so it cannot send the periodic
 heartbeat a long-running MCP connection does. A session acquired or used by
-`--cli` is therefore held on a wall-clock idle timeout instead of the 10 s
-heartbeat contract, refreshed by every `--cli` call that touches it:
+`--cli` is therefore held on a wall-clock idle timeout instead of the heartbeat
+lease, measured from the end of the last `--cli` tool call that touched it:
 
 ```bash
 export AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS=600000
 ```
 
-The default is 10 minutes, and the ceiling is 1 hour. The value is read from the
+The default is 2 minutes, the same as the ordinary idle window, and the ceiling
+is 1 hour. Heartbeats do not refresh it: a `--daemon heartbeat` loop keeps the
+owner live but does not hold the device without tool calls. The value is read from the
 `--cli` process, not the daemon's, and travels with the invocation, so changing
 it takes effect on the very next call — no daemon restart. Sessions owned by a
 long-lived MCP client (stdio or HTTP) are unaffected and keep the heartbeat

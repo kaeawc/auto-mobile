@@ -35,6 +35,12 @@ interface ActiveExecution {
    * reason. Binding the execution to one of them is refused (#9958).
    */
   revokedDeviceBindings?: Map<string, Error>;
+  /**
+   * The call only reads device inventory (`listDevices {sessionUuid}` and friends). Such a call is
+   * admitted without refreshing the session's activity, so its end does not count as session use
+   * either: a poller must not keep a dead owner's session alive.
+   */
+  readOnlySessionAccess?: boolean;
 }
 
 export type ExecutionScope = "session" | "global";
@@ -93,6 +99,7 @@ export class ExecutionTracker {
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
+  private sessionExecutionEndListeners = new Set<(sessionUuids: readonly string[]) => void>();
   private timer: Timer;
   private idGenerator: IdGenerator;
   private daemonRestartPrepared = false;
@@ -257,8 +264,58 @@ export class ExecutionTracker {
     if (execution.resolvedAutolockSessionUuid) {
       this.unregisterAutolockSessionExecution(execution.resolvedAutolockSessionUuid, executionId);
     }
+    this.notifySessionExecutionEnded(execution);
     for (const listener of this.executionEndListeners) {
       listener();
+    }
+  }
+
+  /**
+   * Observe the end of every tool execution that belonged to a device session, with the session
+   * UUIDs it ran under (explicit, resolved-autolock and provisional-autolock). The daemon restarts a
+   * session's idle window from here, so idleness counts from the end of the last call, not its
+   * start. Returns the unsubscribe function.
+   */
+  onSessionExecutionEnded(listener: (sessionUuids: readonly string[]) => void): () => void {
+    this.sessionExecutionEndListeners.add(listener);
+    return () => {
+      this.sessionExecutionEndListeners.delete(listener);
+    };
+  }
+
+  /** Mark an execution as a read-only inventory call, whose end is not session use. */
+  markReadOnlySessionAccess(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.readOnlySessionAccess = true;
+    }
+  }
+
+  private notifySessionExecutionEnded(execution: ActiveExecution): void {
+    if (execution.readOnlySessionAccess) {
+      return;
+    }
+    const sessionUuids = [
+      ...new Set(
+        [
+          execution.sessionUuid,
+          execution.resolvedAutolockSessionUuid,
+          execution.provisionalAutolockSessionUuid,
+        ].filter((uuid): uuid is string => typeof uuid === "string" && uuid.length > 0),
+      ),
+    ];
+    if (sessionUuids.length === 0) {
+      return;
+    }
+    for (const listener of this.sessionExecutionEndListeners) {
+      try {
+        listener(sessionUuids);
+      } catch (error) {
+        // A listener's failure must not stop the remaining listeners or the execution's teardown.
+        logger.warn(
+          `[ExecutionTracker] Session execution-end listener failed: ${errorMessage(error)}`,
+        );
+      }
     }
   }
 

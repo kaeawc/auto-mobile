@@ -227,6 +227,17 @@ const EMULATOR_POSTURE_IDS: Partial<Record<RequestedPosture, number>> = {
 // use the dedicated fold/unfold commands; rear display is a device state:
 // https://developer.android.com/blog/posts/emulator-control-for-adaptive-app-development
 
+/**
+ * `emu posture` IDs for closed/opened (same enum: 1 closed, 3 opened). Flip AVDs
+ * (am-flip-6p7) answer `KO: Device is not foldable` to `emu fold`/`emu unfold` yet
+ * accept `emu posture <n>`, so these are the fallback when fold/unfold is refused.
+ */
+const EMULATOR_FOLD_FALLBACK_POSTURE_IDS: Partial<Record<RequestedPosture, number>> = {
+  closed: 1,
+  opened: 3,
+};
+const NOT_FOLDABLE_REFUSAL = /device is not foldable/i;
+
 const DISPLAY_PRESET_IDS: Record<DisplayPreset, number> = {
   phone: 0,
   unfolded: 1,
@@ -277,6 +288,8 @@ function validateSupportedPosture(
   }
 }
 
+const POSTURE_REFUSED = "The posture did not change.";
+
 /** The console answers `OK`/`KO: <reason>` with a zero adb exit code either way. */
 async function runEmulatorConsoleCommand(
   adb: ReturnType<AdbClientFactory["create"]>,
@@ -284,15 +297,62 @@ async function runEmulatorConsoleCommand(
   refusal: string,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  const { stdout, stderr } = await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
-  if (emulatorConsoleReportsFailure(stdout, stderr)) {
-    throw new ActionableError(
-      `The emulator console refused '${command}': ${emulatorConsoleFailureReason(stdout, stderr)}. ${refusal}`,
-    );
+  const reason = await emulatorConsoleRefusal(adb, command, signal);
+  if (reason !== undefined) {
+    throw new ActionableError(`The emulator console refused '${command}': ${reason}. ${refusal}`);
   }
 }
 
-const POSTURE_REFUSED = "The posture did not change.";
+/** Runs a console command; returns the refusal reason, or undefined when it answered OK. */
+async function emulatorConsoleRefusal(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  command: string,
+  signal: AbortSignal | undefined,
+): Promise<string | undefined> {
+  const { stdout, stderr } = await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
+  return emulatorConsoleReportsFailure(stdout, stderr)
+    ? emulatorConsoleFailureReason(stdout, stderr)
+    : undefined;
+}
+
+/**
+ * `emu fold`/`emu unfold`, falling back to the numeric `emu posture` command when the
+ * console says the device is not foldable (flip AVDs). Other refusals throw unchanged.
+ */
+async function runEmulatorPostureCommand(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  requested: RequestedPosture,
+  operation: PostureOperation,
+): Promise<void> {
+  const { signal, assertCurrent } = operation;
+  const fallbackId = EMULATOR_FOLD_FALLBACK_POSTURE_IDS[requested];
+  if (fallbackId === undefined) {
+    await runEmulatorConsoleCommand(
+      adb,
+      `emu posture ${EMULATOR_POSTURE_IDS[requested]}`,
+      POSTURE_REFUSED,
+      signal,
+    );
+    return;
+  }
+  const command = requested === "closed" ? "emu fold" : "emu unfold";
+  const reason = await emulatorConsoleRefusal(adb, command, signal);
+  if (reason === undefined) {
+    return;
+  }
+  if (!NOT_FOLDABLE_REFUSAL.test(reason)) {
+    throw new ActionableError(
+      `The emulator console refused '${command}': ${reason}. ${POSTURE_REFUSED}`,
+    );
+  }
+  logger.info(
+    `[SetPosture] '${command}' refused (${reason}); falling back to 'emu posture ${fallbackId}'`,
+  );
+  assertCurrent();
+  throwIfAborted(signal);
+  await runEmulatorConsoleCommand(adb, `emu posture ${fallbackId}`, POSTURE_REFUSED, signal);
+}
+
 const presetRefused = (preset: DisplayPreset): string =>
   `The posture command was accepted, but the '${preset}' display preset was not applied. ` +
   "Emulators refuse resize-display when run headless (-no-window) and when the AVD is not the Resizable profile.";
@@ -312,16 +372,10 @@ async function setEmulatorPosture(
     await awaitWhileRequestIsLive(adb.executeCommand("shell cmd device_state state reset"), signal);
     assertCurrent();
   }
-  const command =
-    requested === "closed"
-      ? "emu fold"
-      : requested === "opened"
-        ? "emu unfold"
-        : `emu posture ${EMULATOR_POSTURE_IDS[requested]}`;
   throwIfAborted(signal);
   let presetPending = Boolean(displayPreset);
   try {
-    await runEmulatorConsoleCommand(adb, command, POSTURE_REFUSED, signal);
+    await runEmulatorPostureCommand(adb, requested, operation);
     assertCurrent();
     if (displayPreset) {
       throwIfAborted(signal);

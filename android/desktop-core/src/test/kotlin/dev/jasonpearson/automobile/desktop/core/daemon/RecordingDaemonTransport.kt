@@ -22,6 +22,21 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
    */
   @Volatile var heldByAnotherSession: Boolean = false
 
+  /** Devices another live session holds; binding one is refused like [heldByAnotherSession]. */
+  val heldDeviceIds: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+  /**
+   * The next this-many `setActiveDevice` calls fail the way an unrelated daemon error does
+   * (#10682): an `isError` tool result that is NOT an ownership refusal.
+   */
+  @Volatile var unrelatedBindFailures: Int = 0
+
+  /**
+   * Session UUIDs the daemon has terminally released (idle release, #10682 C4): their heartbeat is
+   * "Session not found" and their `setActiveDevice` is `session_ownership_lost`.
+   */
+  val releasedSessions: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
   fun failNext(key: String) {
     failures.add(key)
   }
@@ -45,8 +60,9 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
         null
       }
     calls.add(request.method to device)
-    sessionCalls.add(request.method to request.params["sessionId"]?.jsonPrimitive?.content)
-    if (failures.remove(key)) {
+    val sessionId = request.params["sessionId"]?.jsonPrimitive?.content
+    sessionCalls.add(request.method to sessionId)
+    if (failures.remove(key) || (key == "daemon/heartbeat" && sessionId in releasedSessions)) {
       return DaemonResponse(
         id = request.id,
         type = "mcp_response",
@@ -58,26 +74,49 @@ internal class RecordingDaemonTransport(private val rejectBindsUntilAttempt: Int
       id = request.id,
       type = "mcp_response",
       success = true,
-      result = DaemonJson.parseToJsonElement(resultFor(key)),
+      result = DaemonJson.parseToJsonElement(resultFor(key, request, device)),
     )
   }
 
-  private fun resultFor(key: String): String =
+  private fun resultFor(key: String, request: DaemonRequest, device: String?): String =
     when (key) {
-      "tools/call:setActiveDevice" ->
-        if (heldByAnotherSession) {
-          HELD_REFUSAL
-        } else {
-          bindAttempts++
-          val success = bindAttempts >= rejectBindsUntilAttempt
-          """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
-        }
+      "tools/call:setActiveDevice" -> bindResult(request, device)
       "daemon/registerSession" ->
         """{"accepted":true,"heartbeatTimeoutMs":10000,"expiresAtMs":12345}"""
       else -> "{}"
     }
+
+  private fun bindResult(request: DaemonRequest, device: String?): String {
+    val session =
+      request.params["arguments"]?.jsonObject?.get("sessionUuid")?.jsonPrimitive?.content
+    return when {
+      session in releasedSessions -> OWNERSHIP_LOST
+      heldByAnotherSession || device in heldDeviceIds -> heldRefusal(device)
+      unrelatedBindFailures > 0 -> {
+        unrelatedBindFailures--
+        DEVICE_NOT_FOUND
+      }
+      else -> {
+        bindAttempts++
+        val success = bindAttempts >= rejectBindsUntilAttempt
+        """{"content":[{"type":"text","text":"{\"success\":$success}"}]}"""
+      }
+    }
+  }
 }
 
-private const val HELD_REFUSAL =
+// Shapes from src/server/setActiveDevice.ts (assertDeviceOwner, requestedPoolDevice) via
+// shapeToolCallError's `Error: <message>` text, and src/server/index.ts's TerminalSessionError
+// branch (sessionOwnershipLostPayload).
+private fun heldRefusal(device: String?) =
   """{"isError":true,"content":[{"type":"text","text":""" +
-    """"Error: Device 'emulator-5554' is already assigned to session agent-session"}]}"""
+    """"Error: Device '$device' is already assigned to session agent-session"}]}"""
+
+private const val DEVICE_NOT_FOUND =
+  """{"isError":true,"content":[{"type":"text","text":""" +
+    """"Error: Device 'emulator-5554' not found in device pool"}]}"""
+
+private const val OWNERSHIP_LOST =
+  """{"isError":true,"content":[{"type":"text","text":""" +
+    """"{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session s is """ +
+    """terminal after idle-timeout and cannot be reused.\",\"retryable\":true}}"}]}"""

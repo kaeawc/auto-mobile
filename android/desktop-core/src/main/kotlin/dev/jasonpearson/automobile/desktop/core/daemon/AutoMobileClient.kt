@@ -4,6 +4,7 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -302,6 +303,8 @@ data class StartDeviceResult(
 data class SetActiveDeviceResult(
   val success: Boolean = true,
   val message: String? = null,
+  /** Why the daemon refused, when it is a refusal the session loop acts on (#10682). */
+  @Transient val refusal: SetActiveDeviceRefusal? = null,
 )
 
 @Serializable

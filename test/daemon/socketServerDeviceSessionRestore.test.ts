@@ -20,8 +20,12 @@ import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceInca
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
+import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 
 afterEach(() => DaemonState.getInstance().reset());
+
+// These tests exercise the three-minute restart recovery window, which the idle deadline caps.
+useSessionIdleWindowForSuite();
 
 test("device-control replay refuses a restore-retired epoch with actionable transport error", async () => {
   const timer = new FakeTimer();

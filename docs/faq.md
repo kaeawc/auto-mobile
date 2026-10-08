@@ -47,13 +47,27 @@ Use `listDevices` to inspect them and `setActiveDevice` to select one. For
 repeatable CLI calls, associate calls with the session UUID returned when you
 acquire a device and pass it with `--session-uuid`.
 
+## When does the daemon release a device session?
+
+An MCP client's session is released about 10 s after its owner's last heartbeat
+(a 4 s lease, a 4 s grace, then at most one 2 s sweep), or 2 minutes after the
+end of its last tool call while heartbeats keep arriving. A tool call in flight
+is activity, so a session is never released mid-call. Heartbeats prove the client
+is alive, not that it is using the device, so they never extend the 2-minute idle
+window. If the device restarts mid-session, the daemon waits up to three minutes
+for it to come back while the client keeps calling, and calls that wait on or fail
+because of the restart count as activity. Change the idle window with
+`AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` — see
+[environment variables](using/environment-variables.md#session-heartbeat-timeout).
+
 ## How long does a device session survive between `--cli` calls?
 
-Ten minutes of idleness by default. Each `--cli` invocation is a separate
-process, so it cannot keep the periodic heartbeat a long-running MCP connection
-sends; instead it tells the daemon that the session it acquired or used is
-CLI-owned, and the daemon holds that session on a wall-clock idle timeout that
-every later `--cli` call refreshes. Tune it with
+Two minutes of idleness by default, measured from the end of the last call.
+Each `--cli` invocation is a separate process, so it cannot keep the periodic
+heartbeat a long-running MCP connection sends; instead it tells the daemon that
+the session it acquired or used is CLI-owned, and the daemon holds that session
+on a wall-clock idle timeout that every later `--cli` tool call refreshes
+(heartbeats do not). Tune it with
 `AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS` — see
 [environment variables](using/environment-variables.md). After the idle timeout
 the session is released and the id is spent: acquire a new one with `getAndroid`

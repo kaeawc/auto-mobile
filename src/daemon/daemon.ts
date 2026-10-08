@@ -41,6 +41,7 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { OwnerDisconnectExecutionVeto } from "./ownerDisconnectRelease";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
@@ -294,6 +295,8 @@ const DISCONNECT_RECORDING_STOP_WAIT_MS = 60_000;
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
+// Bound on removing recorded CtrlProxy forwards and releasing forwarding leases at stop.
+const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
 // shutdown (issue #3044). A SIGTERM arriving mid-startup-migration would otherwise
@@ -420,10 +423,11 @@ interface CapturedDisconnectRecoveryOptions {
 }
 
 /**
- * Pick the daemon's HTTP port: the preferred port first, then every other port
- * in the documented `DAEMON_PORT_RANGE_START`-`DAEMON_PORT_RANGE_END` range
- * (ascending from the preferred port, then wrapping to the range start). A
- * preferred port outside the range has no fallback.
+ * Pick the daemon's HTTP port: the preferred port first, then each higher port up to
+ * `DAEMON_PORT_RANGE_END`. The scan never goes below the preferred port, so a daemon started
+ * on a non-default port can never take `DEFAULT_DAEMON_PORT`, the port the shared daemon's
+ * restart insists on (`strictPort`). A preferred port outside the
+ * `DAEMON_PORT_RANGE_START`-`DAEMON_PORT_RANGE_END` range has no fallback.
  */
 export async function findAvailableDaemonPort(
   preferredPort: number,
@@ -434,25 +438,26 @@ export async function findAvailableDaemonPort(
   }
   const inRange =
     preferredPort >= DAEMON_PORT_RANGE_START && preferredPort <= DAEMON_PORT_RANGE_END;
-  const rangePorts = Array.from(
-    { length: DAEMON_PORT_RANGE_END - DAEMON_PORT_RANGE_START + 1 },
-    (_, index) => DAEMON_PORT_RANGE_START + index,
-  );
   const fallbacks = inRange
-    ? [
-        ...rangePorts.filter((port) => port > preferredPort),
-        ...rangePorts.filter((port) => port < preferredPort),
-      ]
+    ? Array.from(
+        { length: DAEMON_PORT_RANGE_END - preferredPort },
+        (_, index) => preferredPort + 1 + index,
+      )
     : [];
   for (const port of fallbacks) {
     if (await isPortAvailable(port)) {
       return port;
     }
   }
+  if (!inRange) {
+    throw new Error(
+      `Port ${preferredPort} is not available (outside the fallback range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END})`,
+    );
+  }
   throw new Error(
-    inRange
-      ? `No available ports in range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END}`
-      : `Port ${preferredPort} is not available (outside the fallback range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END})`,
+    fallbacks.length === 0
+      ? `Port ${preferredPort} is not available (no higher port in the fallback range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END})`
+      : `No available ports in range ${preferredPort}-${DAEMON_PORT_RANGE_END}`,
   );
 }
 
@@ -537,6 +542,7 @@ export class Daemon {
     WeakSet<NavigationGraphManager>
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
+  private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private options: DaemonOptions;
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
@@ -670,6 +676,10 @@ export class Daemon {
     recoveryPolicy: ReturnType<typeof parseDeviceRecoveryPolicy>["policy"],
     recoveryPolicyEnvironment: NodeJS.ProcessEnv,
   ): DevicePool {
+    const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
+      (sessionId) => this.hasActiveSessionExecution(sessionId),
+      this.timer,
+    );
     return DevicePool.create({
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
@@ -683,11 +693,9 @@ export class Daemon {
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
-          // Like the heartbeat monitor, leave a session with work in flight to its lease.
-          if (this.hasActiveSessionExecution(session.sessionId)) {
-            logger.info(
-              `[Daemon] Kept session ${session.sessionId} after its owner disconnected: executions are still active`,
-            );
+          // Never release mid-call (#5343): returning with the session still held defers the
+          // release, which is retried once the call settles. The veto is bounded (#10663).
+          if (ownerDisconnectExecutionVeto.keeps(session)) {
             return;
           }
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
@@ -737,6 +745,30 @@ export class Daemon {
     });
   }
 
+  /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
+  private stopSessionTimers(): void {
+    this.sessionManager.stopCleanupTimer();
+    this.observerSessionRegistry.dispose();
+    this.unsubscribeSessionExecutionEnded?.();
+    this.unsubscribeSessionExecutionEnded = null;
+  }
+
+  /** Idleness counts from the END of the last tool call (owner decision 2026-10-08). */
+  private subscribeToolCallEndActivity(): void {
+    this.unsubscribeSessionExecutionEnded = executionTracker.onSessionExecutionEnded(
+      (sessionUuids) => {
+        const sessionIds = new Set(
+          sessionUuids.map(
+            (uuid) => resolveToolSelectionBaseSessionUuid(uuid, this.sessionManager) ?? uuid,
+          ),
+        );
+        for (const sessionId of sessionIds) {
+          this.sessionManager.recordToolCallEnded(sessionId);
+        }
+      },
+    );
+  }
+
   private configureSessionLifecycleCallbacks(): void {
     registerLocationRouteSessionCleanup(this.sessionManager);
     registerNetworkStateSessionCleanup(this.sessionManager);
@@ -752,6 +784,7 @@ export class Daemon {
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
+    this.subscribeToolCallEndActivity();
     this.sessionManager.onSessionCreated((session) => {
       NavigationGraphManager.clearReleasedSession(session.sessionId);
       this.setupNavigationGraphUpdateListener(
@@ -1339,14 +1372,22 @@ export class Daemon {
     const session =
       this.sessionManager.getSession(sessionId) ??
       this.sessionManager.getReleasingSession(sessionId);
-    if (session && isSessionReleasing(this.sessionManager, sessionId, session)) {
+    // Match the socket route: an unknown, released, or releasing session id is a
+    // 404 unless it names a live observer session, so a client learns its session
+    // is gone instead of heartbeating a dead id forever.
+    if (!session || isSessionReleasing(this.sessionManager, sessionId, session)) {
+      if (this.observerSessionRegistry.heartbeat(sessionId)) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ status: "ok" }));
+        return;
+      }
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
       return;
     }
     // HTTP heartbeats carry no liveness owner token, so apply the socket route's
     // tokenless rule: a no-op (200) on a proxy-owned or claim-pending session.
-    if (!(session && isTokenOwnedOrClaimPending(session))) {
+    if (!isTokenOwnedOrClaimPending(session)) {
       this.sessionManager.recordHeartbeat(sessionId);
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -2467,6 +2508,8 @@ export class Daemon {
    * Start periodic heartbeat checks to cancel stale sessions
    */
   private startHeartbeatMonitor(): void {
+    // Owners can reconnect only now that the control socket accepts connections.
+    this.sessionManager.startRehydratedOwnerWindows();
     this.heartbeatMonitor = new SessionHeartbeatMonitor(
       this.sessionManager,
       (sessionId) => this.hasActiveSessionExecution(sessionId),
@@ -3929,15 +3972,7 @@ export class Daemon {
               deviceDisconnectMonitor,
             ),
         },
-        {
-          name: "ADB missing-device subscription",
-          run: () => {
-            if (this.unsubscribeAdbMissingDevice) {
-              this.unsubscribeAdbMissingDevice();
-              this.unsubscribeAdbMissingDevice = null;
-            }
-          },
-        },
+        { name: "ADB missing-device subscription", run: () => this.unsubscribeAdbMissing() },
         {
           // Stop the session cleanup interval before the DB drain below. It is the one
           // best-effort DB writer that fires on its own timer rather than an external
@@ -3946,10 +3981,7 @@ export class Daemon {
           // barrier in the microtask window AFTER closeDatabase()'s resetDbWriteBarrier()
           // and hit the just-closed connection (issue #2912; #2792 safety window).
           name: "session cleanup timer",
-          run: () => {
-            this.sessionManager.stopCleanupTimer();
-            this.observerSessionRegistry.dispose();
-          },
+          run: () => this.stopSessionTimers(),
         },
         { name: "video recording socket server", run: stopVideoRecordingSocketServer },
         { name: "test recording socket server", run: stopTestRecordingSocketServer },
@@ -3997,6 +4029,7 @@ export class Daemon {
             );
           },
         },
+        { name: "CtrlProxy forwarding leases", run: () => this.releaseForwardLeases() },
         {
           // Session release broadcasts must be written while subscribed proxy
           // sockets are still connected; closing first degrades the exact
@@ -4049,6 +4082,19 @@ export class Daemon {
         { name: "daemon files", run: () => cleanupDaemonFiles(this.getDaemonFileCleanupOptions()) },
       ],
       (message, error) => logger.warn(message, error),
+    );
+  }
+
+  private unsubscribeAdbMissing(): void {
+    this.unsubscribeAdbMissingDevice?.();
+    this.unsubscribeAdbMissingDevice = null;
+  }
+
+  /** Remove the forwards this daemon recorded and release its forwarding leases, bounded. */
+  private releaseForwardLeases(): Promise<void> {
+    return AndroidCtrlProxyClient.releaseForwardLeasesForShutdown(
+      this.timer,
+      CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS,
     );
   }
 

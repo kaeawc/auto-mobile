@@ -293,7 +293,8 @@ describe("idle eviction with a stale discovery snapshot", () => {
           criteria: { platform: Platform },
           excluded: Set<string>,
           deadline: number,
-        ): Promise<PooledDevice | null>;
+          rediscover: () => Promise<PooledDevice | undefined>,
+        ): Promise<{ device: PooledDevice; started: boolean } | null>;
         trackStartedDeviceProcess(
           device: BootedDevice,
           childProcess: ChildProcess | null | undefined,
@@ -334,8 +335,9 @@ describe("idle eviction with a stale discovery snapshot", () => {
               { platform: "ios" },
               new Set(),
               timer.now() + 1_000,
+              async () => undefined,
             ),
-          ).not.toBeNull();
+          ).toMatchObject({ started: true });
         }
         expect(guardedAdds).toBe(1);
         expect(guardedTracks).toBe(1);

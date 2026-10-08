@@ -97,13 +97,6 @@ const COORDINATE_ACTIONS = new Set([
   "pinchOn",
 ]);
 
-/**
- * Actions that resolve their target from the pre-action read rather than from coordinates the
- * caller chose. A caller observation from an older display generation costs them one fresh read
- * resolved against the new generation instead of a refusal (#9847).
- */
-const SELECTOR_RESOLVED_ACTIONS = new Set(["tapOn"]);
-
 export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
 
 export interface DisplayFence {
@@ -173,6 +166,14 @@ interface ObservedChangeOptions {
   observePartialApplication?: boolean;
   /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
   usesObservationForResolution?: boolean;
+  /**
+   * The block resolves its target from a selector against the pre-action read, never from
+   * coordinates the caller chose. When the caller last saw an older display generation, an
+   * unscoped action (no `display`, `previousObservation` or `skipPreviousObserve`) takes one
+   * fresh read and proceeds only if that read is at the current display revision, instead of
+   * refusing every retry until a manual observe (#9847). Raw-coordinate actions must not set it.
+   */
+  resolvesTargetFromRead?: boolean;
   /** Bind pre/post captures to the panel prepared by the action. */
   display?: string;
   previousObservation?: ObserveResult;
@@ -375,7 +376,7 @@ export class BaseVisualChange {
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     // An unscoped selector action re-reads the display instead of trusting a caller stamp.
     const reresolvesTarget =
-      SELECTOR_RESOLVED_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
+      options.resolvesTargetFromRead === true &&
       options.display === undefined &&
       !options.previousObservation &&
       !options.skipPreviousObserve;

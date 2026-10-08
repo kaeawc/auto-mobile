@@ -34,8 +34,22 @@ const LARGE_TEXT_MIN_BOX_HEIGHT_DP = 32;
 const LARGE_TEXT_BOX_INFERENCE_MAX_HEIGHT_DP = 40;
 /** A pixel this far from the background counts as ink. */
 const INK_MIN_DISTANCE = 40;
+/** A sampled pixel this close to a cluster colour belongs to that cluster's stroke. */
+const STROKE_MAX_DISTANCE = 10;
 /** Grid probes spent locating the ink extent of an element. */
 const INK_SCAN_MAX_PROBES = 16384;
+/**
+ * Grid probes spent looking for a solid stroke of one colour. Every pixel is probed in a
+ * box up to this area (a 1000x256 box uses a stride of 2), keeping a failing colour's cost
+ * per element bounded.
+ */
+const STROKE_SCAN_MAX_PROBES = 65536;
+/** A connected stroke region filling at most this share of its bounding box is glyph-shaped. */
+const GLYPH_MAX_FILL = 0.6;
+/** Thin bars (long side at least 3x the short side) of one colour that read as glyph stems. */
+const GLYPH_MIN_BARS = 3;
+/** Pixels grown across all stroke regions of one colour when judging their shape. */
+const GLYPH_SHAPE_MAX_PIXELS = 65536;
 /** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
 const GLYPH_PIXEL_MAX_DISTANCE = 30;
 /** How far from a sample point to look for the colour a stroke away. */
@@ -939,6 +953,138 @@ export class ContrastChecker {
     return smaller && inked.right - inked.left >= 2 && inked.bottom - inked.top >= 2 ? inked : null;
   }
 
+  /**
+   * Whether `color` fills a stroke at least two pixels wide in both directions somewhere
+   * in `bounds`: a pixel of that colour whose horizontal and vertical neighbours include
+   * the same colour. The anti-aliasing band around a glyph edge is one pixel across, so
+   * its levels never qualify, while a glyph or icon of their own colour does.
+   */
+  private hasSolidStroke(image: RawImage, bounds: Element["bounds"], color: RGB): boolean {
+    return !this.solidStrokeSeeds(image, bounds, color).next().done;
+  }
+
+  /**
+   * Pixels of `color` that sit in a stroke at least two pixels wide on both axes, scanned
+   * on a 2-D grid whose row and column stride stay equal and small (every pixel up to
+   * STROKE_SCAN_MAX_PROBES, then the smallest stride that fits). A stride of `s` finds any
+   * stroke at least `s` px wide on both axes; a lattice of evenly spaced offsets instead
+   * visits only a few columns of a wide box (16 columns, 62px apart, in a 1000x256 box),
+   * so small glyphs between them were never found.
+   */
+  private *solidStrokeSeeds(
+    image: RawImage,
+    bounds: Element["bounds"],
+    color: RGB,
+  ): Generator<{ x: number; y: number }> {
+    const left = Math.ceil(bounds.left);
+    const top = Math.ceil(bounds.top);
+    const right = Math.ceil(bounds.right) - 1;
+    const bottom = Math.ceil(bounds.bottom) - 1;
+    const area = (right - left + 1) * (bottom - top + 1);
+    const stride = Math.max(1, Math.ceil(Math.sqrt(area / STROKE_SCAN_MAX_PROBES)));
+    const stroke = (x: number, y: number): boolean =>
+      this.colorDistance(this.resolvePixelColor(image, x, y), color) <= STROKE_MAX_DISTANCE;
+    const solid = (x: number, y: number): boolean =>
+      stroke(x, y) &&
+      ((x > left && stroke(x - 1, y)) || (x < right && stroke(x + 1, y))) &&
+      ((y > top && stroke(x, y - 1)) || (y < bottom && stroke(x, y + 1)));
+    for (let y = top; y <= bottom; y += stride) {
+      for (let x = left; x <= right; x += stride) {
+        if (solid(x, y)) {
+          yield { x, y };
+        }
+      }
+    }
+  }
+
+  /**
+   * Whether the solid strokes of `color` in `bounds` are shaped like glyphs rather than a
+   * filled tonal shape (an avatar, chip, progress track or divider). Each connected region
+   * of the colour is measured: text has a region that fills little of its bounding box
+   * (a curved or open letter), or several thin bars (stems), while a disc, rectangle or
+   * rule is one region that fills most of its box. Region growth is capped at
+   * GLYPH_SHAPE_MAX_PIXELS in total, so a large flat fill stops the search early.
+   */
+  private hasGlyphStrokes(image: RawImage, box: Element["bounds"], color: RGB): boolean {
+    // Regions are keyed by raster index, so keep them on the raster.
+    const bounds = {
+      left: Math.max(0, box.left),
+      top: Math.max(0, box.top),
+      right: Math.min(image.width, box.right),
+      bottom: Math.min(image.height, box.bottom),
+    };
+    const visited = new Set<number>();
+    const budget = { pixels: GLYPH_SHAPE_MAX_PIXELS };
+    let bars = 0;
+    for (const seed of this.solidStrokeSeeds(image, bounds, color)) {
+      if (budget.pixels <= 0 || bars >= GLYPH_MIN_BARS) {
+        break;
+      }
+      if (visited.has(seed.y * image.width + seed.x)) {
+        continue;
+      }
+      const region = this.strokeRegion(image, bounds, color, seed, visited, budget);
+      const width = region.right - region.left + 1;
+      const height = region.bottom - region.top + 1;
+      if (region.count <= width * height * GLYPH_MAX_FILL) {
+        return true;
+      }
+      bars += Math.min(width, height) * 3 <= Math.max(width, height) ? 1 : 0;
+    }
+    return bars >= GLYPH_MIN_BARS;
+  }
+
+  /** The 4-connected region of `color` around `seed` inside `bounds`: its pixel count and extent. */
+  private strokeRegion(
+    image: RawImage,
+    bounds: Element["bounds"],
+    color: RGB,
+    seed: { x: number; y: number },
+    visited: Set<number>,
+    budget: { pixels: number },
+  ): { count: number; left: number; top: number; right: number; bottom: number } {
+    const left = Math.ceil(bounds.left);
+    const top = Math.ceil(bounds.top);
+    const right = Math.ceil(bounds.right) - 1;
+    const bottom = Math.ceil(bounds.bottom) - 1;
+    const region = { count: 0, left: seed.x, top: seed.y, right: seed.x, bottom: seed.y };
+    const pending = [seed.y * image.width + seed.x];
+    visited.add(pending[0]);
+    while (pending.length > 0 && budget.pixels > 0) {
+      const index = pending.pop()!;
+      const x = index % image.width;
+      const y = Math.floor(index / image.width);
+      budget.pixels--;
+      region.count++;
+      region.left = Math.min(region.left, x);
+      region.top = Math.min(region.top, y);
+      region.right = Math.max(region.right, x);
+      region.bottom = Math.max(region.bottom, y);
+      const neighbours = [
+        x > left ? index - 1 : -1,
+        x < right ? index + 1 : -1,
+        y > top ? index - image.width : -1,
+        y < bottom ? index + image.width : -1,
+      ];
+      for (const next of neighbours) {
+        if (next >= 0 && !visited.has(next) && this.isStrokePixel(image, next, color)) {
+          visited.add(next);
+          pending.push(next);
+        }
+      }
+    }
+    return region;
+  }
+
+  private isStrokePixel(image: RawImage, index: number, color: RGB): boolean {
+    const pixel = this.resolvePixelColor(
+      image,
+      index % image.width,
+      Math.floor(index / image.width),
+    );
+    return this.colorDistance(pixel, color) <= STROKE_MAX_DISTANCE;
+  }
+
   private sampleElementColors(
     image: RawImage,
     bounds: Element["bounds"],
@@ -984,7 +1130,32 @@ export class ContrastChecker {
         // JPEG ringing around glyphs sits just outside the similarity radius; it is not ink.
         (!ink || this.colorDistance(cluster.color, backgroundColor) > INK_MIN_DISTANCE),
     );
-    const textColor = this.selectTextColor(supported, backgroundColor, perimeter);
+    const isSolidStroke = (color: RGB): boolean =>
+      this.hasSolidStroke(image, ink ?? interior, color);
+    const inkText = this.selectTextColor(supported, backgroundColor, perimeter, isSolidStroke);
+    // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
+    // alone can set the extent and leave a faint label beside it unmeasured. Judge faint
+    // solid strokes anywhere inside the box as text too, keeping the lower contrast. Only
+    // glyph-shaped strokes count: an inset tonal avatar, chip, track or divider in the same
+    // distance band is a filled shape, not text.
+    const faintText = ink
+      ? clusters.filter(
+          (cluster) =>
+            cluster.count >= Math.max(2, pixels.length * 0.0025) &&
+            !this.isSimilarColor(cluster.color, backgroundColor) &&
+            this.colorDistance(cluster.color, backgroundColor) <= INK_MIN_DISTANCE &&
+            !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
+            this.hasGlyphStrokes(image, interior, cluster.color),
+        )
+      : [];
+    const textColor = faintText.reduce(
+      (selected, cluster) =>
+        this.getCachedContrast(cluster.color, backgroundColor) <
+        this.getCachedContrast(selected, backgroundColor)
+          ? cluster.color
+          : selected,
+      inkText,
+    );
     return { textColor, backgroundColor };
   }
 
@@ -993,18 +1164,22 @@ export class ContrastChecker {
    * Keep bins with >=25% of the largest foreground population; smaller bins
    * must have >=80% identical pixels and be absent from the background perimeter.
    * This retains small flat glyphs beside a large icon without retaining fringes.
+   * A lossless capture repeats each anti-aliasing level exactly, so a small bin must
+   * also form a solid stroke (#10290).
    */
   private selectTextColor(
     clusters: ColorCluster[],
     background: RGB,
     perimeter: ColorCluster[],
+    isSolidStroke: (color: RGB) => boolean,
   ): RGB {
     const largest = clusters[0]?.count ?? 0;
     const candidates = clusters.filter(
       (cluster) =>
         cluster.count >= largest * 0.25 ||
         (cluster.coreCount >= cluster.count * 0.8 &&
-          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color))),
+          !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
+          isSolidStroke(cluster.color)),
     );
     return candidates.reduce((selected, candidate) => {
       const ratio = this.getCachedContrast(candidate.color, background);

@@ -4,11 +4,16 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { parseAndroidDisplayInfos } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
-import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import {
+  parseAndroidCommittedStateIdentifier,
+  parseAndroidDeviceStates,
+} from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { RotationSettingManagedError } from "../../models/RotationSettingManagedError";
+import type { SettingsNamespace, SettingsValueType } from "../observe/android/types";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -28,6 +33,37 @@ import {
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
   userRotation: number | null;
+  /**
+   * Original `secure device_state_rotation_lock` (per-device-state lock map on foldables and
+   * resizable emulators), captured before the session's first rotation write. Turning
+   * auto-rotate off rewrites this map, and while it records a lock the window manager reverts
+   * `accelerometer_rotation=1`, so restore writes it back first. Absent when the device has no
+   * such setting.
+   */
+  deviceStateRotationLock?: string;
+}
+
+const DEVICE_STATE_ROTATION_LOCK = "device_state_rotation_lock";
+// Values of a `device_state_rotation_lock` entry (Settings.Secure.DEVICE_STATE_ROTATION_LOCK_*).
+const DEVICE_STATE_ROTATION_LOCKED = "1";
+const DEVICE_STATE_ROTATION_UNLOCKED = "2";
+
+/**
+ * Unlock `deviceState`'s entry in a `device_state_rotation_lock` map
+ * (`state:setting:state:setting...`). Returns null when the map is malformed or the entry is
+ * not locked, so there is nothing to write.
+ */
+export function unlockDeviceStateRotationEntry(map: string, deviceState: number): string | null {
+  const parts = map.split(":");
+  if (parts.length < 2 || parts.length % 2 !== 0) {
+    return null;
+  }
+  const index = parts.findIndex((part, i) => i % 2 === 0 && part === String(deviceState));
+  if (index < 0 || parts[index + 1] !== DEVICE_STATE_ROTATION_LOCKED) {
+    return null;
+  }
+  parts[index + 1] = DEVICE_STATE_ROTATION_UNLOCKED;
+  return parts.join(":");
 }
 
 export interface RotationRestoreSlot {
@@ -58,10 +94,20 @@ interface RotationSettingCleanup {
   assertCurrentDevice?: () => void;
   pendingWrite?: Promise<unknown>;
   needed: boolean;
+  /**
+   * How turning auto-rotate back on handles `secure device_state_rotation_lock` (mt-0083 D1):
+   * while that per-state map records a lock for the current device state, the window manager
+   * reverts an `accelerometer_rotation=1` write to 0. "restore" writes back the map captured
+   * before this call forced auto-rotate off; "clear" unlocks the committed device state's entry
+   * (auto-rotate was not on before the call). Unset leaves the map alone.
+   */
+  deviceStateLock?: { kind: "restore"; value: string } | { kind: "clear" };
 }
 
 const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
 const ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS = 1000;
+// Reads of a non-default display's rotation after `cmd window user-rotation -d` (150ms apart).
+const DISPLAY_ROTATION_CONFIRM_ATTEMPTS = 5;
 
 type AlreadyAppliedOrientationDecision =
   | { kind: "handled"; result: RotateResult }
@@ -158,11 +204,19 @@ export class Rotate extends BaseVisualChange {
    * @returns Promise with current orientation ("portrait" or "landscape")
    */
   private async readSystemSetting(key: string, signal?: AbortSignal): Promise<string | null> {
+    return this.readSetting("system", key, signal);
+  }
+
+  private async readSetting(
+    namespace: SettingsNamespace,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
     throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const a11yResult = await awaitWhileRequestIsLive(
-        a11y.requestSettingsGet("system", key),
+        a11y.requestSettingsGet(namespace, key),
         signal,
       );
       if (a11yResult.success) {
@@ -175,14 +229,14 @@ export class Rotate extends BaseVisualChange {
     throwIfAborted(signal);
     try {
       const result = await awaitWhileRequestIsLive(
-        this.adb.executeCommand(`shell settings get system ${key}`),
+        this.adb.executeCommand(`shell settings get ${namespace} ${key}`),
         signal,
       );
       const out = result.stdout.trim();
       return !out || out === "null" ? null : out;
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn(`Failed to read system setting ${key}: ${error}`);
+      logger.warn(`Failed to read ${namespace} setting ${key}: ${error}`);
       return null;
     }
   }
@@ -213,11 +267,42 @@ export class Rotate extends BaseVisualChange {
     }
     // No observation or device discovery is needed for a settings-only restoration.
     // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
+    const lock = state.deviceStateRotationLock;
     await runWithAbortSignal(signal, async () => {
       // Compare-and-skip: settings that already hold the restore values need no write and no
       // read-back, which a window manager owning a folded panel's rotation could never verify.
-      if (skipIfCurrent && (await this.settingsAlreadyMatch(targets, signal))) {
+      if (
+        skipIfCurrent &&
+        (await this.settingsAlreadyMatch(targets, signal)) &&
+        (lock === undefined ||
+          (await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal)) === lock)
+      ) {
         return;
+      }
+      // The per-state lock goes back first: while it still records the session's lock, the
+      // window manager reverts an accelerometer_rotation=1 write to 0 (mt-0083 D1). It is not
+      // read back itself; the accelerometer_rotation read-back below verifies its effect.
+      if (lock !== undefined) {
+        try {
+          await this.writeSetting(
+            {
+              namespace: "secure",
+              key: DEVICE_STATE_ROTATION_LOCK,
+              value: lock,
+              valueType: "string",
+            },
+            signal,
+            cleanup,
+          );
+        } catch (error) {
+          throwIfAborted(signal);
+          // A failed lock write must not leave user_rotation and accelerometer_rotation
+          // unrestored; the accelerometer_rotation read-back below decides the outcome.
+          logger.warn(
+            `[Rotate] Failed to restore device_state_rotation_lock=${lock}; restoring the rotation settings anyway: ${errorMessage(error)}`,
+            error,
+          );
+        }
       }
       if (state.userRotation !== null) {
         await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
@@ -270,7 +355,10 @@ export class Rotate extends BaseVisualChange {
       foldable = parseAndroidDeviceStates(stdout).length > 1;
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn(`[Rotate] Could not read device states after ${key} read-back mismatch`, error);
+      logger.warn(
+        `[Rotate] Could not read device states after ${key} read-back mismatch: ${errorMessage(error)}`,
+        error,
+      );
     }
     return foldable
       ? new RotationSettingManagedError({ key, expected, actual })
@@ -324,7 +412,10 @@ export class Rotate extends BaseVisualChange {
         },
       );
     } catch (error) {
-      logger.warn("Failed to roll back user_rotation after rotation failure", error);
+      logger.warn(
+        `Failed to roll back user_rotation after rotation failure: ${errorMessage(error)}`,
+        error,
+      );
       return `Failed to roll back user_rotation: ${error}`;
     }
   }
@@ -363,7 +454,7 @@ export class Rotate extends BaseVisualChange {
       // release/rebind so a subsequent rotate cannot redefine the session baseline.
     } catch (error) {
       logger.warn(
-        "Failed to restore original user_rotation after explicit automatic rotation",
+        `Failed to restore original user_rotation after explicit automatic rotation: ${errorMessage(error)}`,
         error,
       );
       result.warning = [result.warning, `Failed to restore original user_rotation: ${error}`]
@@ -884,6 +975,8 @@ export class Rotate extends BaseVisualChange {
     }
 
     await beforeWrite({ accelerometerRotation: true });
+    // Auto-rotate was not on, so any lock the device-state map records for this state is cleared.
+    cleanup.deviceStateLock = { kind: "clear" };
     const { achievedOrientation, warning } = await this.restoreAutoRotateAndConfirmOrientation(
       orientation,
       signal,
@@ -1081,10 +1174,24 @@ export class Rotate extends BaseVisualChange {
               await cleanup.pendingWrite;
             } catch (error) {
               // A failed write may have applied; its settlement still orders the restore.
-              logger.warn("[Rotate] Pending setting write failed before cleanup", error);
+              logger.warn(
+                `[Rotate] Pending setting write failed before cleanup: ${errorMessage(error)}`,
+                error,
+              );
             }
           }
+          const hasDeviceStateLock = await this.prepareDeviceStateLockForAutoRotate(cleanup);
           await this.writeSystemSetting("accelerometer_rotation", "1", undefined, cleanup);
+          if (hasDeviceStateLock) {
+            // A device-state lock that still records a lock reverts this write; only the
+            // read-back shows whether auto-rotate actually came back on.
+            const actual = await this.readSystemSetting("accelerometer_rotation");
+            if (actual !== "1") {
+              throw new ActionableError(
+                `accelerometer_rotation=1 read back ${actual ?? "unset"} after restoring device_state_rotation_lock.`,
+              );
+            }
+          }
           cleanup.needed = false;
         }),
       {
@@ -1095,18 +1202,93 @@ export class Rotate extends BaseVisualChange {
     );
   }
 
+  /**
+   * Put `device_state_rotation_lock` back before auto-rotate is turned on (see
+   * {@link RotationSettingCleanup.deviceStateLock}). Returns whether the device has the setting,
+   * so the caller reads `accelerometer_rotation` back only there; other devices are unchanged.
+   */
+  private async prepareDeviceStateLockForAutoRotate(
+    cleanup: RotationSettingCleanup,
+  ): Promise<boolean> {
+    const plan = cleanup.deviceStateLock;
+    if (plan === undefined) {
+      return false;
+    }
+    let value: string | null;
+    if (plan.kind === "restore") {
+      value = plan.value;
+    } else {
+      const current = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK);
+      if (current === null) {
+        return false;
+      }
+      value = unlockDeviceStateRotationEntry(current, await this.readCommittedDeviceState());
+    }
+    if (value !== null) {
+      try {
+        await this.writeSetting(
+          { namespace: "secure", key: DEVICE_STATE_ROTATION_LOCK, value, valueType: "string" },
+          undefined,
+          cleanup,
+        );
+      } catch (error) {
+        // Still turn auto-rotate on; the accelerometer_rotation read-back decides the outcome.
+        logger.warn(
+          `[Rotate] Failed to write device_state_rotation_lock before restoring auto-rotate: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
+    return true;
+  }
+
+  private async readCommittedDeviceState(): Promise<number> {
+    try {
+      const { stdout } = await this.adb.executeCommand(
+        "shell cmd device_state state",
+        ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+      );
+      const identifier = parseAndroidCommittedStateIdentifier(stdout);
+      if (identifier !== undefined) {
+        return identifier;
+      }
+      logger.warn(`[Rotate] Could not parse the committed device state from: ${stdout.trim()}`);
+    } catch (error) {
+      logger.warn(
+        `[Rotate] Could not read the committed device state: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    // No entry matches -1, so the lock map is left unchanged.
+    return -1;
+  }
+
   private async writeSystemSetting(
     key: string,
     value: string,
     signal?: AbortSignal,
     cleanup?: RotationSettingCleanup,
   ): Promise<void> {
+    await this.writeSetting({ namespace: "system", key, value, valueType: "int" }, signal, cleanup);
+  }
+
+  private async writeSetting(
+    setting: {
+      namespace: SettingsNamespace;
+      key: string;
+      value: string;
+      valueType: SettingsValueType;
+    },
+    signal?: AbortSignal,
+    cleanup?: RotationSettingCleanup,
+  ): Promise<void> {
+    const { namespace, key, value, valueType } = setting;
     throwIfAborted(signal);
     cleanup?.assertCurrentDevice?.();
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       cleanup?.assertCurrentDevice?.();
-      const write = a11y.requestSettingsPut("system", key, value, "int");
+      const write = a11y.requestSettingsPut(namespace, key, value, valueType);
       if (cleanup) {
         cleanup.pendingWrite = write;
       }
@@ -1121,7 +1303,7 @@ export class Rotate extends BaseVisualChange {
     }
     throwIfAborted(signal);
     cleanup?.assertCurrentDevice?.();
-    const write = this.adb.executeCommand(`shell settings put system ${key} ${value}`);
+    const write = this.adb.executeCommand(`shell settings put ${namespace} ${key} ${value}`);
     if (cleanup) {
       cleanup.pendingWrite = write;
     }
@@ -1150,23 +1332,12 @@ export class Rotate extends BaseVisualChange {
           return await this.executeIosRotation(orientation, progress, perf, signal);
         case "android":
           if (display !== 0) {
-            await this.assertDisplayExists(display, signal);
-            const rotation = rotationForOrientation(
+            return await this.rotateNonDefaultDisplay(
               orientation,
-              await readNaturalLandscape(this.adb, signal, display),
+              display,
+              lockOrientation,
+              signal,
             );
-            const mode = lockOrientation === false ? "free" : "lock";
-            await this.adb.executeCommand(
-              `shell cmd window user-rotation -d ${display} ${mode} ${rotation}`,
-            );
-            return {
-              success: true,
-              orientation,
-              value: rotation,
-              currentOrientation: orientation,
-              rotationPerformed: true,
-              message: `Rotated display ${display} to ${orientation}`,
-            };
           }
           return await this.executeAndroidRotation(
             orientation,
@@ -1186,6 +1357,94 @@ export class Rotate extends BaseVisualChange {
           : "Failed to rotate device",
       );
     }
+  }
+
+  private async rotateNonDefaultDisplay(
+    orientation: "portrait" | "landscape",
+    display: number,
+    lockOrientation: boolean | undefined,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
+    await this.assertDisplayExists(display, signal);
+    const naturalLandscape = await readNaturalLandscape(this.adb, signal, display);
+    const rotation = rotationForOrientation(orientation, naturalLandscape);
+    const mode = lockOrientation === false ? "free" : "lock";
+    await this.adb.executeCommand(
+      `shell cmd window user-rotation -d ${display} ${mode} ${rotation}`,
+    );
+    // The command returning is not proof the display rotated (#10362): read the target
+    // display's own rotation back before reporting the requested orientation.
+    const actualRotation = await this.readDisplayRotationUntil(
+      display,
+      (value) => orientationFromRotation(value, naturalLandscape) === orientation,
+      signal,
+    );
+    const base = { orientation, value: rotation, rotationPerformed: true };
+    if (actualRotation === null) {
+      const warning = `Display ${display}'s orientation after rotation could not be confirmed (live rotation read failed); the requested ${orientation} orientation may not be held.`;
+      return { ...base, success: true, currentOrientation: "unknown", warning, message: warning };
+    }
+    const actual = orientationFromRotation(actualRotation, naturalLandscape) ?? "unknown";
+    if (actual === orientation) {
+      return {
+        ...base,
+        success: true,
+        currentOrientation: orientation,
+        message: `Rotated display ${display} to ${orientation}`,
+      };
+    }
+    const error = `Requested ${orientation} on display ${display}, but the display is actually in ${actual} (rotation ${actualRotation}) after the rotation settled.`;
+    return {
+      ...base,
+      success: false,
+      currentOrientation: actual,
+      rotationPerformed: false,
+      error,
+      message: error,
+    };
+  }
+
+  /**
+   * Poll one display's live WindowManager rotation until `reached` accepts it, within a bounded
+   * budget: at most {@link DISPLAY_ROTATION_CONFIRM_ATTEMPTS} reads, no new read once
+   * {@link ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS} has elapsed, and each read capped at
+   * {@link ROTATION_READ_FLOOR_MS}. Returns the last rotation read, or null when none was readable.
+   */
+  private async readDisplayRotationUntil(
+    display: number,
+    reached: (rotation: number) => boolean,
+    signal?: AbortSignal,
+  ): Promise<number | null> {
+    const start = this.timer.now();
+    let last: number | null = null;
+    for (let attempt = 1; attempt <= DISPLAY_ROTATION_CONFIRM_ATTEMPTS; attempt++) {
+      throwIfAborted(signal);
+      try {
+        const rotation = await readWindowManagerRotation(this.adb, {
+          displayId: display,
+          signal,
+          timeoutMs: ROTATION_READ_FLOOR_MS,
+        });
+        last = rotation ?? last;
+        if (rotation !== null && reached(rotation)) {
+          return rotation;
+        }
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(
+          `[Rotate] Failed to read display ${display} rotation: ${errorMessage(error)}`,
+          error,
+        );
+      }
+      if (
+        attempt === DISPLAY_ROTATION_CONFIRM_ATTEMPTS ||
+        this.timer.now() - start >= ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS
+      ) {
+        break;
+      }
+      await awaitWhileRequestIsLive(this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS), signal);
+    }
+    return last;
   }
 
   private async assertDisplayExists(display: number, signal?: AbortSignal): Promise<void> {
@@ -1439,6 +1698,17 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
+  /** Captured once, with the session's first originals, before any write can change it. */
+  private async captureDeviceStateRotationLock(
+    state: RotationRestoreState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const lock = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (lock !== null) {
+      state.deviceStateRotationLock = lock;
+    }
+  }
+
   private rotationCallSettings(
     autoRotateState: "locked" | "enabled" | "unknown",
     slot?: RotationRestoreSlot,
@@ -1468,6 +1738,9 @@ export class Rotate extends BaseVisualChange {
           });
           if (!settings.started && settings.previousUserRotation === null) {
             settings.previousUserRotation = state.userRotation;
+          }
+          if (!original) {
+            await this.captureDeviceStateRotationLock(state, signal);
           }
           throwIfAborted(signal);
           slot.get();
@@ -1587,6 +1860,11 @@ export class Rotate extends BaseVisualChange {
           // the lock on devices where the settings provider completes slowly.
           throwIfAborted(signal);
           cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
+          await this.planDeviceStateLock(cleanup, {
+            shouldRestoreAutoRotate,
+            autoRotateState,
+            signal,
+          });
           await this.writeSystemSetting("accelerometer_rotation", "0", signal, cleanup);
         } else {
           logger.debug(
@@ -1646,6 +1924,34 @@ export class Rotate extends BaseVisualChange {
     }
   }
 
+  /**
+   * Decide, before this call forces auto-rotate off, how turning it back on treats
+   * `device_state_rotation_lock`: auto-rotate that was on gets the map captured now (before the
+   * `accelerometer_rotation=0` write records a lock in it); an explicit unlock of auto-rotate
+   * that was not on clears the committed state's lock when it turns auto-rotate on.
+   */
+  private async planDeviceStateLock(
+    cleanup: RotationSettingCleanup,
+    options: {
+      shouldRestoreAutoRotate: boolean;
+      autoRotateState: "locked" | "enabled" | "unknown";
+      signal?: AbortSignal;
+    },
+  ): Promise<void> {
+    const { shouldRestoreAutoRotate, autoRotateState, signal } = options;
+    if (!shouldRestoreAutoRotate) {
+      return;
+    }
+    if (autoRotateState !== "enabled") {
+      cleanup.deviceStateLock = { kind: "clear" };
+      return;
+    }
+    const value = await this.readSetting("secure", DEVICE_STATE_ROTATION_LOCK, signal);
+    if (value !== null) {
+      cleanup.deviceStateLock = { kind: "restore", value };
+    }
+  }
+
   private async confirmAndroidRotationAfterError(options: {
     orientation: "portrait" | "landscape";
     settings: RotationCallSettings;
@@ -1698,7 +2004,7 @@ export class Rotate extends BaseVisualChange {
         await this.restoreAutoRotateSetting(cleanup);
         logger.info("Restored auto-rotate after error");
       } catch (error) {
-        logger.warn("Failed to restore auto-rotate", error);
+        logger.warn(`Failed to restore auto-rotate: ${errorMessage(error)}`, error);
         restoreFailure = toActionableError(error, "Failed to restore auto-rotate");
       }
     }

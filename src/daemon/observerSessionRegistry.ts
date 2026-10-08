@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import { getDefaultSessionHeartbeatTimeoutMs } from "./sessionManager";
+import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export const MAX_OBSERVER_SESSIONS = 32;
@@ -53,7 +54,9 @@ export class ObserverSessionRegistry implements ObserverSessionStore {
 
   constructor(
     private readonly timer: Timer = defaultTimer,
-    private readonly heartbeatTimeoutMs = getDefaultSessionHeartbeatTimeoutMs(),
+    // An observer gets the same no-heartbeat budget as a session owner: the lease plus the
+    // suspect grace, so one late heartbeat at the 2 s client cadence never expires it.
+    private readonly heartbeatTimeoutMs = getDefaultSessionHeartbeatTimeoutMs() + SUSPECT_GRACE_MS,
   ) {}
 
   register(sessionId: string, clientName: string): ObserverRegistrationResult {

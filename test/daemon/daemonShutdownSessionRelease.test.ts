@@ -1,6 +1,7 @@
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { Session, SessionDeviceAssigner } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import * as daemonFilesModule from "../../src/daemon/daemonFiles";
@@ -18,6 +19,11 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
+import {
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+} from "../../src/server/videoRecordingManager";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 
 interface DaemonSocketServerInternals {
   socketServer: {
@@ -53,14 +59,27 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   let appearanceSync: ReturnType<typeof spyOn>;
   // Daemon shutdown drains the process-wide write barrier. These unit tests mock
   // closeDatabase(), so reset that global explicitly to retain test isolation.
-  beforeEach(() => {
+  beforeEach(async () => {
     resetDbWriteBarrier();
     appearanceSync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
       undefined,
     );
+    // daemon.stop() lists active recordings before closing the DB. Without a fake
+    // repository that read reaches getDatabase(): the unit-test guard makes it
+    // throw instantly, but a caller-exported AUTOMOBILE_DB_DIR stands the guard
+    // down and the real file I/O outlives the FakeTimer-bounded cleanup stage.
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: { listActiveRecordingIds: () => [] } as never,
+      recordingRepository: new FakeVideoRecordingRepository() as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer: new FakeTimer(),
+      now: () => new Date(0),
+    });
   });
 
   afterEach(() => {
+    resetVideoRecordingManagerDependencies();
     appearanceSync.mockRestore();
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
@@ -1197,6 +1216,41 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       closeDatabaseSpy.mockRestore();
       loggerCloseSpy.mockRestore();
       cleanupDaemonFilesSpy.mockRestore();
+    }
+  });
+
+  test("stop releases CtrlProxy forwarding leases, bounded, before closing the database", async () => {
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const events: string[] = [];
+    const releaseSpy = spyOn(
+      AndroidCtrlProxyClient,
+      "releaseForwardLeasesForShutdown",
+    ).mockImplementation(async () => {
+      events.push("releaseLeases");
+    });
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      events.push("closeDatabase");
+    });
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    const cleanupFilesSpy = spyOn(daemonFilesModule, "cleanupDaemonFiles").mockResolvedValue(
+      undefined,
+    );
+    try {
+      await daemon.stop();
+
+      expect(releaseSpy).toHaveBeenCalledWith(timer, 3_000);
+      expect(events).toEqual(["releaseLeases", "closeDatabase"]);
+    } finally {
+      releaseSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+      cleanupFilesSpy.mockRestore();
     }
   });
 });

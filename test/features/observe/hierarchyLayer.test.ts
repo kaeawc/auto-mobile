@@ -241,6 +241,30 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
     expect(scoped.packageName).toBe(PROTOTYPE_CAPTURE.appPackage);
   });
 
+  test("CtrlProxy's full-screen highlight window (same type, no nodes) is not an overlay", () => {
+    // Highlight shown with SYSTEM_ALERT_WINDOW granted: TYPE_APPLICATION_OVERLAY, FLAG_NOT_TOUCHABLE.
+    const hierarchy = capturedAppLayerOverlayHierarchy();
+    const highlight = {
+      id: 999,
+      type: 3,
+      packageName: CTRL_PROXY_PACKAGE,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+    };
+    hierarchy.windows = [
+      ...hierarchy.windows!.filter(
+        (window) => window.id !== PROTOTYPE_CAPTURE.appLayerOverlayWindowId,
+      ),
+      highlight,
+    ];
+    expect(hasOwnOverlay(hierarchy)).toBe(false);
+    expect(() => scopeHierarchyForSelector(hierarchy, "overlay")).toThrow(
+      /no AutoMobile overlay is showing/,
+    );
+    expect(() =>
+      assertAppGestureNotUnderOverlay(hierarchy, "app", { x: 540, y: 2000 }, "tap"),
+    ).not.toThrow();
+  });
+
   test('"app" gestures inside the app-layer overlay are refused', () => {
     const hierarchy = capturedAppLayerOverlayHierarchy();
     const bump = selectByText(hierarchy, "Bump")!;

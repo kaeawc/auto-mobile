@@ -8,6 +8,10 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
+import {
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  SUSPECT_GRACE_MS,
+} from "../../src/daemon/sessionLivenessWindows";
 import { DAEMON_VERSION, HEARTBEAT_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -918,8 +922,8 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       await proxy.ensureConnected();
       firstClient.emitConnectionClosed();
       await timer.advanceTimeAsync(2_000);
-      await timer.advanceTimeAsync(4_000);
-      // The first tick has expired at t=6s while its shared connect remains pending.
+      await timer.advanceTimeAsync(2_000);
+      // The first tick has expired at t=4s while its shared connect remains pending.
       finishConnect();
       for (let i = 0; i < 50; i++) {
         await Promise.resolve();
@@ -986,11 +990,14 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
-  // Issue #9995: stdio passes heartbeatTimeoutMs=10s, so the tick interval (5s)
-  // equals the fence threshold (leash - min(interval, leash/2) = 5s). A socket that
+  // Issue #9995: stdio passes the default heartbeatTimeoutMs (4s), so the tick interval
+  // (2s) equals the fence threshold (leash - min(interval, leash/2) = 2s). A socket that
   // merely closed (no reconnect started) must get its bounded attempt before fencing.
   describe("stdio cadence (interval == fence threshold, issue #9995)", () => {
-    const STDIO_HEARTBEAT_TIMEOUT_MS = 10_000;
+    const STDIO_HEARTBEAT_TIMEOUT_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
+    const STDIO_INTERVAL_MS = STDIO_HEARTBEAT_TIMEOUT_MS / 2;
+    /** The lease plus the daemon's suspect grace: the proxy's whole recovery budget. */
+    const STDIO_BUDGET_MS = STDIO_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
 
     function stdioProxy(
       clients: DaemonClientLike[],
@@ -1021,15 +1028,15 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       try {
         await proxy.ensureConnected();
         firstClient.emitConnectionClosed();
-        await timer.advanceTimeAsync(5_000);
+        await timer.advanceTimeAsync(STDIO_INTERVAL_MS);
 
         expect(heartbeats(recoveredClient)).toBeGreaterThanOrEqual(1);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).resolves.toBeDefined();
 
         // The successful heartbeat on the new connection cleared the miss: the
         // keeper keeps the session alive well past the original leash.
-        await timer.advanceTimeAsync(5_000);
-        await timer.advanceTimeAsync(5_000);
+        await timer.advanceTimeAsync(STDIO_INTERVAL_MS);
+        await timer.advanceTimeAsync(STDIO_INTERVAL_MS);
         await monitor.tick();
         expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
         expect(reaped).toEqual([]);
@@ -1058,15 +1065,14 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       try {
         await proxy.ensureConnected();
         firstClient.emitConnectionClosed();
-        await timer.advanceTimeAsync(5_000);
+        await timer.advanceTimeAsync(STDIO_INTERVAL_MS);
         // The first tick attempted the reconnect rather than fencing.
         expect(connectAttempts).toBe(1);
 
-        // The tick's own deadline (5s) expires at 10s and starts recovery: three attempts in
-        // 3s slots (the 20s lease-plus-grace budget less 1s margin, from the 10s start), so
-        // the handover lands at 19s, still inside the budget (checked at 19s).
-        await timer.advanceTimeAsync(9_000);
-        await timer.advanceTimeAsync(5_000);
+        // The tick's own deadline (2s) expires at 4s and starts recovery: three attempts in
+        // 1s slots (the 8s lease-plus-grace budget less 1s margin, from the 4s start), so the
+        // handover lands at 7s, still inside the budget (checked just before it ends).
+        await timer.advanceTimeAsync(STDIO_BUDGET_MS - 1 - STDIO_INTERVAL_MS);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
           reason: "daemon_stalled",
           handover: { code: "daemon_stalled", attempts: 3 },
@@ -1099,12 +1105,12 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       try {
         await proxy.ensureConnected();
         firstClient.emitConnectionClosed();
-        await timer.advanceTimeAsync(5_000);
+        await timer.advanceTimeAsync(STDIO_INTERVAL_MS);
         // The first tick failed fast and started recovery; it has not handed over yet.
         expect(connectAttempts).toBeGreaterThanOrEqual(1);
         expect(connectAttempts).toBeLessThan(4);
-        // The attempts are spread over equal ~4.7s slots (t=5s, 9.7s, 14.3s), not burned at once.
-        await timer.advanceTimeAsync(10_000);
+        // The attempts are spread over equal ~1.7s slots (t=2s, 3.7s, 5.3s), not burned at once.
+        await timer.advanceTimeAsync(STDIO_BUDGET_MS - STDIO_INTERVAL_MS);
         expect(connectAttempts).toBeGreaterThanOrEqual(4);
         await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
           reason: "daemon_stalled",
@@ -1144,8 +1150,9 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
 
     try {
       await proxy.ensureConnected();
-      // Tick at 2s times out at 6s; three recovery attempts follow in ~4.3s slots (6s, 10.3s, 14.7s).
-      await timer.advanceTimeAsync(18_999);
+      // Default lease 4s, cadence 2s: the tick at 2s times out at 4s; three recovery attempts
+      // follow in 1s slots (4s, 5s, 6s), all before the daemon could release at lease plus grace.
+      await timer.advanceTimeAsync(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS - 1);
       expect(attempts).toBeGreaterThanOrEqual(4);
       await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
         reason: "daemon_stalled",

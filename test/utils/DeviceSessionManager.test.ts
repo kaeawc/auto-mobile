@@ -20,6 +20,7 @@ import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDevic
 import { FakeWindow } from "../fakes/FakeWindow";
 import { BootedDevice, AppearanceConfigInput, ExecResult } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { parseAppearanceConfig } from "../../src/features/appearance";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadinessConfig";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
@@ -44,7 +45,14 @@ function createTestSessionManager(
 ): DeviceSessionManager {
   return DeviceSessionManager.createInstance(provider, adbFactory, {
     ...options,
-    appearanceOnConnectDependencies: { isSyncEnabled: () => true },
+    appearanceOnConnectDependencies: {
+      isSyncEnabled: () => true,
+      // Never read the persisted appearance config: with a caller-exported
+      // AUTOMOBILE_DB_DIR the unit-test DB guard stands down and the real
+      // stored/default config (applyOnConnect + host dark mode) would spawn a
+      // real `xcrun simctl ui ... appearance` against the fake device.
+      getConfig: async () => parseAppearanceConfig({ applyOnConnect: false }),
+    },
   });
 }
 

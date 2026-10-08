@@ -70,6 +70,10 @@ import {
   type LivenessLeaseState,
 } from "./livenessOwnerLease";
 import { OWNER_DISCONNECTED_RELEASE_REASON } from "./ownerDisconnectRelease";
+import {
+  DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  getSessionIdleTimeoutMs,
+} from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DAEMON_SESSION_SUSPECT_CODE } from "./types";
 
@@ -411,7 +415,7 @@ export interface PreCliLivenessSnapshot {
  *
  * - `heartbeat` (the default): the strict contract a long-lived stdio/HTTP MCP
  *   client can keep — a first heartbeat within the pre-first-heartbeat grace,
- *   then one every `heartbeatTimeoutMs` (10 s by default).
+ *   then one every `heartbeatTimeoutMs` (4 s by default, plus a 4 s suspect grace).
  * - `cli-idle`: the contract a one-shot `--cli` process can keep. Each
  *   invocation connects, runs one tool and exits, so between calls nobody is
  *   heartbeating; the session is instead reaped only after a wall-clock idle
@@ -930,23 +934,41 @@ export {
   sanitizeCliSessionIdleTimeoutMs,
 } from "./constants";
 
+/** The idle window default before the 2026-10-08 owner decision; rows persisted with it adopt the current one. */
+const LEGACY_DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+/** The CLI idle default before the 2026-10-08 owner decision; rows persisted with it adopt the current one. */
+const LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
 /** Default grace before a never-heartbeated default-policy session is reaped. */
 export const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 // Give a restarted emulator the same three-minute cold-boot allowance as device readiness.
 const DEVICE_RESTART_RECOVERY_WINDOW_MS = DEFAULT_DEVICE_READY_TIMEOUT_MS;
 
-function restartRecoveryDeadlineFromPersisted(persisted: DeviceSession): number | undefined {
-  if (
-    !persisted.release_reason ||
-    !isDeviceRestartReleaseReason(persisted.release_reason) ||
-    persisted.released_at_ms === null
-  ) {
+function isDeviceRestartReleasedRow(
+  persisted: DeviceSession,
+): persisted is DeviceSession & { released_at_ms: number } {
+  return Boolean(
+    persisted.release_reason &&
+    isDeviceRestartReleaseReason(persisted.release_reason) &&
+    persisted.released_at_ms !== null,
+  );
+}
+
+/**
+ * When a device-restart recovery must give up. Admission is bounded by the session's idle
+ * expiry; a caller-driven wait (`callerInFlight`) is not, because a tool call in flight is
+ * activity and is never released mid-call (owner decision 2026-10-08) — only the cold-boot
+ * allowance bounds it.
+ */
+function restartRecoveryDeadlineFromPersisted(
+  persisted: DeviceSession,
+  callerInFlight = false,
+): number | undefined {
+  if (!isDeviceRestartReleasedRow(persisted)) {
     return undefined;
   }
-  return Math.min(
-    persisted.expires_at_ms,
-    persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS,
-  );
+  const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
+  return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
 }
 
 /**
@@ -1051,6 +1073,14 @@ export class SessionManager {
   private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
   /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
   private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
+  /**
+   * Last tool-call activity (a call starting, joining, or ending) against a session that is
+   * waiting out a device restart. The released row's `expires_at_ms` froze at the device loss,
+   * so without this an agent that keeps calling through a cold boot longer than the idle window
+   * would lose its session; it is projected onto the persisted row by
+   * {@link readPersistedSession}. In memory only: a daemon restart falls back to the row.
+   */
+  private readonly restartRecoveryActivityAt: Map<string, number> = new Map();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
@@ -1244,13 +1274,14 @@ export class SessionManager {
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
-  // Session timeout: 30 minutes
-  private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+  // Idle window (heartbeats, no tool call): 2 minutes from the end of the last
+  // tool call, env-overridable (see `./sessionLivenessWindows`).
+  private readonly SESSION_TIMEOUT_MS = getSessionIdleTimeoutMs();
 
   // Cleanup interval: every 5 minutes
   private readonly CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-  static readonly DEFAULT_HEARTBEAT_TIMEOUT_MS = 10 * 1000;
+  static readonly DEFAULT_HEARTBEAT_TIMEOUT_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS;
 
   constructor(
     timer: Timer = defaultTimer,
@@ -1647,12 +1678,33 @@ export class SessionManager {
     throw new DaemonSessionCreationRejectedError(session.sessionId, snapshot);
   }
 
+  /** The persisted row, with tool activity during a device-restart recovery applied to its expiry. */
+  private async readPersistedSession(sessionId: string): Promise<DeviceSession | undefined> {
+    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const activityAt = this.restartRecoveryActivityAt.get(sessionId);
+    if (!persisted || activityAt === undefined || !isDeviceRestartReleasedRow(persisted)) {
+      return persisted;
+    }
+    return {
+      ...persisted,
+      expires_at_ms: Math.max(persisted.expires_at_ms, activityAt + persisted.session_timeout_ms),
+    };
+  }
+
+  /** A tool call started, joined or ended against a session waiting out a device restart. */
+  private recordRestartRecoveryActivity(sessionId: string): void {
+    this.restartRecoveryActivityAt.set(
+      sessionId,
+      Math.max(this.restartRecoveryActivityAt.get(sessionId) ?? 0, this.timer.now()),
+    );
+  }
+
   /** Read-only admission probe; recovery itself remains owned by getOrCreateSession. */
   async isReleasedSessionInRestartRecoveryWindow(sessionId: string): Promise<boolean> {
     if (this.terminalReleaseSnapshots.has(sessionId)) {
       return false;
     }
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     if (
       !persisted ||
       this.terminalReleaseSnapshots.has(sessionId) ||
@@ -1667,7 +1719,7 @@ export class SessionManager {
   private async getPersistedTerminalRelease(
     sessionId: string,
   ): Promise<SessionReleaseSnapshot | undefined> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     return persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined;
   }
 
@@ -1694,6 +1746,7 @@ export class SessionManager {
       persisted.expires_at_ms <= this.timer.now() &&
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
+      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
       await this.deviceSessionRepository.markReleased(
         persisted.session_uuid,
         "expired",
@@ -1978,6 +2031,9 @@ export class SessionManager {
   ): Promise<Session> {
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     if (pendingAssignment) {
+      if (this.restartRecoveryActivityAt.has(sessionId)) {
+        this.recordRestartRecoveryActivity(sessionId);
+      }
       const shared = this.sharedSessionAssignments.get(sessionId);
       if (shared?.controller.signal.aborted) {
         await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
@@ -2155,7 +2211,7 @@ export class SessionManager {
       unissuedSessionError = error;
     }
 
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease =
       persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
     if (persistedTerminalRelease) {
@@ -2175,7 +2231,7 @@ export class SessionManager {
     requireIssuedSession: boolean,
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persisted = await this.readPersistedSession(sessionId);
     const persistedTerminalRelease = persisted
       ? this.terminalReleaseFromPersisted(sessionId, persisted)
       : undefined;
@@ -2209,6 +2265,9 @@ export class SessionManager {
       );
     }
 
+    if (persisted && isDeviceRestartReleasedRow(persisted)) {
+      this.recordRestartRecoveryActivity(sessionId);
+    }
     return await this.recoverPersistedSession(
       sessionId,
       devicePool,
@@ -2228,7 +2287,12 @@ export class SessionManager {
     initialOwnership: "owned" | "awaiting-owner",
     shared: SharedSessionAssignment,
   ): Promise<Session> {
-    const recoveryTarget = await this.recoveryTargetFromPersisted(sessionId, persisted, platform);
+    const recoveryTarget = await this.recoveryTargetFromPersisted(
+      sessionId,
+      persisted,
+      platform,
+      initialOwnership === "owned",
+    );
     if (recoveryTarget && initialOwnership === "awaiting-owner") {
       recoveryTarget.initialOwnership = initialOwnership;
     }
@@ -2266,6 +2330,8 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session ${sessionId} creation failed after device assignment`);
     }
+    // The live session's own clocks take over from here.
+    this.restartRecoveryActivityAt.delete(sessionId);
     logger.info(
       `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
     );
@@ -3024,7 +3090,7 @@ export class SessionManager {
     releaseReason: string,
   ): Promise<string | null> {
     if (isTerminalReleaseReason(releaseReason) || releaseReason === "superseded") {
-      const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+      const persisted = await this.readPersistedSession(sessionId);
       const deadline = persisted && restartRecoveryDeadlineFromPersisted(persisted);
       if (
         persisted &&
@@ -3780,6 +3846,7 @@ export class SessionManager {
     // must still stop routing tools to a device that is already confirmed
     // lost; a later release retry can persist and complete removal.
     this.terminalReleaseSnapshots.set(snapshot.sessionId, snapshot);
+    this.restartRecoveryActivityAt.delete(snapshot.sessionId);
     await this.persistSessionRelease(snapshot);
   }
 
@@ -4375,10 +4442,14 @@ export class SessionManager {
     if (target.removed) {
       return;
     }
-    const { userRotation, accelerometerRotation } = target.state;
+    const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
+    const lock =
+      deviceStateRotationLock === undefined
+        ? ""
+        : `, device_state_rotation_lock=${deviceStateRotationLock}`;
     logger.warn(
       `Gave up restoring rotation settings on ${deviceId} ${when} ` +
-        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"} ` +
+        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
         `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
         `A fold or display change during the session can make the recorded settings unverifiable.`,
     );
@@ -5759,14 +5830,50 @@ export class SessionManager {
   }
 
   /**
+   * A tool call on the session finished: restart the idle window from now (owner decision
+   * 2026-10-08). The call stamped `lastUsedAt` when it started and held the session while it ran
+   * (`activeSessionExecutionChecker`), so without this a call that outlasted the idle window would
+   * release its session the moment it ended. The end of a call is tool usage, so it also refreshes
+   * the session's activity heartbeat, exactly as the start did (`reclaimAndRefreshExistingSession`).
+   */
+  recordToolCallEnded(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session && this.restartRecoveryActivityAt.has(sessionId)) {
+      // A call that waited on, or failed because of, a device restart is still the client using
+      // the session: restart its idle window so recovery is only lost after real quiet.
+      this.recordRestartRecoveryActivity(sessionId);
+      return;
+    }
+    if (!session || this.releasingSessions.has(session)) {
+      return;
+    }
+    const now = this.timer.now();
+    session.lastUsedAt = Math.max(session.lastUsedAt, now);
+    session.lastHeartbeat = Math.max(session.lastHeartbeat, now);
+    session.expiresAt = Math.max(session.expiresAt, now + session.sessionTimeoutMs);
+    session.activityGeneration++;
+    void this.getBarrier()
+      .track(() => this.recordSessionActivity(session))
+      .catch((error) => {
+        // Unlike a call's start, nobody awaits this write, so the in-memory refresh stands: the
+        // call really did just end, and rolling back to its start would release a session that
+        // outlived the idle window the moment it finished. The next activity write persists it.
+        logger.warn(
+          `[SessionManager] Failed to record tool-call end activity: ${errorMessage(error)}`,
+        );
+      });
+  }
+
+  /**
    * Record a liveness heartbeat for a session.
    *
    * A heartbeat proves the owner process is alive; it is not device use (#10656). It renews the
    * owner lease (`lastHeartbeat`, `lastOwnerHeartbeat`), marks the session as heartbeating, and
    * promotes an awaiting-owner session to owned. It must never write the tool-activity clocks
    * (`lastUsedAt`, `expiresAt`): an idle but live owner — a stdio proxy whose keeper ticks every
-   * 5 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
-   * calls (`getOrCreateSession`) move the idle deadline. Guarded by
+   * 2 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
+   * calls (`getOrCreateSession` at the start, `recordToolCallEnded` at the end) move the idle
+   * deadline. Guarded by
    * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {
@@ -5975,6 +6082,25 @@ export class SessionManager {
   }
 
   /**
+   * Start every rehydrated session's owner-reconnect window now (#10051 follow-up). Rehydration
+   * runs early in daemon startup, before iOS services, the control socket and the heartbeat
+   * monitor, and no owner can reconnect until the socket accepts connections, so the window is
+   * measured from when the daemon is ready to hear from owners rather than from rehydration.
+   * Returns how many sessions were restarted.
+   */
+  startRehydratedOwnerWindows(): number {
+    const now = this.timer.now();
+    let restarted = 0;
+    for (const session of this.sessions.values()) {
+      if (session.ownership === "awaiting-owner" && session.awaitingOwnerSince !== undefined) {
+        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, now);
+        restarted++;
+      }
+    }
+    return restarted;
+  }
+
+  /**
    * Do not hold the daemon's own stall against any session (#10051).
    *
    * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
@@ -5998,9 +6124,17 @@ export class SessionManager {
       }
       const leaseStart = effectiveLastHeartbeat(session);
       session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
-      session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
+      // Shift, never reset (#10662): a full window per late tick would let a session whose
+      // owner is gone outlive its lease for as long as the ticks keep arriving late.
+      session.expiresAt = Math.max(
+        session.expiresAt,
+        Math.min(session.expiresAt + lostMs, resumedAt + session.sessionTimeoutMs),
+      );
       if (session.awaitingOwnerSince !== undefined) {
-        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
+        session.awaitingOwnerSince = Math.max(
+          session.awaitingOwnerSince,
+          Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+        );
       }
       forgiven++;
     }
@@ -6438,6 +6572,7 @@ export class SessionManager {
     sessionId: string,
     persisted: DeviceSession | undefined,
     requestedPlatform: Platform | undefined,
+    callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
     if (!persisted || !this.isRecoverablePersistedSession(persisted)) {
       return undefined;
@@ -6473,7 +6608,7 @@ export class SessionManager {
       platform: persisted.platform,
       stableDeviceId,
       deviceId: persisted.device_id,
-      restartRecoveryDeadlineMs: restartRecoveryDeadlineFromPersisted(persisted),
+      restartRecoveryDeadlineMs: restartRecoveryDeadlineFromPersisted(persisted, callerInFlight),
       liveness: this.recoveryLivenessFromPersisted(persisted),
       persistenceMetadata: {
         source: persisted.source,
@@ -6497,15 +6632,62 @@ export class SessionManager {
       persisted.heartbeat_timeout_source,
     );
     const livenessPolicy = persistedLivenessPolicy(persisted.liveness_policy);
-    const preCliLiveness = persistedPreCliLiveness(persisted);
+    const persistedPreCli = persistedPreCliLiveness(persisted);
+    const preCliLiveness = persistedPreCli && {
+      ...persistedPreCli,
+      heartbeatTimeoutMs: this.currentDefaultLease(
+        persistedPreCli.heartbeatTimeoutMs,
+        persistedPreCli.heartbeatTimeoutSource,
+      ),
+      sessionTimeoutMs: this.currentDefaultIdleWindow(persistedPreCli.sessionTimeoutMs),
+    };
+    const sessionTimeoutMs = this.currentDefaultIdleWindow(persisted.session_timeout_ms);
+    if (livenessPolicy === "cli-idle") {
+      // A CLI session's heartbeat timeout is its idle timeout, whatever the stored source says.
+      const cliIdleTimeoutMs =
+        persisted.heartbeat_timeout_ms === LEGACY_DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS
+          ? Math.min(resolveCliSessionIdleTimeoutMs(), MAX_CLI_SESSION_IDLE_TIMEOUT_MS)
+          : persisted.heartbeat_timeout_ms;
+      return {
+        sessionTimeoutMs: Math.max(sessionTimeoutMs, cliIdleTimeoutMs),
+        heartbeatTimeoutMs: cliIdleTimeoutMs,
+        heartbeatTimeoutSource,
+        hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
+        livenessPolicy,
+        ...(preCliLiveness ? { preCliLiveness } : {}),
+      };
+    }
     return {
-      sessionTimeoutMs: persisted.session_timeout_ms,
-      heartbeatTimeoutMs: persisted.heartbeat_timeout_ms,
+      sessionTimeoutMs,
+      heartbeatTimeoutMs: this.currentDefaultLease(
+        persisted.heartbeat_timeout_ms,
+        heartbeatTimeoutSource,
+      ),
       heartbeatTimeoutSource,
       hasReceivedHeartbeat: persisted.has_received_heartbeat === 1,
       livenessPolicy,
       ...(preCliLiveness ? { preCliLiveness } : {}),
     };
+  }
+
+  /**
+   * A recovered session's lease: one this daemon (or an older one) chose by default follows the
+   * current default, so an upgrade does not leave a pre-upgrade session on the old lease for its
+   * whole life. An explicitly requested lease is kept.
+   */
+  private currentDefaultLease(heartbeatTimeoutMs: number, source: "default" | "custom"): number {
+    return source === "default" ? getDefaultSessionHeartbeatTimeoutMs() : heartbeatTimeoutMs;
+  }
+
+  /**
+   * A recovered session's idle window. The stored value has no source column, so a row holding
+   * exactly the pre-2026-10-08 default (30 min) is treated as defaulted and follows the current
+   * idle window; any other value was requested and is kept.
+   */
+  private currentDefaultIdleWindow(sessionTimeoutMs: number): number {
+    return sessionTimeoutMs === LEGACY_DEFAULT_SESSION_TIMEOUT_MS
+      ? this.SESSION_TIMEOUT_MS
+      : sessionTimeoutMs;
   }
 
   // Intentionally NOT barrier-tracked when reached via the awaited path

@@ -687,6 +687,30 @@ describe("MultiPlatformDeviceManager", () => {
     expect(runningStateProbed).toBe(false);
   });
 
+  test("startDeviceWithOutcome reports how the Android launcher obtained the emulator", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      undefined,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async () => [],
+        launchEmulator: async (request) => ({
+          avdName: request.avdName,
+          process: null,
+          outcome: "joined-in-process-launch",
+          dispose: () => {},
+        }),
+      }),
+    );
+
+    const start = await manager.startDeviceWithOutcome({
+      name: "Pixel",
+      platform: "android",
+      isRunning: false,
+    });
+
+    expect(start).toEqual({ process: null, outcome: "joined-in-process-launch" });
+  });
+
   test("startDevice forwards the poster option to the Android launcher", async () => {
     let received: string | undefined;
     const manager = new MultiPlatformDeviceManager(

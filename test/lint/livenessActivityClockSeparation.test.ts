@@ -99,16 +99,17 @@ interface Classified {
 }
 
 /**
- * Liveness-only functions that still write an activity clock, baselined with the
- * issue that removes the write. An entry that no longer matches fails, so fixing
- * the write forces the baseline to shrink.
+ * Liveness-only functions that still write an activity clock: known exceptions,
+ * each with the issue that justifies it. An entry that no longer matches fails, so
+ * removing or adding a write forces this list to be updated.
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 1,
     reason:
-      "#10662: stall forgiveness compensates for time the daemon itself lost; it should shift " +
-      "expiresAt by the lost interval instead of resetting it to a full window.",
+      "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
+      "expiresAt by at most the lost interval (never to a full window from resume), so it grants " +
+      "no hold time a non-stalled session would not have had.",
   },
 };
 
@@ -132,6 +133,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Tool usage: a tool reading the session cache stamps lastUsedAt.",
   },
+  "src/daemon/sessionManager.ts SessionManager.recordToolCallEnded": {
+    writes: 2,
+    reason:
+      "Tool usage: the end of a tool call restarts the idle window (owner decision 2026-10-08), " +
+      "so idleness counts from the end of the last call; the execution tracker fires it.",
+  },
   "src/daemon/sessionManager.ts rollbackSessionActivityIfCurrent": {
     writes: 2,
     reason: "Rollback: restores the pre-write activity clocks after a failed cache activity write.",
@@ -146,7 +153,8 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 1,
-    reason: "Stall compensation, baselined in KNOWN_LIVENESS_WRITES (#10662).",
+    reason:
+      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES (#10662).",
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------
@@ -157,6 +165,13 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.bindResultMintedDeviceSession": {
     writes: 1,
     reason: "Tool usage: a device-acquisition result (getAndroid/getApple/startDevice) binds.",
+  },
+  "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.endSessionCall": {
+    writes: 2,
+    reason:
+      "Tool usage: the end of a forwarded call that reached the session restarts the latest " +
+      "binding's replay lease and a held session's lastUsedAt, so idleness counts from the end " +
+      "of the last call however long it ran.",
   },
   "src/daemon/daemonMcpProxy.ts DaemonMcpProxy.holdPreviousBinding": {
     writes: 1,
@@ -804,6 +819,52 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
       .sort()
       .join("\n");
     expect({ actual, located }).toEqual({ actual: expected, located });
+  });
+
+  test("the CLI idle release is judged on the tool-activity clock, never a heartbeat clock", () => {
+    // A `--daemon heartbeat` loop proves the CLI owner is alive, not that it uses the device, so
+    // it must never hold a CLI session past the idle window (owner decision 2026-10-08).
+    const path = "src/daemon/SessionHeartbeatMonitor.ts";
+    const model = parse(path, readFileSync(join(ROOT, path), "utf8"));
+    const heartbeatClocks = new Set([
+      "lastHeartbeat",
+      "lastOwnerHeartbeat",
+      "stallForgivenAt",
+      "effectiveLastHeartbeat",
+      "ownerLeaseHeartbeat",
+    ]);
+    const judgements: { line: number; readsActivity: boolean; heartbeatReads: string[] }[] = [];
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isConditionalExpression(node) &&
+        ts.isStringLiteral(unwrap(node.whenTrue)) &&
+        (unwrap(node.whenTrue) as ts.StringLiteral).text === "cli-idle-timeout"
+      ) {
+        let readsActivity = false;
+        const heartbeatReads: string[] = [];
+        const scan = (inner: ts.Node): void => {
+          if (ts.isPropertyAccessExpression(inner) && inner.name.text === "lastUsedAt") {
+            readsActivity = true;
+          }
+          if (
+            (ts.isIdentifier(inner) || ts.isPrivateIdentifier(inner)) &&
+            heartbeatClocks.has(inner.text)
+          ) {
+            heartbeatReads.push(inner.text);
+          }
+          ts.forEachChild(inner, scan);
+        };
+        scan(node.condition);
+        judgements.push({ line: lineOf(model.source, node), readsActivity, heartbeatReads });
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(model.source);
+    // Sanity: the judgement exists, so the check cannot pass vacuously.
+    expect(judgements.length).toBeGreaterThan(0);
+    expect(
+      judgements.filter((judgement) => !judgement.readsActivity || judgement.heartbeatReads.length),
+    ).toEqual([]);
   });
 
   test("the persisted activity mirror copies the session's clocks instead of computing new ones", () => {

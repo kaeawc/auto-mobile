@@ -123,8 +123,8 @@ asking the client to retry registration; unrelated UUIDs do not wait for that re
 
 `ObserverSessionRegistry` is a separate in-memory registry, never a `Session`
 and never persisted. Defaults pending owner confirmation: cap 32
-(`MAX_OBSERVER_SESSIONS`), the existing default heartbeat timeout of 10 seconds
-(including its environment override), and unowned-device-only scope via
+(`MAX_OBSERVER_SESSIONS`), the default heartbeat timeout plus the suspect grace
+(8 seconds; the timeout keeps its environment override), and unowned-device-only scope via
 `observerMaySeeDeviceOwner`. Every registry operation lazily purges expiry using
 the injected Timer; there are no background timers. `dispose()` closes and clears
 it. Registration is idempotent and refreshes TTL; expired entries free quota.

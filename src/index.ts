@@ -711,6 +711,7 @@ async function main() {
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();
       let server;
+      let proxyToClaimInitialSession: { claimInitialSession(): Promise<void> } | undefined;
       try {
         if (useProxyMode) {
           const { getDefaultSessionHeartbeatTimeoutMs } = await import("./daemon/sessionManager");
@@ -725,6 +726,7 @@ async function main() {
           });
           server = result.server;
           stdioProxy = result.proxy;
+          proxyToClaimInitialSession = result.proxy;
         } else {
           server = createMcpServer({ debug });
         }
@@ -738,6 +740,8 @@ async function main() {
         await server.connect(stdioTransport);
         startupBenchmark.endPhase("serverListening");
         logger.info("MCP server connected to stdio transport");
+        // `--initial-session-uuid` adopts its session now, not on the first tool call.
+        void proxyToClaimInitialSession?.claimInitialSession();
         logger.info(
           `AutoMobile MCP server running on stdio (${useProxyMode ? "proxy" : "direct"} mode)`,
         );

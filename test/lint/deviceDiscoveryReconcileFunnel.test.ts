@@ -57,9 +57,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 2,
+      calls: 3,
       reason:
-        "The pool routes discovery through the identity collaborator before reading pooled identity.",
+        "The pool routes discovery through the identity collaborator before reading pooled identity. " +
+        "The third call only asks whether an emulator a start did not launch is visible to this adb, " +
+        "and whose foreign lease it carries, before readiness; it never consults pooled identity.",
     },
     "src/daemon/devicePoolRefresh.ts": {
       calls: 1,

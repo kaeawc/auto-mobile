@@ -395,6 +395,7 @@ export class DragAndDrop extends BaseVisualChange {
         {
           changeExpected: false,
           display: options.display,
+          resolvesTargetFromRead: true,
           progress,
           perf,
           signal,

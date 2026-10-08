@@ -359,6 +359,63 @@ describe("SetPosture", () => {
     }
   });
 
+  // am-flip-6p7 (mt-0083 D2): the console refuses fold/unfold but accepts `emu posture <n>`.
+  test.each([
+    ["opened", "emu unfold", "emu posture 3"],
+    ["closed", "emu fold", "emu posture 1"],
+  ] as const)(
+    "falls back to the numeric posture when '%s' is refused as not foldable",
+    async (posture, foldCommand, fallback) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(phoneStates, ""),
+      );
+      adb.setCommandResponse(foldCommand, createExecResult("KO: Device is not foldable\r\n", ""));
+      adb.setCommandResponse(fallback, createExecResult("OK\r\n", ""));
+      const { feature } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture },
+      });
+      const result = await feature.execute(posture);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell cmd device_state print-states",
+        "shell cmd device_state state reset",
+        foldCommand,
+        fallback,
+      ]);
+      expect(result.posture).toBe(posture);
+    },
+  );
+
+  test("a not-foldable refusal of the fallback posture command is still reported", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
+    adb.setCommandResponse("emu unfold", createExecResult("KO: Device is not foldable", ""));
+    adb.setCommandResponse("emu posture 3", createExecResult("KO: Failed to set posture", ""));
+    const { feature } = makeFeature(makeDevice(), adb, new FakeTimer());
+    await expect(feature.execute("opened")).rejects.toThrow(
+      "The emulator console refused 'emu posture 3': KO: Failed to set posture. The posture did not change.",
+    );
+  });
+
+  test("other fold/unfold refusals fail without the numeric fallback", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
+    adb.setCommandResponse("emu fold", createExecResult("KO: console busy", ""));
+    const { feature } = makeFeature(makeDevice(), adb, new FakeTimer());
+    await expect(feature.execute("closed")).rejects.toThrow(
+      "The emulator console refused 'emu fold': KO: console busy. The posture did not change.",
+    );
+    expect(adb.wasCommandExecuted("emu posture 1")).toBe(false);
+  });
+
   test("sets the Resizable emulator display preset", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(

@@ -2,7 +2,8 @@ import { FakeDeviceResourceObserver } from "../fakes/FakeDeviceResourceObserver"
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
 import { z } from "zod/v4";
 import {
   provisionDeviceSchema,
@@ -57,8 +58,29 @@ import type {
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import {
+  resetVideoRecordingManagerDependencies,
+  setVideoRecordingManagerDependencies,
+} from "../../src/server/videoRecordingManager";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 
 isolateToolRegistry();
+
+/**
+ * Pool dependencies with in-memory session-tracking and autolock persistence, so
+ * no pool write reaches getDatabase() (and through a caller-exported
+ * AUTOMOBILE_DB_DIR, a real file DB).
+ */
+function isolatedPoolDependencies(
+  ...[sessionManager, daemonSessionId, overrides]: Parameters<typeof createDevicePoolDependencies>
+): ReturnType<typeof createDevicePoolDependencies> {
+  return createDevicePoolDependencies(sessionManager, daemonSessionId, {
+    installedAppsRepository: new FakeInstalledAppsRepository(),
+    deviceSessionRepository: { markAutolockSession: async () => {} },
+    ...overrides,
+  });
+}
 
 let policyReads = 0;
 const autolockEnv = new Proxy<Record<string, string | undefined>>(
@@ -645,7 +667,19 @@ describe("provisionDevice handler", () => {
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
   let restorePipelineOverrides: (() => void) | undefined;
 
-  const setup = () => {
+  const setup = async () => {
+    // Teardown/replacement paths list active recordings. Without a fake repository
+    // that read reaches getDatabase(): the unit-test guard makes it throw at once,
+    // but a caller-exported AUTOMOBILE_DB_DIR stands the guard down and the real
+    // file I/O reorders teardown against provisioning (and hangs the warm-up).
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: { listActiveRecordingIds: () => [] } as never,
+      recordingRepository: new FakeVideoRecordingRepository() as never,
+      configRepository: {} as never,
+      highlightClient: {} as never,
+      timer: new FakeTimer(),
+      now: () => new Date(0),
+    });
     autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env: autolockEnv,
@@ -679,12 +713,13 @@ describe("provisionDevice handler", () => {
     restorePipelineOverrides = undefined;
     resetDeviceToolsDependencies();
     resetProvisionedDeviceTransportFenceForTests();
+    resetVideoRecordingManagerDependencies();
     DaemonState.getInstance().reset();
   };
 
-  const reset = () => {
+  const reset = async () => {
     cleanup();
-    setup();
+    await setup();
   };
   const test = warmedTests(reset);
   beforeEach(reset);
@@ -835,7 +870,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -934,7 +969,7 @@ describe("provisionDevice handler", () => {
       };
       deviceManager.setBootedDevices("android", [firstDevice, secondDevice]);
       const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "daemon", {
+        isolatedPoolDependencies(sessions, "daemon", {
           env: autolockEnv,
           timer,
           deviceManager,
@@ -3196,7 +3231,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3318,72 +3353,92 @@ describe("provisionDevice handler", () => {
         },
       });
     });
-    const exactIosProvisioner: ExactDeviceProvisioner = {
-      provision: async (request) => {
-        deviceManager.setDeviceImages("ios", [created.device]);
-        await request.lifecycleLease?.bindCanonicalIdentity({
-          platform: "ios",
-          stableId: created.device.deviceId!,
-        });
-        return created;
-      },
+    // Let the preempted provision's rollback teardown (and the racing teardown)
+    // run to completion against fakes: the shutdown must observe the simulator
+    // leave the booted list, and the iOS CtrlProxy stop must not reach a real runner.
+    const originalKillDevice = deviceManager.killDevice.bind(deviceManager);
+    deviceManager.killDevice = async (device) => {
+      await originalKillDevice(device);
+      deviceManager.setBootedDevices("ios", []);
     };
-    setDeviceToolsDependencies({
-      exactDeviceProvisionerFactory: () => exactIosProvisioner,
-    });
-    registerDeviceTools();
-    const provisionTool = ToolRegistry.getTool("provisionDevice");
-    const teardownTool = ToolRegistry.getTool("deleteDevice");
-    if (!provisionTool || !teardownTool) {
-      throw new Error("expected provisionDevice and deleteDevice tools");
+    const iosCtrlProxyManager = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+      stop: async () => {},
+    } as never);
+    try {
+      const exactIosProvisioner: ExactDeviceProvisioner = {
+        provision: async (request) => {
+          deviceManager.setDeviceImages("ios", [created.device]);
+          await request.lifecycleLease?.bindCanonicalIdentity({
+            platform: "ios",
+            stableId: created.device.deviceId!,
+          });
+          return created;
+        },
+      };
+      setDeviceToolsDependencies({
+        exactDeviceProvisionerFactory: () => exactIosProvisioner,
+      });
+      registerDeviceTools();
+      const provisionTool = ToolRegistry.getTool("provisionDevice");
+      const teardownTool = ToolRegistry.getTool("deleteDevice");
+      if (!provisionTool || !teardownTool) {
+        throw new Error("expected provisionDevice and deleteDevice tools");
+      }
+
+      const provision = provisionTool.handler({
+        operationId: "operation-ios-created-lock",
+        device: {
+          platform: "ios",
+          name: created.device.name,
+          spec: created.resolvedSpec,
+        },
+        boot: true,
+        readiness: "automation",
+      });
+      await readinessStarted;
+      deviceManager.clearHistory();
+
+      const teardown = teardownTool.handler({
+        operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
+        target: {
+          platform: "ios",
+          isVirtual: true,
+          stableId: created.device.deviceId!,
+          stableName: created.device.name,
+        },
+        mode: "destroy",
+        verifyAbsence: true,
+        timeoutMs: 60_000,
+      });
+      let teardownSettled = false;
+      void teardown.then(
+        () => {
+          teardownSettled = true;
+        },
+        () => {
+          teardownSettled = true;
+        },
+      );
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await Promise.resolve();
+      }
+      expect(teardownSettled).toBe(false);
+      expect(deviceManager.getExecutedOperations()).toEqual([]);
+
+      releaseReadiness();
+      const provisionResult = await provision;
+      const teardownResult = await teardown;
+      expect(deviceManager.getExecutedOperations()).toContainEqual(
+        expect.stringContaining("getBootedDevices:ios"),
+      );
+      // Teardown preempts the in-flight provision, whose rollback removes the
+      // simulator it created; the racing teardown then finds it already gone.
+      expect(provisionResult.isError).toBe(true);
+      expect(deviceManager.getExecutedOperations()).toContain("destroyDevice:ios:created-udid");
+      expect(teardownResult.structuredContent).toMatchObject({ state: "already_absent" });
+    } finally {
+      iosCtrlProxyManager.mockRestore();
     }
-
-    const provision = provisionTool.handler({
-      operationId: "operation-ios-created-lock",
-      device: {
-        platform: "ios",
-        name: created.device.name,
-        spec: created.resolvedSpec,
-      },
-      boot: true,
-      readiness: "automation",
-    });
-    await readinessStarted;
-    deviceManager.clearHistory();
-
-    const teardown = teardownTool.handler({
-      operationId: "35e6f783-b794-47b8-b8a1-8619677820f0",
-      target: {
-        platform: "ios",
-        isVirtual: true,
-        stableId: created.device.deviceId!,
-        stableName: created.device.name,
-      },
-      mode: "destroy",
-      verifyAbsence: true,
-      timeoutMs: 60_000,
-    });
-    let teardownSettled = false;
-    void teardown.then(
-      () => {
-        teardownSettled = true;
-      },
-      () => {
-        teardownSettled = true;
-      },
-    );
-    for (let attempt = 0; attempt < 50; attempt++) {
-      await Promise.resolve();
-    }
-    expect(teardownSettled).toBe(false);
-    expect(deviceManager.getExecutedOperations()).toEqual([]);
-
-    releaseReadiness();
-    await provision;
-    await teardown;
-    expect(deviceManager.getExecutedOperations()).toContainEqual(
-      expect.stringContaining("getBootedDevices:ios"),
-    );
   });
 
   test("rebinds a live session before replaying a completed boot operation", async () => {
@@ -3441,7 +3496,7 @@ describe("provisionDevice handler", () => {
       const timer = new FakeTimer();
       const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
+        isolatedPoolDependencies(sessionManager, "daemon-session", {
           env: autolockEnv,
           timer: timer,
           deviceManager: deviceManager,
@@ -3561,7 +3616,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3625,7 +3680,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3740,7 +3795,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3845,7 +3900,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3911,7 +3966,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -3979,7 +4034,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -4070,7 +4125,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -4126,7 +4181,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -4244,7 +4299,7 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -4914,7 +4969,7 @@ describe("provisionDevice handler", () => {
       const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       sessionManager.stopCleanupTimer();
       const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
+        isolatedPoolDependencies(sessionManager, "daemon-session", {
           env: autolockEnv,
           timer: timer,
           deviceManager: deviceManager,
@@ -4976,7 +5031,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -5145,7 +5200,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -5822,7 +5877,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -5896,7 +5951,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, persistence);
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -6004,7 +6059,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, persistence);
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,
@@ -6102,7 +6157,7 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
+      isolatedPoolDependencies(sessionManager, "daemon-session", {
         env: autolockEnv,
         timer: timer,
         deviceManager: deviceManager,

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   FileCtrlProxyForwardLease,
   ctrlProxyForwardLeaseFileName,
+  ctrlProxyOwnedForwardFileName,
   deviceIdFromCtrlProxyForwardLeaseFileName,
 } from "../../../../src/features/observe/android/CtrlProxyForwardLease";
 import type {
@@ -244,5 +245,88 @@ describe("FileCtrlProxyForwardLease stale-owner reclaim (#10497)", () => {
     const name = ctrlProxyForwardLeaseFileName("192.168.1.5:5555");
     expect(deviceIdFromCtrlProxyForwardLeaseFileName(name)).toBe("192.168.1.5:5555");
     expect(deviceIdFromCtrlProxyForwardLeaseFileName("x.lock.1.reclaim")).toBeUndefined();
+  });
+
+  test("records forward ownership for its coordination directory only (#10690)", () => {
+    const probe = new FakeOwnerProbe({ kind: "unreachable", detail: "unused" });
+    const creator = lease(probe, { pid: FOREIGN_PID });
+    creator.recordOwnedForward(8767);
+
+    const record = JSON.parse(
+      readFileSync(join(dir, ctrlProxyOwnedForwardFileName(DEVICE, 8767)), "utf8"),
+    );
+    expect(record).toEqual({
+      pid: FOREIGN_PID,
+      deviceId: DEVICE,
+      localPort: 8767,
+      createdAt: 100_000,
+    });
+    // A later daemon sharing the directory may reclaim it; other ports stay foreign.
+    const successor = lease(probe);
+    expect(successor.ownsForward(8767)).toBe(true);
+    expect(successor.ownsForward(8765)).toBe(false);
+    expect(successor.ownershipDirectory()).toBe(dir);
+
+    const otherDir = mkdtempSync(join(tmpdir(), "ctrlproxy-lease-other-"));
+    try {
+      const isolated = new FileCtrlProxyForwardLease(DEVICE, {
+        lockDir: () => otherDir,
+        ownerProbe: probe,
+        ownerSocketPath: () => undefined,
+        timer,
+      });
+      expect(isolated.ownsForward(8767)).toBe(false);
+    } finally {
+      rmSync(otherDir, { recursive: true, force: true });
+    }
+
+    successor.forgetOwnedForward(8767);
+    expect(creator.ownsForward(8767)).toBe(true);
+    expect(successor.ownsForward(8767)).toBe(false);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  test("lists this device's forward records with when they were written (#10690)", () => {
+    const own = lease(new FakeOwnerProbe({ kind: "unreachable", detail: "unused" }));
+    own.recordOwnedForward(8769);
+    timer.advanceTime(5);
+    own.fork().recordOwnedForward!(52001);
+    // Another device's record and the lease lock itself are not this device's records.
+    new FileCtrlProxyForwardLease("emulator-5602", {
+      lockDir: () => dir,
+      timer,
+    }).recordOwnedForward(8770);
+    expect(own.tryAcquire()).toBe(true);
+    // A torn record still lists, with no time, so the sweep can prune it.
+    writeFileSync(join(dir, ctrlProxyOwnedForwardFileName(DEVICE, 8771)), "{");
+
+    expect(own.recordedForwards().sort((a, b) => a.localPort - b.localPort)).toEqual([
+      { localPort: 8769, createdAt: 100_000 },
+      { localPort: 8771, createdAt: 0 },
+      { localPort: 52001, createdAt: 100_005 },
+    ]);
+    own.release();
+  });
+
+  test("lists no records when the coordination directory cannot be read", () => {
+    const missing = new FileCtrlProxyForwardLease(DEVICE, {
+      lockDir: () => join(dir, "missing"),
+      timer,
+    });
+    expect(missing.recordedForwards()).toEqual([]);
+  });
+
+  test("forks share forward records, and records stay out of the lease listing", () => {
+    const own = lease(new FakeOwnerProbe({ kind: "unreachable", detail: "unused" }));
+    const fork = own.fork();
+    fork.recordOwnedForward!(8768);
+    expect(own.ownsForward(8768)).toBe(true);
+
+    const name = ctrlProxyOwnedForwardFileName(DEVICE, 8768);
+    expect(readdirSync(dir)).toEqual([name]);
+    expect(deviceIdFromCtrlProxyForwardLeaseFileName(name)).toBeUndefined();
+
+    own.forgetOwnedForward(8768);
+    expect(fork.ownsForward!(8768)).toBe(false);
   });
 });

@@ -2833,7 +2833,7 @@ export class DaemonManager implements DaemonManagerLike {
     // before the child actually binds, so a competitor can still win the
     // canonical port in that window. strictPort makes the child's own
     // listen() call the atomic guard, failing loudly instead of silently
-    // falling back to port + 1..3 and recreating the split-brain.
+    // falling back to a higher port in the range and recreating the split-brain.
     const restartOptions = mergeRestartOptions(runningOptions, requestedOptions);
     if (expectedDaemon && !this.isSameDaemonGeneration(status, expectedDaemon)) {
       stderrLog("Daemon generation changed before restart; joining the current generation");

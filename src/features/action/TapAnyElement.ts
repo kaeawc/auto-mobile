@@ -1986,6 +1986,7 @@ export class TapAnyElement extends BaseVisualChange {
           changeExpected: false,
           display: targetDisplay?.observation.display.key,
           previousObservation: targetDisplay?.observation,
+          resolvesTargetFromRead: true,
           timeoutMs: 800,
           progress,
           perf,

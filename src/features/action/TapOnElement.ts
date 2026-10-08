@@ -1418,6 +1418,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           right: ime.bounds[2],
           bottom: ime.bounds[3],
         },
+        // Default-layer selectors also resolve app rows kept under AutoMobile's own overlay
+        // (#10691); layer "app" refuses those later with its own overlay-specific error.
+        context.options.layer === undefined,
       );
       if (!safe.point) {
         throw new TapTargetUnavailableError(
@@ -4590,6 +4593,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           signal,
           deferPredictionOutcome: true,
           deferPostActionScreenshot: true,
+          resolvesTargetFromRead: true,
           ...(options.ensureChecked !== undefined
             ? { observationHostTimestampProvider: () => ensureCheckedTapTimestamp }
             : {}),

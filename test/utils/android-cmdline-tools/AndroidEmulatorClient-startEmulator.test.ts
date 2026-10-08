@@ -70,6 +70,17 @@ describe("AndroidEmulatorClient startEmulator handle", () => {
     expect(result).toBeNull();
   });
 
+  test("reports an AVD already visible to this adb (e.g. started by hand) as already-running", async () => {
+    const { client } = clientWithAvd("Pixel_9", [
+      { name: "Pixel_9", platform: "android", deviceId: "emulator-5554", source: "local" },
+    ]);
+
+    const launch = await client.launchEmulator({ avdName: "Pixel_9" });
+
+    expect(launch.process).toBeNull();
+    expect(launch.outcome).toBe("already-running");
+  });
+
   test("returns null when the AVD is already starting", async () => {
     const { client, advertisements } = clientWithAvd("Pixel_9");
     advertisements.advertised.add("Pixel_9");

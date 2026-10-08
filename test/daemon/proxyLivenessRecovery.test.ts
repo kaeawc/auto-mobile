@@ -27,8 +27,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 // #10053: per-session liveness recovery, driven entirely by a fake timer against a scripted daemon.
 
-const LEASE_MS = 10_000;
-/** The heartbeat request timeout of a 5s-cadence proxy on a 10s lease. */
+/** The scenarios below are written against a 20 s budget: a configured lease plus the suspect grace. */
+const BUDGET_MS = 20_000;
+const LEASE_MS = BUDGET_MS - SUSPECT_GRACE_MS;
+/** The heartbeat request timeout of a 5s-cadence proxy on that lease. */
 const REQUEST_TIMEOUT_MS = 5_000;
 
 interface Harness {
@@ -106,7 +108,7 @@ describe("recovery budget arithmetic", () => {
     const slot = (now: number, requestTimeoutMs = REQUEST_TIMEOUT_MS) =>
       recoveryAttemptSlotMs({ leaseMs: LEASE_MS, lastAckAt: 0, now, requestTimeoutMs });
     expect(slot(6_000)).toBe(
-      Math.floor((20_000 - RECOVERY_SAFETY_MARGIN_MS - 6_000) / LIVENESS_RECOVERY_ATTEMPTS),
+      Math.floor((BUDGET_MS - RECOVERY_SAFETY_MARGIN_MS - 6_000) / LIVENESS_RECOVERY_ATTEMPTS),
     );
     // An hour-old acknowledgement says nothing about the daemon (review F4): each attempt is
     // given as long as a regular heartbeat, not a constant 250 ms.

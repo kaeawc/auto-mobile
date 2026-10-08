@@ -332,3 +332,46 @@ describe("AndroidEmulatorClient duplicate-launch guard (#6407)", () => {
     }
   });
 });
+
+describe("AndroidEmulatorClient launch outcome", () => {
+  test("a launch that spawns its emulator is launched", async () => {
+    const harness = createHarness();
+
+    const launch = harness.client.launchEmulator({ avdName: AVD });
+    await harness.spawnedAtLeast(1);
+    completeStartupValidation(harness.children[0]);
+
+    expect((await launch).outcome).toBe("launched");
+  });
+
+  test("joining a launch in flight in this process is joined-in-process-launch", async () => {
+    const harness = createHarness();
+
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    const second = await harness.client.launchEmulator({ avdName: AVD });
+
+    expect(second.process).toBeNull();
+    expect(second.outcome).toBe("joined-in-process-launch");
+
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+  });
+
+  test("an AVD this process is still bringing up is already-running", async () => {
+    const harness = createHarness();
+    const firstLaunch = harness.client.startEmulator(AVD);
+    await harness.spawnedAtLeast(1);
+    completeStartupValidation(harness.children[0]);
+    await firstLaunch;
+
+    expect((await harness.client.launchEmulator({ avdName: AVD })).outcome).toBe("already-running");
+  });
+
+  test("an advertised AVD is already-running", async () => {
+    const harness = createHarness();
+    harness.advertisements.advertised.add(AVD);
+
+    expect((await harness.client.launchEmulator({ avdName: AVD })).outcome).toBe("already-running");
+  });
+});

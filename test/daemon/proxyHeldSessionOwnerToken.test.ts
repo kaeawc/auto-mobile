@@ -315,6 +315,9 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
     await foreignHeartbeat(true);
     const proxy = createProxy({ token: "harness-token", initialSessionUuid: "android-session" });
     await proxy.ensureConnected();
+    // A startup claim alone never fences (r1 finding 4): the leash starts once a tool call uses
+    // the binding.
+    await proxy.callTool("observe", {});
 
     // The foreign owner keeps its lease live past the conflict leash (lease plus grace plus one tick).
     for (let tick = 0; tick < 14; tick++) {

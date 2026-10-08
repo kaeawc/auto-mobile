@@ -55,6 +55,8 @@ class LivenessTimer extends FakeTimer {
 }
 
 const LEASE_MS = 10_000;
+/** Time a daemon's suspect refusal reports as left in its grace window. */
+const REFUSAL_REMAINING_MS = SUSPECT_GRACE_MS - 1_000;
 const DEVICE_POOL = {
   refreshDevices: async () => 0,
   getStats: () => ({ total: 2, idle: 0, assigned: 2, error: 0 }),
@@ -191,7 +193,7 @@ describe("proxy liveness stalls (#10053)", () => {
   }
 
   function shapeSuspectResult(sessionUuid = "android-session") {
-    return shapeToolCallError(new SessionSuspectError(sessionUuid, 8_000), {
+    return shapeToolCallError(new SessionSuspectError(sessionUuid, REFUSAL_REMAINING_MS), {
       toolName: "observe",
       source: "ProxyServer",
     });
@@ -290,7 +292,9 @@ describe("proxy liveness stalls (#10053)", () => {
   });
 
   describe("daemon_stalled", () => {
-    test.each([2_000, 5_000])(
+    // Cadences whose detection plus three attempts fit inside lease plus grace (the default
+    // proxy cadence is 2 s).
+    test.each([1_000, 2_000])(
       "an unresponsive daemon yields daemon_stalled after exactly three failed attempts at a %i ms cadence",
       async (intervalMs) => {
         const proxy = createProxy(intervalMs);
@@ -1150,8 +1154,9 @@ describe("proxy liveness stalls (#10053)", () => {
       const proxy = createProxy(2_000);
       await acquire(proxy, "getAndroid");
       timer.stall(55_000);
-      // The daemon woke with the proxy and needs a few seconds before it answers heartbeats.
-      hangUntil = timer.now() + 2_000 + 5_000;
+      // The daemon woke with the proxy and needs a few seconds before it answers heartbeats,
+      // still inside its 60 s idle window plus the suspect grace.
+      hangUntil = timer.now() + 2_000 + 3_000;
 
       await baseTimer.advanceTimeAsync(2_000);
       await baseTimer.advanceTimeAsync(4_000);
@@ -1261,7 +1266,7 @@ describe("proxy liveness stalls (#10053)", () => {
       expect(JSON.parse(result.content[0].text).error).toMatchObject({
         code: DAEMON_SESSION_SUSPECT_CODE,
         sessionUuid: "android-session",
-        remainingMs: 8_000,
+        remainingMs: REFUSAL_REMAINING_MS,
       });
       // Ordinary tool failures and prose stay unrecognised.
       expect(
@@ -1386,9 +1391,10 @@ describe("proxy liveness stalls (#10053)", () => {
 
       expect(declaresDeviceSessionSuspect(result)).toBe(true);
       expect(observeCalls).toBe(1);
-      // 8 s left in the window plus the 5 s heartbeat request timeout (lease 10 s, interval 5 s).
-      expect(elapsedMs).toBeGreaterThanOrEqual(13_000);
-      expect(elapsedMs).toBeLessThan(13_000 + 500);
+      // The time left in the window plus the 5 s heartbeat request timeout (lease 10 s, interval
+      // 5 s), still short of the 13 s the three recovery attempts take before handing over.
+      expect(elapsedMs).toBeGreaterThanOrEqual(REFUSAL_REMAINING_MS + 5_000);
+      expect(elapsedMs).toBeLessThan(REFUSAL_REMAINING_MS + 5_000 + 500);
     });
 
     test("a refusal for a session this proxy does not hold is returned unchanged and not retried", async () => {

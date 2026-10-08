@@ -20,7 +20,6 @@ import {
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
-  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM,
   INTERNAL_ACTIONS_COMPACT_METADATA_PARAM,
@@ -37,6 +36,7 @@ import {
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
 } from "./constants";
+import { getSessionIdleTimeoutMs, PROXY_HEARTBEAT_INTERVAL_MS } from "./sessionLivenessWindows";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
@@ -138,7 +138,7 @@ export type VersionMismatchReason =
 
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
-const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = PROXY_HEARTBEAT_INTERVAL_MS;
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
@@ -975,8 +975,8 @@ export class DaemonMcpProxy {
       claimSent: boolean;
       /**
        * Proxy-clock time a tool call last bound this session (#10657). A held session nothing
-       * has named for {@link DAEMON_BOUND_SESSION_REPLAY_TTL_MS} is abandoned and evicted, so a
-       * conversation that moved to another device stops pinning the old one.
+       * has named for the session idle window (`boundSessionReplayTtlMs`) is abandoned and
+       * evicted, so a conversation that moved to another device stops pinning the old one.
        */
       lastUsedAt: number;
       /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
@@ -990,10 +990,21 @@ export class DaemonMcpProxy {
   /** How long a refused claim keeps retrying: the other owner's lease plus its grace (#10053). */
   private readonly ownershipConflictLeashMs: number;
   /**
+   * The daemon's idle window, which retires the remembered binding and evicts abandoned held
+   * sessions. Read from the same `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` override the daemon reads.
+   */
+  private readonly boundSessionReplayTtlMs = getSessionIdleTimeoutMs();
+  /**
    * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
    */
   private latestBindingConflict: { sessionUuid: string; since: number } | undefined;
+  /**
+   * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
+   * While the previous owner is still heartbeating, its refusals must not fence the binding: the
+   * keeper keeps retrying the claim, and the leash only starts once a tool call needs the session.
+   */
+  private initialSessionAwaitingFirstCall = false;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -1018,6 +1029,12 @@ export class DaemonMcpProxy {
   private readonly livenessHandoverListeners = new Set<(handover: LivenessHandover) => void>();
   /** Tool calls currently awaiting an answer on each daemon connection. */
   private readonly toolCallsInFlight = new WeakMap<DaemonClientLike, number>();
+  /**
+   * Tool calls forwarded under each session UUID that have not finished yet. A session with a call
+   * in flight is in use, so neither the replay lease of the latest binding nor a held session's
+   * idle eviction may retire it; the idle clock restarts when its last call ends.
+   */
+  private readonly sessionCallsInFlight = new Map<string, number>();
   /** Connections a liveness attempt saw fail at the transport level: dead, with nothing to lose. */
   private readonly deadSocketClients = new WeakSet<DaemonClientLike>();
   /** Stable for this proxy instance, including all transport reconnects. */
@@ -1205,6 +1222,7 @@ export class DaemonMcpProxy {
       this.boundSessionUuid = config.initialSessionUuid.trim();
       this.boundSessionUuidAt = this.timer.now();
       this.initialSessionBindingConfigured = true;
+      this.initialSessionAwaitingFirstCall = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
       this.claimableSessions.add(this.boundSessionUuid);
     }
@@ -1258,6 +1276,28 @@ export class DaemonMcpProxy {
       }
     } catch (error) {
       await this.handleConnectionFailure(error);
+    }
+  }
+
+  /**
+   * Adopt the `--initial-session-uuid` session at proxy startup instead of on the first tool call.
+   * Connection establishment sends the claiming heartbeat and starts the keeper, so a handoff
+   * proxy that has only initialized already owns the session and keeps it alive if the previous
+   * owner stops first. A no-op without an initial session binding.
+   */
+  async claimInitialSession(): Promise<void> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!this.initialSessionBindingConfigured || !sessionUuid || this.closing) {
+      return;
+    }
+    try {
+      await this.ensureConnected();
+    } catch (error) {
+      // Best-effort: the first tool call retries the connection and its claim.
+      logger.warn(
+        `[DaemonMcpProxy] Startup claim of initial session ${sessionUuid} failed: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 
@@ -3301,6 +3341,8 @@ export class DaemonMcpProxy {
     allowSuspectRetry: boolean,
   ): Promise<ForwardedToolCall> {
     signal?.throwIfAborted();
+    // From the first tool call on, a refused claim of the initial binding is leashed as usual.
+    this.initialSessionAwaitingFirstCall = false;
     // These are daemon-internal routing markers. Never accept caller-controlled
     // values: only this proxy may add them after selecting its active binding.
     const callerArgs = { ...args };
@@ -3352,6 +3394,8 @@ export class DaemonMcpProxy {
     this.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
     let registeredRequestId: string | undefined;
     let registeredClient: DaemonClientLike | undefined;
+    const trackedSessionUuid = this.beginSessionCall(name, forwardedSessionUuid);
+    let callReachedSession = true;
     try {
       const forwarding = this.withRecoverableReconnect(
         () => {
@@ -3426,6 +3470,7 @@ export class DaemonMcpProxy {
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
       return { result };
     } catch (error) {
+      callReachedSession = !this.failureNeverReachedLiveSession(error);
       signal?.throwIfAborted();
       // The success-only rememberSessionUuid above never runs when the handler
       // rejects, but an admitted-then-rejected call still reached
@@ -3455,6 +3500,7 @@ export class DaemonMcpProxy {
       }
       throw error;
     } finally {
+      this.endSessionCall(trackedSessionUuid, callReachedSession);
       this.releaseReleaseEpochReference(forwardedSessionUuid);
       this.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
       this.removeProgressListener(registeredClient, registeredRequestId);
@@ -3735,17 +3781,69 @@ export class DaemonMcpProxy {
     if (
       this.initialSessionBindingConfigured ||
       this.boundSessionUuid === undefined ||
-      this.boundSessionUuidAt === undefined
+      this.boundSessionUuidAt === undefined ||
+      // A call still running on the binding is use: the idle window counts from when it ends.
+      this.hasSessionCallInFlight(this.boundSessionUuid)
     ) {
       return false;
     }
-    return this.timer.now() - this.boundSessionUuidAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+    return this.timer.now() - this.boundSessionUuidAt >= this.boundSessionReplayTtlMs;
+  }
+
+  private hasSessionCallInFlight(sessionUuid: string): boolean {
+    return (this.sessionCallsInFlight.get(sessionUuid) ?? 0) > 0;
+  }
+
+  /**
+   * Count a forwarded call against the session it uses; returns the UUID to pass to
+   * {@link endSessionCall}. Inventory observation never uses the session it names, so it neither
+   * holds nor refreshes it.
+   */
+  private beginSessionCall(name: string, sessionUuid: string | undefined): string | undefined {
+    if (sessionUuid === undefined || isDeviceInventoryTool(name)) {
+      return undefined;
+    }
+    this.sessionCallsInFlight.set(
+      sessionUuid,
+      (this.sessionCallsInFlight.get(sessionUuid) ?? 0) + 1,
+    );
+    return sessionUuid;
+  }
+
+  /**
+   * A call forwarded under `sessionUuid` ended. When it reached the session, the idle window
+   * restarts now (calls still in flight keep it from expiring meanwhile): the owner rule releases a
+   * session 2 min after the END of its last tool call, however long that call ran. A call that never reached a
+   * live session (a transport or pre-dispatch failure) used nothing, so it leaves the clock alone.
+   */
+  private endSessionCall(sessionUuid: string | undefined, reachedSession: boolean): void {
+    if (sessionUuid === undefined) {
+      return;
+    }
+    const remaining = (this.sessionCallsInFlight.get(sessionUuid) ?? 1) - 1;
+    if (remaining > 0) {
+      this.sessionCallsInFlight.set(sessionUuid, remaining);
+    } else {
+      this.sessionCallsInFlight.delete(sessionUuid);
+    }
+    if (!reachedSession) {
+      return;
+    }
+    const now = this.timer.now();
+    if (sessionUuid === this.boundSessionUuid && !this.terminalBoundSession) {
+      this.boundSessionUuidAt = now;
+    }
+    const held = this.otherHeldSessions.get(sessionUuid);
+    if (held) {
+      held.lastUsedAt = now;
+    }
   }
 
   private clearBoundSessionUuid(): void {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
     this.initialSessionBindingConfigured = false;
+    this.initialSessionAwaitingFirstCall = false;
     this.boundSessionFromResultMint = false;
     this.livenessOwnershipClaimSent = false;
     this.latestBindingConflict = undefined;
@@ -4500,9 +4598,12 @@ export class DaemonMcpProxy {
   private evictAbandonedHeldSessions(): void {
     const now = this.timer.now();
     for (const [sessionUuid, held] of [...this.otherHeldSessions]) {
-      if (now - held.lastUsedAt >= DAEMON_BOUND_SESSION_REPLAY_TTL_MS) {
+      if (
+        !this.hasSessionCallInFlight(sessionUuid) &&
+        now - held.lastUsedAt >= this.boundSessionReplayTtlMs
+      ) {
         logger.info(
-          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${DAEMON_BOUND_SESSION_REPLAY_TTL_MS}ms; no longer heartbeating it`,
+          `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
         );
         this.dropHeldSession(sessionUuid);
       }
@@ -4864,6 +4965,13 @@ export class DaemonMcpProxy {
     if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
       return;
     }
+    if (this.initialSessionAwaitingFirstCall) {
+      // A handoff proxy claimed its initial session at startup while the previous owner still
+      // heartbeats it. Keep the binding claimable and keep retrying: the claim lands once the old
+      // owner's lease lapses, and the leash starts only when a tool call needs the session.
+      this.latestBindingConflict = undefined;
+      return;
+    }
     const now = this.timer.now();
     if (this.latestBindingConflict?.sessionUuid !== sessionUuid) {
       this.latestBindingConflict = { sessionUuid, since: now };
@@ -5211,10 +5319,7 @@ export class DaemonMcpProxy {
       name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       isDeviceInventoryTool(name) ||
-      isUnprovenSessionAdmissionError(error) ||
-      this.isRecoverableDaemonSessionError(error) ||
-      this.isPreDispatchDaemonSessionError(error) ||
-      this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
+      this.failureNeverReachedLiveSession(error)
     ) {
       return;
     }
@@ -5232,6 +5337,16 @@ export class DaemonMcpProxy {
       this.updateBoundSessionUuid(admittedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  /** A rejection proving the call never reached the handler with a live session. */
+  private failureNeverReachedLiveSession(error: unknown): boolean {
+    return (
+      isUnprovenSessionAdmissionError(error) ||
+      this.isRecoverableDaemonSessionError(error) ||
+      this.isPreDispatchDaemonSessionError(error) ||
+      this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
+    );
   }
 
   /**

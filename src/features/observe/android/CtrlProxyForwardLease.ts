@@ -1,4 +1,6 @@
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
@@ -41,6 +43,48 @@ export function deviceIdFromCtrlProxyForwardLeaseFileName(fileName: string): str
   return decoded.length > 0 ? decoded : undefined;
 }
 
+/**
+ * Marker recording that a process in this coordination directory created the
+ * CtrlProxy forward on `localPort` for `deviceId` (issue #10690). The ".forward"
+ * suffix keeps markers out of the ".lock" lease listing.
+ */
+export function ctrlProxyOwnedForwardFileName(deviceId: string, localPort: number): string {
+  return `${Buffer.from(deviceId).toString("base64url")}.${localPort}.forward`;
+}
+
+/** One `.forward` marker: the host port and when its writer recorded it. */
+export interface RecordedCtrlProxyForward {
+  localPort: number;
+  /** Writer's clock when recorded; 0 when the record cannot be read. */
+  createdAt: number;
+}
+
+/** Parse the host port out of a marker file name written for `deviceId`. */
+function localPortFromOwnedForwardFileName(deviceId: string, fileName: string): number | undefined {
+  const prefix = `${Buffer.from(deviceId).toString("base64url")}.`;
+  if (!fileName.startsWith(prefix) || !fileName.endsWith(".forward")) {
+    return undefined;
+  }
+  const port = Number(fileName.slice(prefix.length, -".forward".length));
+  return Number.isInteger(port) && port > 0 ? port : undefined;
+}
+
+function recordCreatedAt(contents: string): number {
+  try {
+    const parsed: unknown = JSON.parse(contents);
+    return typeof parsed === "object" &&
+      parsed !== null &&
+      "createdAt" in parsed &&
+      typeof parsed.createdAt === "number"
+      ? parsed.createdAt
+      : 0;
+  } catch (error) {
+    // A torn or foreign-format record carries no time; 0 lets the sweep prune it.
+    logger.debug(`[CTRL_PROXY] Unreadable CtrlProxy forward record: ${errorMessage(error)}`);
+    return 0;
+  }
+}
+
 /** Why an attempt to take a live owner's lease succeeded or was refused. */
 export interface ForwardLeaseReclaimResult {
   acquired: boolean;
@@ -78,6 +122,29 @@ export interface CtrlProxyForwardLease {
   isHeld?(): boolean;
   /** When this process last took the lease, while it holds it. */
   getAcquiredAt?(): number | undefined;
+  /**
+   * Record that this process created the device's CtrlProxy forward on
+   * `localPort` (issue #10690). Only a recorded forward may later be removed.
+   */
+  recordOwnedForward?(localPort: number): void;
+  /** Drop the record once the forward on `localPort` is confirmed gone. */
+  forgetOwnedForward?(localPort: number): void;
+  /**
+   * Whether this process, or an earlier AutoMobile process sharing its
+   * coordination directory, created the forward on `localPort`. A forward
+   * without a record belongs to a daemon this process cannot coordinate with,
+   * so it must never be removed or replaced (issue #10690).
+   */
+  ownsForward?(localPort: number): boolean;
+  /** The directory holding the lease and forward records, for diagnostics. */
+  ownershipDirectory?(): string;
+  /**
+   * Every forward record for this device in the coordination directory, with
+   * when it was written. The orphan sweep drops records whose forward is gone
+   * (ADB restart, device reboot) so a stale record can never claim a port that
+   * another daemon later forwards (issue #10690).
+   */
+  recordedForwards?(): RecordedCtrlProxyForward[];
 }
 
 export interface FileCtrlProxyForwardLeaseDeps {
@@ -100,6 +167,8 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private readonly ownerSocketPath: () => string | undefined;
   private readonly timer: Timer;
   private readonly pid: number;
+  /** Forwards this process created; shared with forked observer holders. */
+  private readonly ownedForwardPorts = new Set<number>();
 
   public constructor(
     private readonly deviceId: string,
@@ -262,6 +331,86 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     return this.lastOwnerPid;
   }
 
+  private ownedForwardPath(localPort: number): string {
+    return join(this.lockDir(), ctrlProxyOwnedForwardFileName(this.deviceId, localPort));
+  }
+
+  public recordOwnedForward(localPort: number): void {
+    this.ownedForwardPorts.add(localPort);
+    const record = {
+      pid: this.pid,
+      deviceId: this.deviceId,
+      localPort,
+      createdAt: this.timer.now(),
+    };
+    try {
+      writeFileSync(this.ownedForwardPath(localPort), `${JSON.stringify(record)}\n`, {
+        mode: 0o600,
+      });
+    } catch (error) {
+      // This process still owns the forward in memory; only crash recovery by
+      // a later daemon loses the record, and it then leaves the forward alone.
+      logger.warn(
+        `[CTRL_PROXY] Failed to record CtrlProxy forward ownership for ${this.deviceId} ` +
+          `tcp:${localPort}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  public forgetOwnedForward(localPort: number): void {
+    this.ownedForwardPorts.delete(localPort);
+    try {
+      rmSync(this.ownedForwardPath(localPort), { force: true });
+    } catch (error) {
+      // A leftover record only lets this coordination domain reclaim the port later.
+      logger.warn(
+        `[CTRL_PROXY] Failed to remove CtrlProxy forward record for ${this.deviceId} ` +
+          `tcp:${localPort}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  public ownsForward(localPort: number): boolean {
+    return this.ownedForwardPorts.has(localPort) || existsSync(this.ownedForwardPath(localPort));
+  }
+
+  public ownershipDirectory(): string {
+    return this.lockDir();
+  }
+
+  public recordedForwards(): RecordedCtrlProxyForward[] {
+    let fileNames: string[];
+    try {
+      fileNames = readdirSync(this.lockDir());
+    } catch (error) {
+      // No readable directory means no records to prune; ownership checks still fail closed.
+      logger.warn(
+        `[CTRL_PROXY] Failed to list CtrlProxy forward records for ${this.deviceId}: ` +
+          `${errorMessage(error)}`,
+        error,
+      );
+      return [];
+    }
+    return fileNames.flatMap((fileName) => {
+      const localPort = localPortFromOwnedForwardFileName(this.deviceId, fileName);
+      if (localPort === undefined) {
+        return [];
+      }
+      try {
+        const contents = readFileSync(this.ownedForwardPath(localPort), "utf8");
+        return [{ localPort, createdAt: recordCreatedAt(contents) }];
+      } catch (error) {
+        // Removed between listing and reading: nothing left to prune.
+        logger.debug(
+          `[CTRL_PROXY] CtrlProxy forward record ${fileName} vanished: ${errorMessage(error)}`,
+        );
+        return [];
+      }
+    });
+  }
+
   /** A separate holder on the same process lease for one detached observer. */
   public fork(): CtrlProxyForwardLease {
     let acquired = false;
@@ -279,6 +428,11 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
         }
       },
       getLastOwnerPid: () => this.lastOwnerPid,
+      recordOwnedForward: (localPort) => this.recordOwnedForward(localPort),
+      forgetOwnedForward: (localPort) => this.forgetOwnedForward(localPort),
+      ownsForward: (localPort) => this.ownsForward(localPort),
+      ownershipDirectory: () => this.ownershipDirectory(),
+      recordedForwards: () => this.recordedForwards(),
       // A fork can meet the same idle or orphaned foreign owner as the singleton.
       tryReclaimFromStaleOwner: async () => {
         const result = await this.reclaimHolder();

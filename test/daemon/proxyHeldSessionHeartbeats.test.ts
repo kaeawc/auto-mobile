@@ -3,6 +3,7 @@ import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { LIVENESS_RECOVERY_ATTEMPTS } from "../../src/daemon/proxyLivenessRecovery";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
@@ -232,10 +233,15 @@ describe("proxy heartbeats every session it holds (issue #9335)", () => {
 
     failHeartbeatFor.add("ios-session");
     // The failing latest binding gets a recovery attempt (#10053) and then sits out the ticks
-    // while it recovers; the held session keeps heartbeating throughout.
+    // while it recovers, heard from only through its spaced recovery attempts; the held session
+    // keeps heartbeating on every tick throughout.
     expect(await tickSessions()).toEqual(["android-session", "ios-session", "ios-session"]);
-    expect(await tickSessions()).toEqual(["android-session"]);
-    expect(await tickSessions()).toEqual(["android-session"]);
+    const later = [await tickSessions(), await tickSessions()];
+    for (const tick of later) {
+      expect(tick).toContain("android-session");
+    }
+    const iosRecoveryAttempts = later.flat().filter((sessionId) => sessionId === "ios-session");
+    expect(iosRecoveryAttempts.length).toBeLessThan(LIVENESS_RECOVERY_ATTEMPTS);
   });
 
   test("rebinding does not duplicate timers or heartbeats", async () => {

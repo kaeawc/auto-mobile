@@ -51,6 +51,7 @@ import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/vir
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeEmulatorConsoleBusyRegistry } from "../fakes/FakeEmulatorConsoleBusyRegistry";
 import { logger } from "../../src/utils/logger";
+import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -67,6 +68,9 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
     });
   }
 }
+
+// These tests exercise the three-minute restart recovery window, which the idle deadline caps.
+useSessionIdleWindowForSuite();
 
 describe("DevicePool", () => {
   let devicePool: DevicePool;

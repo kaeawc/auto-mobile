@@ -298,7 +298,8 @@ describe("deliberate liveness ownership release", () => {
   );
 
   test("release retains the later activity-based heartbeat deadline and its suspect grace", async () => {
-    timer.advanceTime(8_000);
+    // A tool call inside the owner's lease moves the activity heartbeat past the claim.
+    timer.advanceTime(LEASE - 2_000);
     await manager.getOrCreateSession(SESSION);
     await release();
     timer.advanceTime(LEASE + SUSPECT_GRACE_MS);
@@ -315,7 +316,7 @@ describe("deliberate liveness ownership release", () => {
     session.awaitingOwnerSince = timer.now();
     session.hasReceivedHeartbeat = false;
     await release();
-    timer.advanceTime(LEASE);
+    timer.advanceTime(LEASE + SUSPECT_GRACE_MS);
     await monitor.tick();
     expect(reaped).toEqual([]);
     timer.advanceTime(1);

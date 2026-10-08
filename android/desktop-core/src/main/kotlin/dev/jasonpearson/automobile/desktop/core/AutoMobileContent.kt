@@ -103,8 +103,10 @@ import dev.jasonpearson.automobile.desktop.core.failures.McpFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
 import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceBindErrorNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlBlockedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceControlTapErrorBanner
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceIdleReleasedNotice
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceViewingNotice
 import dev.jasonpearson.automobile.desktop.core.layout.ScreenshotMetadataOverlay
@@ -961,11 +963,17 @@ fun AutoMobileContent(
   // client once it unblocked, and that session's independent error claim could publish a banner
   // into the new context.
   val controlClientProvider by rememberUpdatedState(clientProvider)
+  // Each dispatched input is the user using the device: after an inactivity release it binds the
+  // device again (owner decision 2026-10-08).
+  val onUserInteraction by rememberUpdatedState(desktopSessionState.onUserInteraction)
   val deviceControlSession =
     remember(screenshotScope) {
       DeviceControlSession(
         scope = screenshotScope,
-        clientProvider = { controlClientProvider?.invoke() },
+        clientProvider = {
+          activeDeviceIdState.value?.let { onUserInteraction(it) }
+          controlClientProvider?.invoke()
+        },
         platform = { controlPlatform.value },
         nowMs = MONOTONIC_NOW_MS,
         publishError = { message -> deviceControlTapError = message },
@@ -2062,6 +2070,20 @@ fun AutoMobileContent(
               // takes it on its own (#10660). Take control is the one explicit bind attempt.
               if (activeDeviceId != null && desktopSessionState.viewingDeviceId == activeDeviceId) {
                 DeviceViewingNotice(onTakeControl = desktopSessionState.requestControl)
+              }
+              // Released for inactivity: still controllable; the next input re-binds it.
+              if (
+                activeDeviceId != null && desktopSessionState.idleReleasedDeviceId == activeDeviceId
+              ) {
+                DeviceIdleReleasedNotice(onTakeControl = desktopSessionState.requestControl)
+              }
+              // A bind that failed for another reason is an error, not viewing (#10682).
+              val bindError = desktopSessionState.bindErrorMessage
+              if (activeDeviceId != null && bindError != null) {
+                DeviceBindErrorNotice(
+                  message = bindError,
+                  onRetry = desktopSessionState.requestControl,
+                )
               }
 
               // Why control is unavailable (issue #4531). The policy's reason is surfaced only

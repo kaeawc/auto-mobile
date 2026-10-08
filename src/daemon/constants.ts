@@ -2,6 +2,7 @@ import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./sessionLivenessWindows";
 export { DAEMON_NON_FINITE_ENCODED_PARAM } from "../utils/nonFiniteJson";
 
 /**
@@ -412,14 +413,15 @@ export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uu
 
 /**
  * How long the proxy will keep replaying a remembered session binding on
- * sessionless calls before treating it as retired (issue #4610). It mirrors the
- * daemon's session idle timeout (`SessionManager.SESSION_TIMEOUT_MS`, 30 min):
- * once this window elapses with no forwarded call (explicit or implicit)
- * refreshing the binding, the daemon session has certainly idle/heartbeat-expired, and
+ * sessionless calls before treating it as retired (issue #4610). It is the
+ * daemon's session idle window (`DEFAULT_SESSION_IDLE_TIMEOUT_MS`, 2 min; the
+ * proxy reads the same `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` override through
+ * `getSessionIdleTimeoutMs`): once this window elapses after the end of the last
+ * forwarded call (explicit or implicit), the daemon session has idle-expired, and
  * replaying its UUID would silently recreate the released session and reacquire
  * a device without the caller asking for it.
  */
-export const DAEMON_BOUND_SESSION_REPLAY_TTL_MS = 30 * 60 * 1000;
+export const DAEMON_BOUND_SESSION_REPLAY_TTL_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
 
 /**
  * Control-socket method a client sends to opt in to server-pushed
@@ -498,13 +500,14 @@ export const CLI_KEEPER_LIVENESS_OWNER_KIND = "cli-keeper";
 /**
  * Default wall-clock idle timeout for a CLI-owned session (issue #6870).
  *
- * Ten minutes, deliberately measured in minutes rather than the 10 s heartbeat
- * timeout: the gap between two `--cli` invocations is an agent reading the
- * previous result and choosing the next call, which routinely exceeds 10 s.
- * Each invocation refreshes the clock (activity and the CLI's own heartbeat
- * both stamp `lastHeartbeat`), so only a genuinely abandoned session expires.
+ * The same two minutes as the ordinary idle window (owner decision 2026-10-08),
+ * deliberately measured in minutes rather than the heartbeat lease: the gap
+ * between two `--cli` invocations is an agent reading the previous result and
+ * choosing the next call, which routinely exceeds the lease. Each invocation
+ * refreshes the clock (activity, the end of the call and the CLI's own heartbeat
+ * all stamp `lastHeartbeat`), so only a genuinely abandoned session expires.
  */
-export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+export const DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
 
 /**
  * Ceiling applied to a CLI idle timeout the daemon did not resolve itself

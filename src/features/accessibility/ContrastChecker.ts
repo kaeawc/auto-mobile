@@ -62,6 +62,51 @@ function reportedTextSizePx(element: Element): number | null {
 }
 
 /** Whether the whole element rectangle lies inside the decoded image (hierarchy px == raster px on Android). */
+/** Summed-area table of opaque (alpha 255) pixels: `(width + 1) * (height + 1)` running counts. */
+const opaquePixelTables = new WeakMap<RawImage, Int32Array>();
+
+function opaquePixelTable(image: RawImage): Int32Array {
+  let table = opaquePixelTables.get(image);
+  if (!table) {
+    const stride = image.width + 1;
+    table = new Int32Array(stride * (image.height + 1));
+    for (let y = 0; y < image.height; y++) {
+      let row = 0;
+      for (let x = 0; x < image.width; x++) {
+        row += image.data[(image.width * y + x) * 4 + 3] === 255 ? 1 : 0;
+        table[(y + 1) * stride + x + 1] = table[y * stride + x + 1] + row;
+      }
+    }
+    opaquePixelTables.set(image, table);
+  }
+  return table;
+}
+
+/**
+ * Whether the square of `radius` around (x, y), sampled the way `underlyingColorAtRadius`
+ * samples it (round, then clamp to the image), holds any opaque pixel. Those samples are
+ * exactly the pixels of one clamped rectangle, so the table answers in constant time.
+ */
+function squareHasOpaquePixel(
+  image: RawImage,
+  table: Int32Array,
+  x: number,
+  y: number,
+  radius: number,
+): boolean {
+  const x0 = Math.round(clamp(x - radius, 0, image.width - 1));
+  const x1 = Math.round(clamp(x + radius, 0, image.width - 1));
+  const y0 = Math.round(clamp(y - radius, 0, image.height - 1));
+  const y1 = Math.round(clamp(y + radius, 0, image.height - 1));
+  const stride = image.width + 1;
+  const count =
+    table[(y1 + 1) * stride + x1 + 1] -
+    table[y0 * stride + x1 + 1] -
+    table[(y1 + 1) * stride + x0] +
+    table[y0 * stride + x0];
+  return count > 0;
+}
+
 function boundsInsideImage(image: RawImage, bounds: Element["bounds"]): boolean {
   return (
     bounds.left >= 0 &&
@@ -1351,11 +1396,20 @@ export class ContrastChecker {
   ): RGB | null {
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dy = -radius; dy <= radius; dy++) {
-        const sampleX = clamp(x + dx, 0, image.width - 1);
-        const sampleY = clamp(y + dy, 0, image.height - 1);
-        const pixel = this.pixelRGBA(image, sampleX, sampleY);
-        if (pixel.a === 255) {
-          return { r: pixel.r, g: pixel.g, b: pixel.b };
+        // findUnderlyingColor only asks for the smallest radius whose square holds an opaque
+        // pixel, so from radius 2 on no inner sample is opaque: only the ring can answer.
+        // Radius 1 still reads its centre, in the original order.
+        if (radius > 1 && Math.abs(dx) < radius && Math.abs(dy) < radius) {
+          continue;
+        }
+        // pixelRGBA's addressing (round, then clamp) inlined so the miss path, which runs
+        // for hundreds of samples per translucent pixel, reads one alpha byte and allocates
+        // nothing. Rounding a value already clamped to [0, size - 1] stays in range.
+        const sampleX = Math.round(clamp(x + dx, 0, image.width - 1));
+        const sampleY = Math.round(clamp(y + dy, 0, image.height - 1));
+        const idx = (image.width * sampleY + sampleX) * 4;
+        if (image.data[idx + 3] === 255) {
+          return { r: image.data[idx], g: image.data[idx + 1], b: image.data[idx + 2] };
         }
       }
     }
@@ -1363,10 +1417,13 @@ export class ContrastChecker {
   }
 
   private findUnderlyingColor(image: RawImage, x: number, y: number): RGB | null {
+    // The first radius whose square holds an opaque pixel is the one the widening scan stops
+    // at; find it from the summed-area table, then scan only that square in the original
+    // order so the same pixel wins. A pixel with none within 12 never scans at all.
+    const table = opaquePixelTable(image);
     for (let radius = 1; radius <= 12; radius++) {
-      const color = this.underlyingColorAtRadius(image, x, y, radius);
-      if (color) {
-        return color;
+      if (squareHasOpaquePixel(image, table, x, y, radius)) {
+        return this.underlyingColorAtRadius(image, x, y, radius);
       }
     }
 

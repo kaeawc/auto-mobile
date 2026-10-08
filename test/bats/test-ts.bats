@@ -115,6 +115,14 @@ fi
 if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
 fi
+if [[ "$1" == test && -n "${STUB_SLOW_SHARD_LABEL:-}" && "${AUTOMOBILE_WATCHDOG_LABEL:-}" == "$STUB_SLOW_SHARD_LABEL" ]]; then
+  if [[ -n "${STUB_FAKE_CLOCK_DIR:-}" ]]; then
+    # Advance only this shard's fake clock; no real waiting.
+    printf '%s\n' "$STUB_SLOW_SHARD_SECONDS" > "$STUB_FAKE_CLOCK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+  else
+    sleep "$STUB_SLOW_SHARD_SECONDS"
+  fi
+fi
 # Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
 # <testcase>, not only on the enclosing <testsuite>.
 stub_junit_report() {
@@ -591,6 +599,36 @@ EOF
   [[ "$output" == *"test-ts: unit shard 1/2 wall="*"s status=7"* ]]
   [[ "$output" == *"test-ts: unit shard 2/2 wall="*"s status=7"* ]]
   [[ "$output" == *"test-ts: unit shards total wall="*"s status=1"* ]]
+}
+
+@test "unit shard wall time is each shard's own duration, not its reap time (#10583)" {
+  # Deterministic per-shard clock: `date +%s` is a fixed base plus the offset the
+  # stub bun wrote for the calling shard's label, so nothing really sleeps.
+  local clock_dir
+  clock_dir="$(mktemp -d)"
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+offset=0
+label_file="$STUB_FAKE_CLOCK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+if [[ -n "${AUTOMOBILE_WATCHDOG_LABEL:-}" && -f "$label_file" ]]; then
+  offset="$(cat "$label_file")"
+fi
+printf '%s\n' "$((1000 + offset))"
+EOF
+  chmod +x "$STUB_BIN/date"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    STUB_FAKE_CLOCK_DIR="$clock_dir" \
+    STUB_SLOW_SHARD_LABEL="unit shard 0" STUB_SLOW_SHARD_SECONDS=2 \
+    bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ -s scratch/test-ts-unit-shards/shard-0.wall ]
+  [ -s scratch/test-ts-unit-shards/shard-1.wall ]
+  slow="$(sed -nE 's/^test-ts: unit shard 1\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
+  fast="$(sed -nE 's/^test-ts: unit shard 2\/2 wall=([0-9]+)s status=0$/\1/p' <<< "$output")"
+  [ "$slow" -ge 2 ]
+  # Shard 2 is reaped after shard 1, so the old reap-time clock reported >= 2s here.
+  [ "$fast" -le 1 ]
 }
 
 @test "explicit unit worker count bypasses the macOS floor" {

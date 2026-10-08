@@ -117,6 +117,7 @@ Every node has required `type`. All other common properties are optional:
 | `testTag`         | Nonempty accessibility/test selector tag.                                                          |
 | `onTap`           | Nonempty ordered array of actions, run in order. See "Tap targets" below.                          |
 | `style`           | Strict style object below.                                                                         |
+| `styleWhen`       | Conditional style overrides (see Conditional style below). One to 8 entries.                       |
 | `visibleWhen`     | Condition (see Conditions below). A false condition, or a missing key, means hidden.               |
 | `anchor`          | Bounds or app-element anchor below.                                                                |
 | `safeAreaPadding` | Explicit inset selection below.                                                                    |
@@ -349,8 +350,20 @@ contract). `key` takes exactly one comparison, and comparisons need `key`;
 errors point at the offending field (for example `root.visibleWhen.gt`).
 `toggle` and `increment` validate their `key` against the declared `state`
 (`root.onTap[0].key`), run silently like `setState` (no `change` event), and are
-no-ops at runtime if the key's type was changed by other means. `styleWhen`,
-list templates and a `decrement` alias are later slices of #10440.
+no-ops at runtime if the key's type was changed by other means. List templates
+and a `decrement` alias are later slices of #10440.
+
+### Conditional style: styleWhen
+
+Any node may declare `styleWhen`: one to 8 entries of `{when: condition, style: style}`
+(for selected, disabled or error looks without duplicating nodes). `when` takes
+any condition form above; `style` is the same strict style object as `style`, so
+an unknown key fails at `root.styleWhen[0].style.colour`. At render, every entry
+whose condition holds is merged over the node's base `style` in authored order:
+a property set by a later matching entry wins, and properties no entry sets keep
+the base value. Merging is per top-level property, so `padding` and `border`
+replace the base object whole rather than merging edge by edge. Conditions read the
+node's local state, so pager `{page}`/`{pageCount}` keys work inside a pager.
 
 ### Re-showing an overlay
 

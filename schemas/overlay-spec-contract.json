@@ -491,6 +491,25 @@
         }
       }
     },
+    "styleWhenEntry": {
+      "kind": "object",
+      "fields": {
+        "when": {
+          "rule": {
+            "kind": "ref",
+            "name": "condition"
+          },
+          "optional": false
+        },
+        "style": {
+          "rule": {
+            "kind": "ref",
+            "name": "style"
+          },
+          "optional": false
+        }
+      }
+    },
     "item": {
       "kind": "object",
       "fields": {
@@ -886,6 +905,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -960,6 +992,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1040,6 +1085,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1117,6 +1175,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1186,6 +1257,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1264,6 +1348,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1376,6 +1473,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1438,6 +1548,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1519,6 +1642,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1593,6 +1729,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1673,6 +1822,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1748,6 +1910,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -1830,6 +2005,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -1904,6 +2092,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },
@@ -2004,6 +2205,19 @@
               },
               "optional": true
             },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
             "visibleWhen": {
               "rule": {
                 "kind": "ref",
@@ -2092,6 +2306,19 @@
               "rule": {
                 "kind": "ref",
                 "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
               },
               "optional": true
             },

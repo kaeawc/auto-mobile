@@ -8,6 +8,7 @@ import {
 } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
 import { ActionableError } from "../../../../src/models/ActionableError";
+import { IosRunnerBusyError } from "../../../../src/features/observe/ios/runnerErrorCodes";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
@@ -3329,6 +3330,8 @@ describe("IOSCtrlProxyClient", function () {
           throw new Error("Expected runner_busy to reject");
         } catch (error) {
           expect(error).toBeInstanceOf(ActionableError);
+          // Typed so text/press callers can treat it as never run, not as indeterminate.
+          expect(error).toBeInstanceOf(IosRunnerBusyError);
           expect((error as Error).message).toBe(
             "iOS runner is busy executing request_set_text for 4.2s; retry shortly",
           );

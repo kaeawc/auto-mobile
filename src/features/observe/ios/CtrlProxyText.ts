@@ -21,6 +21,7 @@ import {
 import { combineWithAmbientAbort, getRequestContext } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
+import { IosRunnerBusyError } from "./runnerErrorCodes";
 
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
@@ -64,6 +65,16 @@ export class CtrlProxyText extends SharedTextDelegate {
       completeDispatch?.(result.retryable !== false);
       return result;
     } catch (error) {
+      if (error instanceof IosRunnerBusyError) {
+        // The runner refused it before queuing, so the text was never typed: a plain failure.
+        completeDispatch?.(true);
+        logger.warn("[CtrlProxyText] Runner busy; text command not run", error);
+        return {
+          success: false,
+          totalTimeMs: this.context.timer.now() - startMs,
+          error: errorMessage(error),
+        };
+      }
       completeDispatch?.(false, error);
       // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
       rethrowRealCtrlProxyWebSocketInTestError(error);

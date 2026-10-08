@@ -1,3 +1,5 @@
+import { ActionableError } from "../../../models/ActionableError";
+
 /**
  * Typed codes the iOS runner adds to an error reply (`errorCode`, additive: older runners omit it).
  * The Swift side is `CommandError.wireCode`; `runnerErrorCodes.contract.test.ts` pins every value
@@ -63,3 +65,9 @@ export function isRunnerGestureOutcomeUnknown(failure: {
 }): boolean {
   return isRunnerDeadlineCompletedLate(failure) || isRunnerGestureBoundExceeded(failure);
 }
+
+/**
+ * The runner refused a command with `runner_busy` before queuing it: the command never ran, so
+ * the refusal is a definite non-execution and safe to retry, unlike a lost or late reply.
+ */
+export class IosRunnerBusyError extends ActionableError {}

@@ -803,3 +803,37 @@ wiring_requires_yq() {
   [ "$output" -ge 15 ]
   [ "$output" -le 45 ]
 }
+
+@test "release.yml attaches a SHA-256 file alongside the Linux .deb (#4726)" {
+  wiring_requires_yq
+  run yq -r '.jobs."verify-and-release".steps[]
+    | select(.name == "Create GitHub Release") | .run' ".github/workflows/release.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'AutoMobile-${VERSION}-linux.deb.sha256'* ]]
+  [[ "$output" == *'scripts/release/write-asset-checksum.sh'* ]]
+  # The checksum is generated before the upload list is consumed.
+  local gen_line upload_line
+  gen_line="$(grep -n 'write-asset-checksum.sh' <<<"$output" | head -1 | cut -d: -f1)"
+  upload_line="$(grep -n 'gh release view' <<<"$output" | head -1 | cut -d: -f1)"
+  [ "$gen_line" -lt "$upload_line" ]
+}
+
+@test "write-asset-checksum.sh writes a sha256sum -c compatible file with a bare name (#4726)" {
+  local script="scripts/release/write-asset-checksum.sh"
+  local dir
+  dir="$(mktemp -d)"
+  printf 'deb-bytes\n' > "$dir/AutoMobile-1.2.3-linux.deb"
+
+  run bash "$script" "$dir/AutoMobile-1.2.3-linux.deb"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$dir/AutoMobile-1.2.3-linux.deb.sha256" ]
+  [[ "$(cat "$output")" == *"  AutoMobile-1.2.3-linux.deb" ]]
+  [[ "$(cat "$output")" != *"$dir"* ]]
+  (cd "$dir" && shasum -a 256 -c AutoMobile-1.2.3-linux.deb.sha256)
+
+  run bash "$script" "$dir/missing.deb"
+  [ "$status" -eq 1 ]
+  run bash "$script"
+  [ "$status" -eq 2 ]
+  rm -rf "$dir"
+}

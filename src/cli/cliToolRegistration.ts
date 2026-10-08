@@ -19,6 +19,7 @@ import { registerDatabaseTools } from "../server/databaseTools";
 import { registerDeepLinkTools } from "../server/deepLinkTools";
 import { registerFormTools } from "../server/formTools";
 import { registerOverlayTools } from "../server/overlayTools";
+import { overlayAgentRegistry } from "../features/overlay/ios/overlayAgentInjection";
 import { registerHighlightTools } from "../server/highlightTools";
 import { registerNavigationTools } from "../server/navigationTools";
 import { registerNetworkTools } from "../server/networkTools";
@@ -53,7 +54,7 @@ export function initializeCliTools(): void {
   registerDeepLinkTools();
   registerFormTools();
   registerHighlightTools();
-  registerOverlayTools();
+  registerOverlayTools({ agentConnections: overlayAgentRegistry });
   registerNavigationTools();
   registerNetworkTools();
   registerPreferenceTools();

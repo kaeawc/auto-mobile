@@ -40,7 +40,7 @@ export interface OverlayAgentConnections {
   get(deviceId: string): OverlayAgentClient | undefined;
 }
 
-/** Until #10567 supplies a registry, no iOS device has an agent connection. */
+/** No injected agents: every iOS device reports no agent connection. */
 export const noOverlayAgentConnections: OverlayAgentConnections = { get: () => undefined };
 
 export function overlayAgentNotConnectedMessage(deviceId: string): string {

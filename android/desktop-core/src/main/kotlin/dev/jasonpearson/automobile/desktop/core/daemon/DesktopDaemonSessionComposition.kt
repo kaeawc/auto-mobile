@@ -172,6 +172,9 @@ fun rememberDesktopDaemonSession(
     // [MAX_BIND_ATTEMPTS] times and then surfaced as [bindErrorMessage], never as viewing.
     var refused = false
     var failedBinds = 0
+    // Set when this session must be replaced by a fresh one before anything else happens: it still
+    // holds a device the pane no longer controls (#10682 C3).
+    var rotateSession = false
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
@@ -186,6 +189,17 @@ fun rememberDesktopDaemonSession(
                   bindingAcknowledged = true
                   failedBinds = 0
                   session.deviceBound(held = true)
+                }
+                result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION &&
+                  session.holdsDevice -> {
+                  // The daemon refused before rebinding, so this session still holds the device
+                  // it bound earlier while the pane would only view the new pick. Release that
+                  // hold by rotating the session; the fresh session views the pick passively.
+                  LOG.info(
+                    "Device ${target.deviceId} is held by another session; releasing the " +
+                      "previously bound device before viewing it"
+                  )
+                  rotateSession = true
                 }
                 result.refusal == SetActiveDeviceRefusal.HELD_BY_ANOTHER_SESSION -> {
                   refused = true
@@ -223,6 +237,10 @@ fun rememberDesktopDaemonSession(
         }
         .isSuccess
       if (bindingGeneration.get() != generation) return@LaunchedEffect
+      if (rotateSession) {
+        sessionEpoch++
+        return@LaunchedEffect
+      }
       if (!registered) {
         delay(HEARTBEAT_INTERVAL_MS)
         continue

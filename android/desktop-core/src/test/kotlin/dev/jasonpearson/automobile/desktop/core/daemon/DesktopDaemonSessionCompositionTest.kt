@@ -327,6 +327,44 @@ class DesktopDaemonSessionCompositionTest {
     }
 
   @Test
+  fun `picking a device held elsewhere releases the device this session holds`() =
+    runComposeUiTest {
+      // #10682 C3: the daemon refuses the new pick before rebinding, so the session would keep
+      // holding the old device (and heartbeating it) while the pane only views the new one.
+      val transport = RecordingDaemonTransport().apply { heldDeviceIds += pixelFold.deviceId }
+      val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)
+      var state: DesktopDaemonSessionState? = null
+      setContent { state = sessionHost(transport, binding) }
+      mainClock.autoAdvance = false
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals("emulator-5554", state?.boundDeviceId)
+
+      binding.value = pixelFold
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      val oldSessionHeartbeats =
+        transport.sessionsFor("daemon/heartbeat").count { it == "session-1" }
+      repeat(3) { tick() }
+
+      assertEquals(listOf<String?>("session-1"), transport.sessionsFor("daemon/releaseSession"))
+      assertEquals(
+        oldSessionHeartbeats,
+        transport.sessionsFor("daemon/heartbeat").count { it == "session-1" },
+      )
+      assertEquals(3, transport.sessionsFor("daemon/heartbeat").count { it == "session-2" })
+      assertEquals("emulator-5556", state?.viewingDeviceId)
+      assertEquals(null, state?.boundDeviceId)
+      // The fresh session holds nothing, so closing the pane releases nothing more.
+      binding.value = null
+      mainClock.advanceTimeByFrame()
+      mainClock.advanceTimeByFrame()
+      repeat(2) { tick() }
+      assertEquals(1, transport.count("daemon/releaseSession"))
+    }
+
+  @Test
   fun `a refused bind is not a device hold so unfocusing releases nothing`() = runComposeUiTest {
     val transport = RecordingDaemonTransport(rejectBindsUntilAttempt = 99)
     val binding = mutableStateOf<DesktopDaemonSessionBinding?>(pixel)

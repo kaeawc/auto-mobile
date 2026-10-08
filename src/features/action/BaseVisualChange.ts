@@ -288,7 +288,9 @@ export class BaseVisualChange {
       this.adbFactory = defaultAdbClientFactory;
       this.adb = this.adbFactory.create(device);
     }
-    this.awaitIdle = new AwaitIdle(device, this.adbFactory);
+    // Same clock as this instance: its gfxinfo stability polls must not spend real
+    // wall-clock under an injected FakeTimer.
+    this.awaitIdle = new AwaitIdle(device, this.adbFactory, timer);
     // Honor the observer seam before constructing defaults: RealObserveScreen's
     // screenshot service starts host filesystem work and retention timers.
     this.observeScreen =

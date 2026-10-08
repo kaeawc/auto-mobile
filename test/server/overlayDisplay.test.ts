@@ -170,9 +170,10 @@ describe("overlay display targeting", () => {
     const again = await call({ action: "show", spec, display: "inner" });
     expect(again.success).toBe(true);
     expect(again.warning).toBeUndefined();
-    // The in-place replacement carries no display: the device keeps the overlay where it is.
+    // The in-place replacement names the display it replaces on, so a dismissal racing the
+    // replacement cannot move it to the default display.
     expect(client.getOverlayHistory()[0].displayId).toBe(2);
-    expect(client.getOverlayHistory()[1].displayId).toBeUndefined();
+    expect(client.getOverlayHistory()[1].displayId).toBe(2);
   });
 
   test("a same-id show under the pin it was shown with carries no warning", async () => {
@@ -226,6 +227,57 @@ describe("overlay display targeting", () => {
     const other = await call({ action: "show", spec: { ...spec, id: "other" }, display: "inner" });
     expect(other.warning).toBeUndefined();
     expect(other.lastResult?.displayId).toBe(2);
+  });
+
+  test("a same-id show from another session is in place on the display the first one chose", async () => {
+    await call({ action: "show", spec, display: "inner", sessionUuid: "one" });
+    const second = await call({ action: "show", spec, display: "cover", sessionUuid: "two" });
+    expect(second.success).toBe(true);
+    expect(second.warning).toContain("logical display 2");
+    expect(second.lastResult?.displayId).toBe(2);
+    expect(client.getOverlayHistory()[1].displayId).toBe(2);
+    expect(
+      (await call({ action: "status", sessionUuid: "two" })).overlays?.map((e) => e.displayId),
+    ).toEqual([2]);
+  });
+
+  test("a same-id show from another session ignores a selector the device cannot resolve", async () => {
+    await call({ action: "show", spec, display: "inner", sessionUuid: "one" });
+    adb.setCommandResponse("cmd display get-displays", { stdout: COVER_ONLY, stderr: "" });
+    const second = await call({ action: "show", spec, display: "inner", sessionUuid: "two" });
+    expect(second.success).toBe(true);
+    expect(second.lastResult?.displayId).toBe(2);
+  });
+
+  test("only the latest concurrent same-id show commits its status", async () => {
+    const reached: Array<() => void> = [];
+    const release: Array<() => void> = [];
+    const show = client.requestShowOverlay.bind(client);
+    let calls = 0;
+    client.requestShowOverlay = async (...args) => {
+      if (calls++ === 0) {
+        // The first show is held after the device accepted it, so it finishes last.
+        const result = await show(...args);
+        await new Promise<void>((resolve) => {
+          release.push(resolve);
+          reached.forEach((notify) => notify());
+        });
+        return result;
+      }
+      return show(...args);
+    };
+    const held = new Promise<void>((resolve) => reached.push(resolve));
+    const older = call({ action: "show", spec, display: "inner" });
+    await held;
+    const newer = await call({ action: "show", spec });
+    expect(newer.lastResult?.displayId).toBeUndefined();
+    release[0]();
+    const olderPayload = await older;
+    expect(olderPayload.success).toBe(true);
+    expect(olderPayload.lastResult?.displayId).toBe(2);
+    const overlays = (await call({ action: "status" })).overlays;
+    expect(overlays).toHaveLength(1);
+    expect(Object.hasOwn(overlays?.[0] ?? {}, "displayId")).toBe(false);
   });
 
   test("a disconnected panel is refused with posture guidance and nothing is sent", async () => {

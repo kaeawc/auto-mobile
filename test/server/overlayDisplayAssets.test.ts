@@ -7,6 +7,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeOverlayAssetFileReader } from "../fakes/FakeOverlayAssetFileReader";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { event } from "../helpers/overlayTestEvent";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 /**
@@ -168,8 +169,21 @@ describe("overlay display together with assets", () => {
     expect(payload.success).toBe(true);
     expect(payload.lastResult?.displayId).toBe(2);
     expect(payload.warning).toBeUndefined();
-    const again = client.getOverlayHistory()[1];
-    expect(Object.hasOwn(again ?? {}, "displayId")).toBe(false);
+    expect(client.getOverlayHistory()[1]?.displayId).toBe(2);
+    expect(inventoryReads()).toBe(1);
+  });
+
+  test("a dismissal while a same-id show stages assets still shows on the same display", async () => {
+    await call({ action: "show", spec, assets, display: "inner" });
+    const put = client.requestPutOverlayAsset.bind(client);
+    client.requestPutOverlayAsset = async (asset, options) => {
+      client.emitOverlayEvent(event(1, "panel", "dismissed"));
+      return put(asset, options);
+    };
+    const { payload } = await call({ action: "show", spec, assets });
+    expect(payload.success).toBe(true);
+    expect(client.getOverlayHistory()[1]?.displayId).toBe(2);
+    expect(payload.lastResult?.displayId).toBe(2);
     expect(inventoryReads()).toBe(1);
   });
 });

@@ -32,6 +32,11 @@ export interface OverlayScope {
 }
 export interface OverlayStatusStore {
   status(scope: OverlayScope): OverlayStatus;
+  /**
+   * The overlay currently shown with this id on the device, from any session. The device holds one
+   * active overlay, so whether a same-id show replaces in place is a device-wide fact.
+   */
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined;
   startShow(scope: OverlayScope): void;
   recordEvent(scope: OverlayScope, event: OverlayEvent): void;
   /** The device reported a terminal dismissal for this overlay; its presence is gone. */
@@ -85,6 +90,16 @@ export class InMemoryOverlayStatusStore implements OverlayStatusStore {
       })),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
+  }
+
+  shownOnDevice(deviceId: string, id: string): OverlayLastResult | undefined {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        return { ...entry };
+      }
+    }
+    return undefined;
   }
 
   /** Only events after this show attempt can establish its successful snapshot. */

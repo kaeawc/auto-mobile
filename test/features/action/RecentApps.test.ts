@@ -134,6 +134,56 @@ describe("RecentApps", () => {
     });
   });
 
+  describe("fresh overview reads (#10349)", () => {
+    const overview = (fresh: boolean): ObserveResult =>
+      ({
+        ...capturedRecents,
+        timestamp: fakeTimer.now(),
+        freshness: { isFresh: fresh, verified: fresh },
+      }) as unknown as ObserveResult;
+    const app = (): ObserveResult => createObserveResult(createAppHierarchy());
+
+    // Models the hierarchy source: without a minTimestamp floor it serves its
+    // cached (stale) tree even when requireFreshExtraction is set.
+    const serveCache = (cached: ObserveResult, live: () => ObserveResult) => {
+      const origExecute = fakeObserveScreen.execute.bind(fakeObserveScreen);
+      fakeObserveScreen.execute = async (options) => {
+        await origExecute(options);
+        return options?.minTimestamp && options.minTimestamp > 0 ? live() : cached;
+      };
+    };
+    const pressed = () => fakeAdb.getExecutedCommands().includes("shell input keyevent 187");
+
+    test("does not press Recents again when the overview is already open", async () => {
+      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeObserveScreen.setObserveResult(() => overview(true));
+      serveCache(overview(false), () => overview(true));
+
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(true);
+      expect(pressed()).toBe(false);
+    });
+
+    test("re-reads once when the first fresh read is still reported stale", async () => {
+      fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });
+      fakeObserveScreen.setObserveResult(() => overview(true));
+      let floorReads = 0;
+      const origExecute = fakeObserveScreen.execute.bind(fakeObserveScreen);
+      fakeObserveScreen.execute = async (options) => {
+        await origExecute(options);
+        floorReads += options?.minTimestamp ? 1 : 0;
+        return overview(floorReads > 1);
+      };
+
+      const result = await recentApps.execute();
+
+      expect(result.success).toBe(true);
+      expect(floorReads).toBeGreaterThan(1);
+      expect(pressed()).toBe(false);
+    });
+  });
+
   describe("error handling", () => {
     test("should handle hardware navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createAppHierarchy());

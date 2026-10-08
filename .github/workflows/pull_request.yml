@@ -635,7 +635,9 @@ jobs:
   build-ide-plugin:
     timeout-minutes: 20
     name: "Build IDE Plugin"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: (needs.detect-changes.outputs.ide_plugin_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
@@ -677,7 +679,9 @@ jobs:
   ide-plugin-unit-tests:
     timeout-minutes: 20
     name: "Run IDE Plugin Unit Tests"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: [detect-changes, build-ide-plugin]
     if: (needs.detect-changes.outputs.ide_plugin_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
@@ -964,7 +968,9 @@ jobs:
   detekt:
     timeout-minutes: 30
     name: "Detekt"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     # detekt analyzes Kotlin only, so a PR touching none of the inputs in the
     # `kotlin` filter cannot change what it reports. This gates whether the job
@@ -1313,7 +1319,7 @@ jobs:
   bun-audit:
     timeout-minutes: 20
     name: "Bun Security Audit"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
@@ -1649,7 +1655,7 @@ jobs:
   format-check:
     timeout-minutes: 10
     name: "Check Formatting"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.format_changed == 'true'
     steps:
@@ -1670,7 +1676,7 @@ jobs:
 
   ts-code-coverage:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 20
@@ -1793,7 +1799,9 @@ jobs:
   kotlin-code-coverage:
     timeout-minutes: 30
     name: "Run CtrlProxy Unit Tests"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
@@ -2600,7 +2608,9 @@ jobs:
   android-emulator-compile-smoke:
     timeout-minutes: 10
     name: "Android Emulator Compile Smoke"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     steps:
@@ -2624,7 +2634,9 @@ jobs:
   junit-runner-unit-tests:
     timeout-minutes: 20
     name: "Run JUnit Runner Unit Tests"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:
@@ -2873,7 +2885,9 @@ jobs:
   build-junit-runner-library:
     timeout-minutes: 20
     name: "Build JUnitRunner Library"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     defaults:
@@ -2908,7 +2922,9 @@ jobs:
   build-android-control-proxy:
     timeout-minutes: 20
     name: "Build CtrlProxy APK"
-    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
+    # Gradle needs >8 GB (5g daemon + 2g Kotlin daemon + workers); opt in with
+    # NAMESPACE_GRADLE_RUNNERS=true once the Namespace profile has 16 GB.
+    runs-on: ${{ vars.NAMESPACE_GRADLE_RUNNERS == 'true' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true' || needs.detect-changes.outputs.webrtc_should_run == 'true'
     defaults:
@@ -3504,7 +3520,7 @@ jobs:
   runtime-graph-verification:
     timeout-minutes: 20
     name: "Pinned Runtime Graph"
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ts_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     steps:

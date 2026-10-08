@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.protocol
 
+import kotlin.math.abs
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.*
 
@@ -504,9 +505,66 @@ object OverlaySpecValidator {
     return null
   }
 
+  private fun stepFitsRange(step: Double, range: Double): Boolean {
+    val count = range / step
+    return step > 0 && count >= 1 && abs(count - Math.round(count)) < 1e-9
+  }
+
+  /** Slider range, step and bound-value checks; the contract only types the individual fields. */
+  private fun sliderErrors(
+    value: JsonObject,
+    path: String,
+    stored: JsonPrimitive?,
+  ): OverlaySpecError? {
+    fun JsonObject.double(key: String) = (get(key) as? JsonPrimitive)?.doubleOrNull
+    val min = value.double("min")
+    val max = value.double("max")
+    val step = value.double("step")
+    if (min == null || max == null || min >= max)
+      return fail("$path.max", "Slider max must be greater than min")
+    if (step != null && !stepFitsRange(step, max - min))
+      return fail("$path.step", "Slider step must be positive and divide the range evenly")
+    val number = stored?.takeIf { !it.isString }?.doubleOrNull
+    if (number == null || !number.isFinite() || number < min || number > max)
+      return fail("$path.stateKey", "Slider requires a numeric state key within min and max")
+    return null
+  }
+
+  /** A filter chip is a boolean toggle; an assist chip only runs its actions. */
+  private fun chipErrors(
+    value: JsonObject,
+    path: String,
+    stored: JsonPrimitive?,
+  ): OverlaySpecError? {
+    val bound = value.text("stateKey") != null
+    val variant = value.text("variant")
+    if (variant == "filter" && !bound)
+      return fail("$path.stateKey", "Filter chip requires a boolean state key")
+    if (variant == "assist" && bound)
+      return fail("$path.stateKey", "Assist chip cannot bind a state key")
+    if (bound && (stored == null || stored.isString || stored.booleanOrNull == null))
+      return fail("$path.stateKey", "Filter chip requires a boolean state key")
+    return null
+  }
+
+  private fun componentBindingErrors(
+    value: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): OverlaySpecError? {
+    val type = value.text("type")
+    if (type != "slider" && type != "chip") return null
+    val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
+    return if (type == "slider") sliderErrors(value, path, stored)
+    else chipErrors(value, path, stored)
+  }
+
   private fun bindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for ((value, path) in context.nodes) {
+      componentBindingErrors(value, path, state)?.let {
+        return it
+      }
       val key = value.text("stateKey") ?: continue
       val stored = state[key] as? JsonPrimitive
       if (value.text("type") == "textField" && stored?.isString != true)

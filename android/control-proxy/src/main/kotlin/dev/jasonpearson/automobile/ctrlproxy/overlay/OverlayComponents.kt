@@ -1,13 +1,33 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,25 +35,37 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.OverlayButtonNode
+import dev.jasonpearson.automobile.protocol.OverlayCardNode
 import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
+import dev.jasonpearson.automobile.protocol.OverlayChipNode
 import dev.jasonpearson.automobile.protocol.OverlayNode
+import dev.jasonpearson.automobile.protocol.OverlaySliderNode
 import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
 
 /**
  * Material 3 component nodes (#10439). Each draws its own Material control and owns its tap, so
  * [overlayNodeModifier] must not add a second click handler for these roles.
  */
-internal val OVERLAY_COMPONENT_ROLES = setOf("switch", "checkbox", "button")
+internal val OVERLAY_COMPONENT_ROLES = setOf("switch", "checkbox", "button", "slider", "chip")
 
-/** The boolean state key a `switch` or `checkbox` is bound to; null for every other node. */
+/**
+ * The boolean state key a `switch`, `checkbox` or filter `chip` is bound to; null for every other
+ * node, including an assist chip.
+ */
 internal fun overlayToggleKey(node: OverlayNode): String? =
   when (node) {
     is OverlaySwitchNode -> node.stateKey
     is OverlayCheckboxNode -> node.stateKey
+    is OverlayChipNode -> node.stateKey
     else -> null
   }
 
@@ -93,4 +125,138 @@ private fun OverlayComponentLabel(node: OverlayRenderNode) {
     Modifier.clearAndSetSemantics {},
     color = if (node.style.source.color != null) node.style.color else LocalContentColor.current,
   )
+}
+
+/** The step-aligned, in-range value a drag or set-progress lands on, rounded to micro-units. */
+internal fun snapOverlaySlider(raw: Double, min: Double, max: Double, step: Double?): Double {
+  val clamped = raw.coerceIn(min, max)
+  if (step == null) return clamped
+  val snapped = min + Math.round((clamped - min) / step) * step
+  return (Math.round(snapped * 1e6) / 1e6).coerceIn(min, max)
+}
+
+/** Compose counts the discrete positions strictly between the ends. */
+internal fun overlaySliderSteps(min: Double, max: Double, step: Double?): Int =
+  if (step == null) 0 else (Math.round((max - min) / step).toInt() - 1).coerceAtLeast(0)
+
+/**
+ * A labelled Material slider bound to a number. Material's Slider supplies the progress range info
+ * and set-progress action; merging them into the node's own semantics keeps one accessibility node
+ * whose value observe reads from the range info.
+ */
+@Composable
+internal fun RenderOverlaySlider(
+  node: OverlayRenderNode,
+  modifier: Modifier,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  val source = node.source as? OverlaySliderNode ?: return
+  val actions = source.onTap.orEmpty()
+  val range = source.min.toFloat()..source.max.toFloat()
+  val steps = overlaySliderSteps(source.min, source.max, source.step)
+  val change = { raw: Float ->
+    val value = snapOverlaySlider(raw.toDouble(), source.min, source.max, source.step)
+    interact(OverlayInteraction.Slide(source.stateKey, value, actions))
+  }
+  Column(
+    modifier.semantics(mergeDescendants = true) {
+      progressBarRangeInfo = ProgressBarRangeInfo(node.sliderValue.toFloat(), range, steps)
+      setProgress {
+        change(it)
+        true
+      }
+    }
+  ) {
+    if (node.text.isNotEmpty()) OverlayComponentLabel(node)
+    Slider(
+      node.sliderValue.toFloat(),
+      change,
+      Modifier.fillMaxWidth(),
+      valueRange = range,
+      steps = steps,
+    )
+  }
+}
+
+/**
+ * An assist chip (no `stateKey`) runs `onTap`; a filter chip toggles its boolean key like a switch
+ * and exposes the Checkbox role with its checked state.
+ */
+@Composable
+internal fun RenderOverlayChip(
+  node: OverlayRenderNode,
+  modifier: Modifier,
+  interact: (OverlayInteraction) -> Unit,
+) {
+  val source = node.source as? OverlayChipNode ?: return
+  val actions = source.onTap.orEmpty()
+  val key = source.stateKey
+  if (key == null) {
+    AssistChip(
+      { if (actions.isNotEmpty()) interact(OverlayInteraction.Tap(actions)) },
+      { OverlayComponentLabel(node) },
+      modifier,
+    )
+    return
+  }
+  val colors = MaterialTheme.colorScheme
+  Row(
+    Modifier.minimumInteractiveComponentSize()
+      .toggleable(node.checked, role = Role.Checkbox) {
+        interact(OverlayInteraction.Toggle(key, actions))
+      }
+      .then(modifier)
+  ) {
+    Surface(
+      shape = FilterChipDefaults.shape,
+      color = if (node.checked) colors.secondaryContainer else Color.Transparent,
+      contentColor = if (node.checked) colors.onSecondaryContainer else colors.onSurfaceVariant,
+      border = if (node.checked) null else BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+      Row(
+        Modifier.height(FilterChipDefaults.Height).padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        if (node.checked) Icon(Icons.Default.Check, null, Modifier.size(18.dp))
+        ProvideTextStyle(MaterialTheme.typography.labelLarge) { OverlayComponentLabel(node) }
+      }
+    }
+  }
+}
+
+/** A filled (default), elevated or outlined Material card holding the node's children. */
+@Composable
+internal fun RenderOverlayCard(
+  node: OverlayRenderNode,
+  modifier: Modifier,
+  content: @Composable ColumnScope.() -> Unit,
+) {
+  val container = node.style.background
+  when ((node.source as? OverlayCardNode)?.variant) {
+    "elevated" ->
+      ElevatedCard(
+        modifier,
+        colors =
+          container?.let { CardDefaults.elevatedCardColors(containerColor = it) }
+            ?: CardDefaults.elevatedCardColors(),
+        content = content,
+      )
+    "outlined" ->
+      OutlinedCard(
+        modifier,
+        colors =
+          container?.let { CardDefaults.outlinedCardColors(containerColor = it) }
+            ?: CardDefaults.outlinedCardColors(),
+        content = content,
+      )
+    else ->
+      Card(
+        modifier,
+        colors =
+          container?.let { CardDefaults.cardColors(containerColor = it) }
+            ?: CardDefaults.cardColors(),
+        content = content,
+      )
+  }
 }

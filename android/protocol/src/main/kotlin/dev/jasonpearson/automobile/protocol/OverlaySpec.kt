@@ -349,6 +349,55 @@ data class OverlayButtonNode(
   val variant: String = "filled",
 ) : OverlayNode()
 
+@SerialName("slider")
+@Serializable
+data class OverlaySliderNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val stateKey: String,
+  val label: String? = null,
+  val min: Double,
+  val max: Double,
+  val step: Double? = null,
+) : OverlayNode()
+
+@SerialName("chip")
+@Serializable
+data class OverlayChipNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val label: String,
+  val variant: String? = null,
+  val stateKey: String? = null,
+) : OverlayNode()
+
+@SerialName("card")
+@Serializable
+data class OverlayCardNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val onTap: List<OverlayAction>? = null,
+  override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
+  override val visibleWhen: OverlayCondition? = null,
+  override val anchor: OverlayAnchor? = null,
+  override val safeAreaPadding: OverlaySafeAreaPadding? = null,
+  val variant: String = "filled",
+  val children: List<OverlayNode>,
+) : OverlayNode()
+
 @SerialName("scroll")
 @Serializable
 data class OverlayScrollNode(

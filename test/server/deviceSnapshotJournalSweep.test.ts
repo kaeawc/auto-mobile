@@ -646,29 +646,37 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     }
   });
 
-  test("real sweep processes only the entry cap and leaves the remainder for lazy recovery", async () => {
-    for (let index = 0; index < SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES + 1; index++) {
-      await fs.writeFile(
-        path.join(root, `save-${String(index).padStart(3, "0")}.journal.tmp.replacing`),
-        "pending-new",
+  describe("with one more leftover journal than the sweep cap", () => {
+    // Writing the leftover journals is arrangement; keep its file IO out of the test's time.
+    beforeEach(async () => {
+      await Promise.all(
+        Array.from({ length: SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES + 1 }, (_, index) =>
+          fs.writeFile(
+            path.join(root, `save-${String(index).padStart(3, "0")}.journal.tmp.replacing`),
+            "pending-new",
+          ),
+        ),
       );
-    }
-    const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      expect(await runSnapshotJournalSweep()).toEqual({
-        recovered: SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES,
-        failed: 0,
-        skippedLocked: 0,
-        truncated: true,
-      });
-      expect(await fs.readdir(root)).toEqual([
-        `save-${String(SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES).padStart(3, "0")}.journal.tmp.replacing`,
-      ]);
-      expect(
-        warning.mock.calls.some(([message]) => String(message).includes("lazy recovery")),
-      ).toBe(true);
-    } finally {
-      warning.mockRestore();
-    }
+    });
+
+    test("real sweep processes only the entry cap and leaves the remainder for lazy recovery", async () => {
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        expect(await runSnapshotJournalSweep()).toEqual({
+          recovered: SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES,
+          failed: 0,
+          skippedLocked: 0,
+          truncated: true,
+        });
+        expect(await fs.readdir(root)).toEqual([
+          `save-${String(SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES).padStart(3, "0")}.journal.tmp.replacing`,
+        ]);
+        expect(
+          warning.mock.calls.some(([message]) => String(message).includes("lazy recovery")),
+        ).toBe(true);
+      } finally {
+        warning.mockRestore();
+      }
+    });
   });
 });

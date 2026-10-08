@@ -74,6 +74,8 @@ export { APP_FILE_PUSH_TIMEOUT_MS } from "../features/storage/fileTransferTimeou
 const APP_FILE_STAGING_CLEANUP_COMMAND_TIMEOUT_MS = 5000;
 /** Printed by the write script only when it saved the previous content of an overwritten file. */
 const APP_FILE_BACKUP_MARKER = "AUTOMOBILE_APP_FILE_BACKUP";
+/** Printed (to stderr) by the write script when the destination is an existing directory. */
+const APP_FILE_DIRECTORY_MARKER = "AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY";
 /** Backups removed per device command, matching the other batched file commands. */
 const APP_FILE_BACKUP_DISCARD_CHUNK = 64;
 
@@ -1052,18 +1054,34 @@ class AndroidAppFileProvider
         { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
       );
       const replace = `mv -f ${shellQuote(temporary)} ${shellQuote(destination)}`;
+      // `mv -f <file> <directory>` moves the file INTO the directory and succeeds, so a
+      // directory destination must be refused before anything is staged or moved (#10349 D3).
+      const refuseDirectory =
+        `if [ -d ${shellQuote(destination)} ]; then ` +
+        `echo ${APP_FILE_DIRECTORY_MARKER} >&2; exit 1; fi; `;
       const command =
         target.kind === "external"
-          ? `${saveBackup}${replace}`
-          : `mkdir -p ${shellQuote(posix.dirname(destination))} && ` +
+          ? `${refuseDirectory}${saveBackup}${replace}`
+          : `${refuseDirectory}mkdir -p ${shellQuote(posix.dirname(destination))} && ` +
             `cp ${shellQuote(staging)} ${shellQuote(temporary)} && ` +
             `chmod 600 ${shellQuote(temporary)} && ${saveBackup}${replace}`;
-      const output = await executeAndroidAppFileCommand(
-        adb,
-        `${prefix} sh -c ${shellQuote(command)}`,
-        context,
-        { noRetry: true, signal: request.signal },
-      );
+      let output: ExecResult;
+      try {
+        output = await executeAndroidAppFileCommand(
+          adb,
+          `${prefix} sh -c ${shellQuote(command)}`,
+          context,
+          { noRetry: true, signal: request.signal },
+        );
+      } catch (error) {
+        if (errorMessage(error).includes(APP_FILE_DIRECTORY_MARKER)) {
+          throw new ActionableError(
+            `Cannot write ${request.destinationPath} for ${appTarget.appId}: the destination is an existing directory. ` +
+              "Choose a file path (for example a name inside that directory).",
+          );
+        }
+        throw error;
+      }
       restoreOnFailure = false;
       onWritten(output.stdout.includes(APP_FILE_BACKUP_MARKER) ? backup : undefined);
     } finally {

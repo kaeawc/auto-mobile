@@ -68,6 +68,22 @@ object NoOpEmulatorControlExecutor : EmulatorControlExecutor {
 }
 
 /**
+ * Reports a hardware-button press as the user using [deviceId] (#10716) before delegating, so an
+ * idle-released desktop session binds the device again on the press, as pane input does. The
+ * notification runs first: the rebind only restarts the session's bind loop and does not gate the
+ * press, which targets the device directly.
+ */
+class InteractionNotifyingControlExecutor(
+  private val delegate: EmulatorControlExecutor,
+  private val onUserInteraction: (String) -> Unit,
+) : EmulatorControlExecutor by delegate {
+  override suspend fun pressButton(deviceId: String, platform: Platform, button: DeviceButton) {
+    onUserInteraction(deviceId)
+    delegate.pressButton(deviceId, platform, button)
+  }
+}
+
+/**
  * Real executor backed by the daemon [AutoMobileClient]. Sets the active device first, then invokes
  * the control's MCP tool with the resolved platform + deviceId, enabling the tool's server
  * capability where one gates it. Untested IO seam (mirrors `DaemonMcpResourceClient`).

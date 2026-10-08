@@ -302,7 +302,7 @@ green (0/0); production runner smoke green on the 26.5 sim.
   confinement, not a lock. (`WebSocketServer`, `WebSocketConnection`, `NWByteChannel`,
   `OSLogReader` — the last **must** be queue-confined, not lock-confined, because
   `OSLogStore` is not `Sendable` and so cannot live in an `OSAllocatedUnfairLock<State:
-Sendable>` in this toolchain.)
+  Sendable>` in this toolchain.)
 - **Lock-confined Sendable collections** where a synchronous cross-thread path can't
   `await` (broadcast; or a write on the network queue): `OSAllocatedUnfairLock<State>` →
   genuinely `Sendable`, no `@unchecked`. (`SdkEventBuffer`, `ConnectionRegistry`, the
@@ -321,7 +321,7 @@ Sendable>` in this toolchain.)
   blocking SDK HTTP/DB calls freeze XCUITest and starve `/health` (#5374). It `await`s
   `@MainActor` UI collaborators and off-main SDK actors.
 - **`handle -> Any` is replaced by `-> any WebSocketResponsePayload`** (`Sendable &
-Encodable`). `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
+  Encodable`). `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
   downcasts for `perfTiming` injection; everything else encodes straight through.
 - **Coders are fresh-per-call** (`.sortedKeys`) — closes the reference's shared-mutable
   `JSONEncoder` smell; byte-identical since the config matches.

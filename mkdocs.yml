@@ -117,6 +117,7 @@ nav:
       - "Session execution logs": using/session-logs.md
       - "Session Downloads fixtures": using/session-downloads.md
       - "Storage capabilities": using/storage-capabilities.md
+      - "SDK capabilities": using/sdk-capabilities.md
       - "Live device acceptance": using/live-device-acceptance.md
       - "Dynamic Tools": using/dynamic-tools.md
       - "Environment variables": using/environment-variables.md

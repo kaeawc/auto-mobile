@@ -40,6 +40,7 @@ teardown() {
 # $1 = ipaSha256 value (may be empty)
 # $2 = videoJarSha256 value (optional; the field is omitted when unset, matching
 #      real registry entries that predate jar delivery)
+# $4 = overlayAgentSha256 value (optional; omitted when unset)
 # $3 = screenCaptureHelperSha256 value (optional; the field is omitted when
 #      unset, matching releases that predate helper delivery)
 write_release_ts() {
@@ -54,9 +55,15 @@ write_release_ts() {
     helper_line="
     screenCaptureHelperSha256: \"$3\","
   fi
+  local overlay_line=""
   if [ "$#" -ge 4 ]; then
+    overlay_line="
+    overlayAgentSha256: \"$4\","
+  fi
+  local filter_line=""
+  if [ "$#" -ge 5 ]; then
     filter_line="
-    networkFilterSha256: \"$4\","
+    networkFilterSha256: \"$5\","
   fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
@@ -66,6 +73,7 @@ export interface ReleaseChecksumEntry {
   runnerSha256: string;
   videoJarSha256?: string;
   screenCaptureHelperSha256?: string;
+  overlayAgentSha256?: string;
   networkFilterSha256?: string;
 }
 
@@ -74,7 +82,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$filter_line
+    runnerSha256: "",$video_line$helper_line$overlay_line$filter_line
   },
 ];
 EOF
@@ -162,8 +170,32 @@ EOF
   [[ "$output" == *"SHA256 mismatch"* ]]
 }
 
-@test "matching networkFilterSha256 verifies successfully (networkfilter platform)" {
+@test "matching overlayAgentSha256 verifies successfully (overlayagent platform)" {
   write_release_ts "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" overlayagent
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+
+@test "absent overlayAgentSha256 reports 'no checksum', not a mismatch" {
+  write_release_ts "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" overlayagent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+}
+
+@test "mismatched overlayAgentSha256 reports a mismatch" {
+  write_release_ts "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" overlayagent
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
+}
+
+@test "matching networkFilterSha256 verifies successfully (networkfilter platform)" {
+  write_release_ts "" "" "" "" "$ART_SHA"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" networkfilter
   [ "$status" -eq 0 ]
@@ -180,7 +212,7 @@ EOF
 }
 
 @test "mismatched networkFilterSha256 reports a mismatch" {
-  write_release_ts "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  write_release_ts "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
   cd "$PROJECT"
   run bash "$ABS_SCRIPT" "$ARTIFACT" networkfilter
   [ "$status" -ne 0 ]

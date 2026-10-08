@@ -12,9 +12,9 @@
 # main post-merge (or worse, gets committed by the apply/write path), so the pin
 # must be enforced, not merely declared.
 
-KTFMT_VERSION="0.64"
+KTFMT_VERSION="0.65"
 
-# Parse the numeric version from `ktfmt --version` (e.g. "ktfmt version 0.64").
+# Parse the numeric version from `ktfmt --version` (e.g. "ktfmt version 0.65").
 # Filter to ktfmt's own version line first so a JVM warning on stderr (the manual
 # install runs `java -jar`) can't have *its* version grabbed instead. Prints the
 # empty string if ktfmt is absent or emits nothing parseable.
@@ -29,12 +29,12 @@ installed_ktfmt_version() {
     }' <<<"$version_output"
 }
 
-# Normalize a version string for comparison so a 2-part pin (e.g. "0.64") and a
-# 3-part printed version (e.g. "0.64.0") are treated as equal (issue #3004).
+# Normalize a version string for comparison so a 2-part pin (e.g. "0.65") and a
+# 3-part printed version (e.g. "0.65.0") are treated as equal (issue #3004).
 # Strategy: strip any trailing ".0" release-patch component, collapsing an
 # `x.y.0` to `x.y`, so the pin and the parsed `ktfmt --version` compare equal
 # regardless of whether either side carries the redundant zero patch. A non-zero
-# patch (e.g. "0.64.1") is preserved and therefore still fails the gate, since it
+# patch (e.g. "0.65.1") is preserved and therefore still fails the gate, since it
 # IS a different formatter build. Empty input normalizes to empty.
 normalize_ktfmt_version() {
     local version="$1"

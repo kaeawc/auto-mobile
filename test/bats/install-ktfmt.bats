@@ -22,7 +22,7 @@ setup() {
   mkdir -p "$HOME"
 
   # Records what curl was asked to download, so a test can assert the pinned
-  # JAR (v0.64) was fetched on the fallback path.
+  # JAR (v0.65) was fetched on the fallback path.
   export CURL_LOG="$TEST_DIR/curl.log"
 
   # detect_os reads `uname -s`; default macOS, override with UNAME_S (e.g.
@@ -52,7 +52,7 @@ STUB
   cat > "$STUB_BIN/java" <<'STUB'
 #!/usr/bin/env bash
 if [[ " $* " == *" --version "* ]]; then
-  echo "ktfmt version ${WRAPPER_VERSION:-0.64}"
+  echo "ktfmt version ${WRAPPER_VERSION:-0.65}"
   exit 0
 fi
 if [[ " $* " == *" -version "* ]]; then
@@ -82,7 +82,7 @@ STUB
   cat > "$STUB_BIN/ktfmt" <<'STUB'
 #!/usr/bin/env bash
 if [[ " $* " == *" --version "* ]]; then
-  echo "ktfmt version ${BREW_KTFMT_VERSION:-0.64}"
+  echo "ktfmt version ${BREW_KTFMT_VERSION:-0.65}"
   exit 0
 fi
 exit 0
@@ -97,7 +97,7 @@ teardown() {
 }
 
 @test "macOS: brew version matching the pin does NOT trigger a manual JAR download" {
-  run env BREW_KTFMT_VERSION="0.64" bash "$SCRIPT"
+  run env BREW_KTFMT_VERSION="0.65" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   # No fallback -> curl was never invoked to fetch a JAR.
   [ ! -s "$CURL_LOG" ]
@@ -110,13 +110,13 @@ teardown() {
   # so a passing exit here proves the PATH/hash fix works.
   run env BREW_KTFMT_VERSION="0.66" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  # Fallback fetched the pinned fat JAR from the v0.64 GitHub release.
+  # Fallback fetched the pinned fat JAR from the v0.65 GitHub release.
   [ -s "$CURL_LOG" ]
-  grep -q "v0.64/ktfmt-0.64-with-dependencies.jar" "$CURL_LOG"
+  grep -q "v0.65/ktfmt-0.65-with-dependencies.jar" "$CURL_LOG"
   # The pinned wrapper was installed into the sandboxed ~/.local/bin.
   [ -x "$HOME/.local/bin/ktfmt" ]
   # verify_installation confirmed the resolved ktfmt is now the pin, not brew's.
-  [[ "$output" == *"ktfmt 0.64 is installed"* ]]
+  [[ "$output" == *"ktfmt 0.65 is installed"* ]]
 }
 
 @test "Windows: scoop version != pin falls back to the pinned JAR (honors pin)" {
@@ -126,12 +126,12 @@ teardown() {
   run env UNAME_S="MINGW64_NT-10.0" BREW_KTFMT_VERSION="0.66" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -s "$CURL_LOG" ]
-  grep -q "v0.64/ktfmt-0.64-with-dependencies.jar" "$CURL_LOG"
-  [[ "$output" == *"ktfmt 0.64 is installed"* ]]
+  grep -q "v0.65/ktfmt-0.65-with-dependencies.jar" "$CURL_LOG"
+  [[ "$output" == *"ktfmt 0.65 is installed"* ]]
 }
 
 @test "Windows: scoop version matching the pin does NOT trigger a manual JAR download" {
-  run env UNAME_S="MINGW64_NT-10.0" BREW_KTFMT_VERSION="0.64" bash "$SCRIPT"
+  run env UNAME_S="MINGW64_NT-10.0" BREW_KTFMT_VERSION="0.65" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ ! -s "$CURL_LOG" ]
 }
@@ -145,6 +145,6 @@ teardown() {
   # Fallback still ran (pinned JAR fetched), but verification caught the mismatch.
   [ -s "$CURL_LOG" ]
   [[ "$output" == *"0.66"* ]]
-  [[ "$output" == *"0.64"* ]]
+  [[ "$output" == *"0.65"* ]]
   [[ "$output" != *"Installation completed successfully"* ]]
 }

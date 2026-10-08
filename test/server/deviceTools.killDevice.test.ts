@@ -705,6 +705,30 @@ describe("killDevice handler", () => {
       },
     });
     registerDeviceTools();
+    callKillDeviceAsItsHolder();
+  };
+
+  /**
+   * These tests exercise shutdown mechanics, which a device's holder drives; a non-holder is
+   * refused before any of them run (#10785, covered in lifecycleDeviceOwnership.test.ts). Each
+   * call names the session holding its target at call time, as the holder's own call would.
+   */
+  const callKillDeviceAsItsHolder = () => {
+    const tool = ToolRegistry.getRegisteredTool("killDevice")!;
+    ToolRegistry.register(
+      "killDevice",
+      tool.description,
+      tool.schema,
+      (args, progress, signal) => {
+        const deviceId = (args as { device?: { deviceId?: string } }).device?.deviceId;
+        const holder =
+          deviceId && DaemonState.getInstance().isInitialized()
+            ? DaemonState.getInstance().getSessionManager().getSessionForDevice(deviceId)
+            : null;
+        return tool.handler(holder ? { ...args, sessionUuid: holder } : args, progress, signal);
+      },
+      { defaultEnabled: true, transportRecovery: "connect" },
+    );
   };
 
   const cleanup = () => {
@@ -4029,7 +4053,7 @@ describe("killDevice handler", () => {
       timer,
     });
     DaemonState.getInstance().initialize(
-      {} as SessionManager,
+      { getSessionForDevice: () => null } as never,
       {
         markIntentionalShutdown: () => {
           markedIntentionalShutdown++;
@@ -5106,7 +5130,7 @@ describe("killDevice handler", () => {
       manager = stoppedManager;
       if (platform === "android") {
         DaemonState.getInstance().initialize(
-          {} as SessionManager,
+          { getSessionForDevice: () => null } as never,
           {
             markIntentionalShutdown: () => {
               markedIntentionalShutdown++;

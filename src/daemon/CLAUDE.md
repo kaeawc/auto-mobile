@@ -146,7 +146,13 @@ Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` i
 with no session is refused with the same code before admission or device work,
 unless the tool is registered `deviceReadOnly` (watching: `observe`,
 `identifyInteractions`, `hitTest`). An autolocked device keeps autolock's own
-refusal.
+refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
+`deleteDevice` on a booted target) never reach that resolver, so they apply the
+same code through `assertLifecycleCallerHoldsDevice`
+(`src/server/lifecycleDeviceOwnership.ts`); the autolocking MCP connection counts
+as the holder, and the user's `force: true` overrides with a logged warning.
+Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
+guarded by the pool's own owner check instead.
 
 Owner decisions 2026-10-08 (#10730) settle the viewing question: watching is
 allowed on any device, whichever session owns it, and watching is not use.

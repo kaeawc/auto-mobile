@@ -302,6 +302,20 @@ final class OverlayComponentsTests: XCTestCase {
         XCTAssertEqual(OverlayTime.label(hour: 7, minute: 30), "07:30")
         XCTAssertEqual(OverlayTime.label(hour: 23, minute: 5), "23:05")
     }
+
+    func testTwelveHourFaceRoundTripsEveryHour() {
+        XCTAssertEqual(OverlayTime.hour12(of: 0), 12)
+        XCTAssertEqual(OverlayTime.hour12(of: 12), 12)
+        XCTAssertEqual(OverlayTime.hour12(of: 15), 3)
+        for hour in 0..<24 {
+            let back = OverlayTime.hour24(hour12: OverlayTime.hour12(of: hour), pm: OverlayTime.isPM(hour: hour))
+            XCTAssertEqual(back, hour)
+        }
+    }
+
+    func testPickerWheelsAreLabelledByWhatTheySet() {
+        XCTAssertEqual([OverlayTime.hourLabel, OverlayTime.minuteLabel], ["Hour", "Minute"])
+    }
 }
 
 extension Result {

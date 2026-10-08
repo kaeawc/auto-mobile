@@ -35,6 +35,9 @@ class OverlayComponentSemanticsTest {
         mapOf(
           "alarm" to OverlayScalar.BooleanValue(true),
           "repeat" to OverlayScalar.BooleanValue(false),
+          "volume" to OverlayScalar.Numeric(7.0),
+          "mon" to OverlayScalar.BooleanValue(true),
+          "tue" to OverlayScalar.BooleanValue(false),
         ),
         OverlayColumnNode(
           children =
@@ -43,6 +46,22 @@ class OverlayComponentSemanticsTest {
               OverlayCheckboxNode(testTag = "repeat", stateKey = "repeat", onTap = save),
               OverlayButtonNode(testTag = "save", label = "Save", onTap = save),
               OverlayButtonNode(testTag = "cancel", label = "Cancel", variant = "text"),
+              OverlaySliderNode(
+                testTag = "volume",
+                stateKey = "volume",
+                label = "Volume",
+                min = 0.0,
+                max = 10.0,
+                step = 1.0,
+              ),
+              OverlayChipNode(testTag = "mon", label = "Mon", stateKey = "mon"),
+              OverlayChipNode(testTag = "tue", label = "Tue", stateKey = "tue"),
+              OverlayChipNode(testTag = "add", label = "Add", onTap = save),
+              OverlayCardNode(
+                testTag = "card",
+                variant = "outlined",
+                children = listOf(OverlayButtonNode(testTag = "inner", label = "Inner")),
+              ),
             )
         ),
       )
@@ -105,5 +124,50 @@ class OverlayComponentSemanticsTest {
     node.click()
     root.tagged("cancel").click()
     assertEquals(listOf(OverlayInteraction.Tap(save)), interactions)
+  }
+
+  @Test
+  fun `a slider exposes its range info label and a set-progress action`() {
+    val node = render().tagged("volume")
+    val range = node.config[SemanticsProperties.ProgressBarRangeInfo]
+    assertEquals(7f, range.current, 0f)
+    assertEquals(0f..10f, range.range)
+    assertEquals(9, range.steps)
+    assertEquals(listOf(AnnotatedString("Volume")), node.config[SemanticsProperties.Text])
+    assertEquals(listOf("Volume"), node.config[SemanticsProperties.ContentDescription])
+    assertEquals(true, checkNotNull(node.config[SemanticsActions.SetProgress].action)(8f))
+    assertEquals(listOf(OverlayInteraction.Slide("volume", 8.0)), interactions)
+  }
+
+  @Test
+  fun `a filter chip reports checked state and toggles while an assist chip is a button`() {
+    val root = render()
+    val on = root.tagged("mon")
+    assertEquals(Role.Checkbox, on.config[SemanticsProperties.Role])
+    assertEquals(ToggleableState.On, on.config[SemanticsProperties.ToggleableState])
+    assertEquals(listOf("Mon"), on.config[SemanticsProperties.ContentDescription])
+    val off = root.tagged("tue")
+    assertEquals(ToggleableState.Off, off.config[SemanticsProperties.ToggleableState])
+    on.click()
+    off.click()
+    val assist = root.tagged("add")
+    assertEquals(Role.Button, assist.config[SemanticsProperties.Role])
+    assertFalse(assist.config.contains(SemanticsProperties.ToggleableState))
+    assist.click()
+    assertEquals(
+      listOf(
+        OverlayInteraction.Toggle("mon"),
+        OverlayInteraction.Toggle("tue"),
+        OverlayInteraction.Tap(save),
+      ),
+      interactions,
+    )
+  }
+
+  @Test
+  fun `a card is a semantics-free container that keeps its children reachable`() {
+    val card = render().tagged("card")
+    assertFalse(card.config.contains(SemanticsProperties.ContentDescription))
+    assertEquals(Role.Button, card.tagged("inner").config[SemanticsProperties.Role])
   }
 }

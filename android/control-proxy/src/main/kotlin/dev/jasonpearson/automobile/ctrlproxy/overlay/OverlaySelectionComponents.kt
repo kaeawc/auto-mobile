@@ -12,7 +12,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -88,7 +87,7 @@ internal fun RenderOverlayRadioGroup(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         RadioButton(selected, onClick = null)
-        Text(option.label, Modifier.clearAndSetSemantics {}, color = LocalContentColor.current)
+        Text(option.label, Modifier.clearAndSetSemantics {}, color = overlayForeground(node))
       }
     }
   }
@@ -122,6 +121,7 @@ internal fun RenderOverlayListItem(
         Modifier.clickable(role = Role.Button) { interact(OverlayInteraction.Tap(actions)) }
       else -> Modifier
     }
+  val foreground = if (node.style.source.color != null) node.style.color else Color.Unspecified
   ListItem(
     headlineContent = { Text(source.headline, Modifier.clearAndSetSemantics {}) },
     modifier = target.then(modifier),
@@ -134,7 +134,11 @@ internal fun RenderOverlayListItem(
     colors =
       ListItemDefaults.colors(
         containerColor =
-          if (node.style.background != null) Color.Transparent else ListItemDefaults.containerColor
+          if (node.style.background != null) Color.Transparent else ListItemDefaults.containerColor,
+        headlineColor = foreground,
+        supportingColor = foreground,
+        leadingIconColor = foreground,
+        trailingIconColor = foreground,
       ),
   )
 }

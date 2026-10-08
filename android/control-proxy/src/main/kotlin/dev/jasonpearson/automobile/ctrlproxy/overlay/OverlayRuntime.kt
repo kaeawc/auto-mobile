@@ -62,6 +62,13 @@ sealed interface OverlayInteraction {
     val value: String,
     val actions: List<OverlayAction> = emptyList(),
   ) : OverlayInteraction
+
+  /** A `slider` drag or accessibility set-progress: stores the (already snapped) number. */
+  data class Slide(
+    val key: String,
+    val value: Double,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
 }
 
 /**
@@ -133,6 +140,12 @@ class OverlayRuntime(
         // The validator keeps the bound key a string; anything else leaves the group inert.
         if (current.state[interaction.key] !is OverlayScalar.Text) return
         change(interaction.key, OverlayScalar.Text(interaction.value))
+        tap(interaction.actions)
+      }
+      is OverlayInteraction.Slide -> {
+        val stored = current.state[interaction.key] as? OverlayScalar.Numeric ?: return
+        if (stored.value == interaction.value) return
+        change(interaction.key, OverlayScalar.Numeric(interaction.value))
         tap(interaction.actions)
       }
     }
@@ -264,6 +277,7 @@ internal fun overlayDescendants(node: OverlayNode): List<OverlayNode> =
     is OverlayRowNode -> node.children
     is OverlayColumnNode -> node.children
     is OverlayPagerNode -> node.children
+    is OverlayCardNode -> node.children
     is OverlayScrollNode -> listOf(node.child)
     is OverlayBottomSheetNode -> listOf(node.child)
     else -> emptyList()

@@ -54,7 +54,7 @@ const TARGET_ELEMENT: Element = {
 
 function makeScrollUntilVisible({
   accessibilityDetector,
-  finder,
+  scrollResolver,
   timer,
   accessibilityService,
   observeResults,
@@ -70,7 +70,7 @@ function makeScrollUntilVisible({
   geometry,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
-  finder: FakeElementFinder;
+  scrollResolver: FakeScrollElementResolver;
   timer: FakeTimer;
   accessibilityService: FakeScrollAccessibilityService;
   observeResults: ObserveResult[];
@@ -112,7 +112,7 @@ function makeScrollUntilVisible({
 
   return new ScrollUntilVisible({
     device,
-    resolver: resolver ?? new FakeScrollElementResolver(finder),
+    resolver: resolver ?? scrollResolver,
     geometry: geometry ?? fakeGeometry,
     observeScreen: fakeObserveScreen as any,
     accessibilityService,
@@ -142,6 +142,7 @@ const BASE_OPTIONS: SwipeOnResolvedOptions = {
 describe("ScrollUntilVisible overshoot recovery", () => {
   let detector: FakeAccessibilityDetector;
   let finder: FakeElementFinder;
+  let scrollResolver: FakeScrollElementResolver;
   let timer: FakeTimer;
   let accessibilityService: FakeScrollAccessibilityService;
   let talkBackExecutor: FakeTalkBackSwipeExecutor;
@@ -150,6 +151,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     detector = new FakeAccessibilityDetector();
     detector.setTalkBackEnabled(false);
     finder = new FakeElementFinder();
+    scrollResolver = new FakeScrollElementResolver(finder);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
@@ -161,7 +163,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const resolve = spyOn(resolver, "resolve");
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -192,7 +194,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const observeOptions: Array<Record<string, unknown> | undefined> = [];
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -210,7 +212,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const controller = new AbortController();
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(), makeObserveResult(1)],
@@ -228,7 +230,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     let interactions = 0;
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [0, 1, 2, 3, 4].map((id) => makeObserveResult(id)),
@@ -258,7 +260,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     let observesAtSwipe: number | undefined;
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
@@ -283,7 +285,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const controller = new AbortController();
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -321,7 +323,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     };
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [observation],
@@ -360,7 +362,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     };
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [observation],
@@ -373,7 +375,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("element found in reverse after forward end-of-list", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     // Forward phase: obs[1] same as obs[0] → 1 unchanged scroll → switch to reverseMode
     // Reverse phase: obs[2] is different fingerprint → element found
@@ -387,7 +389,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const sameObs = makeObserveResult(0);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       // [0]=initial, [1]=same fingerprint (forward end), [2]=different (reverse finds element)
@@ -403,14 +405,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("throws when both forward and reverse directions exhaust without finding element", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     finder.nextElementByText = null; // never found
 
     // All observations identical — both forward and reverse end-of-list trigger
     const sameObs = makeObserveResult(99);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, sameObs, sameObs, sameObs, sameObs, sameObs, sameObs],
@@ -421,7 +423,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("element found in forward direction without entering reverse mode", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => {
@@ -432,7 +434,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [
@@ -454,7 +456,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("suppresses intermediate evidence and captures only the terminal observation", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => {
       findCount++;
@@ -465,7 +467,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const terminalEvidence: ObserveResult[] = [];
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1)],
@@ -487,7 +489,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("switches to opposite direction after forward end-of-list", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     // Forward phase triggers end-of-list (1 same), then reverse finds element
     let findCount = 0;
@@ -499,7 +501,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const sameObs = makeObserveResult(0);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
@@ -519,7 +521,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("stale unchanged observation is re-observed before deciding to reverse", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     // Tie the synthetic target to the final page, regardless of how many earlier pages are searched.
     finder.findElementByText = (hierarchy) =>
       hierarchy.hierarchy.node === final.viewHierarchy!.hierarchy.node ? TARGET_ELEMENT : null;
@@ -543,7 +545,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const observeOptions: Array<Record<string, unknown> | undefined> = [];
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults,
@@ -570,14 +572,15 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       bounds: { left: 100, top: 100, right: 300, bottom: 700 },
     };
     let containerLookups = 0;
-    finder.findScrollableContainer = () =>
-      ++containerLookups === 1 ? firstContainer : shiftedContainer;
+    scrollResolver.setScrollableContainerResolver(() =>
+      ++containerLookups === 1 ? firstContainer : shiftedContainer,
+    );
     let findCount = 0;
     finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     const sameObs = { ...makeObserveResult(0), freshness: { isFresh: true } };
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
@@ -610,13 +613,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       bounds: { left: 250, top: 200, right: 300, bottom: 250 },
     };
     let containerLookups = 0;
-    finder.findScrollableContainer = () =>
-      ++containerLookups === 1 ? firstContainer : shiftedContainer;
+    scrollResolver.setScrollableContainerResolver(() =>
+      ++containerLookups === 1 ? firstContainer : shiftedContainer,
+    );
     let findCount = 0;
     finder.findElementByText = () => (++findCount >= 2 ? shiftedTarget : null);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1)],
@@ -637,13 +641,15 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       bounds: { left: 50, top: 100, right: 350, bottom: 700 },
     };
     let containerLookups = 0;
-    finder.findScrollableContainer = () => (++containerLookups === 1 ? lastKnownContainer : null);
+    scrollResolver.setScrollableContainerResolver(() =>
+      ++containerLookups === 1 ? lastKnownContainer : null,
+    );
     let findCount = 0;
     finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     const sameObs = makeObserveResult(0);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
@@ -693,7 +699,8 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const fakeDetector = new FakeAccessibilityDetector();
     fakeDetector.setTalkBackEnabled(false);
     const fakeFinder = new FakeElementFinder();
-    fakeFinder.nextScrollableContainer = CONTAINER_ELEMENT;
+    const fakeResolver = new FakeScrollElementResolver(fakeFinder);
+    fakeResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const fakeTalkBack = new FakeTalkBackSwipeExecutor();
@@ -717,7 +724,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = new ScrollUntilVisible({
       device: DEVICE,
-      resolver: new FakeScrollElementResolver(fakeFinder),
+      resolver: fakeResolver,
       geometry: fakeGeometry,
       observeScreen: fakeObserveScreen as any,
       accessibilityService: fakeAccessibilityService,
@@ -743,7 +750,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   test("scroll idle detection: no extra sleep when observation already settled", async () => {
     // When observedInteraction and the first idle poll return the same fingerprint,
     // waitForScrollIdle returns immediately without sleeping.
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => {
@@ -753,7 +760,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       // All distinct so fingerprints keep changing → scroll detected each iteration
@@ -776,7 +783,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("reverse mode uses slow speed even when original options had fast speed", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     // Forward phase triggers end-of-list (1 same), reverse finds element
     let findCount = 0;
@@ -794,7 +801,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const sameObs = makeObserveResult(0);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
@@ -811,7 +818,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("uses safe swipe coordinates from overlay detector when overlay is present", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => (++findCount >= 2 ? TARGET_ELEMENT : null);
@@ -828,7 +835,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
@@ -844,14 +851,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("indeterminate Android swipe stops before retry or reverse recovery", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const error =
       "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (timeout). Do not retry automatically.";
     const failure = { success: false, outcomeIndeterminate: true, error };
     talkBackExecutor.setFailureResult(failure);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -866,12 +873,12 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("two consecutive definite Android swipe failures report the swipe error without reversing", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const failure = { success: false, error: "adb: device offline" };
     talkBackExecutor.setFailureResult(failure);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -886,14 +893,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("one definite Android failure with an unchanged hierarchy does not trigger reverse recovery", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
     finder.findElementByText = () => (++findCount >= 3 ? TARGET_ELEMENT : null);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const sameObs = makeObserveResult();
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
@@ -908,14 +915,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("a successful Android swipe resets the consecutive failure allowance", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     let findCount = 0;
     finder.findElementByText = () => (++findCount >= 5 ? TARGET_ELEMENT : null);
     const failure = { success: false, error: "gesture rejected" };
     talkBackExecutor.setFailureResult(failure);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [0, 1, 2, 3, 4].map(makeObserveResult),
@@ -934,11 +941,11 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("timeout after a tolerated Android failure retains the swipe error", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     talkBackExecutor.setFailureResult({ success: false, error: "adb: device offline" });
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -953,10 +960,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("successful unchanged swipes preserve the end-of-container message", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -970,13 +977,13 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("failed iOS swipe still returns the original failure after one swipe", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const observation = makeObserveResult();
     const terminalEvidence: ObserveResult[] = [];
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [observation],
@@ -1001,7 +1008,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("indeterminate iOS swipe stops the lookFor loop instead of reporting found false (#9972)", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     const error =
       "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (Swipe timed out after 5000ms). The swipe may have been applied. Do not retry automatically.";
     talkBackExecutor.setFailureResult({ success: false, outcomeIndeterminate: true, error });
@@ -1012,7 +1019,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     } as unknown as IOSCtrlProxyClient);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -1036,7 +1043,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("a definite iOS swipe failure does not invalidate the hierarchy cache", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const cacheInvalidations: string[] = [];
     const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
@@ -1044,7 +1051,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     } as unknown as IOSCtrlProxyClient);
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [makeObserveResult()],
@@ -1062,7 +1069,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("scroll proceeds past a failed swipe if observation is still returned", async () => {
-    finder.nextScrollableContainer = CONTAINER_ELEMENT;
+    scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
 
     let findCount = 0;
     finder.findElementByText = (_h: any, _t: any) => (++findCount >= 3 ? TARGET_ELEMENT : null);
@@ -1071,7 +1078,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
-      finder,
+      scrollResolver,
       timer,
       accessibilityService,
       observeResults: [
@@ -1228,8 +1235,10 @@ describe("iOS chrome scroll-end guard", () => {
       const observation = { ...fixture, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const finder = new FakeElementFinder();
-      finder.nextScrollableContainer = { bounds: { left: 0, top: 0, right: 393, bottom: 852 } };
+      const scrollResolver = new FakeScrollElementResolver();
+      scrollResolver.setNextScrollableContainer({
+        bounds: { left: 0, top: 0, right: 393, bottom: 852 },
+      });
       const executor = new FakeTalkBackSwipeExecutor();
       const geometry = new FakeElementGeometry();
       geometry.swipeResult = { startX: 196, startY: 85, endX: 196, endY: 766 };
@@ -1237,7 +1246,7 @@ describe("iOS chrome scroll-end guard", () => {
         device: { ...DEVICE, platform: "ios" },
         geometry: includeSystemInsets ? new DefaultElementGeometry() : geometry,
         accessibilityDetector: new FakeAccessibilityDetector(),
-        finder,
+        scrollResolver,
         timer,
         accessibilityService: new FakeScrollAccessibilityService(),
         observeResults: [observation],
@@ -1263,7 +1272,7 @@ describe("iOS chrome scroll-end guard", () => {
       device: { ...DEVICE, platform: "ios" },
       geometry: new DefaultElementGeometry(),
       accessibilityDetector: new FakeAccessibilityDetector(),
-      finder: new FakeElementFinder(),
+      scrollResolver: new FakeScrollElementResolver(),
       timer,
       accessibilityService: new FakeScrollAccessibilityService(),
       observeResults: [observation],

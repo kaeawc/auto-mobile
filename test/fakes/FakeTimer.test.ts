@@ -112,6 +112,89 @@ describe("FakeTimer auto-advance", function () {
     expect(polls).toBeGreaterThan(1);
   });
 
+  test("drops an endless poll to one event per real turn once it never goes idle", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let polling = true;
+    let polls = 0;
+    const poller = (async () => {
+      while (polling) {
+        polls++;
+        await timer.sleep(1);
+      }
+    })();
+    const realTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+    // Microtask bursts first (100 events per real turn), then the throttle.
+    for (let turn = 0; turn < 20 && polls < 1_000; turn++) {
+      await realTurn();
+    }
+    expect(polls).toBeGreaterThanOrEqual(1_000);
+    const throttledFrom = polls;
+    for (let turn = 0; turn < 5; turn++) {
+      await realTurn();
+    }
+    polling = false;
+    await poller;
+
+    expect(polls - throttledFrom).toBeLessThanOrEqual(10);
+  });
+
+  test("returns to the microtask pump after a throttled poll goes idle", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let polling = true;
+    const poller = (async () => {
+      while (polling) {
+        await timer.sleep(1);
+      }
+    })();
+    for (let turn = 0; turn < 20; turn++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    polling = false;
+    await poller;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    let realTurnRan = false;
+    setImmediate(() => {
+      realTurnRan = true;
+    });
+
+    for (let step = 0; step < 50; step++) {
+      await timer.sleep(1_000);
+    }
+
+    expect(realTurnRan).toBe(false);
+  });
+
+  test("reset() takes a throttled pump back to microtask pumping", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let polling = true;
+    const poller = (async () => {
+      while (polling) {
+        await timer.sleep(1);
+      }
+    })();
+    for (let turn = 0; turn < 20; turn++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    // A shared timer reset between tests while its pump is in throttled mode.
+    polling = false;
+    timer.reset();
+    await poller;
+    let realTurnRan = false;
+    setImmediate(() => {
+      realTurnRan = true;
+    });
+
+    for (let step = 0; step < 50; step++) {
+      await timer.sleep(1_000);
+    }
+
+    expect(realTurnRan).toBe(false);
+  });
+
   test("paces a lone never-cleared interval at one tick per real turn", async function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

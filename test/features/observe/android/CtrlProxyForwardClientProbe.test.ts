@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   HostForwardClientConnectionProbe,
   parseLsofForwardClientPids,
@@ -22,19 +23,18 @@ const LSOF_ADB_AND_CLIENT =
   "p501\nf12\nn127.0.0.1:49572->127.0.0.1:49573\n" +
   "p92981\nf5\nn127.0.0.1:49573->127.0.0.1:49572\n";
 
-// Windows `netstat -ano -p TCP` layout (header, listener, accepted end, client
-// end, a TIME_WAIT row with PID 0). Not captured: no Windows host is available.
-const NETSTAT_TCP = [
-  "",
-  "Active Connections",
-  "",
-  "  Proto  Local Address          Foreign Address        State           PID",
-  "  TCP    127.0.0.1:8765         0.0.0.0:0              LISTENING       501",
-  "  TCP    127.0.0.1:8765         127.0.0.1:52144        ESTABLISHED     501",
-  "  TCP    127.0.0.1:52144        127.0.0.1:8765         ESTABLISHED     7720",
-  "  TCP    127.0.0.1:52100        127.0.0.1:8765         TIME_WAIT       0",
-  "",
-].join("\r\n");
+// Captured on a windows-latest GitHub runner with `netstat -ano -p TCP` and
+// `netstat -ano -p TCPv6` (CRLF bytes kept; pinned -text in .gitattributes) while
+// PID 8072 held both ends of loopback connections: 62741 (IPv4) and 62743 (IPv6).
+// The IPv4 capture also carries TIME_WAIT rows with PID 0 and many LISTENING rows.
+const NETSTAT_TCP = readFileSync(
+  new URL("../../../fixtures/windows-netstat/netstat_ano_p_TCP.txt", import.meta.url),
+  "utf8",
+);
+const NETSTAT_TCPV6 = readFileSync(
+  new URL("../../../fixtures/windows-netstat/netstat_ano_p_TCPv6.txt", import.meta.url),
+  "utf8",
+);
 
 function execResult(stdout: string): ExecResult {
   return {
@@ -84,9 +84,21 @@ describe("parseLsofForwardClientPids", () => {
 });
 
 describe("parseNetstatForwardClientPids", () => {
-  test("counts the client end and skips the listener, accepted end and PID 0 rows", () => {
-    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 8765)).toEqual([7720]);
-    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 9000)).toEqual([]);
+  test("keeps the CRLF line endings of the real capture", () => {
+    expect(NETSTAT_TCP).toContain("\r\n");
+    expect(NETSTAT_TCPV6).toContain("\r\n");
+  });
+
+  test("counts the IPv4 client end and skips listeners, remote peers and PID 0 rows", () => {
+    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 62741)).toEqual([8072]);
+    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 62724)).toEqual([]);
+    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 443)).toEqual([]);
+    expect(parseNetstatForwardClientPids(NETSTAT_TCP, 0)).toEqual([]);
+  });
+
+  test("counts the IPv6 loopback client end", () => {
+    expect(parseNetstatForwardClientPids(NETSTAT_TCPV6, 62743)).toEqual([8072]);
+    expect(parseNetstatForwardClientPids(NETSTAT_TCPV6, 22)).toEqual([]);
   });
 });
 
@@ -128,14 +140,16 @@ describe("HostForwardClientConnectionProbe", () => {
 
   test("reads IPv4 and IPv6 netstat tables on Windows", async () => {
     const host = new ScriptedHost(async (command) =>
-      execResult(
-        command.endsWith("TCPv6")
-          ? "  TCP    [::1]:52150            [::1]:8765             ESTABLISHED     7721\r\n"
-          : NETSTAT_TCP,
-      ),
+      execResult(command.endsWith("TCPv6") ? NETSTAT_TCPV6 : NETSTAT_TCP),
     );
     const probe = new HostForwardClientConnectionProbe(host, "win32");
-    expect(await probe.findClientPids(8765)).toEqual([7720, 7721]);
-    expect(host.commands).toEqual(["netstat -ano -p TCP", "netstat -ano -p TCPv6"]);
+    expect(await probe.findClientPids(62741)).toEqual([8072]);
+    expect(await probe.findClientPids(62743)).toEqual([8072]);
+    expect(host.commands).toEqual([
+      "netstat -ano -p TCP",
+      "netstat -ano -p TCPv6",
+      "netstat -ano -p TCP",
+      "netstat -ano -p TCPv6",
+    ]);
   });
 });

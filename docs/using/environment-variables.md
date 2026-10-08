@@ -188,22 +188,32 @@ the current owner (a restarted owner resuming). A session on the CLI idle policy
 never has a live lease for this purpose: its one-shot CLI owners exit between
 invocations, so the next invocation's new token can always claim it.
 
-Heartbeats prove liveness, not use. A heartbeat-policy session also has a
-2-minute idle window measured from the end of its last tool call, and heartbeats
-never extend it: they renew only the owner lease and its grace window. A tool
-call in flight is activity, so a session is never released mid-call however long
-the call runs, and the window restarts when the call ends. An agent that
+Heartbeats prove liveness, not use (owner decision 2026-10-08, #10656). A
+heartbeat-policy session also has a 2-minute idle window measured from the end
+of its last tool call, and heartbeats never extend it: they renew only the owner
+lease and its grace window. Only tool usage extends the idle deadline, so a
+heartbeat from an idle but live owner does not. A tool call in flight is
+activity, so the idle window does not release a session mid-call, and it
+restarts when the call ends (#10694). That hold is bounded: it lasts until the
+latest in-flight call's request deadline plus 10 s, or 30 minutes after it began
+when an in-flight call has no deadline, so a call that never settles cannot hold
+a device forever. An agent that
 acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
 release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
-Watching is not use, and desktop input is (owner decisions 2026-10-08, #10730).
-A desktop or IDE window that only watches a device holds no session on it: it
+Watching is not use, and desktop input is (owner decisions 2026-10-08, #10693,
+#10730). A desktop or IDE window that only watches a device holds no session on it: it
 registers an observer session, which the idle window does not apply to. Its
 first tap, swipe, key or text input on a free device allocates the device, and
 each later input restarts the idle window. When the user stops sending input,
 the daemon releases the device after the window as `cleanup-expired`, and the
 window drops back to watching without re-acquiring it; the next input
-allocates it again.
+allocates it again. The desktop may watch any device whichever session owns it
+(owner decision 2026-10-08, #10698, #10731, #8902), as a read-only viewer;
+control stays with the owner. `input/*` for a held device is accepted only from a
+frame that names the holding session, and is refused with
+`device_owned_by_other_session` otherwise (#10743). A device nobody holds takes
+input from anyone.
 `AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS` (alias `AUTO_MOBILE_SESSION_IDLE_TIMEOUT_MS`)
 changes the window, for example to check idle release live; a value that is not a
 positive base-10 integer is ignored. Set it in both the daemon's and the proxy's
@@ -219,7 +229,15 @@ call `getAndroid` or `getApple`, which works on the same transport (#10702).
 and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or
 fail because of that recovery count as activity, so the idle window only ends the
-recovery once the client has made no calls for the whole window.
+recovery once the client has made no calls for the whole window. A call waiting
+inside the recovery is bounded by the three minutes alone.
+
+A daemon restart gives a session it rehydrates a fresh idle window: the session
+is recreated with `lastUsedAt` set to the restart time and its deadline one idle
+window later, because the persisted `last_used_at_ms` is not restored. This is
+intended, so an idle session that outlives a restart can hold its device for up
+to one more window. A persisted session whose deadline had already passed when
+the daemon restarted is not rehydrated.
 
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
@@ -232,8 +250,11 @@ To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
 A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
-(from a `getAndroid`, `getApple` or `startDevice` result) or was started with
-through `--initial-session-uuid`. A `sessionUuid` that is only passed to a tool
+(from a `getAndroid`, `getApple`, `startDevice` or `provisionDevice` result, which
+includes a `provisionDevice` call that returns an error but keeps its session) or was started with
+through `--initial-session-uuid`. A session UUID that the proxy learns from a `setActiveDevice` result is bound
+for routing like one named in call args, and is not claimed or heartbeated
+unless this proxy minted it. A `sessionUuid` that is only passed to a tool
 call is forwarded with that call but never claimed or heartbeated, so a proxy
 cannot inherit a session another owner holds, even after that owner's lease
 lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
@@ -384,7 +405,8 @@ its heartbeat monitor runs more than 2 s later than scheduled it moves every
 session's lease forward by exactly that lateness, so a daemon stall of a few
 seconds cannot push a heartbeating owner past lease plus grace.
 
-Idle time is wall-clock, host sleep included. A stall that on its own outlasts a
+Idle time is wall-clock, host sleep included (owner decision 2026-10-08,
+#10661; classification of sleep versus a daemon stall in #10699). A stall that on its own outlasts a
 session's idle window (its timeout plus the suspect grace), such as a laptop
 asleep for longer than that, is idleness and is not forgiven, so waking the host
 may release the session. The verdict does not depend on which timer runs first

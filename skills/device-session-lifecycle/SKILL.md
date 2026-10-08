@@ -374,7 +374,11 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     `test/daemon/livenessScenarioMatrix.test.ts` (harness:
     `test/helpers/livenessScenarioHarness.ts`); a seeded property in
     `test/daemon/sessionExpiryProperties.test.ts` covers the clock
-    discontinuities (#10667, #10705).
+    discontinuities (#10667, #10705). Desktop input is tool usage and
+    watching is not: a viewer allocates nothing, and the first `input/*`
+    allocates the device (#10730). The in-flight hold is bounded (request
+    deadline plus 10 s, 30 minutes without a deadline): a call that never
+    settles must not pin a device (#10663, #10712).
 
 ## 3. Recurring bug classes → where to look first
 
@@ -416,7 +420,9 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
    (or hand-calls `recordHeartbeat`) to force an expiry no production client
    can reach. A fix without a "released when idle despite heartbeats" test
    regresses silently to "never released". (#10655 H1/H3, #10656, #10658, #10657,
-   #10667)
+   #10667). Later instances: a selector-routed call that did not count as use
+   (#10692), a client rebind that undid the idle release (#10693), and the
+   deadline stamped at call start rather than call end (#10694)
 
 ## 4. Hunting procedure
 

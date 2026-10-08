@@ -159,9 +159,20 @@ also renewed the idle deadline (#10656; related #10657, #10658, #10050/#10051,
 The investigation produced the two-sided scenario matrix
 (`test/daemon/livenessScenarioMatrix.test.ts`, #10667) and extended the
 seeded expiry properties with a real `DevicePool`, daemon restart and
-known-failure properties (#10705). Open from it: #10699 (host sleep vs daemon
-stall), and autolock sessions keep a 60 s heartbeat lease, so a dead autolock
-owner holds its device for the autolock window instead of ~10 s.
+known-failure properties (#10705). Owner decisions 2026-10-08: only tool usage
+extends the idle deadline, host sleep counts toward the idle window (#10661),
+desktop taps are tool use while watching is not (#10693, #10730), and the
+desktop may watch any device while control stays with its owner (#10698,
+#10731, #8902). Regressions the series found and closed: #10692 (a device driven
+through a platform/deviceId selector was fenced at 30 minutes), #10693 (the
+client's lapse rebind undid the idle release and pane taps never counted),
+#10694 (the deadline was stamped when a call started, so a long call released
+the device right after it ended), #10699 (sleep versus daemon stall), #10700
+(a `--daemon heartbeat` keeper held a cli-idle session forever). Autolock
+sessions now use the default owner lease (#10729), so a dead autolock owner is
+released after ~10 s, not the 60 s autolock window. Later hold-policy work:
+per-adb-server device claims (#10708, #10709) and CtrlProxy forward ownership
+(#10690).
 
 ## Cross-index: bug class → instances
 

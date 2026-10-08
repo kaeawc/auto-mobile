@@ -53,7 +53,10 @@ final class OverlaySpecDecodingTests: XCTestCase {
         XCTAssertEqual(style.cornerRadius, .corners(topStart: 4, topEnd: 0, bottomEnd: 0, bottomStart: 0))
         XCTAssertEqual(style.offset?.y, 2)
         XCTAssertEqual(style.textDecoration, "underline")
-        let token = try JSONDecoder().decode(Style.self, from: Data(#"{"cornerRadius":"large","fontFamily":"serif"}"#.utf8))
+        let token = try JSONDecoder().decode(
+            Style.self,
+            from: Data(#"{"cornerRadius":"large","fontFamily":"serif"}"#.utf8)
+        )
         XCTAssertEqual(token.cornerRadius, .uniform(16))
         XCTAssertEqual(token.fontFamily, .keyword("serif"))
     }

@@ -69,11 +69,12 @@ struct OverlaySpec: Decodable {
     let id: String
     let window: WindowSpec
     let state: [String: JSONValue]?
+    let theme: OverlayTheme?
     /// The node tree with every `repeat` list template already expanded (see `OverlayRepeat`).
     let root: OverlayNode
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, root
+        case id, window, state, theme, root
     }
 
     init(from decoder: Decoder) throws {
@@ -81,6 +82,7 @@ struct OverlaySpec: Decodable {
         id = try container.decode(String.self, forKey: .id)
         window = try container.decode(WindowSpec.self, forKey: .window)
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
+        theme = try container.decodeIfPresent(OverlayTheme.self, forKey: .theme)
         let raw = try container.decode(JSONValue.self, forKey: .root)
         root = try JSONDecoder().decode(OverlayNode.self, from: JSONEncoder().encode(OverlayRepeat.expand(raw)))
     }
@@ -422,9 +424,25 @@ final class OverlayNode: Decodable {
         return nil
     }
 
+    /// `fontFamily: {asset}` ids on this node's own style and its `styleWhen` entries.
+    func fontAssetIds() -> Set<String> {
+        let styles = [style].compactMap { $0 } + (styleWhen ?? []).map(\.style)
+        return Set(styles.compactMap { style -> String? in
+            if case let .asset(id) = style.fontFamily { id } else { nil }
+        })
+    }
+
+    /// Every font asset id in this subtree.
+    func collectFontAssets(into ids: inout Set<String>) {
+        ids.formUnion(fontAssetIds())
+        children?.forEach { $0.collectFontAssets(into: &ids) }
+        child?.collectFontAssets(into: &ids)
+    }
+
     /// Asset ids the spec references, for the `missingAssets` warning.
     func collectAssets(into ids: inout Set<String>) {
         if let asset { ids.insert(asset) }
+        ids.formUnion(fontAssetIds())
         items?.compactMap(\.image).forEach { ids.insert($0) }
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)

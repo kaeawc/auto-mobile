@@ -1,5 +1,8 @@
+import os
 import SwiftUI
 import UIKit
+
+private let overlayLog = Logger(subsystem: "dev.jasonpearson.automobile.overlay-agent", category: "overlay")
 
 /// Entry point called from the dyld constructor in Loader.c. The constructor runs before
 /// UIApplication exists, so everything waits for the main run loop.
@@ -176,6 +179,7 @@ final class OverlayAgent {
             case "show_overlay":
                 let spec = try decode(OverlaySpec.self, message["spec"])
                 model.show(spec, reset: message["reset"] as? Bool == true)
+                warnAboutFontAssets(for: spec)
                 result(true, extra: missingAssetsExtra())
             // No update_overlay (#10550): a same-id show_overlay replaces the shown overlay.
             case "dismiss_overlay":
@@ -209,6 +213,16 @@ final class OverlayAgent {
         }
     }
 
+    /// One warning per shown spec: an uploaded font cannot be loaded on iOS, so its text uses the
+    /// system font. The ids also come back in `missingAssets`, like any asset the host has not sent.
+    private func warnAboutFontAssets(for spec: OverlaySpec) {
+        let fonts = model.fontAssets()
+        guard !fonts.isEmpty else { return }
+        overlayLog.warning(
+            "overlay \(spec.id, privacy: .public): fontFamily asset unsupported on iOS, using system font for \(fonts.joined(separator: ","), privacy: .public)"
+        )
+    }
+
     private func missingAssetsExtra() -> [String: Any] {
         let missing = model.missingAssets()
         return missing.isEmpty ? [:] : ["missingAssets": missing]
@@ -228,8 +242,10 @@ final class OverlayAgent {
 /// Lays out the shown spec by placement and records the touchable rects for the window.
 struct OverlayRootView: View {
     @ObservedObject var model: OverlayModel
+    @Environment(\.colorScheme) private var systemScheme
 
     var body: some View {
+        let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
         ZStack {
             if let spec = model.spec {
                 placed(spec)
@@ -237,6 +253,9 @@ struct OverlayRootView: View {
                 dismissControl
             }
         }
+        // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
+        .environment(\.colorScheme, palette.dark ? .dark : .light)
+        .environment(\.overlayPalette, palette)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Bars and cutouts are the spec's job (safeAreaPadding); the keyboard still pushes a
         // sheet or bottom-floating overlay up so its text field stays visible.

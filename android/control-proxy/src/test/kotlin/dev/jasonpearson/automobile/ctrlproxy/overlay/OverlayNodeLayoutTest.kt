@@ -141,4 +141,91 @@ class OverlayNodeLayoutTest {
     assertEquals(20.sp, input.style.fontSize)
     assertEquals(2f, input.density.fontScale)
   }
+
+  @Test
+  fun `weighted children without a width share the row`() {
+    val weighted = OverlayStyle(weight = 1.0, height = OverlayDimension.Dp(20.0))
+    val root =
+      render(
+        OverlayRowNode(
+          testTag = "row",
+          style = OverlayStyle(width = OverlayDimension.Dp(200.0)),
+          children =
+            listOf(
+              OverlayBoxNode(testTag = "a", style = weighted, children = emptyList()),
+              OverlayBoxNode(testTag = "b", style = weighted, children = emptyList()),
+            ),
+        )
+      )
+    assertEquals(dp(100f), root.tagged("a").boundsInRoot.width, 0.5f)
+    assertEquals(dp(100f), root.tagged("b").boundsInRoot.width, 0.5f)
+    assertEquals(root.tagged("a").boundsInRoot.right, root.tagged("b").boundsInRoot.left, 0.5f)
+  }
+
+  @Test
+  fun `weighted children without a height share the column`() {
+    val weighted = OverlayStyle(weight = 1.0, width = OverlayDimension.Dp(20.0))
+    val root =
+      render(
+        OverlayColumnNode(
+          style = OverlayStyle(height = OverlayDimension.Dp(120.0)),
+          children =
+            listOf(
+              OverlayBoxNode(testTag = "a", style = weighted, children = emptyList()),
+              OverlayBoxNode(
+                testTag = "b",
+                style = weighted.copy(weight = 2.0),
+                children = emptyList(),
+              ),
+            ),
+        )
+      )
+    assertEquals(dp(40f), root.tagged("a").boundsInRoot.height, 0.5f)
+    assertEquals(dp(80f), root.tagged("b").boundsInRoot.height, 0.5f)
+  }
+
+  @Test
+  fun `min and max bounds clamp the authored size`() {
+    val root =
+      render(
+        OverlayColumnNode(
+          children =
+            listOf(
+              OverlayBoxNode(
+                testTag = "maxFill",
+                style =
+                  OverlayStyle(
+                    width = OverlayDimension.Fill,
+                    maxWidth = 50.0,
+                    height = OverlayDimension.Dp(10.0),
+                  ),
+                children = emptyList(),
+              ),
+              OverlayBoxNode(
+                testTag = "minDp",
+                style =
+                  OverlayStyle(
+                    width = OverlayDimension.Dp(10.0),
+                    minWidth = 80.0,
+                    height = OverlayDimension.Dp(10.0),
+                  ),
+                children = emptyList(),
+              ),
+              OverlayBoxNode(
+                testTag = "maxDp",
+                style =
+                  OverlayStyle(
+                    width = OverlayDimension.Dp(10.0),
+                    height = OverlayDimension.Dp(200.0),
+                    maxHeight = 40.0,
+                  ),
+                children = emptyList(),
+              ),
+            )
+        )
+      )
+    assertEquals(dp(50f), root.tagged("maxFill").boundsInRoot.width, 0.5f)
+    assertEquals(dp(80f), root.tagged("minDp").boundsInRoot.width, 0.5f)
+    assertEquals(dp(40f), root.tagged("maxDp").boundsInRoot.height, 0.5f)
+  }
 }

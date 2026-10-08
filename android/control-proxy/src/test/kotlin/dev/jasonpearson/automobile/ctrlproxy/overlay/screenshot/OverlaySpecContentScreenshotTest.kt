@@ -27,28 +27,27 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "fullscreen_all_nodes",
       validOverlayFixture("fullscreen-all-nodes"),
-      pending = true,
     )
 
   /** Tab bar, pager with a scrolled text page, text field and a closed bottom sheet. */
   @Test
   fun tabbedPagerWithTextField() =
-    overlayScreenshotTest("doc_example_1", validOverlayFixture("doc-example-1"), pending = true)
+    overlayScreenshotTest("doc_example_1", validOverlayFixture("doc-example-1"))
 
   /** Horizontal scroll row with an icon action above a bottom navigation bar. */
   @Test
   fun bottomNavigationSheet() =
-    overlayScreenshotTest("doc_example_2", validOverlayFixture("doc-example-2"), pending = true)
+    overlayScreenshotTest("doc_example_2", validOverlayFixture("doc-example-2"))
 
   /** Styled floating box: background colour, corner radius and a text child. */
   @Test
   fun styledFloatingBox() =
-    overlayScreenshotTest("doc_example_3", validOverlayFixture("doc-example-3"), pending = true)
+    overlayScreenshotTest("doc_example_3", validOverlayFixture("doc-example-3"))
 
   /** Tab bar and bottom navigation bound to state and to a pager. */
   @Test
   fun sheetBindings() =
-    overlayScreenshotTest("sheet_bindings", validOverlayFixture("sheet-bindings"), pending = true)
+    overlayScreenshotTest("sheet_bindings", validOverlayFixture("sheet-bindings"))
 
   /** Buttons, checkbox and switch in a row and column layout. */
   @Test
@@ -56,7 +55,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "material_controls",
       validOverlayFixture("material-controls"),
-      pending = true,
     )
 
   /** Slider, chips and a card. */
@@ -65,7 +63,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "material_slider_chip_card",
       validOverlayFixture("material-slider-chip-card"),
-      pending = true,
     )
 
   /** Radio group, list items, checkbox, switch and icon buttons. */
@@ -74,7 +71,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "selection_controls",
       validOverlayFixture("selection-controls"),
-      pending = true,
     )
 
   /** Colour-role and corner-radius style tokens. */
@@ -83,7 +79,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "color_role_and_corner_tokens",
       validOverlayFixture("color-role-and-corner-tokens"),
-      pending = true,
     )
 
   /** Elevation, linear and radial gradients, and aspect ratio. */
@@ -92,23 +87,22 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "elevation_gradient_aspect_ratio",
       validOverlayFixture("elevation-gradient-aspect-ratio"),
-      pending = true,
     )
 
   /** Text style roles under a scaled typography theme. */
   @Test
   fun textStyleRole() =
-    overlayScreenshotTest("text_style_role", validOverlayFixture("text-style-role"), pending = true)
+    overlayScreenshotTest("text_style_role", validOverlayFixture("text-style-role"))
 
   /** Conditional styles resolved against the initial state. */
   @Test
   fun styleWhen() =
-    overlayScreenshotTest("style_when", validOverlayFixture("style-when"), pending = true)
+    overlayScreenshotTest("style_when", validOverlayFixture("style-when"))
 
   /** A list template expanded with repeat. */
   @Test
   fun repeatTemplate() =
-    overlayScreenshotTest("repeat", validOverlayFixture("repeat"), pending = true)
+    overlayScreenshotTest("repeat", validOverlayFixture("repeat"))
 
   /** Row weights and size bounds. */
   @Test
@@ -116,13 +110,12 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "row_weight_size_bounds",
       validOverlayFixture("row-weight-size-bounds"),
-      pending = true,
     )
 
   /** Dark mode with a seed colour scheme. */
   @Test
   fun themeSeed() =
-    overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"), pending = true)
+    overlayScreenshotTest("theme_seed", validOverlayFixture("theme-seed"))
 
   /** Light mode with scaled serif typography and custom shapes. */
   @Test
@@ -130,7 +123,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_typography_shapes",
       validOverlayFixture("theme-typography-shapes"),
-      pending = true,
     )
 
   /** A `system` theme on a light device. */
@@ -140,7 +132,6 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_device_light",
       validOverlayFixture("theme-device"),
-      pending = true,
     )
 
   /** A `system` theme on a dark device. */
@@ -150,6 +141,5 @@ class OverlaySpecContentScreenshotTest {
     overlayScreenshotTest(
       "theme_device_dark",
       validOverlayFixture("theme-device"),
-      pending = true,
     )
 }

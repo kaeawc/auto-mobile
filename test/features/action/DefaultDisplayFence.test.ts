@@ -1132,12 +1132,15 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const on = h.attach(
         new TapOnElement(h.device, h.adb, {
           ...h.deps,
+          observeScreen: h.observe,
           tapStrategy: new FakeTapStrategy(),
           selectionStateTracker: { prepare: async () => null, finalize: async () => [] },
         }),
       );
       on.refreshViewHierarchy = refresh;
-      const any = h.attach(new TapAnyElement(h.device, h.adb, h.deps));
+      const any = h.attach(
+        new TapAnyElement(h.device, h.adb, { ...h.deps, observeScreen: h.observe }),
+      );
       any.setRefreshViewHierarchyForTesting(async (_defaultRefresh, timeout) => refresh(timeout));
       const options = {
         text: "Target",

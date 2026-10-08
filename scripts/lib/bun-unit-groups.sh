@@ -49,8 +49,8 @@ if [[ "${#shared_files[@]}" -gt 0 ]]; then
   fi
 fi
 isolated_chunk="$(unit_isolated_chunk_size)"
-if ! [[ "$isolated_chunk" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer, got: ${isolated_chunk}" >&2
+if ! [[ "$isolated_chunk" =~ ^(0|[1-9][0-9]{0,8})$ ]]; then
+  echo "AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE must be a non-negative integer below 1000000000, got: ${isolated_chunk}" >&2
   exit 2
 fi
 isolated_total="${#isolated_files[@]}"

@@ -2167,7 +2167,7 @@ fixture_list() {
 
 @test "isolated chunk size rejects non-integers before invoking Bun" {
   stub_chunk_discovery
-  for value in '' abc 1.5 -1 05; do
+  for value in '' abc 1.5 -1 05 1000000000 9223372036854775808 99999999999999999999; do
     run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE="$value" \
       bash "$SCRIPT" unit
     [ "$status" -eq 2 ]

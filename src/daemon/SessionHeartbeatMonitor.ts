@@ -79,6 +79,12 @@ export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** How long shutdown waits for releases a scan started before giving up on them. */
 const REAP_STOP_TIMEOUT_MS = 5_000;
+/**
+ * How long a release may stay unsettled before the monitor reports it as stuck (#10704). Its
+ * session is skipped meanwhile, never released twice, but other sessions are still judged on
+ * schedule; this only makes a wedged teardown visible.
+ */
+export const STUCK_REAP_WARN_MS = 30_000;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -125,6 +131,8 @@ export class SessionHeartbeatMonitor {
    * waits on them: one slow teardown must not delay the expiry checks of every other session.
    */
   private readonly reapsInFlight = new Map<string, Promise<void>>();
+  /** When each in-flight release started, and whether it has been reported as stuck. */
+  private readonly reapStartedAt = new Map<string, { at: number; reported: boolean }>();
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -323,6 +331,7 @@ export class SessionHeartbeatMonitor {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.reapsInFlight.has(session.sessionId)) {
+        this.reportIfStuck(session.sessionId);
         continue;
       }
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
@@ -363,12 +372,31 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
+    this.reapStartedAt.set(sessionId, { at: this.timer.now(), reported: false });
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {
         this.reapsInFlight.delete(sessionId);
+        this.reapStartedAt.delete(sessionId);
       }
     });
     return logged;
+  }
+
+  /** Warn once when a release has been tearing down for {@link STUCK_REAP_WARN_MS} (#10704). */
+  private reportIfStuck(sessionId: string): void {
+    const started = this.reapStartedAt.get(sessionId);
+    if (!started || started.reported) {
+      return;
+    }
+    const elapsedMs = this.timer.now() - started.at;
+    if (elapsedMs < STUCK_REAP_WARN_MS) {
+      return;
+    }
+    started.reported = true;
+    logger.warn(
+      `Session ${sessionId} release has not settled after ${elapsedMs}ms; its device stays held ` +
+        "until the teardown finishes. Other sessions are still judged on schedule.",
+    );
   }
 
   /**

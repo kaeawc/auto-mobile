@@ -23,7 +23,11 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyC
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
+
+// No test in this file may run the installed network-filter-controller.
+const networkFilterBridge = new FakeNetworkFilterBridge();
 
 const createBootedDevice = (
   deviceId: string,
@@ -236,7 +240,8 @@ describe("device state tools", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
-    registerUtilityTools();
+    networkFilterBridge.setState("not_installed");
+    registerUtilityTools({ networkFilterBridge });
     for (const name of ["getDeviceState", "setDeviceState"]) {
       const tool = ToolRegistry.getTool(name)!;
       const handler = tool.deviceAwareHandler!;
@@ -659,7 +664,33 @@ describe("device state tools", () => {
     expect(payload.networkCondition).toMatchObject({
       supported: false,
       capability: "unsupported",
+      backend: "network-extension",
+      controller: { state: "not_installed" },
     });
+    expect(networkFilterBridge.statusCalls).toBeGreaterThan(0);
+  });
+
+  test("setDeviceState networkCondition on an iOS simulator returns the backend state's message (#10590)", async () => {
+    networkFilterBridge.setState("approval_required");
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
+
+    const response = await setTool!.deviceAwareHandler!(iosSim, {
+      networkCondition: { profile: "offline" },
+    });
+
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.networkCondition).toMatchObject({
+      supported: false,
+      capability: "unsupported",
+      backend: "network-extension",
+      controller: { state: "approval_required", contractVersion: 2 },
+      requestedProfile: "offline",
+      verified: false,
+    });
+    expect(payload.networkCondition.error).toContain("System Settings");
+    expect(payload.networkCondition.error).not.toContain("host-side proxy");
   });
 
   test("setActiveDevice binds a refreshed session device in the pool", async () => {

@@ -88,6 +88,25 @@ the extension installs only after a macOS restart, `1` any other non-ready
 state (#6897). The controller executable itself exits `0` for both pending
 approval states, so scripts should call the wrapper rather than the executable.
 
+AutoMobile can do the download, verification, copy and activation itself, but
+only when asked (#10588). It never installs on daemon start or from
+`setDeviceState`:
+
+```bash
+auto-mobile --ios-network-filter install            # download, verify, copy, activate
+auto-mobile --ios-network-filter install --upgrade  # replace a differing installed copy
+auto-mobile --ios-network-filter status             # read-only controller status
+```
+
+`install` checks the release zip's SHA-256 against `networkFilterSha256` in
+the release checksum registry and fails closed when this version has no entry.
+It then runs `codesign --verify --deep --strict` and checks the bundle
+identifiers and a Developer ID team shared by the app and its provider (pin
+one with `AUTOMOBILE_NETWORK_FILTER_TEAM_ID`) before it copies the app to
+`/Applications`. Set `AUTOMOBILE_NETWORK_FILTER_APP_PATH` to a locally built,
+signed `.app` to skip the download. The exit codes match the `activate` wrapper
+above. `auto-mobile --cli doctor` reports the same states.
+
 Initial extension and filter approval require macOS interaction. A timeout is an
 uncertain installation result: inspect `status` and System Settings before
 retrying. Filter configuration acknowledgement alone never reports readiness:

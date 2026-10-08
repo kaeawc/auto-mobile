@@ -1097,7 +1097,7 @@ export class Rotate extends BaseVisualChange {
             await this.assertDisplayExists(display, signal);
             const rotation = rotationForOrientation(
               orientation,
-              await readNaturalLandscape(this.adb, signal),
+              await readNaturalLandscape(this.adb, signal, display),
             );
             const mode = lockOrientation === false ? "free" : "lock";
             await this.adb.executeCommand(

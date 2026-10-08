@@ -34,17 +34,22 @@ export function rotationForOrientation(
 }
 
 /**
- * Whether the active display's natural (rotation 0) orientation is landscape,
- * from `wm size`'s physical size. Returns null when the size cannot be read.
+ * Whether a display's natural (rotation 0) orientation is landscape, from `wm size`'s
+ * physical size. Omit `displayId` for the active default display; pass a logical id to
+ * read that display (`wm size -d <id>`), whose natural orientation can differ from display
+ * 0's (#10362). Returns null when the size cannot be read.
  * Read it fresh per request: a fold or unfold changes which panel is active.
  */
 export async function readNaturalLandscape(
   adb: Pick<AdbExecutor, "executeCommand">,
   signal?: AbortSignal,
+  displayId?: number,
 ): Promise<boolean | null> {
   try {
     const { stdout } = await adb.executeCommand(
-      "shell wm size",
+      displayId === undefined || displayId === 0
+        ? "shell wm size"
+        : `shell wm size -d ${displayId}`,
       undefined,
       undefined,
       undefined,

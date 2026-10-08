@@ -1,0 +1,633 @@
+{
+  "description": "Shared criticalSection lock and barrier params cases, generated from the daemon PlanValidator by a scratch generator. Consumed by test/utils/plan/PlanValidatorCoordinationParams.test.ts (PlanValidator) and the Kotlin CoordinationParamsParityTest (TestPlanValidator). Both must reach expected.valid; when invalid, the Kotlin messages (one per error) must contain expected.message split on newlines as a contiguous run, in order (Kotlin also reports schema errors and later checks that the daemon never reaches because it throws at the first failing check).",
+  "cases": [
+    {
+      "name": "accepts a criticalSection lock entered once by each of deviceCount devices",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": true
+      }
+    },
+    {
+      "name": "rejects criticalSection steps that disagree on deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "L",
+              "deviceCount": 3,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" has inconsistent deviceCount values: step 0 deviceCount=2, step 1 deviceCount=3. All steps sharing a lock must declare the same deviceCount."
+      }
+    },
+    {
+      "name": "rejects a criticalSection lock with fewer steps than deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" declares deviceCount=2 but 1 step references it. Every participating device needs its own criticalSection step with this lock."
+      }
+    },
+    {
+      "name": "rejects a criticalSection lock with more steps than deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 1,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "L",
+              "deviceCount": 1,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" declares deviceCount=1 but 2 steps reference it. Every participating device needs its own criticalSection step with this lock."
+      }
+    },
+    {
+      "name": "rejects a criticalSection lock entered twice by the same device",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" is entered twice by device \"A\" (steps 0, 1). Each device can participate in a given lock at most once."
+      }
+    },
+    {
+      "name": "reports criticalSection lock errors in lock order",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "P",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "Q",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "Q",
+              "deviceCount": 1,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"P\" declares deviceCount=2 but 1 step references it. Every participating device needs its own criticalSection step with this lock.\ncriticalSection lock \"Q\" has inconsistent deviceCount values: step 1 deviceCount=2, step 2 deviceCount=1. All steps sharing a lock must declare the same deviceCount."
+      }
+    },
+    {
+      "name": "an inconsistent criticalSection deviceCount is reported instead of a deadlock",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "L",
+              "deviceCount": 3,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "M",
+              "deviceCount": 1,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" has inconsistent deviceCount values: step 0 deviceCount=2, step 1 deviceCount=3. All steps sharing a lock must declare the same deviceCount."
+      }
+    },
+    {
+      "name": "rejects a barrier step without a lock",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 is missing a non-empty 'lock' parameter."
+      }
+    },
+    {
+      "name": "rejects a barrier step with an empty lock",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 is missing a non-empty 'lock' parameter.\nbarrier step 1 is missing a non-empty 'lock' parameter."
+      }
+    },
+    {
+      "name": "rejects a barrier step without a deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X"
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got undefined."
+      }
+    },
+    {
+      "name": "rejects a barrier step with a zero deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 0
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 0
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got 0.\nbarrier step 1 must declare a positive integer 'deviceCount', got 0."
+      }
+    },
+    {
+      "name": "rejects a barrier step with a negative deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": -1
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got -1."
+      }
+    },
+    {
+      "name": "rejects a barrier step with a fractional deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": 1.5
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got 1.5."
+      }
+    },
+    {
+      "name": "rejects a barrier step with a string deviceCount",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "lock": "X",
+              "deviceCount": "2"
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 must declare a positive integer 'deviceCount', got \"2\"."
+      }
+    },
+    {
+      "name": "reports every invalid barrier step in step order",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "deviceCount": 0
+            }
+          },
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "B",
+              "lock": "X",
+              "deviceCount": "two"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "barrier step 0 is missing a non-empty 'lock' parameter.\nbarrier step 0 must declare a positive integer 'deviceCount', got 0.\nbarrier step 1 must declare a positive integer 'deviceCount', got \"two\"."
+      }
+    },
+    {
+      "name": "reports the criticalSection error before the barrier params error",
+      "plan": {
+        "name": "Coordination",
+        "devices": ["A", "B"],
+        "steps": [
+          {
+            "tool": "barrier",
+            "params": {
+              "device": "A",
+              "deviceCount": 2
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "A",
+              "lock": "L",
+              "deviceCount": 2,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "A"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "tool": "criticalSection",
+            "params": {
+              "device": "B",
+              "lock": "L",
+              "deviceCount": 3,
+              "steps": [
+                {
+                  "tool": "pressButton",
+                  "params": {
+                    "button": "home",
+                    "device": "B"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "expected": {
+        "valid": false,
+        "message": "criticalSection lock \"L\" has inconsistent deviceCount values: step 1 deviceCount=2, step 2 deviceCount=3. All steps sharing a lock must declare the same deviceCount."
+      }
+    }
+  ]
+}

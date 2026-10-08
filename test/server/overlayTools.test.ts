@@ -547,6 +547,28 @@ describe("overlay MCP tool", () => {
     expect(lifecycle.getListenerCount()).toBe(0);
   });
 
+  test("a second MCP connection's registration keeps the daemon's status and pending events", async () => {
+    unsubscribe();
+    const connection = { clientFactory: () => client, cacheInvalidator: invalidator };
+    const firstConnection = registerOverlayTools(connection);
+    await call({ action: "show", spec, sessionUuid: "one" });
+    client.emitOverlayEvent(event(1, "panel", "emit", "save"));
+    unsubscribe = registerOverlayTools(connection);
+    // The first connection closing must not wipe what the second one now reads.
+    firstConnection();
+    const status = (await call({ action: "status", sessionUuid: "one" })).payload;
+    expect(status.overlays).toEqual([
+      expect.objectContaining({ id: "panel", lastAction: "show", pendingCount: 1 }),
+    ]);
+    const awaited = await call({ action: "awaitEvent", id: "panel", sessionUuid: "one" });
+    expect(awaited.payload.event).toMatchObject({ sequence: 1, name: "save" });
+    client.emitOverlayEvent(event(2, "panel", "emit", "again"));
+    expect(
+      (await call({ action: "awaitEvent", id: "panel", sessionUuid: "one" })).payload.event,
+    ).toMatchObject({ sequence: 2 });
+    expect(client.getOverlayListenerCount()).toBe(1);
+  });
+
   test("an injected lifecycle drives session release, device removal and unbinding", async () => {
     const lifecycle = new FakeOverlayEventLifecycle();
     unsubscribe();

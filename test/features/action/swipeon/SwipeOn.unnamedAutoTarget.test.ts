@@ -69,7 +69,7 @@ function harness({
       accessibilityDetector,
       autoTargetSelector: selector,
       geometry,
-      finder: elementFinder,
+      scrollables: elementFinder,
     },
   );
   action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;

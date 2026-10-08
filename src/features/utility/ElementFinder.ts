@@ -4,23 +4,17 @@ import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { logger } from "../../utils/logger";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
-import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
+import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher } from "./TextMatcher";
 import { isClickableElementProperties, isEditableElementProperties } from "./elementProperties";
-import { DefaultFocusedInputQuery } from "./FocusedInput";
-import {
-  DefaultClickableElementsQuery,
-  DefaultScrollableElementsQuery,
-} from "./InteractiveElementQueries";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
   STABLE_VIEW_ID_PREFIX,
   STABLE_VIEW_ID_TEXT_HASH_LENGTH,
 } from "../observe/android/StableNodeIdentity";
 import { ActionableError } from "../../models/ActionableError";
-import { isWithin, promoteClickableAncestor } from "./ElementResolver";
-import { SearchableHierarchy } from "./SearchableNode";
 import { compareSelectionRank } from "./selectionRank";
 import {
   ambiguousStableViewIdMessage,
@@ -496,29 +490,6 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     return matches;
-  }
-
-  private findScrollableContainerInRoots(rootNodes: ViewHierarchyNode[]): Element | null {
-    for (const rootNode of rootNodes) {
-      let foundScrollable: Element | null = null;
-      this.parser.traverseNode(rootNode, (node: any) => {
-        if (foundScrollable) {
-          return;
-        } // Already found one
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            foundScrollable = parsedNode;
-          }
-        }
-      });
-      if (foundScrollable) {
-        return foundScrollable;
-      }
-    }
-
-    return null;
   }
 
   private isClickableNode(props: Record<string, unknown>): boolean {
@@ -1211,179 +1182,6 @@ export class DefaultElementFinder implements ElementFinder {
     container: { elementId?: string; text?: string },
   ): ViewHierarchyNode | null {
     return this.findContainerNodeInternal(viewHierarchy, container);
-  }
-
-  /** Delegates to `DefaultScrollableElementsQuery`; new callers should depend on `ScrollableElementsQuery`. */
-  findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    return new DefaultScrollableElementsQuery(this.parser).findScrollableElements(viewHierarchy);
-  }
-
-  /**
-   * Find the first scrollable container element in the view hierarchy
-   * @param viewHierarchy - The view hierarchy to search
-   * @returns The first scrollable element found, or null
-   */
-  findScrollableContainer(viewHierarchy: ViewHierarchyResult): Element | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainScrollable = this.findScrollableContainerInRoots(rootNodes);
-    if (mainScrollable) {
-      return mainScrollable;
-    }
-
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const windowScrollable = this.findScrollableContainerInRoots(windowRoots);
-      if (windowScrollable) {
-        return windowScrollable;
-      }
-    }
-
-    return null;
-  }
-
-  /** Delegates to `DefaultClickableElementsQuery`; new callers should depend on `ClickableElementsQuery`. */
-  findClickableElements(viewHierarchy: ViewHierarchyResult): Element[] {
-    return new DefaultClickableElementsQuery(this.parser).findClickableElements(viewHierarchy);
-  }
-
-  /**
-   * Find clickable elements, optionally restricted to a container.
-   * @param viewHierarchy - The view hierarchy to search
-   * @param container - Optional container to restrict search
-   * @param scrollableContainer - If true, only search within scrollable elements
-   * @returns Array of clickable elements
-   */
-  findClickableElementsInContainer(
-    viewHierarchy: ViewHierarchyResult,
-    container: { elementId?: string; text?: string } | null = null,
-    scrollableContainer: boolean = false,
-  ): Element[] {
-    if (!viewHierarchy) {
-      return [];
-    }
-
-    const containerNode = container
-      ? this.findContainerNodeInternal(viewHierarchy, container)
-      : null;
-
-    if (container && !containerNode) {
-      return [];
-    }
-
-    let searchRoots = containerNode
-      ? [containerNode]
-      : [
-          ...this.parser.extractRootNodes(viewHierarchy),
-          ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
-        ];
-
-    // If scrollableContainer is true, find all scrollable nodes first
-    // and then search for clickables only within those
-    if (scrollableContainer) {
-      const scrollableNodes: any[] = [];
-      for (const rootNode of searchRoots) {
-        this.parser.traverseNode(rootNode, (node: any) => {
-          const nodeProperties = this.parser.extractNodeProperties(node);
-          if (nodeProperties.scrollable === "true" || nodeProperties.scrollable === true) {
-            scrollableNodes.push(node);
-          }
-        });
-      }
-
-      if (scrollableNodes.length > 0) {
-        searchRoots = scrollableNodes;
-      } else {
-        // No scrollable containers found, return empty
-        return [];
-      }
-    }
-
-    const clickables: Element[] = [];
-
-    for (const rootNode of searchRoots) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        if (this.isClickableNode(nodeProperties)) {
-          const parsedNode = this.parser.parseNodeBounds(node);
-          if (parsedNode) {
-            clickables.push(parsedNode);
-          }
-        }
-      });
-    }
-
-    return clickables;
-  }
-
-  /** Delegates to `DefaultFocusedInputQuery`; new callers should depend on `FocusedInputQuery`. */
-  findFocusedTextInput(viewHierarchy: ViewHierarchyResult): Element | null {
-    return new DefaultFocusedInputQuery(this.parser).findFocusedTextInput(viewHierarchy);
-  }
-
-  /**
-   * Find clickable parent elements that contain descendants matching the specified text.
-   * This traverses the hierarchy looking for clickable elements that have a descendant
-   * with matching text, returning the clickable parent (not the text element itself).
-   *
-   * @param viewHierarchy - The view hierarchy to search
-   * @param text - The text to search for in descendants
-   * @param container - Container element selector to restrict the search
-   * @param fuzzyMatch - Whether to use fuzzy matching
-   * @param caseSensitive - Whether to use case-sensitive matching
-   * @returns Array of clickable parent elements containing the text
-   */
-  findClickableParentsContainingText(
-    viewHierarchy: ViewHierarchyResult,
-    text: string,
-    container: { elementId?: string; text?: string } | null = null,
-    fuzzyMatch: boolean = true,
-    caseSensitive: boolean = false,
-  ): Element[] {
-    if (!viewHierarchy || !text) {
-      return [];
-    }
-
-    const matchesText = this.textMatcher.createTextMatcher(text, fuzzyMatch, caseSensitive);
-    const containerNode = container
-      ? this.findContainerNodeInternal(viewHierarchy, container)
-      : null;
-
-    if (container && !containerNode) {
-      return [];
-    }
-
-    const nodes = new SearchableHierarchy(this.parser).project(viewHierarchy);
-    const scope = containerNode ? nodes.find((node) => node.source === containerNode) : undefined;
-    if (containerNode && !scope) {
-      return [];
-    }
-    return this.collectClickableParentsContainingText(nodes, scope, matchesText);
-  }
-
-  private collectClickableParentsContainingText(
-    nodes: ReturnType<SearchableHierarchy["project"]>,
-    scope: ReturnType<SearchableHierarchy["project"]>[number] | undefined,
-    matchesText: (input?: string) => boolean,
-  ): Element[] {
-    const matches = new Map<(typeof nodes)[number]["source"], (typeof nodes)[number]>();
-    for (const node of [...nodes].sort(
-      (a, b) => a.windowRank - b.windowRank || a.index - b.index,
-    )) {
-      if (
-        (!scope || node === scope || isWithin(node, scope, nodes)) &&
-        this.nodeHasText(node.source, matchesText)
-      ) {
-        const target = promoteClickableAncestor(node, nodes, { action: "tap" });
-        if (target?.element && (!scope || target === scope || isWithin(target, scope, nodes))) {
-          matches.set(target.source, matches.get(target.source) ?? target);
-        }
-      }
-    }
-    return [...matches.values()].flatMap((node) => (node.element ? [node.element] : []));
   }
 
   /**

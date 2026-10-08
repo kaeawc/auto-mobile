@@ -227,6 +227,20 @@ object TestPlanValidator {
     // while the daemon rejects it (#6215 review).
     val deviceLabelErrors = validateDeviceLabelsPresent(parsedObject)
     val barrierCoordinationErrors = validateBarrierCoordination(parsedObject)
+    // Runs only once every check the daemon runs before it has passed -- the daemon's
+    // PlanValidator stops at the first failing check and runs its feasibility search last, after
+    // the per-lock count checks guarantee one consistent deviceCount per lock (#6231).
+    val scheduleFeasibilityErrors =
+      if (
+        multiDeviceErrors.isEmpty() &&
+          devicesFieldErrors.isEmpty() &&
+          deviceLabelErrors.isEmpty() &&
+          barrierCoordinationErrors.isEmpty()
+      ) {
+        validateCoordinationScheduleFeasibility(parsedObject)
+      } else {
+        emptyList()
+      }
 
     if (
       validationErrors.isEmpty() &&
@@ -235,7 +249,8 @@ object TestPlanValidator {
         multiDeviceErrors.isEmpty() &&
         devicesFieldErrors.isEmpty() &&
         deviceLabelErrors.isEmpty() &&
-        barrierCoordinationErrors.isEmpty()
+        barrierCoordinationErrors.isEmpty() &&
+        scheduleFeasibilityErrors.isEmpty()
     ) {
       return ValidationResult(valid = true)
     }
@@ -250,6 +265,7 @@ object TestPlanValidator {
     errors.addAll(devicesFieldErrors)
     errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
+    errors.addAll(scheduleFeasibilityErrors)
 
     // Only ERROR-severity findings invalidate a plan; warnings (deprecated fields) do not, so
     // valid=false can never come with an empty error list.
@@ -603,7 +619,9 @@ object TestPlanValidator {
   // -----------------------------------------------------------------------
   // Barrier coordination checks below enforce NECESSARY conditions for a
   // barrier plan to be executable -- they do not prove full deadlock-freedom.
-  // Specifically NOT checked (tracked in issue #6231):
+  // The per-lock checks below do not reason about ORDER; the two gaps they
+  // leave are covered by validateCoordinationScheduleFeasibility (#6231),
+  // which rejects them only when no arrival order can complete:
   //   - Generation-boundary stranding within one lock: e.g. deviceCount=3
   //     with arrivals A,A/B,B/C/D passes every check below (4 distinct
   //     devices, 6 arrivals divisible by 3, no device exceeds its
@@ -1031,6 +1049,77 @@ object TestPlanValidator {
       validateBarrierGenerationCompleteness(usageByLock) +
       validateBarrierExcessDeviceArrivals(usageByLock)
   }
+
+  /**
+   * Validates that at least one arrival order lets every device track get past all of its
+   * barrier/criticalSection steps (issue #6231) -- mirrors the daemon's
+   * PlanValidator.validateCoordinationScheduleFeasibility. See [CoordinationScheduleFeasibility]
+   * for the model: an exhaustive, bounded search over arrival interleavings that rejects only plans
+   * where EVERY order deadlocks, never plans that can complete under some timing.
+   *
+   * A component is skipped (accepted) when the model would not match the runtime for it: a
+   * coordination step marked `optional` or a criticalSection whose sub-steps coordinate again. The
+   * whole check is skipped when a coordination step lacks a usable device/lock/deviceCount
+   * (reported by the schema and the earlier checks).
+   */
+  private fun validateCoordinationScheduleFeasibility(parsedObject: Any?): List<ValidationError> {
+    val steps = (parsedObject as? Map<*, *>)?.get("steps") as? List<*> ?: return emptyList()
+    val tracks = collectCoordinationTracks(steps)
+    if (tracks == null || tracks.size < 2) {
+      return emptyList()
+    }
+    val deadlock =
+      CoordinationScheduleFeasibility.findUnavoidableDeadlock(tracks) ?: return emptyList()
+    return listOf(
+      ValidationError(
+        field = "steps",
+        message = CoordinationScheduleFeasibility.formatDeadlock(deadlock),
+        severity = ValidationSeverity.ERROR,
+      )
+    )
+  }
+
+  /**
+   * Builds per-device tracks of coordination arrivals in plan order, or returns null when a
+   * coordination step lacks a usable device/lock/deviceCount.
+   */
+  private fun collectCoordinationTracks(
+    steps: List<*>
+  ): List<CoordinationScheduleFeasibility.Track>? {
+    val eventsByDevice = linkedMapOf<String, MutableList<CoordinationScheduleFeasibility.Event>>()
+    for ((index, step) in steps.withIndex()) {
+      if (step !is Map<*, *>) {
+        continue
+      }
+      val tool = step["tool"] as? String
+      if (tool == null || tool !in COORDINATION_TOOLS) {
+        continue
+      }
+      val device = effectiveCoordinationField(step, "device") as? String
+      val lock = effectiveCoordinationField(step, "lock") as? String
+      val deviceCount = exactPositiveLong(effectiveCoordinationField(step, "deviceCount"))
+      if (device.isNullOrEmpty() || lock.isNullOrEmpty() || deviceCount == null) {
+        return null
+      }
+      val unmodeled = step["optional"] == true || hasNestedCoordination(step)
+      eventsByDevice
+        .getOrPut(device) { mutableListOf() }
+        .add(CoordinationScheduleFeasibility.Event(tool, lock, deviceCount, index, unmodeled))
+    }
+    return eventsByDevice.map { (device, events) ->
+      CoordinationScheduleFeasibility.Track(device, events)
+    }
+  }
+
+  /** True when a criticalSection's sub-steps coordinate again (nested waits under its mutex). */
+  private fun hasNestedCoordination(step: Map<*, *>): Boolean {
+    val subSteps = effectiveCoordinationField(step, "steps") as? List<*> ?: return false
+    return subSteps.any { sub ->
+      sub is Map<*, *> && sub.containsKey("tool") && sub["tool"].toString() in COORDINATION_TOOLS
+    }
+  }
+
+  private val COORDINATION_TOOLS = setOf("barrier", "criticalSection")
 
   /** Find the line number of a tool name in a specific step */
   private fun findToolNameLine(yamlContent: String, stepIndex: Int, toolName: String): LineInfo? {

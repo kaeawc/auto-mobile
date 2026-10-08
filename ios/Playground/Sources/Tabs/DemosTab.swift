@@ -1403,7 +1403,7 @@ struct SegmentedControlView: UIViewRepresentable {
 /// duplicate leaf identifiers. The status line records which cart/item last received an action.
 struct NestedSelectionDemo: View {
     private static let cartNames = ["cart_A", "cart_B"]
-    private static let itemIds = (40...47).map { "item_\($0)" }
+    private static let itemIds = (40 ... 47).map { "item_\($0)" }
 
     @State private var rows: [String: [String]] = Dictionary(
         uniqueKeysWithValues: cartNames.map { ($0, itemIds) }
@@ -1412,7 +1412,6 @@ struct NestedSelectionDemo: View {
     @State private var status = "status: idle"
 
     var body: some View {
-        ScrollView {
         VStack(alignment: .leading, spacing: 8) {
             Text(status)
                 .accessibilityIdentifier("selection_status")
@@ -1431,7 +1430,10 @@ struct NestedSelectionDemo: View {
             .buttonStyle(.borderedProminent)
             ForEach(Self.cartNames, id: \.self) { cart in
                 Text(cart)
-                VStack(spacing: 4) {
+                // Each cart is its own ScrollView carrying the container identifier, so the
+                // hierarchy holds two scroll containers whose rows share item ids.
+                ScrollView {
+                    VStack(spacing: 4) {
                         ForEach(rows[cart] ?? [], id: \.self) { item in
                             HStack {
                                 TextField(
@@ -1453,14 +1455,14 @@ struct NestedSelectionDemo: View {
                             .accessibilityElement(children: .contain)
                             .accessibilityIdentifier(item)
                         }
+                    }
                 }
+                .frame(height: 200)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(cart)
             }
         }
         .padding(.horizontal, 12)
-        }
         .navigationTitle("Nested Selection")
     }
 }
-

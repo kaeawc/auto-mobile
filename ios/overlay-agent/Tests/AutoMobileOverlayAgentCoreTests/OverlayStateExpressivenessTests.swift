@@ -26,7 +26,7 @@ final class OverlayStateExpressivenessTests: XCTestCase {
         let spec = try sharedFixture("style-when")
         let matched = try XCTUnwrap(spec.root.resolvedStyle(state: ["selected": .bool(true), "count": .number(3)]))
         XCTAssertEqual(matched.background, "#2255CC")
-        XCTAssertEqual(matched.cornerRadius, 8)
+        XCTAssertEqual(matched.cornerRadius, .uniform(8))
         XCTAssertEqual(matched.alpha, 0.5)
         XCTAssertEqual(matched.border?.width, 1)
         XCTAssertEqual(matched.padding?.top, 4, "properties no entry sets keep the base value")

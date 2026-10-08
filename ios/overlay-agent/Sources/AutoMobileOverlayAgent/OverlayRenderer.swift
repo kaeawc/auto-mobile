@@ -174,8 +174,9 @@ struct NodeView: View {
     private var textView: some View {
         let size = style?.textSize ?? 14
         let design: Font.Design = switch style?.fontFamily {
-        case "serif": .serif
-        case "monospace": .monospaced
+        case .keyword("serif"): .serif
+        case .keyword("monospace"): .monospaced
+        // An uploaded font asset is not delivered to the agent, so it uses the system font.
         default: .default
         }
         let weight: Font.Weight = switch style?.fontWeight ?? 400 {
@@ -195,11 +196,20 @@ struct NodeView: View {
         default: .leading
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
-        return Text(interpolatedText)
-            .font(.system(size: UIFontMetrics.default.scaledValue(for: size), weight: weight, design: design))
+        let scaled = UIFontMetrics.default.scaledValue(for: size)
+        var text = Text(interpolatedText)
+            .font(.system(size: scaled, weight: weight, design: design))
+        if style?.fontStyle == "italic" { text = text.italic() }
+        let decoration = style?.textDecoration
+        if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
+        if decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        return text
+            .tracking(style?.letterSpacing ?? 0)
+            .lineSpacing(max(0, (style?.lineHeight ?? scaled) - scaled))
             .foregroundColor(Color(hex: style?.color) ?? .primary)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
+            .truncationMode(.tail)
     }
 
     @ViewBuilder private var imageView: some View {
@@ -272,7 +282,7 @@ struct NodeView: View {
         return HStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 Button {
-                    model.select(index: index, pager: node.pager, key: node.stateKey)
+                    model.select(index: index, pager: node.pager, key: node.stateKey, then: node.onTap ?? [])
                 } label: {
                     VStack(spacing: 2) {
                         if let icon = item.icon {
@@ -313,10 +323,25 @@ struct NodeView: View {
 
     // MARK: Style
 
+    private var cornerShape: UnevenRoundedRectangle {
+        switch style?.cornerRadius {
+        case let .uniform(radius)?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
+                topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius
+            ))
+        case let .corners(topStart, topEnd, bottomEnd, bottomStart)?:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii(
+                topLeading: topStart, bottomLeading: bottomStart, bottomTrailing: bottomEnd, topTrailing: topEnd
+            ))
+        case nil:
+            UnevenRoundedRectangle(cornerRadii: RectangleCornerRadii())
+        }
+    }
+
     private func styled(_ view: some View) -> some View {
         let padding = style?.padding
         let insets = safeAreaEdges
-        let radius = style?.cornerRadius ?? 0
+        let shape = cornerShape
         return view
             .padding(EdgeInsets(
                 top: (padding?.top ?? 0) + insets.top,
@@ -331,11 +356,15 @@ struct NodeView: View {
                 fillsByDefault: node.type == "spacer"
             ))
             .background(Color(hex: style?.background) ?? .clear)
-            .clipShape(RoundedRectangle(cornerRadius: radius))
+            .clipShape(shape)
             .overlay(
-                RoundedRectangle(cornerRadius: radius)
-                    .stroke(Color(hex: style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
+                shape.stroke(Color(hex: style?.border?.color) ?? .clear, lineWidth: style?.border?.width ?? 0)
             )
+            .shadow(
+                color: (style?.elevation ?? 0) > 0 ? Color(hex: style?.shadowColor) ?? .black.opacity(0.25) : .clear,
+                radius: style?.elevation ?? 0
+            )
+            .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
             .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model))
             .modifier(IdentifierModifier(

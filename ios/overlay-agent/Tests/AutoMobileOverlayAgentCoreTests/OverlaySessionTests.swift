@@ -40,6 +40,17 @@ final class OverlaySessionTests: XCTestCase {
         XCTAssertEqual(session.run([emit]).map(\.sequence), [2])
     }
 
+    func testTabSelectionRunsTheNodesOnTapAfterTheSelectionChange() throws {
+        var session = OverlaySession()
+        try session.show(textSpec(id: "a", state: #"{"tab":0}"#))
+        let events = try session.select(
+            index: 1, pager: nil, key: "tab", then: [action(#"{"type":"emit","name":"picked"}"#)]
+        )
+        XCTAssertEqual(events.map(\.name), ["change", "picked"])
+        XCTAssertEqual(events.last?.state["tab"], .number(1))
+        XCTAssertEqual(session.select(index: 1, pager: nil, key: nil, then: []), [])
+    }
+
     // MARK: Dismissal
 
     func testAgentDismissalEmitsOneTerminalEventWithItsReason() throws {

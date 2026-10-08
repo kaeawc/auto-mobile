@@ -134,12 +134,68 @@ struct Border: Decodable {
     let color: String
 }
 
+/// `cornerRadius`: dp number, Material 3 shape token, or per-corner dp radii.
+enum CornerRadius: Decodable, Equatable {
+    case uniform(Double)
+    case corners(topStart: Double, topEnd: Double, bottomEnd: Double, bottomStart: Double)
+
+    private struct Corners: Decodable {
+        let topStart: Double?
+        let topEnd: Double?
+        let bottomEnd: Double?
+        let bottomStart: Double?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Double.self) {
+            self = .uniform(value)
+        } else if let token = try? container.decode(String.self) {
+            // Material 3 Shapes steps; an unknown token is square rather than a decode failure.
+            switch token {
+            case "extraSmall": self = .uniform(4)
+            case "small": self = .uniform(8)
+            case "medium": self = .uniform(12)
+            case "large": self = .uniform(16)
+            case "extraLarge": self = .uniform(28)
+            case "full": self = .uniform(9999)
+            default: self = .uniform(0)
+            }
+        } else {
+            let corners = try container.decode(Corners.self)
+            self = .corners(
+                topStart: corners.topStart ?? 0,
+                topEnd: corners.topEnd ?? 0,
+                bottomEnd: corners.bottomEnd ?? 0,
+                bottomStart: corners.bottomStart ?? 0
+            )
+        }
+    }
+}
+
+/// `fontFamily`: a keyword, or `{asset: id}` naming an uploaded font.
+enum FontFamily: Decodable, Equatable {
+    case keyword(String)
+    case asset(String)
+
+    private struct Asset: Decodable { let asset: String }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let keyword = try? container.decode(String.self) {
+            self = .keyword(keyword)
+        } else {
+            self = try .asset(container.decode(Asset.self).asset)
+        }
+    }
+}
+
 struct Style: Decodable {
     let width: Dimension?
     let height: Dimension?
     let padding: Padding?
     let background: String?
-    let cornerRadius: Double?
+    let cornerRadius: CornerRadius?
     let border: Border?
     let alpha: Double?
     let alignment: String?
@@ -150,7 +206,15 @@ struct Style: Decodable {
     let color: String?
     let textAlign: String?
     let maxLines: Int?
-    let fontFamily: String?
+    let fontFamily: FontFamily?
+    let elevation: Double?
+    let shadowColor: String?
+    let offset: Offset?
+    let lineHeight: Double?
+    let letterSpacing: Double?
+    let textDecoration: String?
+    let fontStyle: String?
+    let overflow: String?
 
     /// Android's `mergedOver`: properties set on `overlay` win, unset ones keep this style's value.
     /// A present property replaces the base value as a whole (`padding` and `border` included).
@@ -171,7 +235,15 @@ struct Style: Decodable {
             color: overlay.color ?? color,
             textAlign: overlay.textAlign ?? textAlign,
             maxLines: overlay.maxLines ?? maxLines,
-            fontFamily: overlay.fontFamily ?? fontFamily
+            fontFamily: overlay.fontFamily ?? fontFamily,
+            elevation: overlay.elevation ?? elevation,
+            shadowColor: overlay.shadowColor ?? shadowColor,
+            offset: overlay.offset ?? offset,
+            lineHeight: overlay.lineHeight ?? lineHeight,
+            letterSpacing: overlay.letterSpacing ?? letterSpacing,
+            textDecoration: overlay.textDecoration ?? textDecoration,
+            fontStyle: overlay.fontStyle ?? fontStyle,
+            overflow: overlay.overflow ?? overflow
         )
     }
 }

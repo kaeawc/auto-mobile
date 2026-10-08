@@ -20,6 +20,20 @@ import {
 } from "../../src/server/interactionTools";
 import type { ExecResult } from "../../src/models";
 import { logger } from "../../src/utils/logger";
+import { ActionableError } from "../../src/models/ActionableError";
+import { RotationSettingManagedError } from "../../src/models/RotationSettingManagedError";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+// Captured `cmd device_state print-states` output from a foldable and a phone emulator.
+const FOLD_STATES = readFileSync(
+  join(__dirname, "..", "fixtures", "android-display", "fold-states.txt"),
+  "utf8",
+);
+const PHONE_STATES = readFileSync(
+  join(__dirname, "..", "fixtures", "android-display", "phone-states.txt"),
+  "utf8",
+);
 
 const device = { deviceId: "rotation-device", name: "Pixel", platform: "android" as const };
 const flush = async () => {
@@ -145,6 +159,8 @@ describe("session rotation restoration", () => {
       const start = h.adb.getExecutedCommands().length;
       await h.manager.releaseSession("rotation-session");
       expect(h.adb.getExecutedCommands().slice(start)).toEqual([
+        // Compare-and-skip read: user_rotation already differs, so the restore writes.
+        "shell settings get system user_rotation",
         "shell settings put system user_rotation 2",
         "shell settings put system accelerometer_rotation 1",
         "shell settings get system user_rotation",
@@ -718,4 +734,64 @@ describe("session rotation restoration", () => {
       }
     },
   );
+});
+
+// afold D7: after rotate → unfold, release must not retry a restore that cannot verify.
+describe("restoreRotationSettings compare-and-skip and managed read-back", () => {
+  class StatesAdb extends RotationAdb {
+    states = PHONE_STATES;
+    override async executeCommand(command: string): Promise<ExecResult> {
+      return command === "shell cmd device_state print-states"
+        ? (await super.executeCommand(command), output(this.states))
+        : super.executeCommand(command);
+    }
+  }
+  const restore = (adb: RotationAdb) =>
+    new Rotate(device, adb, new FakeTimer()).restoreRotationSettings({
+      userRotation: 0,
+      accelerometerRotation: 1,
+    });
+  beforeEach(() => {
+    AndroidCtrlProxyClient.resetInstances();
+  });
+  afterEach(() => {
+    AndroidCtrlProxyClient.resetInstances();
+  });
+
+  test("settings already at the restore values are not written or read back", async () => {
+    const adb = new StatesAdb();
+    adb.user = 0;
+    adb.auto = 1;
+    adb.mismatch = true; // A write could never verify; the skip must not attempt one.
+    await restore(adb);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell settings get system user_rotation",
+      "shell settings get system accelerometer_rotation",
+    ]);
+  });
+
+  test("a read-back mismatch on a foldable is a typed non-retryable outcome", async () => {
+    const adb = new StatesAdb();
+    adb.states = FOLD_STATES;
+    adb.mismatch = true;
+    const error = await restore(adb).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RotationSettingManagedError);
+    expect((error as RotationSettingManagedError).details).toEqual({
+      key: "user_rotation",
+      expected: 0,
+      actual: "2",
+      retryable: false,
+    });
+  });
+
+  test("a read-back mismatch on a single-state device stays a generic failure", async () => {
+    const adb = new StatesAdb();
+    adb.mismatch = true;
+    const error = await restore(adb).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).not.toBeInstanceOf(RotationSettingManagedError);
+    expect((error as Error).message).toBe(
+      "Restoration of user_rotation=0 did not verify by read-back (read 2).",
+    );
+  });
 });

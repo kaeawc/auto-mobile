@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import {
-  assertContainerDurationSpans,
+  assertContainerDurationReachesReopen,
   assertRecordingSpansObservation,
   awaitScreenSizeChange,
   CONTAINER_DURATION_TOLERANCE_MS,
@@ -144,21 +144,39 @@ describe("ffprobe container duration", () => {
   });
 
   test("accepts exactly the container tolerance boundary", () => {
-    expect(() => assertContainerDurationSpans(7000, 0, 12000)).not.toThrow();
+    expect(() => assertContainerDurationReachesReopen(7000, 0, 12000)).not.toThrow();
   });
 
   test("fails one millisecond beyond the container tolerance", () => {
-    expect(() => assertContainerDurationSpans(6999, 0, 12000)).toThrow(
+    expect(() => assertContainerDurationReachesReopen(6999, 0, 12000)).toThrow(
       `toleranceMs=${CONTAINER_DURATION_TOLERANCE_MS}`,
     );
   });
 
-  test("rejects a frozen stream across the fold and unfold observation", () => {
-    expect(() => assertContainerDurationSpans(1000, 1000, 13000)).toThrow("requiredSpanMs=12000");
+  test("rejects a frozen stream across the fold and unfold", () => {
+    expect(() => assertContainerDurationReachesReopen(1000, 1000, 13000)).toThrow(
+      "requiredSpanMs=12000",
+    );
+  });
+
+  test("accepts a container whose static tail ends before the post-reopen screenshot lands", () => {
+    // Nightly run 37722361918: the reopen was requested 13.49s in, screenrecord encoded its
+    // last change 18.18s in, and the settled screenshot's file landed 24.25s in after a 4.1s
+    // full-resolution capture transfer. No footage was missing from the container.
+    expect(() =>
+      assertContainerDurationReachesReopen(18178, 1791430729307, 1791430742799),
+    ).not.toThrow();
+  });
+
+  test("rejects a reopen inside the tolerance as unable to detect a frozen stream", () => {
+    expect(() =>
+      assertContainerDurationReachesReopen(0, 0, CONTAINER_DURATION_TOLERANCE_MS),
+    ).toThrow("too soon");
   });
 
   test("validates all duration assertion inputs are finite", () => {
-    expect(() => assertContainerDurationSpans(Number.NaN, 0, 1)).toThrow("finite inputs");
+    expect(() => assertContainerDurationReachesReopen(Number.NaN, 0, 1)).toThrow("finite inputs");
+    expect(() => assertContainerDurationReachesReopen(1, 0, Number.NaN)).toThrow("finite inputs");
   });
 
   test("probe returns undefined when ffprobe is absent", async () => {

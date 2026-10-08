@@ -8,7 +8,7 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
 import {
-  assertContainerDurationSpans,
+  assertContainerDurationReachesReopen,
   assertRecordingSpansObservation,
   awaitScreenSizeChange,
   probeContainerDurationMs,
@@ -285,6 +285,7 @@ describeLane("foldable posture round trips through the daemon", () => {
     let opened: ObserveResult | undefined;
     let closed: ObserveResult | undefined;
     let reopened: ObserveResult | undefined;
+    let reopenRequestedAtMs: number | undefined;
     let primary: { error: unknown } | undefined;
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
@@ -321,6 +322,8 @@ describeLane("foldable posture round trips through the daemon", () => {
         expect(changed.screenSize).not.toEqual(opened.screenSize);
         closed = await expectPanel(sessionUuid, changed.screenSize, undefined, "closed");
       }
+      // Host clock, like the daemon's recording startedAt.
+      reopenRequestedAtMs = Date.now();
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       reopened = await expectPanel(
         sessionUuid,
@@ -390,10 +393,10 @@ describeLane("foldable posture round trips through the daemon", () => {
     const containerPath = stopped.recordings[0].outputPath ?? metadata.filePath;
     const containerDurationMs = await probeContainerDurationMs(ffprobeRunner, containerPath);
     if (containerDurationMs !== undefined) {
-      assertContainerDurationSpans(
+      assertContainerDurationReachesReopen(
         containerDurationMs,
         Date.parse(metadata.startedAt),
-        Date.parse(reopened.screenshotCapturedAt ?? ""),
+        reopenRequestedAtMs ?? Number.NaN,
       );
     }
     // config.resolution is a requested size, not measured output dimensions;

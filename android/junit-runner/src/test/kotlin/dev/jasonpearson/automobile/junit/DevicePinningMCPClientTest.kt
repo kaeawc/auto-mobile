@@ -43,6 +43,33 @@ class DevicePinningMCPClientTest {
   }
 
   @Test
+  fun `calls carry the failed attempt's session so the holder is one session`() {
+    val delegate = RecordingClient()
+
+    DevicePinningMCPClient.pinTo(delegate, "emulator-5556", "attempt-session")
+      .callTool("tapOn", mapOf("selector" to mapOf("text" to "OK")))
+
+    assertEquals(
+      mapOf(
+        "selector" to mapOf("text" to "OK"),
+        "sessionUuid" to "attempt-session",
+        "deviceId" to "emulator-5556",
+      ),
+      delegate.calls[0].second,
+    )
+  }
+
+  @Test
+  fun `a call that already names a session keeps it`() {
+    val delegate = RecordingClient()
+
+    DevicePinningMCPClient(delegate, "emulator-5556", "attempt-session")
+      .callTool("observe", mapOf("sessionUuid" to "other"))
+
+    assertEquals(mapOf("sessionUuid" to "other"), delegate.calls[0].second)
+  }
+
+  @Test
   fun `a raw observe is sent as project full because deviceId reads reject raw`() {
     val delegate = RecordingClient()
 

@@ -42,6 +42,67 @@ class AutoMobilePlanExecutorTest {
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
     AutoMobilePlanExecutor.retryBackoffMs = 2000L
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { Thread.sleep(it) }
+    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 30_000L
+  }
+
+  @Test
+  fun `a device held by another session is waited for with backoff then succeeds`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    repeat(3) {
+      fakeDaemonClient.queueExecutePlanResponse(
+        buildDaemonResponse(deviceOwnedPayload(), isError = true),
+      )
+    }
+    fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(true, result.success)
+    assertEquals(listOf(500L, 1000L, 2000L), waits)
+    assertEquals(4, fakeDaemonClient.executePlanCalls)
+  }
+
+  @Test
+  fun `a held device that never frees fails with a clear error after the wait budget`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 3_000L
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(deviceOwnedPayload(), isError = true),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(listOf(500L, 1000L, 1500L), waits)
+    assertEquals(4, fakeDaemonClient.executePlanCalls)
+    assertTrue(result.errorMessage, result.errorMessage.contains("device_owned_by_other_session"))
+    assertTrue(result.errorMessage, result.errorMessage.contains("held by another session"))
+    assertTrue(result.errorMessage, result.errorMessage.contains("waited 3000ms"))
+  }
+
+  @Test
+  fun `only the typed code triggers the device held wait`() {
+    val waits = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    fakeDaemonClient.setResponse(
+      "executePlan",
+      buildDaemonResponse(
+        payload(
+          """{"success":false,"error":"device is held by another session","retryable":false}""",
+        ),
+        isError = true,
+      ),
+    )
+
+    val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+
+    assertEquals(false, result.success)
+    assertEquals(emptyList<Long>(), waits)
+    assertEquals(1, fakeDaemonClient.executePlanCalls)
   }
 
   @Test
@@ -521,6 +582,13 @@ class AutoMobilePlanExecutorTest {
       "recovery":{"action":"acquire_replacement_session","tools":["getAndroid","getApple"]}}}""",
     )
 
+  // Shape of shapeToolCallError for an InputDeviceOwnedError
+  // (test/server/toolRegistry.deviceOwnership).
+  private fun deviceOwnedPayload(): JsonObject =
+    payload(
+      """{"success":false,"error":"executePlan refused: device 'emulator-5554' is held by another session.","code":"device_owned_by_other_session","deviceId":"emulator-5554","retryable":false}""",
+    )
+
   private fun deviceLostPayload(): JsonObject =
     payload(
       """{"code":"device_lost","deviceId":"emulator-5554","sessionUuid":"test-session",
@@ -589,6 +657,13 @@ private class FakeDaemonToolClient : DaemonToolClient {
     responses[toolName] = response
   }
 
+  private val executePlanQueue = ArrayDeque<DaemonResponse>()
+
+  /** Responses served once each, in order, before falling back to [setResponse]. */
+  fun queueExecutePlanResponse(response: DaemonResponse) {
+    executePlanQueue.addLast(response)
+  }
+
   fun queueToolSelectionResponse(response: DaemonResponse) {
     toolSelectionResponses.add(response)
   }
@@ -606,6 +681,9 @@ private class FakeDaemonToolClient : DaemonToolClient {
     if (toolName == "executePlan") {
       executePlanCalls++
       lastExecutePlanArguments = arguments
+      executePlanQueue.removeFirstOrNull()?.let {
+        return it
+      }
     }
     return responses[toolName]
       ?: throw IllegalStateException("No response configured for tool: $toolName")

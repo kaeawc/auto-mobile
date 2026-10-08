@@ -419,6 +419,17 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       expect(session?.stallForgivenAt).toBe(heartbeatAt + 5_000);
     });
 
+    test("forgiveness shifts the idle deadline by the lost interval, not to a full window (#10662)", () => {
+      const session = sessionManager.getSession(SESSION)!;
+      const expiresAt = session.expiresAt;
+      timer.setCurrentTime(timer.now() + 20_000);
+
+      sessionManager.forgiveDaemonStall(timer.now(), 3_000);
+
+      // Resetting to resume + timeout would grant 20s the stall never took.
+      expect(session.expiresAt).toBe(expiresAt + 3_000);
+    });
+
     test("a one-shot CLI session keeps its own idle policy through a stall", async () => {
       sessionManager.adoptCliLivenessPolicy(SESSION);
 
@@ -429,7 +440,12 @@ describe("suspect grace window and daemon stall (#10051)", () => {
   });
 
   describe("across a daemon restart", () => {
-    test("a rehydrated session gets fresh deadlines and the suspect window once its owner returns", async () => {
+    /** A daemon restarted at t=40 over a persisted, owned session; rehydration not yet run. */
+    async function restartedDaemon(): Promise<{
+      restarted: SessionManager;
+      restartedMonitor: SessionHeartbeatMonitor;
+      devicePool: SessionDeviceAssigner;
+    }> {
       const persistence = new FakeDeviceSessionPersistence();
       await persistence.upsertActiveSession({
         sessionUuid: SESSION,
@@ -465,6 +481,11 @@ describe("suspect grace window and daemon stall (#10051)", () => {
           return session.assignedDevice;
         },
       };
+      return { restarted, restartedMonitor, devicePool };
+    }
+
+    test("a rehydrated session gets fresh deadlines and the suspect window once its owner returns", async () => {
+      const { restarted, restartedMonitor, devicePool } = await restartedDaemon();
       try {
         await restarted.rehydratePersistedSessions(devicePool);
         const rehydrated = restarted.getSession(SESSION);
@@ -492,6 +513,26 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         expect((await heartbeat(FOREIGN, true, restarted)).code).toBe("liveness_owner_conflict");
         expect((await heartbeat(OWNER, false, restarted)).success).toBe(true);
         expect(restarted.getSession(SESSION)).toBe(rehydrated);
+      } finally {
+        await restartedMonitor.stop();
+        restarted.stopCleanupTimer();
+      }
+    });
+
+    test("an abandoned rehydrated session is reaped even while every tick fires late (#10662)", async () => {
+      const { restarted, restartedMonitor, devicePool } = await restartedDaemon();
+      try {
+        await restarted.rehydratePersistedSessions(devicePool);
+        restartedMonitor.start();
+        // A host in dark-wake cycles: every tick is 3s late, past the 2s stall margin, and the
+        // owner never returns. Each late tick may forgive only its own 3s, so the on-time age
+        // still grows by the scheduled 10s per tick and passes the 10s rehydration window.
+        for (let tick = 0; tick < 5 && reaped.length === 0; tick++) {
+          timer.setCurrentTime(timer.now() + 10_000 + 3_000);
+          await restartedMonitor.tick();
+        }
+
+        expect(reaped).toEqual([{ sessionId: SESSION, reason: "rehydration-owner-timeout" }]);
       } finally {
         await restartedMonitor.stop();
         restarted.stopCleanupTimer();

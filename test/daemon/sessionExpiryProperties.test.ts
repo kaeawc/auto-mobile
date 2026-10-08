@@ -27,13 +27,11 @@ import {
 // AUTOMOBILE_EXPIRY_PROPERTY_SEEDS / AUTOMOBILE_EXPIRY_PROPERTY_SEED_BASE widen it locally.
 //
 // #10661 (host sleep counts toward the idle window on every expiry path) landed in PR #10679,
-// so its order-independence property is enforced. The properties that need fixes not yet on
-// main are `test.todo` with a body: run them with `bun test --todo <this file>`, and flip each
-// to enforced in the PR that lands its fix:
-// - #10656 (PR #10681): heartbeats prove liveness only and never extend the idle deadline.
-//   With PR #10681 applied the property passes on 2,000 seeds.
-// - #10662: stall forgiveness shifts a deadline by at most the lost interval. Needs #10656
-//   too, since a heartbeat that moves the deadline also breaks it.
+// #10656 (heartbeats prove liveness only and never extend the idle deadline) in PR #10681, and
+// #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, so
+// every property here is enforced. A property that needs a fix not yet on main is registered
+// as `test.todo` with a body (run it with `bun test --todo <this file>`) and flipped to
+// enforced in the PR that lands its fix.
 
 /** Slack on top of one monitor interval for the scan-scheduling jitter the generator adds. */
 const SCAN_JITTER_MS = 300;
@@ -264,7 +262,6 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     3_000,
     STEADY_LIVE_OWNER,
     idleReleasedDespiteHeartbeats,
-    "todo",
   );
 
   propertyTests(
@@ -275,10 +272,9 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
   );
 
   propertyTests(
-    "#10662 (after #10656): a forgiven stall moves the idle deadline by at most the lost interval",
+    "#10662: a forgiven stall moves the idle deadline by at most the lost interval",
     5_000,
     SHORT_STALLS,
     deadlinesShiftByAtMostTheLoss,
-    "todo",
   );
 });

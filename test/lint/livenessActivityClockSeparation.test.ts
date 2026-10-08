@@ -99,16 +99,17 @@ interface Classified {
 }
 
 /**
- * Liveness-only functions that still write an activity clock, baselined with the
- * issue that removes the write. An entry that no longer matches fails, so fixing
- * the write forces the baseline to shrink.
+ * Liveness-only functions that still write an activity clock: known exceptions,
+ * each with the issue that justifies it. An entry that no longer matches fails, so
+ * removing or adding a write forces this list to be updated.
  */
 const KNOWN_LIVENESS_WRITES: Readonly<Record<string, Classified>> = {
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 1,
     reason:
-      "#10662: stall forgiveness compensates for time the daemon itself lost; it should shift " +
-      "expiresAt by the lost interval instead of resetting it to a full window.",
+      "#10662: stall forgiveness compensates for time the daemon itself lost. It shifts " +
+      "expiresAt by at most the lost interval (never to a full window from resume), so it grants " +
+      "no hold time a non-stalled session would not have had.",
   },
 };
 
@@ -146,7 +147,8 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 1,
-    reason: "Stall compensation, baselined in KNOWN_LIVENESS_WRITES (#10662).",
+    reason:
+      "Stall compensation (shift by the lost interval), listed in KNOWN_LIVENESS_WRITES (#10662).",
   },
 
   // --- Proxy replay lease (DaemonMcpProxy) ---------------------------------

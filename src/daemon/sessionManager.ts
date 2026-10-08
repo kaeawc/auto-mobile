@@ -5998,9 +5998,17 @@ export class SessionManager {
       }
       const leaseStart = effectiveLastHeartbeat(session);
       session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
-      session.expiresAt = Math.max(session.expiresAt, resumedAt + session.sessionTimeoutMs);
+      // Shift, never reset (#10662): a full window per late tick would let a session whose
+      // owner is gone outlive its lease for as long as the ticks keep arriving late.
+      session.expiresAt = Math.max(
+        session.expiresAt,
+        Math.min(session.expiresAt + lostMs, resumedAt + session.sessionTimeoutMs),
+      );
       if (session.awaitingOwnerSince !== undefined) {
-        session.awaitingOwnerSince = Math.max(session.awaitingOwnerSince, resumedAt);
+        session.awaitingOwnerSince = Math.max(
+          session.awaitingOwnerSince,
+          Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+        );
       }
       forgiven++;
     }

@@ -127,7 +127,12 @@ if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
 fi
 if [[ "$1" == test && -n "${STUB_SLOW_SHARD_LABEL:-}" && "${AUTOMOBILE_WATCHDOG_LABEL:-}" == "$STUB_SLOW_SHARD_LABEL" ]]; then
-  sleep "$STUB_SLOW_SHARD_SECONDS"
+  if [[ -n "${STUB_FAKE_CLOCK_DIR:-}" ]]; then
+    # Advance only this shard's fake clock; no real waiting.
+    printf '%s\n' "$STUB_SLOW_SHARD_SECONDS" > "$STUB_FAKE_CLOCK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+  else
+    sleep "$STUB_SLOW_SHARD_SECONDS"
+  fi
 fi
 # Same shape the real `bun test --reporter=junit` writes: `file=` lands on the
 # <testcase>, not only on the enclosing <testsuite>.
@@ -608,7 +613,23 @@ EOF
 }
 
 @test "unit shard wall time is each shard's own duration, not its reap time (#10583)" {
+  # Deterministic per-shard clock: `date +%s` is a fixed base plus the offset the
+  # stub bun wrote for the calling shard's label, so nothing really sleeps.
+  local clock_dir
+  clock_dir="$(mktemp -d)"
+  cat > "$STUB_BIN/date" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" != "+%s" ]]; then exec /bin/date "$@"; fi
+offset=0
+label_file="$STUB_FAKE_CLOCK_DIR/${AUTOMOBILE_WATCHDOG_LABEL// /_}"
+if [[ -n "${AUTOMOBILE_WATCHDOG_LABEL:-}" && -f "$label_file" ]]; then
+  offset="$(cat "$label_file")"
+fi
+printf '%s\n' "$((1000 + offset))"
+EOF
+  chmod +x "$STUB_BIN/date"
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    STUB_FAKE_CLOCK_DIR="$clock_dir" \
     STUB_SLOW_SHARD_LABEL="unit shard 0" STUB_SLOW_SHARD_SECONDS=2 \
     bash "$SCRIPT" unit
   [ "$status" -eq 0 ]

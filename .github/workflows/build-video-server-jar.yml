@@ -66,6 +66,9 @@ jobs:
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+      - name: "Verify jar contains required classes"
+        run: bash scripts/ci/verify-video-jar-classes.sh android/video-server/build/libs/automobile-video.jar
+
       - name: "Calculate jar SHA256"
         id: checksum
         run: |

@@ -1,0 +1,12 @@
+{
+  "id": "prototype",
+  "window": { "placement": { "type": "fullscreen" } },
+  "root": {
+    "type": "row",
+    "style": { "width": "fill", "minHeight": 44, "maxHeight": 96 },
+    "children": [
+      { "type": "text", "text": "content", "style": { "weight": 1, "minWidth": 48 } },
+      { "type": "text", "text": "control", "style": { "weight": 0.5, "maxWidth": 120.5 } }
+    ]
+  }
+}

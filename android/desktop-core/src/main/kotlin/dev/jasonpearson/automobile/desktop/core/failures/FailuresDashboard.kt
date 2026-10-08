@@ -76,6 +76,10 @@ fun FailuresDashboard(
   // Null preserves legacy behavior; a supplied provider stays null until registered/after release.
   sessionUuidProvider: (() -> String?)? = null,
   failuresPushClient: FailuresPushSocketClient? = null, // Shared client managed at app level
+  // Seam for the locally owned push client so tests can count how often it is (re)created.
+  pushClientFactory: ((() -> String?)?) -> FailuresPushSocketClient = {
+    createFailuresDashboardPushClient(sessionUuidProvider = it)
+  },
 ) {
   val scope = rememberCoroutineScope()
 
@@ -130,7 +134,7 @@ fun FailuresDashboard(
     failuresPushClient
       ?: remember(dataSourceMode, sessionUuidProvider, sessionReady) {
         if (dataSourceMode == DataSourceMode.Real && sessionReady) {
-          createFailuresDashboardPushClient(sessionUuidProvider = sessionUuidProvider)
+          pushClientFactory(sessionUuidProvider)
         } else null
       }
   val isLocalPushClient = failuresPushClient == null

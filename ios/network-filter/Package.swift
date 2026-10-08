@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "network-filter-provider", targets: ["NetworkFilterProvider"]),
     ],
     targets: [
-        .target(name: "NetworkFilterCore"),
+        // libbsm provides audit_token_to_pid and audit_token_to_pidversion.
+        .target(name: "NetworkFilterCore", linkerSettings: [.linkedLibrary("bsm")]),
         .executableTarget(name: "NetworkFilterController", dependencies: ["NetworkFilterCore"]),
         .executableTarget(name: "NetworkFilterProvider", dependencies: ["NetworkFilterCore"]),
         .testTarget(name: "NetworkFilterCoreTests", dependencies: ["NetworkFilterCore"]),

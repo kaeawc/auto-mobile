@@ -100,6 +100,8 @@ data class OverlayStyle(
   val textStyle: String? = null,
 )
 
+@Serializable data class OverlayStyleWhen(val `when`: OverlayCondition, val style: OverlayStyle)
+
 @Serializable
 data class OverlayItem(
   val label: String,
@@ -180,6 +182,7 @@ sealed class OverlayNode {
   abstract val testTag: String?
   abstract val onTap: List<OverlayAction>?
   abstract val style: OverlayStyle?
+  abstract val styleWhen: List<OverlayStyleWhen>?
   abstract val visibleWhen: OverlayCondition?
   abstract val anchor: OverlayAnchor?
   abstract val safeAreaPadding: OverlaySafeAreaPadding?
@@ -192,6 +195,7 @@ data class OverlayBoxNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -205,6 +209,7 @@ data class OverlayRowNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -218,6 +223,7 @@ data class OverlayColumnNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -231,6 +237,7 @@ data class OverlayTextNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -244,6 +251,7 @@ data class OverlayImageNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -258,6 +266,7 @@ data class OverlayIconNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -271,6 +280,7 @@ data class OverlaySpacerNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -283,6 +293,7 @@ data class OverlayTextFieldNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -297,6 +308,7 @@ data class OverlaySwitchNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -311,6 +323,7 @@ data class OverlayCheckboxNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -325,6 +338,7 @@ data class OverlayButtonNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -339,6 +353,7 @@ data class OverlayScrollNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -353,6 +368,7 @@ data class OverlayPagerNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -366,6 +382,7 @@ data class OverlayTabBarNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -382,6 +399,7 @@ data class OverlayBottomNavNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,
@@ -397,6 +415,7 @@ data class OverlayBottomSheetNode(
   override val testTag: String? = null,
   override val onTap: List<OverlayAction>? = null,
   override val style: OverlayStyle? = null,
+  override val styleWhen: List<OverlayStyleWhen>? = null,
   override val visibleWhen: OverlayCondition? = null,
   override val anchor: OverlayAnchor? = null,
   override val safeAreaPadding: OverlaySafeAreaPadding? = null,

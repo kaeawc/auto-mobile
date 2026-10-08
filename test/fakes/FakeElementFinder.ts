@@ -16,8 +16,7 @@ export class FakeElementFinder implements ElementFinder {
   nextClickableParentsContainingText: Element[] = [];
   nextClickableSiblingsOfText: Element[] = [];
   nextClickableSiblingsOfResourceId: Element[] = [];
-  nextFocusedTextInput: any = null;
-  nextIsElementKeyboardFocused: boolean = false;
+  nextFocusedTextInput: Element | null = null;
 
   lastFindByTextArgs?: {
     text: string;
@@ -132,11 +131,7 @@ export class FakeElementFinder implements ElementFinder {
     return this.nextClickableSiblingsOfResourceId;
   }
 
-  findFocusedTextInput(_viewHierarchy: any): any {
+  findFocusedTextInput(_viewHierarchy: ViewHierarchyResult): Element | null {
     return this.nextFocusedTextInput;
-  }
-
-  isElementKeyboardFocused(_element: any): boolean {
-    return this.nextIsElementKeyboardFocused;
   }
 }

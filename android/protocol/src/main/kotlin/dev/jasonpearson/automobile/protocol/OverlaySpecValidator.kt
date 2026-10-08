@@ -41,6 +41,7 @@ object OverlaySpecValidator {
   val MAX_OVERLAY_EMIT_PAYLOAD_BYTES: Int = limit("MAX_OVERLAY_EMIT_PAYLOAD_BYTES")
   val MAX_OVERLAY_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_OVERLAY_EMIT_PAYLOAD_DEPTH")
   val MAX_OVERLAY_SELECTOR_DEPTH: Int = limit("MAX_OVERLAY_SELECTOR_DEPTH")
+  val MAX_OVERLAY_CONDITION_DEPTH: Int = limit("MAX_OVERLAY_CONDITION_DEPTH")
   val nodeTypes: Set<String> = variants("node")
   val actionTypes: Set<String> = variants("action")
   val placementTypes: Set<String> = variants("placement")
@@ -135,6 +136,7 @@ object OverlaySpecValidator {
         ?: pagerErrors(context)
         ?: bindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
         ?: sheetBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
+        ?: stateActionErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
     if (error != null) return OverlaySpecValidation.Failure(error)
     return try {
       OverlaySpecValidation.Success(
@@ -186,6 +188,7 @@ object OverlaySpecValidator {
     val actions = mutableListOf<Located>()
     var images = 0
     var selectorDepth = 0
+    var conditionDepth = 0
   }
 
   private fun fail(path: String, message: String) = OverlaySpecError(path.ifEmpty { "$" }, message)
@@ -235,6 +238,7 @@ object OverlaySpecValidator {
       context.images++
       if (context.images > MAX_OVERLAY_IMAGES) return fail("$path.image", "Image limit exceeded")
     }
+    if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
@@ -257,6 +261,21 @@ object OverlaySpecValidator {
       return fail(path, "Selector depth limit exceeded")
     val error = walk(value, target, path, context, depth)
     context.selectorDepth--
+    return error
+  }
+
+  private fun visitCondition(
+    value: JsonElement,
+    target: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): OverlaySpecError? {
+    context.conditionDepth++
+    if (context.conditionDepth > MAX_OVERLAY_CONDITION_DEPTH)
+      return fail(path, "Condition depth limit exceeded")
+    val error = walk(value, target, path, context, depth)
+    context.conditionDepth--
     return error
   }
 
@@ -313,8 +332,36 @@ object OverlaySpecValidator {
         "Exactly one container selector is required",
       )
     }
+    formConstraint(data, rule, path)?.let {
+      return it
+    }
     if (rule.flag("atLeastOne") && data.isEmpty())
       return fail(path, "At least one selector field is required")
+    return null
+  }
+
+  /** `exactlyOne` picks one form of a union-like object; `dependents` ties fields to a trigger. */
+  private fun formConstraint(data: JsonObject, rule: JsonObject, path: String): OverlaySpecError? {
+    val exactlyOne = (rule["exactlyOne"] as? JsonArray)?.map { it.jsonPrimitive.content }
+    if (exactlyOne != null && exactlyOne.count { data.containsKey(it) } != 1) {
+      return fail(
+        keyPath(path, exactlyOne.first()),
+        "Exactly one of ${exactlyOne.joinToString(", ")} is required",
+      )
+    }
+    val dependents = rule["dependents"] as? JsonObject ?: return null
+    for ((trigger, names) in dependents) {
+      val fields = names.jsonArray.map { it.jsonPrimitive.content }
+      val present = fields.filter { data.containsKey(it) }
+      if (!data.containsKey(trigger)) {
+        if (present.isNotEmpty()) return fail(keyPath(path, present.first()), "Requires $trigger")
+      } else if (present.size != 1) {
+        return fail(
+          keyPath(path, present.getOrNull(1) ?: fields.first()),
+          "Exactly one of ${fields.joinToString(", ")} is required",
+        )
+      }
+    }
     return null
   }
 
@@ -462,6 +509,11 @@ object OverlaySpecValidator {
       val stored = state[key] as? JsonPrimitive
       if (value.text("type") == "textField" && stored?.isString != true)
         return fail("$path.stateKey", "Text field requires a string state key")
+      if (
+        value.text("type") in setOf("switch", "checkbox") &&
+          (stored == null || stored.isString || stored.booleanOrNull == null)
+      )
+        return fail("$path.stateKey", "Toggle control requires a boolean state key")
       if (value.text("type") !in setOf("tabBar", "bottomNav")) continue
       val number = stored?.takeIf { !it.isString }?.doubleOrNull
       if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0) {
@@ -484,6 +536,29 @@ object OverlaySpecValidator {
       ) {
         return fail("$path.openWhen.key", "Sheet requires a boolean state key")
       }
+    }
+    return null
+  }
+
+  private fun stateActionErrors(context: Context, data: JsonObject): OverlaySpecError? {
+    val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
+    for ((value, path) in context.actions) {
+      val stored = state[value.text("key") ?: continue] as? JsonPrimitive
+      val message =
+        when (value.text("type")) {
+          "toggle" ->
+            "Toggle requires a boolean state key"
+              .takeIf {
+                stored == null || stored.isString || stored.booleanOrNull == null
+              }
+          "increment" ->
+            "Increment requires a numeric state key"
+              .takeIf {
+                stored == null || stored.isString || stored.doubleOrNull?.isFinite() != true
+              }
+          else -> null
+        }
+      if (message != null) return fail("$path.key", message)
     }
     return null
   }

@@ -3,7 +3,7 @@ import type { ViewHierarchyResult } from "../../models";
 
 /** Locates the text input that currently owns input focus (IME key sessions, Keyboard). */
 export interface FocusedInputQuery {
-  findFocusedTextInput(viewHierarchy: any): any;
+  findFocusedTextInput(viewHierarchy: ViewHierarchyResult): Element | null;
 }
 
 /** Enumerates scrollable containers (swipeOn auto-targeting, interaction identification). */

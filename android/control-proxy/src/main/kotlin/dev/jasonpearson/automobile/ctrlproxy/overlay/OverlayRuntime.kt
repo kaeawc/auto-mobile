@@ -51,6 +51,10 @@ sealed interface OverlayInteraction {
   ) : OverlayInteraction
 
   data class SheetDismiss(val condition: OverlaySheetCondition) : OverlayInteraction
+
+  /** A `switch` or `checkbox` tap: flips the bound boolean, then runs the node's own actions. */
+  data class Toggle(val key: String, val actions: List<OverlayAction> = emptyList()) :
+    OverlayInteraction
 }
 
 /**
@@ -112,6 +116,12 @@ class OverlayRuntime(
         if (current.state[condition.key] == OverlayScalar.BooleanValue(condition.equals))
           change(condition.key, OverlayScalar.BooleanValue(!condition.equals))
       }
+      is OverlayInteraction.Toggle -> {
+        // The validator keeps the bound key boolean; anything else leaves the control inert.
+        val stored = current.state[interaction.key] as? OverlayScalar.BooleanValue ?: return
+        change(interaction.key, OverlayScalar.BooleanValue(!stored.value))
+        tap(interaction.actions)
+      }
     }
   }
 
@@ -121,6 +131,9 @@ class OverlayRuntime(
       when (action) {
         is OverlayEmitAction -> emit(OverlayEventKind.EMIT, action.name, action.payload)
         is OverlaySetStateAction -> setState(action.key, action.value)
+        is OverlayToggleAction -> action.nextValue(current.state)?.let { setState(action.key, it) }
+        is OverlayIncrementAction ->
+          action.nextValue(current.state)?.let { setState(action.key, it) }
         is OverlaySetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(

@@ -1,0 +1,82 @@
+{
+  "id": "alarm",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "enabled": true,
+    "vibrate": false,
+    "repeat": false
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "switch",
+        "stateKey": "enabled",
+        "label": "Alarm",
+        "testTag": "alarm_switch"
+      },
+      {
+        "type": "switch",
+        "stateKey": "vibrate",
+        "onTap": [
+          {
+            "type": "emit",
+            "name": "vibrateTapped"
+          }
+        ]
+      },
+      {
+        "type": "checkbox",
+        "stateKey": "repeat",
+        "label": "Repeat",
+        "testTag": "repeat_checkbox",
+        "visibleWhen": {
+          "key": "enabled",
+          "equals": true
+        }
+      },
+      {
+        "type": "row",
+        "children": [
+          {
+            "type": "button",
+            "label": "Cancel",
+            "variant": "text",
+            "onTap": [
+              {
+                "type": "dismiss"
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "label": "Edit",
+            "variant": "outlined",
+            "onTap": [
+              {
+                "type": "setState",
+                "key": "repeat",
+                "value": true
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "label": "Save",
+            "testTag": "save_button",
+            "onTap": [
+              {
+                "type": "emit",
+                "name": "save"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,7 +36,9 @@ import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
 import androidx.compose.ui.graphics.Shader
 import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
@@ -56,6 +63,11 @@ internal fun OverlayRuntimeContent(
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val resolver = LocalContext.current.contentResolver
+  val motion =
+    remember(snapshot.spec) {
+      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
+    }
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -65,8 +77,12 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayMotion provides motion,
       ) {
-        OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
+        OverlaySpecContent(
+          mapOverlaySpec(snapshot.spec, snapshot.pages).root,
+          snapshot.spec.theme,
+        ) { interaction ->
           queue.trySend(interaction)
         }
       }
@@ -76,8 +92,12 @@ internal fun OverlayRuntimeContent(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  OverlayTheme(root) {
+fun OverlaySpecContent(
+  root: OverlayRenderNode,
+  theme: OverlaySpecTheme? = null,
+  interact: (OverlayInteraction) -> Unit = {},
+) {
+  OverlayTheme(root, theme) {
     Box(Modifier.semantics { testTagsAsResourceId = true }) {
       RenderOverlayNode(root, interact)
       modalOverlaySheets(root).forEach { node ->
@@ -95,7 +115,28 @@ private fun RenderOverlayNode(
   interact: (OverlayInteraction) -> Unit,
   parentModifier: Modifier = Modifier,
 ) {
-  if (!node.visible) return
+  // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
+  if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    // The row/column weight rides on the animated container: it is the Row/Column's direct child.
+    AnimatedVisibility(
+      visible = node.visible,
+      modifier = parentModifier,
+      enter = fadeIn() + expandIn(),
+      exit = fadeOut() + shrinkOut(),
+    ) {
+      RenderOverlayNodeContent(node, interact)
+    }
+  } else if (node.visible) {
+    RenderOverlayNodeContent(node, interact, parentModifier)
+  }
+}
+
+@Composable
+private fun RenderOverlayNodeContent(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+  parentModifier: Modifier = Modifier,
+) {
   val modifier = parentModifier.then(overlayNodeModifier(node, interact))
   when (node.role) {
     "box" ->
@@ -133,7 +174,12 @@ private fun RenderOverlayNode(
     "icon" -> {
       val icon = overlayIcon(node.iconName)
       if (icon != null)
-        Icon(icon, contentDescription = null, modifier = modifier, tint = node.style.color)
+        Icon(
+          icon,
+          contentDescription = null,
+          modifier = modifier,
+          tint = node.style.color.takeOrElse { LocalContentColor.current },
+        )
       else
         Box(
           modifier.defaultMinSize(24.dp, 24.dp).background(node.style.background ?: Color.LightGray)
@@ -154,6 +200,9 @@ private fun RenderOverlayNode(
     "bottomSheet" ->
       Unit // Modal content is hoisted above the whole author tree, within this window.
     "textField" -> RenderOverlayTextField(node, modifier, interact)
+    "switch",
+    "checkbox" -> RenderOverlayToggle(node, modifier, interact)
+    "button" -> RenderOverlayButton(node, modifier, interact)
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -214,7 +263,12 @@ private fun RenderOverlayPager(
 ) {
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  LaunchedEffect(node.page) { if (pager.currentPage != node.page) pager.scrollToPage(node.page) }
+  val animate = LocalOverlayMotion.current
+  LaunchedEffect(node.page) {
+    if (pager.currentPage != node.page) {
+      if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
+    }
+  }
   LaunchedEffect(pager) {
     snapshotFlow { pager.isScrollInProgress to pager.settledPage }
       .distinctUntilChanged()
@@ -360,7 +414,11 @@ private fun overlayNodeModifier(
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
-  val tappable = actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet"
+  val tappable =
+    actions.isNotEmpty() &&
+      node.role != "textField" &&
+      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_COMPONENT_ROLES
   var modifier: Modifier = Modifier
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).

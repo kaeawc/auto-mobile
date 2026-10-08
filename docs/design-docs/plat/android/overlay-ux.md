@@ -83,18 +83,25 @@ plugin or API-check task; its published artifact includes the contract resource.
 Optional top-level `theme` sets the Material scheme every built-in component draws
 from. At least one of its fields is required:
 
-| Field           | Meaning                                                                                                                                                   |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`          | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting. |
-| `colors.seed`   | Hex color a full light or dark scheme is generated from.                                                                                                  |
-| `colors.source` | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                      |
+| Field                   | Meaning                                                                                                                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`                  | `light`, `dark` or `system` (follow the device). Omitted: inferred from the first opaque background on the root's leading chain, else the device setting.                         |
+| `colors.seed`           | Hex color a full light or dark scheme is generated from.                                                                                                                          |
+| `colors.source`         | `device`: Android 12+ (API 31) dynamic color. On older devices it falls back to `colors.seed` when present, else the default scheme.                                              |
+| `colors.<role>`         | Hex override for one Material 3 role (`primary`, `onPrimary`, `surface`, `surfaceContainer` … the 36 roles style colors accept), applied over the seed, device or default scheme. |
+| `typography.scale`      | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1.                                                                                      |
+| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role.                                                                                                                |
+| `shapes.corner`         | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use.                                             |
 
-| `typography.scale` | Number 0.75–1.5 multiplying the size and line height of every Material type role. Default 1. |
-| `typography.fontFamily` | `sans`, `serif` or `mono`: the family of every Material type role. |
-| `shapes.corner` | `none`, `small`, `medium` (the stock Material 3 scale), `large` or `full` (pill). Shifts every corner family built-in components use. |
-
-`typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
+`colors`, `typography` and `shapes` each need at least one field. An explicit theme wins over the scheme
 inferred from backgrounds.
+
+Role overrides are literal colors, so they apply unchanged in light and dark: pair them with a
+fixed `mode`, or rely on `seed`/`source` for a mode-aware scheme and override only the roles that
+must match a brand. With no `mode`, a `colors.background` (else `colors.surface`) override decides
+light or dark from its luminance, ahead of the authored-background inference, for both the content
+scheme and the host dismiss control. A spec that names only roles in its styles and no hex
+literals renders in light and dark from one source.
 
 A text node's `style.textStyle` names a Material 3 type role (`displayLarge` … `labelSmall`, 15
 in all) and so follows the theme's scale and family. It supplies size, weight and family; an
@@ -311,7 +318,7 @@ of the Material 3 `ColorScheme` role names (`primary`, `onPrimary`,
 `surfaceVariant`, `surfaceContainer` and its `Low`/`High`/`Highest`/`Lowest`
 steps, `surfaceBright`, `surfaceDim`, `error`, `outline`, `scrim`, and the rest
 of the scheme, 36 in all). A role resolves against the overlay's active theme
-(`theme.mode`, `colors.seed`, device colour), so it follows light/dark and the
+(`theme.mode`, `colors.seed`, device colour, `colors.<role>` overrides), so it follows light/dark and the
 seed. No short hex, other named colors, CSS functions, or separate color opacity. Style
 properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.

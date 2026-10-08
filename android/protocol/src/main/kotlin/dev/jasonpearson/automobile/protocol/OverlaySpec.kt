@@ -630,12 +630,49 @@ data class OverlayWindow(
 
 /**
  * `source = "device"` asks for Android 12+ dynamic colour; `seed` generates a scheme from one
- * colour.
+ * colour. Each Material 3 role field is an explicit hex override applied over that scheme (or the
+ * baseline one) in both light and dark.
  */
 @Serializable
 data class OverlaySpecThemeColors(
   val seed: String? = null,
   val source: String? = null,
+  val primary: String? = null,
+  val onPrimary: String? = null,
+  val primaryContainer: String? = null,
+  val onPrimaryContainer: String? = null,
+  val inversePrimary: String? = null,
+  val secondary: String? = null,
+  val onSecondary: String? = null,
+  val secondaryContainer: String? = null,
+  val onSecondaryContainer: String? = null,
+  val tertiary: String? = null,
+  val onTertiary: String? = null,
+  val tertiaryContainer: String? = null,
+  val onTertiaryContainer: String? = null,
+  val background: String? = null,
+  val onBackground: String? = null,
+  val surface: String? = null,
+  val onSurface: String? = null,
+  val surfaceVariant: String? = null,
+  val onSurfaceVariant: String? = null,
+  val surfaceTint: String? = null,
+  val inverseSurface: String? = null,
+  val inverseOnSurface: String? = null,
+  val error: String? = null,
+  val onError: String? = null,
+  val errorContainer: String? = null,
+  val onErrorContainer: String? = null,
+  val outline: String? = null,
+  val outlineVariant: String? = null,
+  val scrim: String? = null,
+  val surfaceBright: String? = null,
+  val surfaceDim: String? = null,
+  val surfaceContainer: String? = null,
+  val surfaceContainerHigh: String? = null,
+  val surfaceContainerHighest: String? = null,
+  val surfaceContainerLow: String? = null,
+  val surfaceContainerLowest: String? = null,
 )
 
 /** `scale` multiplies every Material type role; `fontFamily` is sans, serif or mono. */

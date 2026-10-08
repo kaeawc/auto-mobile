@@ -5588,6 +5588,222 @@
             "values": ["device"]
           },
           "optional": true
+        },
+        "primary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onPrimary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "primaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onPrimaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "inversePrimary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "secondary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onSecondary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "secondaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onSecondaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "tertiary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onTertiary": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "tertiaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onTertiaryContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "background": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onBackground": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surface": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onSurface": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceVariant": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onSurfaceVariant": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceTint": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "inverseSurface": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "inverseOnSurface": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "error": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onError": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "errorContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "onErrorContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "outline": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "outlineVariant": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "scrim": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceBright": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceDim": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceContainer": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceContainerHigh": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceContainerHighest": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceContainerLow": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
+        },
+        "surfaceContainerLowest": {
+          "rule": {
+            "kind": "color"
+          },
+          "optional": true
         }
       },
       "atLeastOne": true

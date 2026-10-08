@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -301,5 +302,79 @@ class OverlayThemeTest {
     val light = overlayDismissColors(false)
     assertTrue(dark.background.alpha < 1f && light.background.alpha < 1f)
     assertNotEquals(dark.content, light.content)
+  }
+
+  private val roleNames =
+    OverlaySpecThemeColors.serializer().descriptor.let { d ->
+      (0 until d.elementsCount).map(d::getElementName) - setOf("seed", "source")
+    }
+
+  @Test
+  fun `every role override replaces exactly the role it names`() {
+    assertEquals(36, roleNames.size)
+    val base = lightColorScheme()
+    roleNames.forEach { role ->
+      val colors = Json.decodeFromString<OverlaySpecThemeColors>("""{"$role":"#010203"}""")
+      val scheme = base.withRoleOverrides(colors)
+      assertEquals(role, Color(0xFF010203), overlayColorRole(scheme, role))
+      roleNames
+        .filter { it != role }
+        .forEach { assertEquals(role, overlayColorRole(base, it), overlayColorRole(scheme, it)) }
+    }
+  }
+
+  @Test
+  fun `role overrides apply over a seed scheme and keep the rest of it`() {
+    val root = model(OverlaySpacerNode()).root
+    val theme =
+      overlayThemeSpec(
+        root,
+        false,
+        OverlaySpecTheme(
+          mode = "light",
+          colors = OverlaySpecThemeColors(seed = "#6750A4", primary = "#FF0000"),
+        ),
+      )
+    val scheme = overlayColorScheme(theme)
+    val seeded = overlaySeedColorScheme(Color(0xFF6750A4), false)
+    assertEquals(Color(0xFFFF0000), scheme.primary)
+    assertEquals(seeded.secondary, scheme.secondary)
+    assertEquals(seeded.surface, scheme.surface)
+  }
+
+  @Test
+  fun `role overrides apply over the device scheme too`() {
+    val theme =
+      overlayThemeSpec(
+        model(OverlaySpacerNode()).root,
+        false,
+        OverlaySpecTheme(colors = OverlaySpecThemeColors(source = "device", error = "#00FF00")),
+      )
+    val dynamic = lightColorScheme(primary = Color(0xFF123456))
+    val scheme = overlayColorScheme(theme, dynamic)
+    assertEquals(Color(0xFF123456), scheme.primary)
+    assertEquals(Color(0xFF00FF00), scheme.error)
+  }
+
+  @Test
+  fun `with no mode a dark background override selects dark for content and host chrome`() {
+    val lightAuthored = model(OverlayBoxNode(style = styled("#FFFFFF"), children = emptyList()))
+    val explicit =
+      OverlaySpecTheme(colors = OverlaySpecThemeColors(background = "#101010", primary = "#FF0000"))
+    val theme = overlayThemeSpec(lightAuthored.root, false, explicit)
+    assertTrue(theme.dark)
+    assertNull(theme.surface) // the light authored background must not paint a dark scheme
+    assertEquals(Color(0xFF101010), overlayColorScheme(theme).background)
+    assertEquals(darkColorScheme().onSurface, overlayColorScheme(theme).onSurface)
+    assertEquals(true, overlayHostDark(lightAuthored.copy(theme = explicit)))
+  }
+
+  @Test
+  fun `an explicit mode still wins over a background override`() {
+    val explicit =
+      OverlaySpecTheme(mode = "light", colors = OverlaySpecThemeColors(surface = "#101010"))
+    val root = model(OverlaySpacerNode())
+    assertFalse(overlayThemeSpec(root.root, true, explicit).dark)
+    assertEquals(false, overlayHostDark(root.copy(theme = explicit)))
   }
 }

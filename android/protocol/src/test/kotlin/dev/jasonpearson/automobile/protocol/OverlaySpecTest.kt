@@ -78,6 +78,36 @@ class OverlaySpecTest {
   }
 
   @Test
+  fun `theme colours have the same fields in the Kotlin model and the shared contract`() {
+    val definitions =
+      Json.parseToJsonElement(
+          checkNotNull(javaClass.getResourceAsStream("/overlay-spec-contract.json"))
+            .readBytes()
+            .decodeToString(),
+        )
+        .jsonObject
+        .getValue("definitions")
+        .jsonObject
+    val fields = definitions.getValue("themeColors").jsonObject.getValue("fields").jsonObject.keys
+    val descriptor = OverlaySpecThemeColors.serializer().descriptor
+    assertEquals(fields, (0 until descriptor.elementsCount).map(descriptor::getElementName).toSet())
+    // Every override is exactly one of the colour roles a style colour can name.
+    val roles =
+      definitions
+        .getValue("colorValue")
+        .jsonObject
+        .getValue("options")
+        .jsonArray
+        .map { it.jsonObject }
+        .single { it.getValue("kind").jsonPrimitive.content == "enum" }
+        .getValue("values")
+        .jsonArray
+        .map { it.jsonPrimitive.content }
+        .toSet()
+    assertEquals(roles, fields - setOf("seed", "source"))
+  }
+
+  @Test
   fun `button and list item icons accept the full icon set`() {
     for (root in
       listOf(

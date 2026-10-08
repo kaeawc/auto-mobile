@@ -42,7 +42,10 @@ class OverlaySpecContentScreenshotTest {
   /** Styled floating box: background colour, corner radius and a text child. */
   @Test
   fun styledFloatingBox() =
-    overlayScreenshotTest("doc_example_3", validOverlayFixture("doc-example-3"))
+    overlayScreenshotTest(
+      "doc_example_3",
+      validOverlayFixture("doc-example-3", resolveElementAnchors = true),
+    )
 
   /** Tab bar and bottom navigation bound to state and to a pager. */
   @Test

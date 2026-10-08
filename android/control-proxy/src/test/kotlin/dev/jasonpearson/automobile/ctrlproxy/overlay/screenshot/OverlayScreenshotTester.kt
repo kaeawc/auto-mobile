@@ -14,6 +14,11 @@ import dev.jasonpearson.automobile.protocol.OverlaySpecValidation
 import dev.jasonpearson.automobile.protocol.OverlaySpecValidator
 import java.io.File
 import java.time.Duration
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.robolectric.Robolectric
 import org.robolectric.Shadows.shadowOf
 
@@ -42,20 +47,59 @@ internal object BitmapPngCodec : OverlayScreenshotComparator.PngCodec {
   }
 }
 
-/** Loads a shared fixture from the repo's `test/fixtures/overlay-spec/valid` directory. */
-internal fun validOverlayFixture(name: String): OverlaySpec {
+/**
+ * Loads a shared fixture from the repo's `test/fixtures/overlay-spec/valid` directory. With
+ * [resolveElementAnchors] each `element` anchor is replaced by a fixed `bounds` anchor with the
+ * same alignment (and offset), standing in for the host's selector resolution: the renderer refuses
+ * an unresolved element anchor.
+ */
+internal fun validOverlayFixture(
+  name: String,
+  resolveElementAnchors: Boolean = false,
+): OverlaySpec {
   val file =
     generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
       .map { File(it, "test/fixtures/overlay-spec/valid/$name.json") }
       .first { it.isFile }
-  return loadOverlaySpec(file)
+  if (!resolveElementAnchors) return loadOverlaySpec(file)
+  val resolved = resolveElementAnchors(Json.parseToJsonElement(file.readText()))
+  return loadOverlaySpecText(file.path, Json.encodeToString(JsonElement.serializer(), resolved))
 }
+
+private val RESOLVED_BOUNDS =
+  JsonObject(
+    mapOf(
+      "x" to JsonPrimitive(24),
+      "y" to JsonPrimitive(120),
+      "width" to JsonPrimitive(160),
+      "height" to JsonPrimitive(48),
+    ),
+  )
+
+private fun resolveElementAnchors(element: JsonElement): JsonElement =
+  when (element) {
+    is JsonArray -> JsonArray(element.map(::resolveElementAnchors))
+    is JsonObject ->
+      if ((element["type"] as? JsonPrimitive)?.content == "element" && "selector" in element) {
+        JsonObject(
+          element.filterKeys { it != "selector" } +
+            mapOf("type" to JsonPrimitive("bounds"), "bounds" to RESOLVED_BOUNDS),
+        )
+      } else {
+        JsonObject(element.mapValues { resolveElementAnchors(it.value) })
+      }
+    else -> element
+  }
 
 /** Reads [file] and validates it with the production [OverlaySpecValidator]. */
 internal fun loadOverlaySpec(file: File): OverlaySpec {
   check(file.isFile) { "Overlay spec not found: ${file.path}" }
-  val validation = OverlaySpecValidator.validate(file.readText())
-  check(validation is OverlaySpecValidation.Success) { "${file.path}: $validation" }
+  return loadOverlaySpecText(file.path, file.readText())
+}
+
+private fun loadOverlaySpecText(source: String, text: String): OverlaySpec {
+  val validation = OverlaySpecValidator.validate(text)
+  check(validation is OverlaySpecValidation.Success) { "$source: $validation" }
   return validation.spec
 }
 

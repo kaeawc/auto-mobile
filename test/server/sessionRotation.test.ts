@@ -991,6 +991,28 @@ describe("restoreRotationSettings compare-and-skip and managed read-back", () =>
     expect(adb.lock).toBe("0:1:1:2:2:0");
   });
 
+  test("a failed device-state read after a mismatch logs the error message, not {}", async () => {
+    class FailingStatesAdb extends RotationAdb {
+      override async executeCommand(command: string): Promise<ExecResult> {
+        if (command === "shell cmd device_state print-states") {
+          throw new Error("device offline");
+        }
+        return super.executeCommand(command);
+      }
+    }
+    const warn = spyOn(logger, "warn");
+    try {
+      const adb = new FailingStatesAdb();
+      adb.mismatch = true;
+      await expect(restore(adb)).rejects.toThrow("did not verify by read-back");
+      expect(warn.mock.calls.map(([message]) => String(message))).toContain(
+        "[Rotate] Could not read device states after user_rotation read-back mismatch: device offline",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a read-back mismatch on a single-state device stays a generic failure", async () => {
     const adb = new StatesAdb();
     adb.mismatch = true;

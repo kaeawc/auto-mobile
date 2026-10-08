@@ -10,6 +10,7 @@ import type { SettingsNamespace, SettingsValueType } from "../observe/android/ty
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -310,7 +311,10 @@ export class Rotate extends BaseVisualChange {
       foldable = parseAndroidDeviceStates(stdout).length > 1;
     } catch (error) {
       throwIfAborted(signal);
-      logger.warn(`[Rotate] Could not read device states after ${key} read-back mismatch`, error);
+      logger.warn(
+        `[Rotate] Could not read device states after ${key} read-back mismatch: ${errorMessage(error)}`,
+        error,
+      );
     }
     return foldable
       ? new RotationSettingManagedError({ key, expected, actual })
@@ -364,7 +368,10 @@ export class Rotate extends BaseVisualChange {
         },
       );
     } catch (error) {
-      logger.warn("Failed to roll back user_rotation after rotation failure", error);
+      logger.warn(
+        `Failed to roll back user_rotation after rotation failure: ${errorMessage(error)}`,
+        error,
+      );
       return `Failed to roll back user_rotation: ${error}`;
     }
   }
@@ -403,7 +410,7 @@ export class Rotate extends BaseVisualChange {
       // release/rebind so a subsequent rotate cannot redefine the session baseline.
     } catch (error) {
       logger.warn(
-        "Failed to restore original user_rotation after explicit automatic rotation",
+        `Failed to restore original user_rotation after explicit automatic rotation: ${errorMessage(error)}`,
         error,
       );
       result.warning = [result.warning, `Failed to restore original user_rotation: ${error}`]
@@ -1121,7 +1128,10 @@ export class Rotate extends BaseVisualChange {
               await cleanup.pendingWrite;
             } catch (error) {
               // A failed write may have applied; its settlement still orders the restore.
-              logger.warn("[Rotate] Pending setting write failed before cleanup", error);
+              logger.warn(
+                `[Rotate] Pending setting write failed before cleanup: ${errorMessage(error)}`,
+                error,
+              );
             }
           }
           await this.writeSystemSetting("accelerometer_rotation", "1", undefined, cleanup);
@@ -1766,7 +1776,7 @@ export class Rotate extends BaseVisualChange {
         await this.restoreAutoRotateSetting(cleanup);
         logger.info("Restored auto-rotate after error");
       } catch (error) {
-        logger.warn("Failed to restore auto-rotate", error);
+        logger.warn(`Failed to restore auto-rotate: ${errorMessage(error)}`, error);
         restoreFailure = toActionableError(error, "Failed to restore auto-rotate");
       }
     }

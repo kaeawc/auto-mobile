@@ -99,6 +99,19 @@ jobs:
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         run: ./scripts/ios/build-network-filter-probe.sh signed
 
+      # The committed MDM profile (docs/assets/mdm/automobile-network-filter.mobileconfig)
+      # pre-approves the filter by designated requirement. Fail the release when
+      # the signed app would stop matching it (#10595).
+      - name: "Verify signed app matches the MDM profile requirement"
+        run: |
+          set -euo pipefail
+          app="$(find scratch -type d -name 'AutoMobile Network Identity Probe.app' -prune -print -quit)"
+          if [[ -z "${app}" ]]; then
+            echo "The signed probe build did not produce the app bundle" >&2
+            exit 1
+          fi
+          bash ./scripts/ci/verify-network-filter-requirement.sh "${app}"
+
       - name: "Stage notarized probe archive"
         run: |
           set -euo pipefail

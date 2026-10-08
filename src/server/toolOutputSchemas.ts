@@ -1513,6 +1513,19 @@ const networkConditionValuesOutputSchema = z
   })
   .passthrough();
 
+/** One leased per-app offline rule on an iOS Simulator (#10264). */
+const iosAppNetworkRuleOutputSchema = z
+  .object({
+    appId: z.string(),
+    profile: z.literal("offline"),
+    revision: z.number(),
+    ownerGeneration: z.number(),
+    owner: z.string().optional(),
+    leaseExpiresInMs: z.number().optional(),
+    droppedFlows: z.number().optional(),
+  })
+  .passthrough();
+
 const deviceStateOutputFields = {
   message: z.string(),
   success: z.boolean().optional(),
@@ -1578,6 +1591,23 @@ const deviceStateOutputFields = {
       observedValues: networkConditionValuesOutputSchema.partial().optional(),
       expiresInSeconds: z.number().optional(),
       rawStatus: z.string().optional(),
+      backend: z.literal("network-extension").optional(),
+      controller: z
+        .object({
+          state: z.string(),
+          contractVersion: z.number().optional(),
+          detail: z.string(),
+          nextStep: z.string(),
+        })
+        .passthrough()
+        .optional(),
+      scope: z.enum(["device", "app"]).optional(),
+      appId: z.string().optional(),
+      rule: iosAppNetworkRuleOutputSchema.optional(),
+      rules: z.array(iosAppNetworkRuleOutputSchema).optional(),
+      acknowledged: z.boolean().optional(),
+      coverage: z.literal("partial").optional(),
+      limitations: z.array(z.string()).optional(),
     })
     .passthrough()
     .optional(),

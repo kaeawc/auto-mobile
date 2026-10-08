@@ -43,13 +43,21 @@ function envelope(uri: string, body: Record<string, unknown>, deviceId?: string)
   };
 }
 
-async function resolveForegroundAppId(
+interface ForegroundTarget {
+  packageName: string;
+  userId: number;
+}
+
+async function resolveForegroundApp(
   device: BootedDevice,
   dependencies: SdkCapabilityResourceDependencies,
-): Promise<string | undefined> {
+): Promise<ForegroundTarget | undefined> {
   try {
     const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create(device);
-    return (await adb.getForegroundApp())?.packageName;
+    const foreground = await adb.getForegroundApp();
+    return foreground
+      ? { packageName: foreground.packageName, userId: foreground.userId }
+      : undefined;
   } catch (error) {
     logger.warn("[SdkCapabilityResources] Foreground app probe failed", error);
     return undefined;
@@ -59,12 +67,13 @@ async function resolveForegroundAppId(
 async function readCapabilities(
   device: BootedDevice,
   appId: string,
+  userId: number | undefined,
   dependencies: SdkCapabilityResourceDependencies,
 ): Promise<SdkCapabilitiesResult> {
   try {
     const reader =
       dependencies.createReader?.(device) ?? AndroidCtrlProxyClient.getInstance(device);
-    return await reader.getSdkCapabilities(appId);
+    return await reader.getSdkCapabilities(appId, userId);
   } catch (error) {
     logger.warn("[SdkCapabilityResources] SDK capability read failed", error);
     return sdkCapabilitiesUnavailable("CTRLPROXY_UNREACHABLE");
@@ -95,13 +104,17 @@ export async function getSdkCapabilitiesResource(
         deviceId,
       );
     }
-    const appId = requestedAppId ?? (await resolveForegroundAppId(device, dependencies));
+    // The foreground app's Android user (e.g. a work profile) is forwarded so CtrlProxy reads that
+    // user's app instance. An explicit appId that is not in the foreground reads CtrlProxy's user.
+    const foreground = await resolveForegroundApp(device, dependencies);
+    const appId = requestedAppId ?? foreground?.packageName;
     if (!appId) {
       return envelope(uri, { appId: null, result: sdkCapabilitiesUnavailable("NO_APP") }, deviceId);
     }
+    const userId = foreground?.packageName === appId ? foreground.userId : undefined;
     return envelope(
       uri,
-      { appId, result: await readCapabilities(device, appId, dependencies) },
+      { appId, result: await readCapabilities(device, appId, userId, dependencies) },
       deviceId,
     );
   } catch (error) {

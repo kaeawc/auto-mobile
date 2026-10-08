@@ -10,6 +10,15 @@ import {
   type ScreenReaderRestoreState,
 } from "../features/accessibility/ScreenReaderRestore";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
+import { ExecNetworkFilterBridge } from "../features/network-filter/NetworkFilterBridge";
+import {
+  IOS_APP_NETWORK_RULE_LEASE_MS,
+  IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+  IosAppNetworkRuleClient,
+  type IosAppNetworkRule,
+  type IosAppNetworkRuleCommandContext,
+} from "../features/network-filter/IosAppNetworkRuleClient";
+import { IosAppNetworkLeases, type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import {
   AndroidDeviceClockAdapter,
   restoreDeviceClock,
@@ -119,6 +128,24 @@ export interface BiometricEnrollmentRestorer {
  */
 export interface NetworkConditionSessionState {
   initialProfile: NetworkConditionProfile;
+  /**
+   * iOS Simulator only (#10264): the one app this session took offline through
+   * the network-extension filter. Restoring removes this session's rule rather
+   * than resetting the whole device.
+   */
+  iosAppRule?: IosAppNetworkRuleSessionState;
+}
+
+/** The per-app rule a session owns on an iOS Simulator (#10264). */
+export interface IosAppNetworkRuleSessionState {
+  udid: string;
+  bundleId: string;
+  /** Fixed for this session binding; a later binding allocates a newer one. */
+  ownerGeneration: number;
+  /** The newest revision this session has sent for the target (apply or reset). */
+  lastRevision: number;
+  /** The revision the provider acknowledged as installed, while it is believed active. */
+  installedRevision?: number;
 }
 
 /** What a pending network restore must write, resolved before any await. */
@@ -127,6 +154,11 @@ interface NetworkConditionRestoreTarget {
   sessionId: string;
   deviceId: string;
   profile: NetworkConditionProfile;
+  /**
+   * iOS Simulator: remove this exact rule, with a reset revision allocated when
+   * the target was captured — newer than any apply this session sent.
+   */
+  iosAppRule?: IosAppNetworkRule;
 }
 
 /** Original auto-time value recorded before the first session clock write. */
@@ -175,6 +207,8 @@ export interface DeviceStateRestorerFactories {
   screenReader?: (device: BootedDevice) => ScreenReaderRestorer;
   /** Delay before each screen-reader restore retry; defaults to a short exponential backoff. */
   screenReaderBackoff?: BackoffPolicy;
+  /** iOS Simulator per-app network rules (#10264); defaults to the installed controller. */
+  iosAppNetworkRule?: IosAppNetworkRuleRestorer;
 }
 
 /** The injected screen-reader restorer, else the real TalkBack/VoiceOver one. */
@@ -998,6 +1032,11 @@ export class SessionManager {
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
   /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
   private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
+  private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
+  /** Renews each session's installed iOS per-app rule (#10264). */
+  private readonly iosAppNetworkLeases: IosAppNetworkLeases;
+  /** Last owner generation handed out; see {@link allocateIosOwnerGeneration}. */
+  private lastIosOwnerGeneration = 0;
   private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
   private readonly screenReaderRemovalGenerations = new Map<string, number>();
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
@@ -1255,6 +1294,18 @@ export class SessionManager {
       networkConditionRestorerFactory,
     );
     this.screenReaderRestoreBackoff = screenReaderBackoffFrom(networkConditionRestorerFactory);
+    this.injectedIosAppNetworkRuleRestorer =
+      typeof networkConditionRestorerFactory === "function"
+        ? undefined
+        : networkConditionRestorerFactory.iosAppNetworkRule;
+    this.iosAppNetworkLeases = new IosAppNetworkLeases(
+      this.timer,
+      () => this.iosAppNetworkRuleRestorer,
+      {
+        leaseMs: IOS_APP_NETWORK_RULE_LEASE_MS,
+        renewIntervalMs: IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+      },
+    );
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -2497,6 +2548,7 @@ export class SessionManager {
     // for this session — it must not later fire against the now-released old
     // device (issue #6085 item 2).
     this.cancelNetworkConditionExpiry(existing.sessionId);
+    this.iosAppNetworkLeases.stop(existing.sessionId);
     const networkTarget = this.networkConditionRestoreTarget(existing);
     const pendingNetworkRestoration = networkTarget
       ? ((
@@ -3105,6 +3157,8 @@ export class SessionManager {
       // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
       // already cleared the slot) wins.
       this.cancelNetworkConditionExpiry(sessionId);
+      // Release removes the iOS app rule itself; stop renewing it first.
+      this.iosAppNetworkLeases.stop(sessionId);
       const pendingCleanup = await this.drainReleaseTeardown(sessionId, session);
       const deviceId = session.assignedDevice;
       // Setup/restoration awaits above are where a newer identity confirmation
@@ -4507,20 +4561,177 @@ export class SessionManager {
   private networkConditionRestoreTarget(session: Session): NetworkConditionRestoreTarget | null {
     const state = session.cacheData.networkCondition;
     // Keyed on the cache alone: the slot is only written by the Android emulator
-    // network path, so its presence is the authoritative evidence a device needs
-    // restoring — independent of whatever platform the caller declared.
+    // network path or the iOS Simulator per-app path (`iosAppRule`), so its
+    // presence is the authoritative evidence a device needs restoring —
+    // independent of whatever platform the caller declared.
     if (!state) {
       return null;
     }
+    const ios = state.iosAppRule;
     return {
       sessionId: session.sessionId,
       deviceId: session.assignedDevice,
       incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
       profile: state.initialProfile,
+      // Each capture allocates a fresh reset revision, newer than every apply
+      // this session sent, so a late apply cannot outlive the restore.
+      ...(ios
+        ? {
+            iosAppRule: {
+              udid: ios.udid,
+              bundleId: ios.bundleId,
+              owner: session.sessionId,
+              ownerGeneration: ios.ownerGeneration,
+              revision: ++ios.lastRevision,
+            },
+          }
+        : {}),
     };
   }
 
+  /** The injected iOS per-app rule restorer, else one over the installed controller. */
+  private get iosAppNetworkRuleRestorer(): IosAppNetworkRuleRestorer {
+    this.injectedIosAppNetworkRuleRestorer ??= defaultIosAppNetworkRuleRestorer();
+    return this.injectedIosAppNetworkRuleRestorer;
+  }
+
+  /**
+   * Owner generations must increase across daemon restarts, because the
+   * provider keeps tombstones of released generations in memory. Seeding from
+   * the host clock (milliseconds) and never repeating a value keeps a new
+   * daemon's generations above an earlier daemon's.
+   */
+  private allocateIosOwnerGeneration(): number {
+    this.lastIosOwnerGeneration = Math.max(
+      this.lastIosOwnerGeneration + 1,
+      Math.floor(this.timer.now()),
+    );
+    return this.lastIosOwnerGeneration;
+  }
+
+  /**
+   * Publish this session's iOS per-app rule slot before an `apply` (#10264), so
+   * release, rebind and TTL expiry can remove it even if the apply is in flight.
+   * One app per session: a different app must be reset first.
+   */
+  beginIosAppNetworkRule(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): IosAppNetworkRuleCommandContext {
+    const state = session.cacheData.networkCondition;
+    const existing = state?.iosAppRule;
+    if (existing && (existing.udid !== target.udid || existing.bundleId !== target.bundleId)) {
+      throw new ActionableError(
+        `Session ${session.sessionId} already holds an offline rule for ${existing.bundleId}; ` +
+          `reset it with networkCondition { profile: "none", appId: "${existing.bundleId}" } first.`,
+      );
+    }
+    const rule: IosAppNetworkRuleSessionState = existing ?? {
+      udid: target.udid,
+      bundleId: target.bundleId,
+      ownerGeneration: this.allocateIosOwnerGeneration(),
+      lastRevision: 0,
+    };
+    if (!existing) {
+      session.cacheData.networkCondition = { initialProfile: "none", iosAppRule: rule };
+    }
+    return this.iosRuleContext(session, rule, ++rule.lastRevision);
+  }
+
+  /**
+   * Ownership for an explicit `reset` of `target`. A session that holds no rule
+   * for it still sends a reset (under a fresh generation it never stores): the
+   * provider then answers `reset` when no rule exists, or refuses to clear
+   * another session's rule.
+   */
+  prepareIosAppNetworkReset(
+    session: Session,
+    target: { udid: string; bundleId: string },
+  ): IosAppNetworkRuleCommandContext {
+    const existing = session.cacheData.networkCondition?.iosAppRule;
+    if (existing && existing.udid === target.udid && existing.bundleId === target.bundleId) {
+      return this.iosRuleContext(session, existing, ++existing.lastRevision);
+    }
+    const transient: IosAppNetworkRuleSessionState = {
+      udid: target.udid,
+      bundleId: target.bundleId,
+      ownerGeneration: this.allocateIosOwnerGeneration(),
+      lastRevision: 1,
+    };
+    return this.iosRuleContext(session, transient, transient.lastRevision);
+  }
+
+  private iosRuleContext(
+    session: Session,
+    state: IosAppNetworkRuleSessionState,
+    revision: number,
+  ): IosAppNetworkRuleCommandContext {
+    return {
+      rule: {
+        udid: state.udid,
+        bundleId: state.bundleId,
+        owner: session.sessionId,
+        ownerGeneration: state.ownerGeneration,
+        revision,
+      },
+      nextRevision: () => ++state.lastRevision,
+    };
+  }
+
+  /**
+   * The provider acknowledged `rule` as installed: record it and renew its lease
+   * while this exact session still owns this exact revision.
+   */
+  confirmIosAppNetworkRule(session: Session, rule: IosAppNetworkRule): void {
+    const state = session.cacheData.networkCondition?.iosAppRule;
+    if (
+      this.sessions.get(session.sessionId) !== session ||
+      !state ||
+      state.ownerGeneration !== rule.ownerGeneration
+    ) {
+      return;
+    }
+    state.installedRevision = rule.revision;
+    this.iosAppNetworkLeases.start(session.sessionId, rule, () => {
+      const current = session.cacheData.networkCondition?.iosAppRule;
+      return (
+        this.isAdmittedForAutomation(session) &&
+        current === state &&
+        current.installedRevision === rule.revision
+      );
+    });
+  }
+
+  /**
+   * The session reset its rule (or the provider said it no longer holds one):
+   * stop renewing and drop the slot, so release does not reset it again.
+   */
+  finishIosAppNetworkReset(session: Session, rule: IosAppNetworkRule): void {
+    if (this.sessions.get(session.sessionId) !== session) {
+      return;
+    }
+    const state = session.cacheData.networkCondition?.iosAppRule;
+    if (!state || state.ownerGeneration !== rule.ownerGeneration) {
+      return;
+    }
+    this.iosAppNetworkLeases.stop(session.sessionId);
+    delete session.cacheData.networkCondition;
+  }
+
+  /** The iOS rule whose lease this session is renewing, if any (diagnostics and tests). */
+  activeIosAppNetworkLease(sessionId: string): IosAppNetworkRule | undefined {
+    return this.iosAppNetworkLeases.active(sessionId);
+  }
+
   private async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
+    if (target.iosAppRule) {
+      if (!this.restoreIncarnationIsCurrent(target)) {
+        return;
+      }
+      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
+      this.clearRestoreHealth(target, "network-condition");
+      return;
+    }
     const device: BootedDevice = {
       name: target.deviceId,
       platform: "android",
@@ -4902,6 +5113,7 @@ export class SessionManager {
     }
     if (session.cacheData.networkCondition) {
       delete session.cacheData.networkCondition;
+      this.iosAppNetworkLeases.stop(session.sessionId);
     }
   }
 
@@ -6052,6 +6264,7 @@ export class SessionManager {
       this.timer.clearTimeout(entry.handle);
     }
     this.networkConditionExpiryTimers.clear();
+    this.iosAppNetworkLeases.stopAll();
     this.pendingNonTerminalReleaseSnapshots.clear();
   }
 
@@ -6205,4 +6418,29 @@ export class SessionManager {
       assignedDevices: this.getAssignedDevices().size,
     };
   }
+}
+
+/**
+ * Removes and renews iOS per-app rules through the installed controller. A
+ * reset that is not confirmed throws, so release keeps retrying and the device
+ * stays quarantined until the rule is gone or its lease ends it.
+ */
+function defaultIosAppNetworkRuleRestorer(): IosAppNetworkRuleRestorer {
+  const client = new IosAppNetworkRuleClient(new ExecNetworkFilterBridge());
+  return {
+    reset: async (rule) => {
+      const result = await client.reset(rule);
+      // Another session's rule for the same app is not ours to remove; ours is gone.
+      if (
+        result.kind === "reset" ||
+        (result.kind === "refused" && result.outcome === "owned_by_another_session")
+      ) {
+        return;
+      }
+      throw new Error(
+        `Failed to remove the offline rule for ${rule.bundleId} on ${rule.udid}: ${result.detail}`,
+      );
+    },
+    renew: (rule, leaseMs) => client.renew(rule, leaseMs),
+  };
 }

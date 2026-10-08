@@ -136,6 +136,7 @@ object OverlaySpecValidator {
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: pagerErrors(context)
         ?: bindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
+        ?: listItemBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
         ?: sheetBindingErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
         ?: stateActionErrors(context, value as? JsonObject ?: JsonObject(emptyMap()))
     if (error != null) return OverlaySpecValidation.Failure(error)
@@ -505,6 +506,34 @@ object OverlaySpecValidator {
     return null
   }
 
+  private fun radioGroupErrors(
+    value: JsonObject,
+    path: String,
+    stored: JsonPrimitive?,
+  ): OverlaySpecError? {
+    if (stored == null || !stored.isString)
+      return fail("$path.stateKey", "Radio group requires a string state key")
+    val values = mutableSetOf<String?>()
+    for ((index, option) in (value["options"] as? JsonArray).orEmpty().withIndex()) {
+      if (!values.add((option as? JsonObject)?.text("value")))
+        return fail("$path.options[$index].value", "Duplicate radio option value")
+    }
+    return null
+  }
+
+  /** A list item's trailing switch or checkbox binds a boolean, like the standalone controls. */
+  private fun listItemBindingErrors(context: Context, data: JsonObject): OverlaySpecError? {
+    val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
+    for ((value, path) in context.nodes) {
+      if (value.text("type") != "listItem") continue
+      val key = (value["trailing"] as? JsonObject)?.text("stateKey") ?: continue
+      val stored = state[key] as? JsonPrimitive
+      if (stored == null || stored.isString || stored.booleanOrNull == null)
+        return fail("$path.trailing.stateKey", "Toggle control requires a boolean state key")
+    }
+    return null
+  }
+
   private fun stepFitsRange(step: Double, range: Double): Boolean {
     val count = range / step
     return step > 0 && count >= 1 && abs(count - Math.round(count)) < 1e-9
@@ -574,6 +603,11 @@ object OverlaySpecValidator {
           (stored == null || stored.isString || stored.booleanOrNull == null)
       )
         return fail("$path.stateKey", "Toggle control requires a boolean state key")
+      if (value.text("type") == "radioGroup") {
+        radioGroupErrors(value, path, stored)?.let {
+          return it
+        }
+      }
       if (value.text("type") !in setOf("tabBar", "bottomNav")) continue
       val number = stored?.takeIf { !it.isString }?.doubleOrNull
       if (number == null || !number.isFinite() || number < 0 || number % 1.0 != 0.0) {

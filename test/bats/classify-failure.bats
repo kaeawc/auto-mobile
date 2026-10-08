@@ -808,3 +808,26 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   [[ "$output" == *"UNKNOWN"* ]]
   [[ "$output" != *"RERUN-DONT-FIX"* ]]
 }
+
+# Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
+@test "investigates a unit shard that timed out on both attempts of its infra retry" {
+  runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 2 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\nTIMEOUT: unit shard 2 exceeded its wall-clock budget after a retry\ntest-ts: unit shards total wall=1450s status=124 retried=1' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — unit shard hit its wall budget on both attempts of the in-job infra retry"* ]]
+}
+
+@test "investigates a unit shard killed by a signal on both attempts of its infra retry" {
+  runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 0 was killed by signal 9 (exit 137) after 300s; retrying once with the same budget\nFAIL: unit shard 0 exited with status 137 after a retry' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INVESTIGATE — unit shard was killed by a signal on both attempts of the in-job infra retry"* ]]
+}
+
+@test "does not classify an ordinary unit shard failure or a passing retry as a retry signature" {
+  runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
+  run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 0 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\ntest-ts: unit shard 0 passed on its retry\nFAIL: unit shard 1 exited with status 1' bash "$SCRIPT" 123
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [[ "$output" != *"infra retry"* ]]
+}

@@ -376,9 +376,35 @@ export interface AndroidEmulatorReadinessOptions {
   freshProvision?: boolean;
 }
 
+/**
+ * How a launch obtained its emulator. Only `launched` carries a process handle of this
+ * launch's own; the others resolve with `process: null` (#3938) and the caller adopts the
+ * emulator through its readiness wait.
+ * - `launched`: this launch spawned the emulator process.
+ * - `joined-in-process-launch`: another launch of the same AVD was already in flight in this
+ *   process; this launch joins it.
+ * - `already-running`: the AVD was already booted and visible to this process's adb (for
+ *   example an emulator the user started by hand), or already starting under a reservation,
+ *   launch, or running-AVD advertisement.
+ * - `duplicate-of-external`: the spawned emulator exited as a duplicate of an emulator for this
+ *   AVD started outside this process, which this process's adb did not list when the launch
+ *   checked.
+ */
+export type AndroidEmulatorLaunchOutcome =
+  | "launched"
+  | "joined-in-process-launch"
+  | "already-running"
+  | "duplicate-of-external";
+
+interface EmulatorProcessLaunch {
+  process: ChildProcess | null;
+  outcome: AndroidEmulatorLaunchOutcome;
+}
+
 export interface AndroidEmulatorLaunchHandle {
   readonly avdName: string;
   readonly process: ChildProcess | null;
+  readonly outcome: AndroidEmulatorLaunchOutcome;
   readonly targetDeviceId?: string;
   /** Stops the emulator only when this launch created its process. */
   dispose(): void;
@@ -2643,6 +2669,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
     const cameraPosterPath = this.resolveCameraPosterPath(request.cameraPosterPath);
     let process: ChildProcess | null = null;
+    let outcome: AndroidEmulatorLaunchOutcome = "launched";
     let disposed = false;
     const dispose = () => {
       if (disposed) {
@@ -2664,7 +2691,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // startup validation: that can run its full 5 s fallback against an
       // emulator that ignores SIGTERM, and the owner needs the child handle
       // inside its abort grace to confirm the exit (#10075).
-      process = await raceWithDeadline(
+      const launch = await raceWithDeadline(
         () =>
           trackAmbient(`emulator launch ${request.avdName}`, () =>
             this.startEmulatorProcess(request.avdName, {
@@ -2684,6 +2711,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           ),
         { timer: this.timer, signal: request.signal, label: "Android emulator launch" },
       );
+      process = launch.process;
+      outcome = launch.outcome;
       if (!process) {
         // A sibling can win the AVD lock after the pre-spawn check. Never adopt its camera state.
         this.assertCameraPosterColdBoot(cameraPosterPath);
@@ -2713,6 +2742,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return {
       avdName: request.avdName,
       process,
+      outcome,
       get targetDeviceId() {
         return process ? client.launchTargetDeviceIds.get(process) : request.deviceId;
       },
@@ -2806,7 +2836,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private async startEmulatorProcess(
     avdName: string,
     options: EmulatorProcessOptions = {},
-  ): Promise<ChildProcess | null> {
+  ): Promise<EmulatorProcessLaunch> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const perf = createGlobalPerformanceTracker();
 
@@ -2830,7 +2860,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       );
       // Joining an in-flight launch gives us no process handle of our own
       // (issue #3938); the caller's readiness wait adopts the same device.
-      return null;
+      return { process: null, outcome: "joined-in-process-launch" };
     }
     AndroidEmulatorClient.inFlightAvdLaunches.add(avdName);
     try {
@@ -2846,7 +2876,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     avdName: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     options: EmulatorProcessOptions = {},
-  ): Promise<ChildProcess | null> {
+  ): Promise<EmulatorProcessLaunch> {
     const {
       requestedExtraArgs,
       onSpawn,
@@ -2860,7 +2890,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // Some other actor already owns this AVD, so we hold no process handle for
       // it. Return null rather than a fabricated `{} as ChildProcess`
       // (issue #3938); the caller waits for readiness regardless.
-      return null;
+      return { process: null, outcome: "already-running" };
     }
 
     const avdConfig = await this.avdConfigReader.readConfig(avdName);
@@ -2910,7 +2940,18 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     logger.info(`Starting emulator with AVD: ${avdName}`);
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
 
-    return this.spawnClaimedEmulator({ avdName, perf, args, reservedEmulator, onSpawn });
+    const child = await this.spawnClaimedEmulator({
+      avdName,
+      perf,
+      args,
+      reservedEmulator,
+      onSpawn,
+    });
+    // The spawn resolves without a process only when the emulator exited as a duplicate of one
+    // started outside this process.
+    return child
+      ? { process: child, outcome: "launched" }
+      : { process: null, outcome: "duplicate-of-external" };
   }
 
   private appendCameraPosterArguments(args: string[], posterPath?: string): void {

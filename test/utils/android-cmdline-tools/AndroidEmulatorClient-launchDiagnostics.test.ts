@@ -265,7 +265,9 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       child.emit("close", 1, null);
     });
 
-    await expect(client.startEmulator(avdName)).resolves.toBeNull();
+    const launch = await client.launchEmulator({ avdName });
+    expect(launch.process).toBeNull();
+    expect(launch.outcome).toBe("duplicate-of-external");
     expect(accelChecks()).toBe(0);
   });
 

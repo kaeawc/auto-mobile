@@ -4,8 +4,10 @@ import {
   BootedDeviceDiscovery,
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
+  DeviceStartResult,
   PlatformDeviceManager,
 } from "../../src/devices/deviceUtils";
+import type { AndroidEmulatorLaunchOutcome } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { discoverySourceFor, type DiscoverySource } from "../../src/utils/discoverySource";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 
@@ -13,8 +15,17 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   deviceImages: DeviceInfo[] = [];
   bootedDevices: BootedDevice[] = [];
   startedDevices: DeviceInfo[] = [];
-  /** Model a launch that finds its AVD already running in another process (duplicate exit). */
-  startAdoptsForeignEmulator = false;
+  /**
+   * How the next starts obtain their device, as `AndroidEmulatorClient` reports it:
+   * - `launched`: a new process; the device becomes visible.
+   * - `joined-in-process-launch` / `already-running`: no process of this start's own, and the
+   *   device becomes (or already is) visible to this daemon's adb.
+   * - `duplicate-of-external`: no process; the external emulator becomes visible to this
+   *   daemon's adb only when `startVisibleDeviceId` is set.
+   */
+  startOutcome: AndroidEmulatorLaunchOutcome = "launched";
+  /** Serial a non-launched start's device appears under; defaults to the image's id or name. */
+  startVisibleDeviceId: string | undefined;
   startDeviceTimeouts: Array<number | undefined> = [];
   // Platforms whose discovery should report as failed/unavailable (used to
   // exercise partial-discovery handling). Defaults to all platforms succeeding.
@@ -166,29 +177,49 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   ): Promise<ChildProcess | null> {
     this.startedDevices.push(device);
     this.startDeviceTimeouts.push(timeoutMs);
-    if (this.startAdoptsForeignEmulator) {
-      // The launch exited as a duplicate of an emulator another process runs: no child process,
-      // and nothing new becomes visible to this daemon's adb.
-      return null;
+    const outcome = this.startOutcome;
+    if (outcome !== "duplicate-of-external" || this.startVisibleDeviceId !== undefined) {
+      const id =
+        outcome === "launched"
+          ? (device.deviceId ?? device.name)
+          : (this.startVisibleDeviceId ?? device.deviceId ?? device.name);
+      if (!this.bootedDevices.some((booted) => booted.deviceId === id)) {
+        this.bootedDevices.push({
+          name: device.name,
+          platform: device.platform,
+          deviceId: id,
+          source: device.source,
+          iosVersion: device.iosVersion,
+        });
+      }
     }
-    const id = device.deviceId ?? device.name;
-    const alreadyBooted = this.bootedDevices.some((booted) => booted.deviceId === id);
-    if (!alreadyBooted) {
-      this.bootedDevices.push({
-        name: device.name,
-        platform: device.platform,
-        deviceId: id,
-        source: device.source,
-        iosVersion: device.iosVersion,
-      });
+    return outcome === "launched" ? ({ pid: 0 } as ChildProcess) : null;
+  }
+
+  /** Delegates to `startDevice`, so subclasses that override it keep their process handles. */
+  async startDeviceWithOutcome(
+    device: DeviceInfo,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+  ): Promise<DeviceStartResult> {
+    const process = await this.startDevice(device, timeoutMs);
+    if (process) {
+      return { process, outcome: "launched" };
     }
-    return { pid: 0 } as ChildProcess;
+    return {
+      process: null,
+      outcome: this.startOutcome === "launched" ? "already-running" : this.startOutcome,
+    };
   }
 
   async killDevice(_: BootedDevice): Promise<void> {}
 
   async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
-    const id = device.deviceId ?? device.name;
+    const id =
+      device.deviceId ??
+      this.bootedDevices.find(
+        (booted) => booted.platform === device.platform && booted.name === device.name,
+      )?.deviceId ??
+      device.name;
     return {
       name: device.name,
       platform: device.platform,

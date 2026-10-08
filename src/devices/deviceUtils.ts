@@ -18,6 +18,7 @@ import type { DiscoverySource } from "../utils/discoverySource";
 import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type {
   AndroidEmulatorForDeviceManager,
+  AndroidEmulatorLaunchOutcome,
   AndroidEmulatorReadinessOptions,
 } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "../utils/android-cmdline-tools/avdmanager";
@@ -182,6 +183,16 @@ export interface DeviceStartOptions {
   cameraPosterPath?: string;
 }
 
+/**
+ * A device start and how it obtained the device. An iOS boot is always `launched`; Android
+ * outcomes are described on {@link AndroidEmulatorLaunchOutcome}. Only `launched` carries a
+ * process this start created.
+ */
+export interface DeviceStartResult {
+  process: ChildProcess | null;
+  outcome: AndroidEmulatorLaunchOutcome;
+}
+
 /** Platform-agnostic device management for Android emulators and iOS simulators. */
 export interface PlatformDeviceManager {
   /**
@@ -239,6 +250,18 @@ export interface PlatformDeviceManager {
     timeoutMs?: number,
     options?: DeviceStartOptions,
   ): Promise<ChildProcess | null>;
+
+  /**
+   * {@link startDevice}, also reporting how the device was obtained, so a caller can tell an
+   * emulator it launched or joined from one that is already running elsewhere. Optional: a
+   * manager without it is treated as `launched` when it returns a process and `already-running`
+   * otherwise.
+   */
+  startDeviceWithOutcome?(
+    device: DeviceInfo,
+    timeoutMs?: number,
+    options?: DeviceStartOptions,
+  ): Promise<DeviceStartResult>;
 
   /**
    * Kill/terminate a running device
@@ -981,6 +1004,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
     options: DeviceStartOptions = {},
   ): Promise<ChildProcess | null> {
+    return (await this.startDeviceWithOutcome(device, timeoutMs, options)).process;
+  }
+
+  async startDeviceWithOutcome(
+    device: DeviceInfo,
+    timeoutMs: number = DEFAULT_DEVICE_READY_TIMEOUT_MS,
+    options: DeviceStartOptions = {},
+  ): Promise<DeviceStartResult> {
     this.validateCameraPosterTarget(device, options);
     assertAndroidImageRunningStateKnown(device);
     // Validate the UDID before any simctl running-state probe: a slow/hung
@@ -1017,15 +1048,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
 
     switch (device.platform) {
-      case "android":
-        return (
-          await this.emulator.launchEmulator({
-            avdName: device.name,
-            deviceId: device.deviceId,
-            signal: getAbortSignal(),
-            cameraPosterPath: options.cameraPosterPath,
-          })
-        ).process;
+      case "android": {
+        const launch = await this.emulator.launchEmulator({
+          avdName: device.name,
+          deviceId: device.deviceId,
+          signal: getAbortSignal(),
+          cameraPosterPath: options.cameraPosterPath,
+        });
+        return { process: launch.process, outcome: launch.outcome };
+      }
       case "ios":
         if (!device.deviceId) {
           throw new ActionableError(
@@ -1033,7 +1064,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
               `a name-only target cannot be verified against 'simctl' state after boot`,
           );
         }
-        return this.simctl.startSimulator(device.deviceId, timeoutMs);
+        return {
+          process: await this.simctl.startSimulator(device.deviceId, timeoutMs),
+          outcome: "launched",
+        };
       default:
         throw new ActionableError("Unknown platform");
     }

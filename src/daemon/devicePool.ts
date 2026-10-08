@@ -41,6 +41,7 @@ import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
+  type DeviceStartResult,
   type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
 } from "../devices/deviceUtils";
@@ -2319,22 +2320,15 @@ export class DevicePool {
       await this.evictUnavailableIdleDevicesMatching(
         (device) => !platform || device.platform === platform,
       );
-      let stats = this.getStatsForPlatform(platform);
-
-      if (stats.total < requiredCount) {
-        const started = await this.startAdditionalDevices(
-          requiredCount - stats.total,
-          startTime + timeoutMs,
-          platform,
-        );
-        if (started > 0) {
-          refreshFailure = (await this.refreshDevicesWithOutcome()).failure;
-          stats = this.getStatsForPlatform(platform);
-        } else if (platform === "android") {
-          // A queued start may have joined a boot without launching a device.
-          stats = this.getStatsForPlatform(platform);
-        }
+      const shortfall = await this.startDevicesForPlatformShortfall(
+        requiredCount,
+        startTime + timeoutMs,
+        platform,
+      );
+      if (shortfall.refresh) {
+        refreshFailure = shortfall.refresh.failure;
       }
+      const stats = shortfall.stats;
 
       this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
 
@@ -2467,6 +2461,38 @@ export class DevicePool {
   }
 
   /**
+   * Boot startable images for a platform allocation that has too few devices. Another daemon's
+   * device cannot serve the plan until that daemon lets it go, so it does not count against
+   * booting a startable image (mt-0083 D2). Returns the pool stats to judge capacity by.
+   */
+  private async startDevicesForPlatformShortfall(
+    requiredCount: number,
+    deadlineMs: number,
+    platform: Platform | undefined,
+  ): Promise<{
+    stats: ReturnType<DevicePool["getStatsForPlatform"]>;
+    refresh?: { failure: string | undefined };
+  }> {
+    const stats = this.getStatsForPlatform(platform);
+    await this.refreshForeignOwnership();
+    const usableTotal = stats.total - this.countForeignDrivenDevices(platform);
+    if (usableTotal >= requiredCount) {
+      return { stats };
+    }
+    const started = await this.startAdditionalDevices(
+      requiredCount - usableTotal,
+      deadlineMs,
+      platform,
+    );
+    if (started > 0) {
+      const refresh = { failure: (await this.refreshDevicesWithOutcome()).failure };
+      return { stats: this.getStatsForPlatform(platform), refresh };
+    }
+    // A queued Android start may have joined a boot without launching a device.
+    return { stats: platform === "android" ? this.getStatsForPlatform(platform) : stats };
+  }
+
+  /**
    * Assign multiple devices with per-session criteria.
    *
    * This is used when plans specify device definitions (platform/type/version).
@@ -2515,6 +2541,7 @@ export class DevicePool {
         refreshFailure = (await this.refreshDevicesWithOutcome()).failure;
       }
 
+      await this.refreshForeignOwnership();
       const started = await this.startAdditionalDevicesForCriteria(
         sortedRequests,
         startTime + timeoutMs,
@@ -2764,7 +2791,10 @@ export class DevicePool {
         const idle = this.selectIdleDevice(candidates);
         // Healthy idle capacity already counted for another request may grow
         // later; it is neither a health failure nor a reason to claim partially.
-        this.assertHealthyAllocationPossible(candidates, idle);
+        // Another daemon's device is healthy capacity that frees later, so wait for it.
+        if (matching.length === candidates.length) {
+          this.assertHealthyAllocationPossible(candidates, idle);
+        }
         if (
           !idle &&
           !this.shouldWaitForDevice(
@@ -2807,6 +2837,7 @@ export class DevicePool {
         return { success: false, attempts, lastBlock };
       }
       waited = true;
+      await this.refreshForeignOwnership();
       // A session may gain or lose its device while the ticket waits (e.g.
       // session-preserving recovery), so deadlock analysis reads a fresh pin.
       this.recordHeldSessions(ticket);
@@ -3254,15 +3285,12 @@ export class DevicePool {
       device,
       deadlineMs,
       "start",
-      async (childProcess, signal, retainLeaseUntil) => {
-        if (childProcess === null && device.platform === "android") {
-          // The launch found this AVD already running in a process this daemon did not start, and
-          // its emulator was not visible to this daemon's adb when the AVD was chosen. It belongs
-          // to someone else (often another daemon on its own adb server): never adopt it for an
-          // allocation, and never spend the allocation deadline waiting for it (mt-0083 D2).
-          logger.warn(
-            `[DevicePool] AVD '${device.name}' is already running in another process; not adopting it for allocation`,
-          );
+      async ({ process: childProcess, outcome }, signal, retainLeaseUntil) => {
+        if (
+          device.platform === "android" &&
+          outcome !== "launched" &&
+          !(await this.canAdoptUnlaunchedEmulator(device, outcome))
+        ) {
           return null;
         }
         const readinessTimeoutMs = this.remainingStartDeadline(deadlineMs);
@@ -3283,6 +3311,13 @@ export class DevicePool {
           ),
           device,
         );
+        if (
+          device.platform === "android" &&
+          outcome !== "launched" &&
+          (await this.refusesForeignOwnedEmulator(device, ready.deviceId))
+        ) {
+          return null;
+        }
         return { ready, childProcess };
       },
     );
@@ -3317,7 +3352,7 @@ export class DevicePool {
     deadlineMs: number,
     operation: "start" | "recovery",
     action: (
-      childProcess: ChildProcess | null,
+      start: DeviceStartResult,
       signal: AbortSignal,
       retainLeaseUntil: (settlement: Promise<unknown>) => void,
     ) => Promise<T>,
@@ -3377,13 +3412,13 @@ export class DevicePool {
           return undefined;
         }
       }
-      const childProcess = await this.startCoordinatedDeviceProcess(
+      const start = await this.startCoordinatedDeviceProcess(
         device,
         deadlineMs,
         signal,
         retainLeaseUntil,
       );
-      return await action(childProcess, signal, retainLeaseUntil);
+      return await action(start, signal, retainLeaseUntil);
     } finally {
       if (retainedLeaseSettlement) {
         void retainedLeaseSettlement.then(
@@ -3407,10 +3442,10 @@ export class DevicePool {
     deadlineMs: number,
     signal: AbortSignal,
     retainLeaseUntil: (settlement: Promise<unknown>) => void,
-  ): Promise<ChildProcess | null> {
+  ): Promise<DeviceStartResult> {
     try {
       return await runWithAbortSignal(signal, () =>
-        this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
+        this.startDeviceWithOutcome(device, deadlineMs),
       );
     } catch (error) {
       if (isEmulatorLaunchCancelledError(error) && error.process) {
@@ -3418,6 +3453,71 @@ export class DevicePool {
       }
       throw error;
     }
+  }
+
+  private async startDeviceWithOutcome(
+    device: DeviceInfo,
+    deadlineMs: number,
+  ): Promise<DeviceStartResult> {
+    const timeoutMs = this.remainingStartDeadline(deadlineMs);
+    if (this.deviceManager.startDeviceWithOutcome) {
+      return this.deviceManager.startDeviceWithOutcome(device, timeoutMs);
+    }
+    const process = await this.deviceManager.startDevice(device, timeoutMs);
+    return { process, outcome: process ? "launched" : "already-running" };
+  }
+
+  /**
+   * Whether a start that did not launch its emulator may adopt it, checked before readiness so
+   * the wait never touches another daemon's device. An already-running emulator (including one
+   * the user started by hand) or an in-process launch is adopted unless another live daemon
+   * drives it. A launch that exited as a duplicate of an emulator started outside this process
+   * is adopted only when this daemon's adb also lists that emulator: one it cannot list (another
+   * daemon on its own adb server) never becomes ready here, so waiting for it would only spend
+   * the allocation deadline (mt-0083 D2).
+   */
+  private async canAdoptUnlaunchedEmulator(
+    device: DeviceInfo,
+    outcome: DeviceStartResult["outcome"],
+  ): Promise<boolean> {
+    const visible = (await this.deviceManager.getBootedDevices("android")).find(
+      (booted) => booted.name === device.name,
+    );
+    if (visible) {
+      return !(await this.refusesForeignOwnedEmulator(device, visible.deviceId));
+    }
+    if (outcome === "duplicate-of-external") {
+      logger.warn(
+        `[DevicePool] AVD '${device.name}' is running in another process that this daemon's adb cannot see; not adopting it for allocation`,
+      );
+      return false;
+    }
+    // Still booting, or booting in this process: readiness names it, then the lease is checked.
+    return true;
+  }
+
+  /**
+   * An emulator this start did not launch is refused only on positive evidence that another
+   * live AutoMobile process drives it: that process holds its CtrlProxy forwarding lease. A
+   * user-started emulator or a launch joined in this process holds no foreign lease and is
+   * adopted.
+   */
+  private async refusesForeignOwnedEmulator(
+    device: DeviceInfo,
+    deviceId: string,
+  ): Promise<boolean> {
+    if (!this.foreignDeviceOwnership) {
+      return false;
+    }
+    await this.foreignDeviceOwnership.refresh([deviceId]);
+    const ownerPid = this.foreignDeviceOwnership.foreignOwnerPid(deviceId);
+    if (ownerPid === undefined) {
+      return false;
+    }
+    logger.warn(
+      `[DevicePool] AVD '${device.name}' (${deviceId}) is driven by another AutoMobile process (PID ${ownerPid}); not adopting it for allocation`,
+    );
+    return true;
   }
 
   private async cancelCoordinatedDeviceStart(
@@ -3474,6 +3574,7 @@ export class DevicePool {
           // something acquires it. Re-discover once before cold-booting an AVD (mt-0083 D2).
           refreshed = true;
           await this.refreshDevicesWithOutcome();
+          await this.refreshForeignOwnership();
           return findExisting(request);
         },
       );
@@ -5101,19 +5202,66 @@ export class DevicePool {
   }
 
   /** Platform multi-device attempt: like tryAssignDevice, minus devices other daemons drive. */
-  private tryAssignUnownedDevice(
+  private async tryAssignUnownedDevice(
     sessionId: string,
     platform?: Platform,
   ): ReturnType<DevicePool["tryAssignDevice"]> {
-    return this.tryAssignFrom(
+    return this.claimAssignedDevice(
       sessionId,
-      () =>
-        this.getDevicesByPlatform(platform).filter(
-          (device) => !this.isDrivenByForeignDaemon(device),
-        ),
-      "platform pool empty",
-      () => this.hasPendingAndroidRecovery(platform),
+      await this.tryAssignFrom(
+        sessionId,
+        () =>
+          this.getDevicesByPlatform(platform).filter(
+            (device) => !this.isDrivenByForeignDaemon(device),
+          ),
+        "platform pool empty",
+        () => this.hasPendingAndroidRecovery(platform),
+      ),
     );
+  }
+
+  /**
+   * Publish this daemon's claim on an Android device multi-device allocation just assigned, so
+   * another daemon's allocation sees it before any CtrlProxy forward exists. When another daemon
+   * claimed it first and still uses it, give the device back and wait like a busy device.
+   */
+  private async claimAssignedDevice(
+    sessionId: string,
+    result: Awaited<ReturnType<DevicePool["tryAssignFrom"]>>,
+  ): Promise<Awaited<ReturnType<DevicePool["tryAssignFrom"]>>> {
+    const deviceId = result.deviceId;
+    if (
+      !result.success ||
+      deviceId === undefined ||
+      !result.session ||
+      !this.foreignDeviceOwnership ||
+      this.devices.get(deviceId)?.platform !== "android"
+    ) {
+      return result;
+    }
+    if (await this.foreignDeviceOwnership.claim(deviceId)) {
+      return result;
+    }
+    logger.info(
+      `[DevicePool] Another AutoMobile process claimed ${deviceId} first; releasing it from session ${sessionId}`,
+    );
+    await this.rollbackAssignments(new Map([[sessionId, { deviceId, session: result.session }]]));
+    return { ...result, success: false, deviceId: undefined, session: undefined, shouldWait: true };
+  }
+
+  /** Re-read which idle Android devices other daemons drive, for this allocation pass. */
+  private async refreshForeignOwnership(): Promise<void> {
+    await this.foreignDeviceOwnership?.refresh(
+      this.getDevicesByPlatform("android")
+        .filter((device) => device.sessionId === null)
+        .map((device) => device.id),
+    );
+  }
+
+  private countForeignDrivenDevices(platform?: Platform): number {
+    return this.getDevicesByPlatform(platform).filter((device) =>
+      this.isDrivenByForeignDaemon(device),
+    ).length;
   }
 
   private recordCriteriaAssignment(
@@ -5145,11 +5293,14 @@ export class DevicePool {
     refreshFailure?: string;
     refreshCompleted?: boolean;
   }> {
-    return this.tryAssignFrom(
+    return this.claimAssignedDevice(
       sessionId,
-      () => this.getUnownedDevicesMatchingCriteria(criteria),
-      "criteria pool empty",
-      () => this.hasPendingAndroidRecoveryMatching(criteria),
+      await this.tryAssignFrom(
+        sessionId,
+        () => this.getUnownedDevicesMatchingCriteria(criteria),
+        "criteria pool empty",
+        () => this.hasPendingAndroidRecoveryMatching(criteria),
+      ),
     );
   }
 

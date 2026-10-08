@@ -1,3 +1,4 @@
+import { promises as fsPromises } from "node:fs";
 import { ActionableError } from "../../src/models/ActionableError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -78,7 +79,7 @@ describe("IosCtrlProxyBuilder", function () {
     const cached = path.join(tempDir, "stale.xctestrun");
     builder["cachedXctestrunPath"].set("any", cached);
     const access = spyOn(fs, "access").mockRejectedValue(new Error("removed"));
-    const listing = spyOn(fs, "readdir").mockResolvedValue(["fresh.xctestrun"]);
+    const listing = spyOn(fsPromises, "readdir").mockResolvedValue(["fresh.xctestrun"]);
     const log = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       expect(await builder.getXctestrunPath()).toBe(
@@ -179,7 +180,7 @@ describe("IosCtrlProxyBuilder", function () {
 
   test("unreadable xctestrun scan retains an empty result and warns", async () => {
     const builder = IosCtrlProxyBuilder.getInstance();
-    const listing = spyOn(fs, "readdir").mockRejectedValue(new Error("permission denied"));
+    const listing = spyOn(fsPromises, "readdir").mockRejectedValue(new Error("permission denied"));
     const log = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(await builder["findXctestrunFiles"]("unreadable")).toEqual([]);

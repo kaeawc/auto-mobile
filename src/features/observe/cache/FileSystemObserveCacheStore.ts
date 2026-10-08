@@ -1,9 +1,10 @@
 import { inheritWrongWindowEvidence } from "../observationFreshness";
-import { mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "path";
 import {
-  readdirAsync,
   readFileAsync,
+  sortedReaddir,
+  sortedReaddirSync,
   statAsync,
   unlinkAsync,
   writeFileAsync,
@@ -242,7 +243,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       }
     }
 
-    const files = await readdirAsync(this.cacheDir);
+    const files = await sortedReaddir(this.cacheDir);
     for (const file of files) {
       if (!file.endsWith(".json") || !file.startsWith("observe_")) {
         continue;
@@ -375,7 +376,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     logger.debug("[OBSERVE_CACHE] Checking disk cache");
     try {
       const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
-      const files = await readdirAsync(this.cacheDir);
+      const files = await sortedReaddir(this.cacheDir);
       const jsonFiles = files.filter(
         (file) => file.endsWith(".json") && file.startsWith(devicePrefix),
       );
@@ -542,7 +543,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private async reapExpiredDiskFiles(deviceId: string): Promise<void> {
     try {
       const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
-      const files = await readdirAsync(this.cacheDir);
+      const files = await sortedReaddir(this.cacheDir);
       const now = this.timer.now();
       const expiredFiles: string[] = [];
 
@@ -586,7 +587,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     // snapshot.
     let matches: string[];
     try {
-      matches = readdirSync(this.cacheDir).filter(predicate);
+      matches = sortedReaddirSync(this.cacheDir).filter(predicate);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to enumerate cache directory for cleanup: ${error}`);
       return;

@@ -1,7 +1,7 @@
 import path from "path";
 import { pathExists } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
-import { readFileAsync, readdirAsync } from "../io";
+import { readFileAsync, sortedReaddir } from "../io";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { PerceptualHasher } from "./PerceptualHasher";
 import { isScreenshotFile } from "./screenshotFormats";
@@ -99,7 +99,7 @@ export class ScreenshotCache {
         return [];
       }
 
-      const files = await readdirAsync(cacheDir);
+      const files = await sortedReaddir(cacheDir);
       const screenshotFiles = files
         .filter((file) => isScreenshotFile(file))
         .map((file) => path.join(cacheDir, file));

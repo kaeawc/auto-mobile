@@ -1,5 +1,6 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 export interface ProcessSafetyViolation {
   file: string;
@@ -656,7 +657,7 @@ export function checkProcessSafetySource(
 const SKIPPED_DIRECTORIES = new Set([".venv", "node_modules", "__pycache__"]);
 
 export function candidateFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const file = join(directory, entry.name);
     if (entry.isDirectory()) {
       return SKIPPED_DIRECTORIES.has(entry.name) ? [] : candidateFiles(file);

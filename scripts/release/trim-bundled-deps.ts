@@ -4,7 +4,6 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -12,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { sortedReaddirEntriesSync } from "../../src/utils/io";
 
 export interface PackageJson {
   version?: string;
@@ -114,7 +114,7 @@ export function collectBundledPackages(root: string): BundledPackage[] {
 }
 
 function files(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     if (entry.name === "node_modules" || entry.isSymbolicLink()) {
       return [];
     }
@@ -357,7 +357,7 @@ export function restoreBackup(root: string): number {
       `Recovering trim backup by path: ${error instanceof Error ? error.message : String(error)}`,
     );
     const walk = (directory: string): Candidate[] =>
-      readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+      sortedReaddirEntriesSync(directory).flatMap((entry) => {
         const filename = path.join(directory, entry.name);
         if (directory === backup && ["manifest.json", "manifest.json.tmp"].includes(entry.name)) {
           return [];

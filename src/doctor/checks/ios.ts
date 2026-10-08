@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BootedDevice, ExecResult } from "../../models";
@@ -113,6 +113,7 @@ export interface IosObserveRoundTripInspector {
 type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
 
 import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
+import { sortedReaddir } from "../../utils/io";
 export { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 
 // Route generic host-command execution through the shared HostCommandExecutor
@@ -523,7 +524,7 @@ export function createIosDoctorDependencies(
       }),
     xcodebuild: new XcodebuildClient(),
     fileExists: existsSync,
-    readDir: async (path) => fs.readdir(path),
+    readDir: async (path) => sortedReaddir(path),
     homedir,
     securityClient: new SecurityClient(),
     logger,

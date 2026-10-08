@@ -1,7 +1,7 @@
 import path from "path";
 import { sequenceBackoff } from "./Backoff";
 import { defaultTimer } from "./SystemTimer";
-import { readdirAsync, statAsync, unlinkAsync } from "./io";
+import { sortedReaddir, statAsync, unlinkAsync } from "./io";
 
 /**
  * Result of enumerating the daemon pid files that could own a `daemon-launch-*.log`
@@ -357,7 +357,7 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
 
   let entries: string[];
   try {
-    entries = await readdirAsync(opts.dir);
+    entries = await sortedReaddir(opts.dir);
   } catch (error) {
     // Startup log pruning is best-effort; an unreadable directory only skips cleanup.
     opts.logger?.debug(

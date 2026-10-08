@@ -1,7 +1,7 @@
-import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 // The single home of the sdkmanager execution-boundary guard (issue #4052, hardened in
 // #4339 and #4341). Both the fast-validate check and test/lint/sdkManagerExecutionBoundary.integration.test.ts
@@ -418,7 +418,7 @@ export function directlyExecutesSdkManager(source: string): boolean {
 }
 
 export function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);

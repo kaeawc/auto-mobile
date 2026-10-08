@@ -1,7 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { executionBoundaryAst } from "./lib/executionBoundaryAst";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src";
 const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
@@ -30,7 +31,7 @@ export interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory() ? sourceFiles(path) : entry.name.endsWith(".ts") ? [path] : [];
   });

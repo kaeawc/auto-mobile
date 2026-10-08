@@ -59,6 +59,7 @@ import {
   DefaultAndroidPrerequisiteDetector,
 } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
+import { sortedReaddirEntries } from "../utils/io";
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
@@ -708,7 +709,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   ): Promise<void> {
     let entries: Dirent[];
     try {
-      entries = await fs.readdir(tempRoot, { withFileTypes: true });
+      entries = await sortedReaddirEntries(tempRoot);
     } catch (error) {
       // A missing/unreadable temp root is expected on some hosts; nothing to sweep.
       logger.debug(`[CTRL_PROXY] Prefetch sweep skipped: cannot read ${tempRoot}: ${error}`);

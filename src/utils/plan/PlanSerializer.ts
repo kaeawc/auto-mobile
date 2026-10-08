@@ -10,6 +10,7 @@ import { migratePlan, type PlanMigrationOptions } from "./PlanMigrator";
 import { getMcpServerVersion, releaseVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
+import { sortedReaddir } from "../io";
 
 /**
  * Interface for plan serialization/deserialization
@@ -108,7 +109,7 @@ export class YamlPlanSerializer implements PlanSerializer {
   }> {
     try {
       // Read all log files in the directory
-      const files = await fs.readdir(logDir);
+      const files = await sortedReaddir(logDir);
       const logFiles = files.filter((f) => f.endsWith(".json")).sort();
 
       if (logFiles.length === 0) {

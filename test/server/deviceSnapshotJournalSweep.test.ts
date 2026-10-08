@@ -9,6 +9,7 @@ import type {
 } from "../../src/db/deviceSnapshotRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import { logger } from "../../src/utils/logger";
+import { sortedReaddir } from "../../src/utils/io";
 import {
   captureDeviceSnapshot,
   listDeviceSnapshots,
@@ -381,7 +382,7 @@ describe("snapshot recovery-aware deletion and startup sweep", () => {
     await started.promise;
     try {
       expect(await fs.readFile(path.join(destination, "payload"), "utf8")).toBe("old");
-      expect((await fs.readdir(root)).sort()).toEqual(["android", "locked"]);
+      expect(await sortedReaddir(root)).toEqual(["android", "locked"]);
       expect(await runSnapshotJournalSweep()).toEqual({
         recovered: 0,
         failed: 0,

@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { sortedReaddirSync } from "../../src/utils/io";
 
 /**
  * Runner calibration probe for the Node unit lane (#10583).
@@ -161,7 +162,7 @@ export function readCalibrationDirectory(directory: string): CalibrationSample[]
   if (!existsSync(directory)) {
     return [];
   }
-  return readdirSync(directory)
+  return sortedReaddirSync(directory)
     .filter((name) => CALIBRATION_FILE_PATTERN.test(name))
     .sort()
     .flatMap((name) => parseCalibrationSamples(readFileSync(join(directory, name), "utf8")));

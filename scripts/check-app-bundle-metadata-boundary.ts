@@ -1,13 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import ts from "typescript";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/ios-cmdline-tools/AppBundleMetadataClient.ts";
 const repoPath = (file: string): string => relative(".", file).replaceAll("\\", "/");
 
 const sourceFiles = (directory: string): string[] =>
-  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     return entry.isDirectory()
       ? sourceFiles(path)

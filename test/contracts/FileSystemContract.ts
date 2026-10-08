@@ -98,7 +98,7 @@ export const runFileSystemContract = (
       await fileSystem.writeFile(path.join(dir, "inside.txt"), "in");
       await fileSystem.writeFile(path.join(sibling, "outside.txt"), "out");
 
-      const entries = (await fileSystem.readdir(dir)).sort();
+      const entries = await fileSystem.readdir(dir);
       // The sibling directory shares a name PREFIX ("listing" vs
       // "listing-sibling"), so a raw substring match would leak a mangled
       // fragment of its child into this listing. The boundary match yields

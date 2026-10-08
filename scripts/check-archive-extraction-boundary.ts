@@ -1,7 +1,7 @@
-import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { executionBoundaryAst } from "./lib/executionBoundaryAst";
+import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 // The single home of the archive-extraction boundary guard (issue #4065). Both the fast-validate
 // check and test/lint/archiveExtractionBoundary.test.ts import `directlyExtractsTar` from here so
@@ -77,7 +77,7 @@ export function directlyExtractsTar(source: string): boolean {
 }
 
 export function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+  return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);

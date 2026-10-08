@@ -170,6 +170,7 @@ class OverlayController(
 
   private fun validate(spec: OverlaySpec): OverlaySpec {
     guardOverlayTree(spec.root)
+    requireResolvedOverlayAnchors(spec.root)
     return when (val validation = OverlaySpecValidator.validate(json.encodeToString(spec))) {
       is OverlaySpecValidation.Failure ->
         error("${validation.error.path}: ${validation.error.message}")

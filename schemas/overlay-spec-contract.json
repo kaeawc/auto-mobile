@@ -847,6 +847,20 @@
                 "name": "bounds"
               },
               "optional": false
+            },
+            "alignment": {
+              "rule": {
+                "kind": "enum",
+                "values": ["cover", "top", "bottom", "start", "end"]
+              },
+              "optional": true
+            },
+            "offset": {
+              "rule": {
+                "kind": "ref",
+                "name": "offset"
+              },
+              "optional": true
             }
           }
         },

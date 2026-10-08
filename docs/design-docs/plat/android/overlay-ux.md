@@ -707,15 +707,35 @@ edge alignment aligns the same node edge to the target edge, centered along the
 other axis, preserving authored node dimensions, then applies the offset.
 
 The host resolves selectors against the app hierarchy with the overlay excluded,
-converts pixels to dp once using the target display density, and accounts for
-the overlay origin and cutout. Resolution happens at show, not live.
-Missing or ambiguous elements fail the tool call before showing content, with
-candidates and hierarchy timestamp handled by #9316/#9302. Anchors can be authored
-in any placement: the host subtracts the window's screen origin; a floating
-window is recommended when pass-through outside anchored content matters. Window
-size is determined by placement/content, not by implicitly resizing to an anchor.
-The renderer receives resolved dp bounds; the wire's resolved representation is
-left to #9298/#9316.
+using tap's resolution (a text match is promoted to its clickable owner) with
+`unique` selection, and converts the element's px bounds to dp once with the
+display density the capture reports (`px * 160 / densityDpi`). Resolution happens at
+show, not live. A missing, ambiguous (candidates listed), empty or off-screen element
+fails the call before anything is shown. The result reports `anchors` (each anchored
+node's path with the element's px and dp bounds) and `hierarchyUpdatedAt`; show again
+to re-anchor after the app scrolls or re-lays out.
+
+On the wire the device only receives bounds anchors: the host replaces each element
+anchor with `{ "type": "bounds", "bounds", "alignment", "offset"? }`, keeping its
+alignment and offset. A bounds anchor may also be authored with `alignment` (default
+`cover`) and `offset`. The renderer refuses an element anchor that reaches it
+unresolved. A host only sends anchors to a CtrlProxy advertising `overlay_anchor_v1`;
+older APKs decode and ignore them, so the host refuses the show there. Anchors are
+Android only, and element anchors resolve against the default display (another
+`display` is refused).
+
+The renderer lays an anchored node at its screen rectangle by subtracting the window's
+screen origin and the node's own position inside the window (cutout, system bars, the
+fullscreen host row, safe-area and authored padding). The node keeps a slot of its
+anchored size in its parent and is drawn translated onto the rectangle. Cover sizes the
+node to the bounds, ignoring authored width/height. Window size is determined by
+placement/content, not by implicitly resizing to an anchor:
+
+- fullscreen and sheet windows take anchors on any node; content outside the window
+  (above a bottom sheet, or under the fullscreen host row) is clipped;
+- a floating window moves onto its anchored root (top-start gravity, x/y in screen px)
+  and stays content-sized, so the rest of the app remains touchable. Only the root of a
+  floating window may be anchored; the host refuses an anchor below it.
 
 ## Safe area and IME
 

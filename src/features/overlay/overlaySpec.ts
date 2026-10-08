@@ -286,17 +286,28 @@ const itemSchema = z
     image: z.string().min(1).optional(),
   })
   .strict();
+const anchorAlignmentSchema = z.enum(["cover", "top", "bottom", "start", "end"]);
+// Bounds are screen-space dp. The host resolves an element anchor into a bounds anchor carrying
+// the same alignment and offset, so the device only ever lays out bounds (#9316).
 export const anchorSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.enum(["bounds"]), bounds: boundsSchema }).strict(),
+  z
+    .object({
+      type: z.enum(["bounds"]),
+      bounds: boundsSchema,
+      alignment: anchorAlignmentSchema.optional(),
+      offset: offsetSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       type: z.enum(["element"]),
       selector: selectorSchema,
-      alignment: z.enum(["cover", "top", "bottom", "start", "end"]),
+      alignment: anchorAlignmentSchema,
       offset: offsetSchema.optional(),
     })
     .strict(),
 ]);
+export type OverlayAnchor = z.infer<typeof anchorSchema>;
 export const placementSchema = z.discriminatedUnion("type", [
   z
     .object({

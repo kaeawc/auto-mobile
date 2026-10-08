@@ -155,9 +155,18 @@ data class OverlayItem(
 
 @Serializable sealed class OverlayAnchor
 
+/**
+ * Screen-space dp [bounds]. [alignment] (`cover` when absent) lays the node over them or along one
+ * of their edges, then [offset] shifts it. The host resolves an element anchor into this shape, so
+ * it is the only anchor the renderer lays out (#9316).
+ */
 @SerialName("bounds")
 @Serializable
-data class OverlayBoundsAnchor(val bounds: OverlayBounds) : OverlayAnchor()
+data class OverlayBoundsAnchor(
+  val bounds: OverlayBounds,
+  val alignment: String? = null,
+  val offset: OverlayOffset? = null,
+) : OverlayAnchor()
 
 @SerialName("element")
 @Serializable

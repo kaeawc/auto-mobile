@@ -9,6 +9,7 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   OVERLAY_CAPTURE,
+  capturedFloatingCoverHierarchy,
   capturedOverlayHierarchy,
   capturedTwoWindowHierarchy,
   observationOf,
@@ -82,6 +83,26 @@ describe("tapOn layer (#9305)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("an AutoMobile overlay window covers that point");
+    expect(service.getTapHistory()).toEqual([]);
+  });
+
+  test("default layer refuses an app row a captured floating overlay covers, before dispatch", async () => {
+    // Device capture: a floating system-layer prototype over the Playground "Elevated" button,
+    // which the device hierarchy keeps under the overlay (own-overlay occlusion exemption).
+    const { command, service } = createCommand(capturedFloatingCoverHierarchy());
+    const result = await command.execute({ action: "tap", elementId: "button_elevated" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("AutoMobile overlay");
+    expect(service.getTapHistory()).toEqual([]);
+  });
+
+  test("default layer refuses an app-only match under a full-screen overlay, before dispatch", async () => {
+    const { command, service } = createCommand(capturedOverlayHierarchy({ fullScreen: true }));
+    const result = await command.execute({ action: "tap", text: "Screenshot" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("AutoMobile overlay");
     expect(service.getTapHistory()).toEqual([]);
   });
 

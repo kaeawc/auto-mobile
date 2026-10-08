@@ -53,13 +53,21 @@ export function hitEntries(entries: readonly SearchableEntry[], point: { x: numb
     );
 }
 
-/** Reuse preview ordering and source identity; system-window dispatch remains unchanged. */
+/**
+ * Reuse preview ordering and source identity; system-window dispatch remains unchanged.
+ *
+ * With `includeOwnOverlays` (the tap path), AutoMobile's own node-hosting overlay windows ranked
+ * above the target's window cover their bounds too: a default-layer tap there would reach the
+ * overlay, not the app row the selector matched behind it. Observe leaves this off and marks
+ * overlay-covered rows through `isFullyCoveredByOwnOverlay`, which also weighs overlay opacity.
+ */
 export function applicationWindowSafeTapPoint(
   hierarchy: ViewHierarchyResult,
   target: Element,
   bounds: ElementBounds,
   point: { x: number; y: number },
   imeBounds?: ElementBounds,
+  includeOwnOverlays = false,
 ): { point: { x: number; y: number } | null; coveredBy?: string } {
   const entries = uniqueBySource(new SearchableHierarchy().project(hierarchy));
   const source = getHierarchyNodeSource(target);
@@ -73,24 +81,22 @@ export function applicationWindowSafeTapPoint(
   if (!types.has(owner.source)) {
     return { point };
   }
+  const overlayCovers = includeOwnOverlays ? ownOverlayCoversAbove(hierarchy, entries, owner) : [];
   const first = hitEntries(entries, point)[0];
-  if (!first || first.windowRank >= owner.windowRank || types.get(first.source) !== 1) {
+  const appCovered =
+    first !== undefined && first.windowRank < owner.windowRank && types.get(first.source) === 1;
+  const overlayCovered = overlayCovers.some((cover) => contains(cover, point.x, point.y));
+  if (!appCovered && !overlayCovered) {
     return { point };
   }
-  const coveredBy =
-    [
-      first.displayedLabel,
-      first.label,
-      first.elementId,
-      target.occludedBy,
-      target.occludedByViewId,
-    ].find((label) => typeof label === "string" && label.length > 0) ?? "application window";
+  const coveredBy = appCovered ? coveringLabel(first, target) : "an AutoMobile overlay window";
   const covers = entries
     .filter(
       (entry) =>
         entry.bounds && entry.windowRank < owner.windowRank && types.get(entry.source) === 1,
     )
     .map((entry) => entry.bounds!);
+  covers.push(...overlayCovers);
   if (imeBounds) {
     covers.push(imeBounds);
   }
@@ -111,6 +117,45 @@ export function applicationWindowSafeTapPoint(
         covers.every((cover) => !contains(cover, candidate.x, candidate.y)),
     );
   return { point: replacement ?? null, coveredBy };
+}
+
+function coveringLabel(first: SearchableEntry, target: Element): string {
+  return (
+    [
+      first.displayedLabel,
+      first.label,
+      first.elementId,
+      target.occludedBy,
+      target.occludedByViewId,
+    ].find((label): label is string => typeof label === "string" && label.length > 0) ??
+    "application window"
+  );
+}
+
+/**
+ * Bounds of AutoMobile's own overlay windows that host nodes and rank above `owner`'s window. The
+ * node-free highlight window passes touches through, so it never covers; nor does an overlay
+ * window that owns the target.
+ */
+function ownOverlayCoversAbove(
+  hierarchy: ViewHierarchyResult,
+  entries: readonly SearchableEntry[],
+  owner: SearchableEntry,
+): ElementBounds[] {
+  const parser = new DefaultElementParser();
+  return ownOverlayWindows(hierarchy)
+    .filter((window) => window.bounds !== undefined && window.hierarchy && hostsNodes(window))
+    .filter((window) => {
+      const sources = new Set<SearchableEntry["source"]>();
+      parser.traverseNode(window.hierarchy!, (node) => sources.add(node));
+      if (sources.has(owner.source)) {
+        return false;
+      }
+      return entries.some(
+        (entry) => sources.has(entry.source) && entry.windowRank < owner.windowRank,
+      );
+    })
+    .map((window) => window.bounds!);
 }
 
 /**

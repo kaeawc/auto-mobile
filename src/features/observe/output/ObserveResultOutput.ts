@@ -11,6 +11,7 @@ import {
 } from "./SkeletonProjection";
 import { DefaultObserveElementCollector } from "../ObserveElementCollector";
 import { getSearchableEntries } from "./elementProvenance";
+import { markOccludedRowsOnFullProjection } from "./FullProjectionOcclusion";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
@@ -145,6 +146,13 @@ export function sanitizeObserveResult(
   reduceTopLevelDebugPerfTelemetry(out);
   reduceAdvisoryOutput(out, cfg.project);
 
+  // Full projection (#10715): carry the skeleton's `occluded` signal for rows an application
+  // window or AutoMobile overlay fully covers. Runs before the trim so the clone still mirrors
+  // `obs`'s tree node for node.
+  if (cfg.project !== "skeleton") {
+    markOccludedRowsForFullProjection(out, obs);
+  }
+
   if (cfg.trimNodes !== false) {
     const roots = toNodeArray(out.viewHierarchy?.hierarchy?.node);
     const referencedOccluderViewIds = collectOccludedByViewIds(roots);
@@ -255,6 +263,17 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   }
   delete out.viewHierarchy;
   delete out.elements;
+}
+
+function markOccludedRowsForFullProjection(out: ObserveResult, obs: ObserveResult): void {
+  if (
+    obs.elements &&
+    obs.viewHierarchy?.hierarchy &&
+    obs.viewHierarchy.windows?.length &&
+    !isIosObservation(obs)
+  ) {
+    markOccludedRowsOnFullProjection(out, obs, skeletonElementsForProjection(obs));
+  }
 }
 
 function skeletonElementsForProjection(source: ObserveResult): ObserveResult["elements"] {

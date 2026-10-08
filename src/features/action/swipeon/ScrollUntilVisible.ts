@@ -32,6 +32,9 @@ import {
   type ElementResolution,
 } from "../../utility/ElementResolver";
 import { SearchableHierarchy } from "../../utility/SearchableNode";
+import { DefaultElementParser } from "../../utility/ElementParser";
+import { AutoTargetSelector } from "./AutoTargetSelector";
+import { resolveScrollableSwipeTarget } from "./scrollableAncestor";
 import type { ResolverSelector } from "../../../server/elementSelectorSchemas";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
@@ -173,10 +176,40 @@ export class ScrollUntilVisible {
   private static readonly MAX_ATTEMPTS = 5;
 
   private readonly searchable = new SearchableHierarchy();
+  private readonly parser = new DefaultElementParser();
+  private readonly autoTarget = new AutoTargetSelector();
   private readonly resolver: Pick<ElementResolver, "resolve">;
 
   constructor(private readonly deps: ScrollUntilVisibleDependencies) {
     this.resolver = deps.resolver ?? new ElementResolver();
+  }
+
+  /**
+   * A single-level named swipe container that does not itself scroll in the swipe direction (a
+   * pager page, a wrapper) resolves to its nearest scrollable ancestor (#10752); see
+   * `resolveScrollableSwipeTarget`. A scoped container chain names its innermost scope on purpose
+   * and is never promoted.
+   */
+  resolveSwipeTarget(
+    hierarchy: ViewHierarchyResult,
+    element: Element,
+    direction: SwipeDirection,
+  ): Element {
+    return resolveScrollableSwipeTarget({
+      hierarchy,
+      element,
+      direction,
+      parser: this.parser,
+      scrollsInDirection: (candidate, dir) => this.autoTarget.scrollsInDirection(candidate, dir),
+    });
+  }
+
+  private resolveNamedSwipeContainer(
+    hierarchy: ViewHierarchyResult,
+    options: SwipeOnOptions,
+  ): Element | null {
+    const element = this.resolveElement(hierarchy, options.container!);
+    return element && this.resolveSwipeTarget(hierarchy, element, options.direction);
   }
 
   resolveElement(
@@ -1157,7 +1190,7 @@ export class ScrollUntilVisible {
       }
     }
 
-    return element;
+    return this.resolveSwipeTarget(viewHierarchy, element, options.direction);
   }
 
   private async refreshContainerHierarchy(
@@ -1207,7 +1240,7 @@ export class ScrollUntilVisible {
         return this.resolveSwipeContainer(viewHierarchy, options.container);
       }
       if (options.container.elementId || options.container.text) {
-        element = this.resolveElement(viewHierarchy, options.container);
+        element = this.resolveNamedSwipeContainer(viewHierarchy, options);
       }
     }
     if (!element) {

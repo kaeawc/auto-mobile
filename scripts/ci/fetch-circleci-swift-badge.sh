@@ -79,5 +79,10 @@ for ((attempt = 1; attempt <= attempts; attempt++)); do
   fi
 done
 
+# Exit 3 (distinct from 1) lets callers skip when the job never published a badge.
+if [[ "$last_reason" == 'artifact listing has no Swift coverage badge artifact' ]]; then
+  echo "::warning::CircleCI job $job_number published no Swift coverage badge artifact after $attempts attempts" >&2
+  exit 3
+fi
 echo "::error::Failed to fetch CircleCI Swift coverage badge after $attempts attempts for job $job_number: $last_reason" >&2
 exit 1

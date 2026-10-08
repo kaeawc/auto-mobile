@@ -129,6 +129,13 @@ assert_success() {
   [ "$(cat "$TEST_ROOT/calls")" = $'listing:1\nlisting:2\ndownload:1' ]
 }
 
+@test "exits 3 when every attempt lists no badge artifact so callers can skip" {
+  run_fetch BADGE_RETRY_SLEEP=0 FAKE_LIST_SEQUENCE=empty,empty,empty,empty,empty,empty,empty
+  [ "$status" -eq 3 ]
+  [[ "$output" == *'published no Swift coverage badge artifact'* ]]
+  [ ! -e "$OUTPUT_PATH" ]
+}
+
 @test "re-lists after invalid badge JSON without publishing invalid content" {
   run_fetch FAKE_DOWNLOAD_SEQUENCE=invalid,ok
   assert_success

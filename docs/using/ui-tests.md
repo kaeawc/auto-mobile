@@ -17,7 +17,7 @@ Add the JUnit runner to the module that owns the tests:
 ```kotlin
 // app/build.gradle.kts
 dependencies {
-    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.83")
+    testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.84")
 }
 ```
 
@@ -34,7 +34,7 @@ Add AutoMobile from GitHub in Xcode (**File → Add Package Dependencies…**), 
 For a Swift package manifest, use the released package:
 
 ```swift
-.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.83")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.84")
 ```
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
@@ -270,12 +270,12 @@ Use one release version for the runner, daemon, and device helpers. Restart a
 shared daemon so it receives the pin, then check the environment before tests:
 
 ```bash
-export AUTOMOBILE_VERSION=0.0.83
-bunx @kaeawc/auto-mobile@0.0.83 --daemon restart
-bunx @kaeawc/auto-mobile@0.0.83 --cli doctor
+export AUTOMOBILE_VERSION=0.0.84
+bunx @kaeawc/auto-mobile@0.0.84 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.84 --cli doctor
 ```
 
-Replace `0.0.83` with the version used by your test runner dependency.
+Replace `0.0.84` with the version used by your test runner dependency.
 
 `--cli doctor` runs locally, without a daemon tool connection. It is status-only: it never installs, updates or enables Android CtrlProxy,
 and never resets running session state. It reports installation, accessibility and

@@ -1,0 +1,18 @@
+{
+  "spec": {
+    "id": "prototype",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "style": {
+        "lineHeight": 0
+      }
+    }
+  },
+  "expectedPath": "root.style.lineHeight"
+}

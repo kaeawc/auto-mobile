@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
 import androidx.compose.ui.graphics.Shader
@@ -195,7 +196,13 @@ private fun RenderOverlayNodeContent(
         // Only an authored family overrides; otherwise the text inherits the theme's family through
         // its role or the themed body style, as plain text in the prototyped app would (#10561).
         fontFamily = if (source.fontFamily != null) rememberOverlayFontFamily(node.style) else null,
+        // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+        fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+        letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+        textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
         textAlign = node.style.textAlign,
+        lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+        overflow = node.style.overflow,
         maxLines = source.maxLines ?: Int.MAX_VALUE,
         style = role ?: LocalTextStyle.current,
       )
@@ -481,6 +488,9 @@ private fun overlayNodeModifier(
       node.role !in OVERLAY_COMPONENT_ROLES &&
       node.role !in OVERLAY_SELECTION_ROLES
   var modifier: Modifier = Modifier
+  // A draw-time shift of the whole node (shadow, touch target and semantics included); siblings
+  // keep the layout slot it would have had.
+  style.offset?.let { modifier = modifier.offset(it.x.toFloat().dp, it.y.toFloat().dp) }
   // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
   // without changing the size it draws at (#10435).
   if (tappable) modifier = modifier.minimumInteractiveComponentSize()
@@ -506,7 +516,12 @@ private fun overlayNodeModifier(
   val shape =
     overlayCornerShape(MaterialTheme.shapes, style.cornerRadius ?: OverlayCornerRadius.Dp(0.0))
   // Before clip/background/border so the shadow is drawn outside the clipped content.
-  style.elevation?.let { modifier = modifier.shadow(it.toFloat().dp, shape) }
+  style.elevation?.let {
+    val shadowColor =
+      overlayThemedColor(node.style.shadowColor, style.shadowColor) ?: DefaultShadowColor
+    modifier =
+      modifier.shadow(it.toFloat().dp, shape, ambientColor = shadowColor, spotColor = shadowColor)
+  }
   if (style.cornerRadius != null) modifier = modifier.clip(shape)
   overlayThemedColor(node.style.background, style.background)?.let {
     modifier = modifier.background(it, shape)

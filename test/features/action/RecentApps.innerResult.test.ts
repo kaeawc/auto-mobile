@@ -10,6 +10,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedHome from "../../fixtures/android-launcher/launcher-home-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
+import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 
 const device: BootedDevice = {
   name: "test-device",
@@ -141,6 +142,19 @@ describe("RecentApps inner result", () => {
     const result = await recentApps.execute();
     expect(result.success).toBe(false);
     expect(result.error).toContain("overview");
+    expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
+  });
+
+  test("a hidden overview panel on the captured Recents hierarchy is not an open overview", async () => {
+    const hiddenOverview = hideCapturedNode(
+      capturedRecents.viewHierarchy,
+      "com.google.android.apps.nexuslauncher:id/overview_panel",
+    );
+    observe.setObserveResult(() => ({ ...recentsObservation(), viewHierarchy: hiddenOverview }));
+    const result = await recentApps.execute();
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("overview");
+    expect(globalActionSpy).toHaveBeenCalledTimes(1);
     expect(adb.getExecutedCommands()).toContain("shell input keyevent 187");
   });
 

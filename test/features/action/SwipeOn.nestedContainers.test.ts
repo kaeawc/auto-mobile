@@ -80,7 +80,7 @@ function harness(frames: ObserveResult[], resolver?: ElementResolver) {
       timer,
       resolver,
       voiceOverExecutor: runner,
-      finder: new FakeScrollableElementsQuery(),
+      scrollables: new FakeScrollableElementsQuery(),
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );

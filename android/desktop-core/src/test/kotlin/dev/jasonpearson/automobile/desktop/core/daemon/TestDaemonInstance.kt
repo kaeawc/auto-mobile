@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -65,39 +67,117 @@ class TestDaemonInstance(private val port: Int = 0) {
     advertisedResources.add(resource)
   }
 
+  /**
+   * When true (the default, like the real daemon, whose transport is built without
+   * `enableJsonResponse`) replies to requests are `text/event-stream` bodies with a `:keepalive`
+   * comment ahead of the `event: message` frame. When false they are plain JSON bodies.
+   */
+  @Volatile var answerWithEventStream: Boolean = true
+
+  /**
+   * Splits an event-stream reply into separately flushed writes (chunked transfer), so a test can
+   * tear a multi-byte character across network reads. Null writes the body in one piece.
+   */
+  @Volatile var eventStreamChunker: ((ByteArray) -> List<ByteArray>)? = null
+
+  /** Every `Accept` header received on a POST, in order (`null` when the header was missing). */
+  val acceptHeaders = CopyOnWriteArrayList<String?>()
+
+  private val sessions = ConcurrentHashMap.newKeySet<String>()
+  private val sessionCounter = AtomicInteger()
+
+  /** Forgets every session, like a daemon restart: previously issued ids now answer 404. */
+  fun forgetSessions() {
+    sessions.clear()
+  }
+
   fun start(): Int {
     val httpServer = HttpServer.create(InetSocketAddress(port), 0)
     httpServer.createContext("/") { exchange ->
       try {
-        val body = exchange.requestBody.bufferedReader().readText()
-        val request = json.decodeFromString(JsonRpcRequest.serializer(), body)
-        val response = handleRequest(request)
-        val responseBody = json.encodeToString(JsonRpcResponse.serializer(), response)
-        val responseBytes = responseBody.toByteArray()
-
-        exchange.responseHeaders.add("Content-Type", "application/json")
-        exchange.responseHeaders.add("mcp-session-id", "test-session-1")
-        exchange.sendResponseHeaders(200, responseBytes.size.toLong())
-        exchange.responseBody.use { it.write(responseBytes) }
+        handleExchange(exchange)
       } catch (e: Exception) {
-        val errorResponse =
-          json.encodeToString(
-            JsonRpcResponse.serializer(),
-            JsonRpcResponse(
-              jsonrpc = "2.0",
-              error = JsonRpcError(code = -32603, message = e.message ?: "Internal error"),
-            ),
-          )
-        val errorBytes = errorResponse.toByteArray()
-        exchange.responseHeaders.add("Content-Type", "application/json")
-        exchange.sendResponseHeaders(200, errorBytes.size.toLong())
-        exchange.responseBody.use { it.write(errorBytes) }
+        reply(exchange, 200, jsonRpcError(-32603, e.message ?: "Internal error"))
       }
     }
     httpServer.start()
     server = httpServer
     return httpServer.address.port
   }
+
+  private fun handleExchange(exchange: HttpExchange) {
+    val accept = exchange.requestHeaders.getFirst("Accept")
+    acceptHeaders.add(accept)
+    // The MCP SDK's streamable transport answers 406 unless Accept lists both response forms.
+    if (accept == null || !accept.contains(JSON) || !accept.contains(EVENT_STREAM)) {
+      reply(exchange, 406, jsonRpcError(-32000, "Not Acceptable: Client must accept both"))
+      return
+    }
+    val body = exchange.requestBody.bufferedReader().readText()
+    val request = json.decodeFromString(JsonRpcRequest.serializer(), body)
+    if (request.method == "initialize") {
+      val newSession = "test-session-${sessionCounter.incrementAndGet()}"
+      sessions.add(newSession)
+      respond(exchange, request, newSession)
+      return
+    }
+    // Like the daemon, an unknown session id is rejected before anything is dispatched.
+    val sessionHeader = exchange.requestHeaders.getFirst("mcp-session-id")
+    when {
+      sessionHeader == null ->
+        reply(exchange, 400, jsonRpcError(-32000, "Bad Request: Mcp-Session-Id required"))
+      sessionHeader !in sessions -> reply(exchange, 404, """{"error":"Session not found"}""")
+      else -> respond(exchange, request, sessionHeader)
+    }
+  }
+
+  private fun respond(exchange: HttpExchange, request: JsonRpcRequest, sessionId: String) {
+    val response = handleRequest(request)
+    exchange.responseHeaders.add("mcp-session-id", sessionId)
+    if (request.id == null) {
+      // Notifications are acknowledged with 202 and no body.
+      exchange.sendResponseHeaders(202, -1)
+      exchange.responseBody.close()
+      return
+    }
+    val responseBody = json.encodeToString(JsonRpcResponse.serializer(), response)
+    if (!answerWithEventStream) {
+      reply(exchange, 200, responseBody)
+      return
+    }
+    val stream = ":keepalive\n\nevent: message\ndata: $responseBody\n\n"
+    val chunker = eventStreamChunker
+    if (chunker == null) {
+      reply(exchange, 200, stream, contentType = EVENT_STREAM)
+      return
+    }
+    exchange.responseHeaders.add("Content-Type", EVENT_STREAM)
+    exchange.sendResponseHeaders(200, 0)
+    exchange.responseBody.use { out ->
+      for (chunk in chunker(stream.toByteArray())) {
+        out.write(chunk)
+        out.flush()
+      }
+    }
+  }
+
+  private fun reply(
+    exchange: HttpExchange,
+    status: Int,
+    body: String,
+    contentType: String = JSON,
+  ) {
+    val bytes = body.toByteArray()
+    exchange.responseHeaders.add("Content-Type", contentType)
+    exchange.sendResponseHeaders(status, bytes.size.toLong())
+    exchange.responseBody.use { it.write(bytes) }
+  }
+
+  private fun jsonRpcError(code: Int, message: String): String =
+    json.encodeToString(
+      JsonRpcResponse.serializer(),
+      JsonRpcResponse(jsonrpc = "2.0", error = JsonRpcError(code = code, message = message)),
+    )
 
   fun stop() {
     server?.stop(0)
@@ -231,5 +311,10 @@ class TestDaemonInstance(private val port: Int = 0) {
           put("contents", JsonArray(contentsJson))
         },
     )
+  }
+
+  private companion object {
+    const val JSON = "application/json"
+    const val EVENT_STREAM = "text/event-stream"
   }
 }

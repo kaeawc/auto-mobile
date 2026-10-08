@@ -1,9 +1,11 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
 import androidx.compose.runtime.Composable
+import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard
+import dev.jasonpearson.automobile.desktop.core.failures.createFailuresDashboardPushClient
 
 /**
  * Docked-facet body for [Tool.Failures]: the failures dashboard (crashes, ANRs, tool-call failures,
@@ -25,11 +27,15 @@ fun FailuresFacet(
   column: DeviceColumn,
   sessionUuidProvider: (() -> String?)? = null,
   dataSourceMode: DataSourceMode = DataSourceMode.Real,
+  pushClientFactory: ((() -> String?)?) -> FailuresPushSocketClient = {
+    createFailuresDashboardPushClient(sessionUuidProvider = it)
+  },
 ) {
   val graph = LocalAutoMobileGraph.current
   FailuresDashboard(
     dataSourceMode = dataSourceMode,
     clientProvider = { graph.autoMobileClient },
     sessionUuidProvider = sessionUuidProvider,
+    pushClientFactory = pushClientFactory,
   )
 }

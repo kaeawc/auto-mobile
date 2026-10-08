@@ -645,7 +645,9 @@ Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 (default 5000 ms). Validation uses the existing overlay schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
 no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
-scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
+Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
+bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
+emit/setPage/setState/toggle/increment/decrement/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
 
 #### iOS simulators

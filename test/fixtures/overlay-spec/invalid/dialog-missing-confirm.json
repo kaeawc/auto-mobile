@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "open": true },
+    "root": { "type": "dialog", "openWhen": { "key": "open", "equals": true } }
+  },
+  "expectedPath": "root.confirm"
+}

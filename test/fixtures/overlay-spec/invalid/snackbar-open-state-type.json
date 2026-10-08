@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "open": 1 },
+    "root": { "type": "snackbar", "openWhen": { "key": "open", "equals": true }, "text": "Saved" }
+  },
+  "expectedPath": "root.openWhen.key"
+}

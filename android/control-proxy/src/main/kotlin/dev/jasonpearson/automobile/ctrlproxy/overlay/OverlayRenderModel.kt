@@ -48,13 +48,22 @@ data class OverlayRenderNode(
   val identity: String = "root",
   val page: Int = 0,
   val selection: Int = 0,
+  /** Whether a `bottomSheet`, `dialog` or `snackbar` is open (its `openWhen` holds). */
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
-  /** The bound value of a `radioGroup` (the option marked selected); null for every other role. */
+  /**
+   * The bound string of a `radioGroup` or `segmentedButton` (the option marked selected) or of a
+   * `datePicker` (its `YYYY-MM-DD` date); null for every other role.
+   */
   val selectedValue: String? = null,
-  /** The bound number of a `slider`; 0 for every other role. */
+  /** The bound number of a `slider` or a determinate `progress`; 0 for every other role. */
   val sliderValue: Double = 0.0,
+  /** A `dialog`'s body text, state placeholders resolved; null for every other role. */
+  val supportingText: String? = null,
+  /** A `timePicker`'s bound hour (0..23) and minute (0..59); 0 for every other role. */
+  val hour: Int = 0,
+  val minute: Int = 0,
   /** The authored `contentDescription`, state placeholders resolved; null when not authored. */
   val contentDescription: String? = null,
 )
@@ -149,6 +158,17 @@ private fun mapOverlayNode(
       is OverlaySliderNode -> "slider"
       is OverlayChipNode -> "chip"
       is OverlayCardNode -> "card"
+      is OverlayIconButtonNode -> "iconButton"
+      is OverlayFabNode -> "fab"
+      is OverlaySegmentedButtonNode -> "segmentedButton"
+      is OverlayTopAppBarNode -> "topAppBar"
+      is OverlayDividerNode -> "divider"
+      is OverlayBadgeNode -> "badge"
+      is OverlayProgressNode -> "progress"
+      is OverlayDialogNode -> "dialog"
+      is OverlaySnackbarNode -> "snackbar"
+      is OverlayTimePickerNode -> "timePicker"
+      is OverlayDatePickerNode -> "datePicker"
       is OverlayScrollNode -> "scroll"
       is OverlayPagerNode -> "pager"
       is OverlayTabBarNode -> "tabBar"
@@ -166,6 +186,13 @@ private fun mapOverlayNode(
       is OverlaySliderNode -> node.label.orEmpty()
       is OverlayChipNode -> node.label
       is OverlayIconNode -> node.name
+      is OverlayFabNode -> node.label.orEmpty()
+      is OverlayTopAppBarNode -> interpolateOverlayText(node.title, localState, context != null)
+      is OverlayBadgeNode ->
+        node.text?.let { interpolateOverlayText(it, localState, context != null) }.orEmpty()
+      is OverlayDialogNode ->
+        node.title?.let { interpolateOverlayText(it, localState, context != null) }.orEmpty()
+      is OverlaySnackbarNode -> interpolateOverlayText(node.text, localState, context != null)
       else -> ""
     }
   val children =
@@ -199,28 +226,68 @@ private fun mapOverlayNode(
     node.visibleWhen?.holds(localState) ?: true,
     mapOverlayStyle(resolveOverlayStyle(node.style, node.styleWhen, localState)),
     node.safeAreaPadding,
-    (node as? OverlayIconNode)?.name,
+    overlayNodeIconName(node),
     children,
     node,
     path,
     (node as? OverlayPagerNode)?.let { pages[it.id] } ?: 0,
     selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
-    (node as? OverlayBottomSheetNode)?.let {
-      state[it.openWhen.key] == OverlayScalar.BooleanValue(it.openWhen.equals)
-    } ?: false,
+    overlayOpenWhen(node)?.let { state[it.key] == OverlayScalar.BooleanValue(it.equals) } ?: false,
     checked =
       (overlayToggleKey(node) ?: overlayListItemToggleKey(node))?.let {
         state[it] == OverlayScalar.BooleanValue(true)
       } ?: false,
-    selectedValue =
-      (node as? OverlayRadioGroupNode)?.let { (state[it.stateKey] as? OverlayScalar.Text)?.value },
+    selectedValue = overlaySelectionKey(node)?.let { (state[it] as? OverlayScalar.Text)?.value },
     sliderValue =
-      (node as? OverlaySliderNode)?.let { (state[it.stateKey] as? OverlayScalar.Numeric)?.value }
-        ?: 0.0,
+      overlayNumberKey(node)?.let { (state[it] as? OverlayScalar.Numeric)?.value } ?: 0.0,
+    supportingText =
+      (node as? OverlayDialogNode)?.text?.let {
+        interpolateOverlayText(it, localState, context != null)
+      },
+    hour = overlayStateInt(state, (node as? OverlayTimePickerNode)?.hourKey),
+    minute = overlayStateInt(state, (node as? OverlayTimePickerNode)?.minuteKey),
     contentDescription =
       node.contentDescription?.let { interpolateOverlayText(it, localState, context != null) },
   )
 }
+
+/** The icon a node draws as its whole content, which labels it when nothing else does. */
+private fun overlayNodeIconName(node: OverlayNode): String? =
+  when (node) {
+    is OverlayIconNode -> node.name
+    is OverlayIconButtonNode -> node.icon
+    is OverlayFabNode -> node.icon
+    else -> null
+  }
+
+/** The boolean condition that opens a `bottomSheet`, `dialog` or `snackbar`; null otherwise. */
+internal fun overlayOpenWhen(node: OverlayNode?): OverlaySheetCondition? =
+  when (node) {
+    is OverlayBottomSheetNode -> node.openWhen
+    is OverlayDialogNode -> node.openWhen
+    is OverlaySnackbarNode -> node.openWhen
+    else -> null
+  }
+
+/** The string key a `radioGroup`, `segmentedButton` or `datePicker` is bound to. */
+private fun overlaySelectionKey(node: OverlayNode): String? =
+  when (node) {
+    is OverlayRadioGroupNode -> node.stateKey
+    is OverlaySegmentedButtonNode -> node.stateKey
+    is OverlayDatePickerNode -> node.stateKey
+    else -> null
+  }
+
+/** The number key a `slider` or a determinate `progress` is bound to. */
+private fun overlayNumberKey(node: OverlayNode): String? =
+  when (node) {
+    is OverlaySliderNode -> node.stateKey
+    is OverlayProgressNode -> node.stateKey
+    else -> null
+  }
+
+private fun overlayStateInt(state: Map<String, OverlayScalar>, key: String?): Int =
+  key?.let { (state[it] as? OverlayScalar.Numeric)?.value?.toInt() } ?: 0
 
 /**
  * Pager placeholders use one-based page labels in the nearest pager; outside it they stay literal.
@@ -459,18 +526,24 @@ private fun inlineTextFieldVisible(node: OverlayRenderNode): Boolean =
   when {
     !node.visible -> false
     node.role == "textField" -> true
-    node.role == "bottomSheet" -> false // Hoisted: only modalOverlaySheets renders it.
+    node.role in OVERLAY_MODAL_ROLES -> false // Hoisted: only modalOverlaySheets renders it.
     node.role == "pager" ->
       node.children.getOrNull(node.page)?.let(::inlineTextFieldVisible) == true
     else -> node.children.any(::inlineTextFieldVisible)
   }
 
-/** Open sheet nodes are rendered last so their modal scrim covers the entire overlay window. */
+/** Roles drawn above the whole author tree while their `openWhen` holds, never inline. */
+internal val OVERLAY_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar")
+
+/**
+ * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the
+ * entire overlay window.
+ */
 fun modalOverlaySheets(node: OverlayRenderNode): List<OverlayRenderNode> {
   if (!node.visible) return emptyList()
-  if (node.role == "bottomSheet" && !node.sheetOpen) return emptyList()
+  val modal = node.role in OVERLAY_MODAL_ROLES
+  if (modal && !node.sheetOpen) return emptyList()
   val children =
     if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page)) else node.children
-  return (if (node.role == "bottomSheet") listOf(node) else emptyList()) +
-    children.flatMap(::modalOverlaySheets)
+  return (if (modal) listOf(node) else emptyList()) + children.flatMap(::modalOverlaySheets)
 }

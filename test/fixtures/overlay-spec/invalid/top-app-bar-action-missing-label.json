@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": {},
+    "root": { "type": "topAppBar", "title": "T", "navigationIcon": { "icon": "menu" } }
+  },
+  "expectedPath": "root.navigationIcon.label"
+}

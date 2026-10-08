@@ -63,6 +63,24 @@ sealed interface OverlayInteraction {
     val actions: List<OverlayAction> = emptyList(),
   ) : OverlayInteraction
 
+  /**
+   * A `dialog` or `snackbar` button: closes its container by making [condition] false, then runs
+   * the button's actions.
+   */
+  data class CloseModal(
+    val condition: OverlaySheetCondition,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
+
+  /** A `timePicker` change: stores both bound keys, emitting one `change` event, then actions. */
+  data class SetTime(
+    val hourKey: String,
+    val minuteKey: String,
+    val hour: Int,
+    val minute: Int,
+    val actions: List<OverlayAction> = emptyList(),
+  ) : OverlayInteraction
+
   /** A `slider` drag or accessibility set-progress: stores the (already snapped) number. */
   data class Slide(
     val key: String,
@@ -125,11 +143,12 @@ class OverlayRuntime(
           interaction.key?.let { change(it, OverlayScalar.Numeric(interaction.index.toDouble())) }
         tap(interaction.actions)
       }
-      is OverlayInteraction.SheetDismiss -> {
-        val condition = interaction.condition
-        if (current.state[condition.key] == OverlayScalar.BooleanValue(condition.equals))
-          change(condition.key, OverlayScalar.BooleanValue(!condition.equals))
+      is OverlayInteraction.SheetDismiss -> close(interaction.condition)
+      is OverlayInteraction.CloseModal -> {
+        close(interaction.condition)
+        tap(interaction.actions)
       }
+      is OverlayInteraction.SetTime -> setTime(interaction)
       is OverlayInteraction.Toggle -> {
         // The validator keeps the bound key boolean; anything else leaves the control inert.
         val stored = current.state[interaction.key] as? OverlayScalar.BooleanValue ?: return
@@ -199,6 +218,28 @@ class OverlayRuntime(
     if (current.active) emitStateChange(touched.filter { baseline[it] != current.state[it] })
   }
 
+  private suspend fun close(condition: OverlaySheetCondition) {
+    if (current.state[condition.key] == OverlayScalar.BooleanValue(condition.equals))
+      change(condition.key, OverlayScalar.BooleanValue(!condition.equals))
+  }
+
+  /** Both keys change together, so a new time reports one `change` event, never a half-set one. */
+  private suspend fun setTime(interaction: OverlayInteraction.SetTime) {
+    val keys = listOf(interaction.hourKey, interaction.minuteKey)
+    // The validator keeps both keys numeric; anything else leaves the picker inert.
+    if (keys.any { current.state[it] !is OverlayScalar.Numeric }) return
+    val baseline = current.state
+    val next =
+      mapOf(
+        interaction.hourKey to OverlayScalar.Numeric(interaction.hour.toDouble()),
+        interaction.minuteKey to OverlayScalar.Numeric(interaction.minute.toDouble()),
+      )
+    if (next.all { (key, value) -> baseline[key] == value }) return
+    setStates(next)
+    emitStateChange(keys.filter { baseline[it] != current.state[it] })
+    tap(interaction.actions)
+  }
+
   /**
    * One key keeps the `{key, value}` payload of [change]. Several keys cannot fit it, so they send
    * `{keys, values}` instead; the event's `state` always carries the full final state.
@@ -228,8 +269,10 @@ class OverlayRuntime(
     emit(OverlayEventKind.PAGE_CHANGED)
   }
 
-  private fun setState(key: String, value: OverlayScalar) {
-    val spec = current.spec.copy(state = current.state + (key to value))
+  private fun setState(key: String, value: OverlayScalar) = setStates(mapOf(key to value))
+
+  private fun setStates(values: Map<String, OverlayScalar>) {
+    val spec = current.spec.copy(state = current.state + values)
     // Reuse the structured protocol validator to enforce keys, numeric ranges and binding types.
     val validation =
       OverlaySpecValidator.validate(runtimeJson.encodeToString(OverlaySpec.serializer(), spec))
@@ -327,6 +370,7 @@ internal fun overlayDescendants(node: OverlayNode): List<OverlayNode> =
     is OverlayCardNode -> node.children
     is OverlayScrollNode -> listOf(node.child)
     is OverlayBottomSheetNode -> listOf(node.child)
+    is OverlayDialogNode -> listOfNotNull(node.child)
     else -> emptyList()
   }
 

@@ -1,0 +1,9 @@
+{
+  "spec": {
+    "id": "a",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": {},
+    "root": { "type": "iconButton", "icon": "not_an_icon" }
+  },
+  "expectedPath": "root.icon"
+}

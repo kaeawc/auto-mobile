@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
 import dev.jasonpearson.automobile.protocol.OverlayAction
+import dev.jasonpearson.automobile.protocol.OverlayBadgeNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomNavNode
 import dev.jasonpearson.automobile.protocol.OverlayBottomSheetNode
 import dev.jasonpearson.automobile.protocol.OverlayBoxNode
@@ -10,12 +11,18 @@ import dev.jasonpearson.automobile.protocol.OverlayCheckboxNode
 import dev.jasonpearson.automobile.protocol.OverlayChipNode
 import dev.jasonpearson.automobile.protocol.OverlayColumnNode
 import dev.jasonpearson.automobile.protocol.OverlayCondition
+import dev.jasonpearson.automobile.protocol.OverlayDatePickerNode
+import dev.jasonpearson.automobile.protocol.OverlayDialogNode
+import dev.jasonpearson.automobile.protocol.OverlayDividerNode
 import dev.jasonpearson.automobile.protocol.OverlayEmitAction
+import dev.jasonpearson.automobile.protocol.OverlayFabNode
+import dev.jasonpearson.automobile.protocol.OverlayIconButtonNode
 import dev.jasonpearson.automobile.protocol.OverlayIconNode
 import dev.jasonpearson.automobile.protocol.OverlayImageNode
 import dev.jasonpearson.automobile.protocol.OverlayListItemNode
 import dev.jasonpearson.automobile.protocol.OverlayNode
 import dev.jasonpearson.automobile.protocol.OverlayPagerNode
+import dev.jasonpearson.automobile.protocol.OverlayProgressNode
 import dev.jasonpearson.automobile.protocol.OverlayRadioGroupNode
 import dev.jasonpearson.automobile.protocol.OverlayRepeat
 import dev.jasonpearson.automobile.protocol.OverlayRepeatSegment
@@ -23,14 +30,18 @@ import dev.jasonpearson.automobile.protocol.OverlayRepeatTemplate
 import dev.jasonpearson.automobile.protocol.OverlayRowNode
 import dev.jasonpearson.automobile.protocol.OverlayScalar
 import dev.jasonpearson.automobile.protocol.OverlayScrollNode
+import dev.jasonpearson.automobile.protocol.OverlaySegmentedButtonNode
 import dev.jasonpearson.automobile.protocol.OverlaySetStateAction
 import dev.jasonpearson.automobile.protocol.OverlaySliderNode
+import dev.jasonpearson.automobile.protocol.OverlaySnackbarNode
 import dev.jasonpearson.automobile.protocol.OverlaySpacerNode
 import dev.jasonpearson.automobile.protocol.OverlayStyleWhen
 import dev.jasonpearson.automobile.protocol.OverlaySwitchNode
 import dev.jasonpearson.automobile.protocol.OverlayTabBarNode
 import dev.jasonpearson.automobile.protocol.OverlayTextFieldNode
 import dev.jasonpearson.automobile.protocol.OverlayTextNode
+import dev.jasonpearson.automobile.protocol.OverlayTimePickerNode
+import dev.jasonpearson.automobile.protocol.OverlayTopAppBarNode
 import java.math.BigDecimal
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
@@ -65,7 +76,8 @@ internal fun overlayChildEntries(
   val children = overlayDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
-    val single = node is OverlayScrollNode || node is OverlayBottomSheetNode
+    val single =
+      node is OverlayScrollNode || node is OverlayBottomSheetNode || node is OverlayDialogNode
     return children.mapIndexed { index, child ->
       OverlayChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
@@ -157,6 +169,27 @@ private fun OverlayNode.bound(instance: RepeatInstance): OverlayNode {
     is OverlayRadioGroupNode ->
       copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is OverlayListItemNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayDialogNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        child = child?.bound(instance),
+      )
+    is OverlayIconButtonNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayFabNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlaySegmentedButtonNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayTopAppBarNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayDividerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayBadgeNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayProgressNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlaySnackbarNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayTimePickerNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is OverlayDatePickerNode ->
+      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
   }
 }
 

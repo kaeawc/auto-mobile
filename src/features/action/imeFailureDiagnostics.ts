@@ -89,6 +89,16 @@ export function focusedImeFieldClass(observation: ObserveResult): string | null 
   return null;
 }
 
+/**
+ * CtrlProxy emits this only after every editing unit was dispatched, when the quiescence barrier
+ * that follows could not complete (ImeCommitDriver.SYNC_LOST_ERROR). The commit itself did not stop
+ * early; the editor may already hold the whole text (#10799).
+ */
+export const IME_EDITOR_SYNC_LOST_ERROR = "Input connection lost while syncing editor state";
+
+export const IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING =
+  "The IME editor sync was lost after every unit was dispatched; a focused-field read-back confirmed the text.";
+
 // Exact messages emitted before any commit in the current CtrlProxy protocol.
 // Unknown/older errors remain conservative; a zero/absent dispatch count proves nothing.
 const BINDING_FAILURES = new Set([
@@ -245,6 +255,74 @@ export async function verifyImeCommitResult(
     },
   });
   return sawPassword ? redactPasswordImeFailure(verified, text) : verified;
+}
+
+/**
+ * A sync loss after full dispatch is not evidence of a partial commit: re-read the focused editor
+ * and report success when it holds the sent text. Anything unverifiable (no focused editor, a
+ * password field, an unreadable value, a mismatch, or an observation error) keeps the original
+ * failure so a commit that genuinely stopped early still reports partial application.
+ */
+export async function confirmImeCommitAfterSyncLoss(
+  result: TextActionResult,
+  text: string,
+  verification: ImeVerification,
+): Promise<TextActionResult> {
+  if (result.success || result.error !== IME_EDITOR_SYNC_LOST_ERROR || text.length === 0) {
+    return result;
+  }
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      verification.checkAbort();
+      if (attempt > 0) {
+        await verification.timer.sleep(verification.settleMs);
+        verification.checkAbort();
+      }
+      const observation = await verification.observe();
+      verification.checkAbort();
+      const readBack = syncLossReadBack(observation, text, verification);
+      if (readBack === "confirmed") {
+        const confirmed: TextActionResult = {
+          ...result,
+          success: true,
+          warning: [result.warning, IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING]
+            .filter(Boolean)
+            .join(" "),
+        };
+        delete confirmed.error;
+        delete confirmed.partialApplication;
+        return confirmed;
+      }
+      if (readBack === "unverifiable") {
+        return result;
+      }
+    }
+  } catch (error) {
+    verification.checkAbort(error);
+    logger.warn(`[SendKeys] IME sync-loss read-back unavailable: ${errorMessage(error)}`, error);
+  }
+  return result;
+}
+
+function syncLossReadBack(
+  observation: ObserveResult,
+  text: string,
+  verification: ImeVerification,
+): "confirmed" | "unverifiable" | "mismatch" {
+  if (
+    verification.passwordField === true ||
+    verification.isPasswordField?.(observation) === true ||
+    verification.lacksRequiredFocus(observation)
+  ) {
+    return "unverifiable";
+  }
+  const observedText = verification.focusedText(observation);
+  if (observedText === undefined) {
+    return "unverifiable";
+  }
+  // Only the strict (marker-aware) suffix upgrades a failure; the looser subsequence match
+  // could be satisfied by pre-existing field content around a genuinely partial insert.
+  return imeCommitSuffixMatches(observedText, text) === true ? "confirmed" : "mismatch";
 }
 
 async function verifyImeCommitReadBack(

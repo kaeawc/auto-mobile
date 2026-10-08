@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
-import { verifyImeCommitResult } from "../../../src/features/action/imeFailureDiagnostics";
+import {
+  confirmImeCommitAfterSyncLoss,
+  IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING,
+  IME_EDITOR_SYNC_LOST_ERROR,
+  verifyImeCommitResult,
+} from "../../../src/features/action/imeFailureDiagnostics";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -185,7 +190,6 @@ describe("IME failure diagnostics", () => {
     ["No active input connection within timeout", "activationBinding", false],
     ["Input connection lost during commit", "commit", true],
     ["Input connection lost while finishing composition", "commit", true],
-    ["Input connection lost while syncing editor state", "commit", true],
     ["unknown old APK error", "commit", true],
   ])("preserves backend cause %s and distinguishes stage %s", async (cause, stage, applied) => {
     const h = harness("");
@@ -205,6 +209,114 @@ describe("IME failure diagnostics", () => {
     });
     expect(h.deliveries).toEqual([]);
     expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  describe("sync loss after full dispatch (#10799)", () => {
+    const syncLost = {
+      success: false,
+      error: IME_EDITOR_SYNC_LOST_ERROR,
+      partialApplication: true,
+      committedUnits: 9,
+    };
+
+    test.each(["ime", "imeKeyEvents"] as const)(
+      "%s reports success when the read-back holds the whole text",
+      async (mode) => {
+        const h = harness("@everyone");
+        h.client.commitViaIme = async () => syncLost;
+        const result = await h.executor.type({ action: "type", text: "@everyone", mode });
+        expect(result).toMatchObject({
+          success: true,
+          resolvedMode: mode,
+          committedUnits: 9,
+          warning: IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING,
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.partialApplication).toBeUndefined();
+        expect(result).not.toHaveProperty("imeFailure");
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      },
+    );
+
+    test("waits for a lagging read-back before confirming", async () => {
+      const reads = [field("@every"), field("@everyone")];
+      const h = harness("", field(""));
+      const observer = { execute: async () => reads.shift() ?? field("@everyone") };
+      const executor = new DefaultSendKeysCommandExecutor(device, h.adbFactory, observer, {
+        textClient: h.client,
+        timer: h.timer,
+        inputKey: { press: async () => ({ success: true }) },
+      });
+      h.client.commitViaIme = async () => syncLost;
+      const result = await executor.type({ action: "type", text: "@everyone", mode: "ime" });
+      expect(result.success).toBe(true);
+      expect(h.timer.getSleepHistory()).toEqual([150]);
+    });
+
+    test("a commit that stopped early keeps partial application", async () => {
+      const h = harness("@every");
+      h.client.commitViaIme = async () => syncLost;
+      const result = await h.executor.type({ action: "type", text: "@everyone", mode: "ime" });
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        error: `${IME_EDITOR_SYNC_LOST_ERROR}; up to 9 editing units were dispatched before the commit stopped`,
+        imeFailure: { stage: "commit", cause: IME_EDITOR_SYNC_LOST_ERROR, committedUnits: 9 },
+      });
+      expect(h.timer.getSleepHistory()).toEqual([150, 150]);
+    });
+
+    test("a password field stays unverified and never names the text", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      let observed = 0;
+      const result = await confirmImeCommitAfterSyncLoss(syncLost, "hunter2", {
+        timer,
+        settleMs: 1,
+        observe: async () => {
+          observed++;
+          return passwordField();
+        },
+        checkAbort: () => {},
+        lacksRequiredFocus: () => false,
+        focusedText: () => "hunter2",
+        focusError: "unfocused",
+        isPasswordField: () => true,
+      });
+      expect(result).toBe(syncLost);
+      expect(observed).toBe(1);
+    });
+
+    test("other failures are returned without observing the editor", async () => {
+      const failure = { success: false, error: "Input connection lost during IME key events" };
+      const result = await confirmImeCommitAfterSyncLoss(failure, "abc", {
+        timer: new FakeTimer(),
+        settleMs: 1,
+        observe: async () => {
+          throw new Error("must not observe");
+        },
+        checkAbort: () => {},
+        lacksRequiredFocus: () => false,
+        focusedText: () => "abc",
+        focusError: "unfocused",
+      });
+      expect(result).toBe(failure);
+    });
+
+    test("an observation error keeps the failure", async () => {
+      const result = await confirmImeCommitAfterSyncLoss(syncLost, "abc", {
+        timer: new FakeTimer(),
+        settleMs: 1,
+        observe: async () => {
+          throw new Error("observe failed");
+        },
+        checkAbort: () => {},
+        lacksRequiredFocus: () => false,
+        focusedText: () => "abc",
+        focusError: "unfocused",
+      });
+      expect(result).toBe(syncLost);
+    });
   });
 
   test("unsupported explicit IME is a precise no-commit failure", async () => {

@@ -719,7 +719,7 @@ clean shutdown then stops it after active device sessions are released.
 | `AUTOMOBILE_ALLOW_INSECURE_ASSET_URL`                                                        | Permit plaintext HTTP asset URLs with `1`/`true` (case-insensitive, no trimming); other non-HTTPS schemes still fail.                                              | off                                                       |
 | `AUTOMOBILE_CTRL_PROXY_APK_PATH`                                                             | Local Android APK override; trimmed filesystem path, resolved from daemon launch directory; bypasses published APK checksum baseline.                              | released/cached APK                                       |
 | `AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM`, `AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK` | Skip Android APK checksum enforcement with `1`/`true` (case-insensitive, no trimming).                                                                             | off                                                       |
-| `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`                                        | Skip APK download when already installed; `1`/`true` enables (case-insensitive, no trimming).                                                                      | off                                                       |
+| `AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED`                                        | Accept an installed APK unchecked outside readiness; readiness still upgrades (see below). `1`/`true` (case-insensitive, no trimming).                             | off                                                       |
 | `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD`                                                        | Use local CtrlProxy sources without downloading; `1`/`true` enables (case-insensitive, no trimming); CLI skip flag also enables.                                   | off                                                       |
 | `AUTOMOBILE_IOS_OVERLAY_AGENT`                                                               | Local iOS simulator overlay-agent dylib override; filesystem path (not trimmed), must exist or resolution fails; wins over a local build and the release download. | local build output, then verified release download        |
 | `AUTOMOBILE_SKIP_IOS_OVERLAY_AGENT_DOWNLOAD`                                                 | Refuse to download the overlay-agent dylib when no verified cached copy exists; `1`/`true` enables (case-insensitive, no trimming).                                | off                                                       |
@@ -731,6 +731,21 @@ clean shutdown then stops it after active device sessions are released.
 | `AUTOMOBILE_FFMPEG`                                                                          | ffmpeg executable override; executable path/name (not trimmed); explicit resolver option wins.                                                                     | `ffmpeg` on PATH                                          |
 
 </div>
+
+`AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED` does not stop a CtrlProxy
+upgrade when the installed APK's checksum differs from the expected release.
+It applies only to paths that do not request a download: CtrlProxy auto-setup
+(including reconnect recovery) and `doctor` status reads accept an installed APK
+as `skipped` without reading its checksum or queuing a background refresh.
+Runner readiness (`startDevice`, observing a device by `deviceId`, and other
+calls that wait for a ready runner) and the IDE "update service" action request
+the download explicitly, so they ignore this variable and upgrade a mismatched
+APK. It is also ignored when `AUTOMOBILE_VERSION` pins a known release and
+`AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM` is unset; a mismatch then fails closed.
+To keep an installed APK through readiness, set
+`AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=1` (readiness never downloads and reports a
+version mismatch as a failure) together with
+`AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1` (the installed version is accepted).
 
 ## iOS builds and signing
 

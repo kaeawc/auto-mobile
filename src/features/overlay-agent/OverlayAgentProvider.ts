@@ -10,6 +10,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/ChecksumCalculator";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
+import { type IdGenerator, defaultIdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
@@ -41,6 +42,8 @@ export interface OverlayAgentProviderDeps {
   checksumCalculator?: ChecksumCalculator;
   cacheDir?: string;
   timer?: Timer;
+  /** Names each download attempt's private partial file. */
+  idGenerator?: IdGenerator;
   env?: NodeJS.ProcessEnv;
   expectedChecksum?: string;
   releaseUrl?: string;
@@ -71,6 +74,7 @@ export class OverlayAgentProvider {
   private readonly cacheDir: string;
   private readonly usesDefaultCacheDir: boolean;
   private readonly timer: Timer;
+  private readonly idGenerator: IdGenerator;
   private readonly env: NodeJS.ProcessEnv;
   private readonly expectedChecksumOverride?: string;
   private readonly releaseUrlOverride?: string;
@@ -84,6 +88,7 @@ export class OverlayAgentProvider {
     this.cacheDir = deps.cacheDir ?? getTempDir(CACHE_SUBDIR);
     this.usesDefaultCacheDir = deps.cacheDir === undefined;
     this.timer = deps.timer ?? defaultTimer;
+    this.idGenerator = deps.idGenerator ?? defaultIdGenerator;
     this.env = deps.env ?? process.env;
     this.expectedChecksumOverride = deps.expectedChecksum;
     this.releaseUrlOverride = deps.releaseUrl;
@@ -221,7 +226,12 @@ export class OverlayAgentProvider {
 
   private async download(expected: string): Promise<string> {
     const dir = await this.ensureSecureCacheDir();
-    const partialPath = path.join(dir, `${OVERLAY_AGENT_CACHE_FILENAME}.download`);
+    // Unique per attempt so overlapping providers/daemons sharing the cache never write, hash,
+    // rename or delete each other's partial; the final rename into place is atomic.
+    const partialPath = path.join(
+      dir,
+      `${OVERLAY_AGENT_CACHE_FILENAME}.${this.idGenerator.next()}.download`,
+    );
     const controller = new AbortController();
     const timeout = this.timer.setTimeout(() => controller.abort(), this.downloadTimeoutMs);
     // Only artifacts this attempt published may be removed on failure; another provider or daemon

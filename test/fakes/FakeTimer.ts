@@ -62,6 +62,8 @@ export class FakeTimer implements Timer {
   private pendingSleeps: PendingSleep[] = [];
   private sleepHistory: number[] = [];
   private currentTime: number = 0;
+  /** Wall-clock time the simulated host spent asleep; the monotonic clock skips it (#10699). */
+  private hostSleptMs: number = 0;
   private pendingTimeouts: PendingTimeout[] = [];
   private pendingIntervals: PendingInterval[] = [];
   private nextTimeoutId: number = 1;
@@ -248,6 +250,24 @@ export class FakeTimer implements Timer {
   }
 
   /**
+   * The monotonic clock: it moves with every advance and `setCurrentTime`, but not across
+   * {@link simulateHostSleep}, like `performance.now()` across a macOS or Linux suspend.
+   */
+  monotonicNow(): number {
+    return this.currentTime - this.hostSleptMs;
+  }
+
+  /**
+   * Simulate the host suspending for `ms`: the wall clock (`now()`) jumps ahead while the monotonic
+   * clock stands still, and no timer fires (nothing runs while the host is asleep). Overdue timers
+   * fire on the next advance, as they do on wake.
+   */
+  simulateHostSleep(ms: number): void {
+    this.currentTime += ms;
+    this.hostSleptMs += ms;
+  }
+
+  /**
    * Resolve all pending sleeps immediately regardless of time.
    * Useful for tests that don't care about timing details.
    */
@@ -341,6 +361,7 @@ export class FakeTimer implements Timer {
     this.consecutiveBursts = 0;
     this.sleepHistory = [];
     this.currentTime = 0;
+    this.hostSleptMs = 0;
     this.pendingTimeouts = [];
     this.pendingIntervals = [];
     this.nextEventSeq = 1;

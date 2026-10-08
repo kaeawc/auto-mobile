@@ -371,9 +371,12 @@ export class LivenessScenario {
     };
   }
 
-  /** The host sleeps: the clock jumps and no timer fires until the next advance. */
+  /**
+   * The host sleeps: the wall clock jumps, the monotonic clock stands still (#10699), and no timer
+   * fires until the next advance.
+   */
   hostSleep(ms: number): void {
-    this.timer.setCurrentTime(this.timer.now() + ms);
+    this.timer.simulateHostSleep(ms);
   }
 
   /**

@@ -57,6 +57,15 @@ export interface Timer {
    * @returns Current time in milliseconds (for testing, can return fake time)
    */
   now(): number;
+
+  /**
+   * A monotonic clock reading in milliseconds, for measuring how long the process itself was
+   * running. Unlike {@link now} it does not advance while the host is suspended (macOS and Linux
+   * suspend; `performance.now()` is uptime-based there), so the gap between the two over an
+   * interval is time the host spent asleep (#10699). Only differences between readings are
+   * meaningful. Optional: a timer without it is treated as never sleeping.
+   */
+  monotonicNow?(): number;
 }
 
 /**
@@ -85,6 +94,10 @@ export class SystemTimer implements Timer {
 
   now(): number {
     return Date.now();
+  }
+
+  monotonicNow(): number {
+    return performance.now();
   }
 }
 

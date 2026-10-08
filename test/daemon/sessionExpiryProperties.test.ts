@@ -6,7 +6,6 @@ import {
   LEASE_MS,
   MONITOR_INTERVAL_MS,
   assertProperty,
-  expectKnownFailure,
   generateSchedule,
   lastActivityAt,
   ownerExitAt,
@@ -31,11 +30,11 @@ import {
 //
 // #10661 (host sleep counts toward the idle window on every expiry path) landed in PR #10679,
 // #10656 (heartbeats prove liveness only and never extend the idle deadline) in PR #10681, and
-// #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, so
-// every property here is enforced except the known failures. A property a tracked bug still
-// violates is registered with `knownFailure`: it runs on every CI pass and succeeds only while a
-// seed still produces a counterexample (an inverted assertion naming the issue), so the bug stays
-// visible and cannot be silently skipped. The PR that fixes the bug flips it to enforced.
+// #10662 (stall forgiveness shifts a deadline by at most the lost interval) with its fix, and
+// #10699 (host sleep is told from a daemon stall by the wall clock outrunning the monotonic one,
+// not by length) with its fix, and #10729 (autolock owners get the default lease) with its fix,
+// so every property here is enforced. A property a newly found bug violates can be registered as
+// an inverted assertion with the harness's `expectKnownFailure`, so it stays visible until fixed.
 //
 // The pool is real: a 60 s window acquires through DevicePool.autolockDevice and a 120 s window
 // through bindOrReuseDeviceSession, and every release is judged by what it leaves in the pool
@@ -121,7 +120,7 @@ const LATE_TICKS_ONLY: ScheduleProfile = {
   allowIdleGaps: true,
 };
 
-/** Host sleeps shorter than the idle window, which the daemon cannot tell from a stall (#10699). */
+/** Host sleeps shorter than the idle window; the monotonic clock tells them from a stall (#10699). */
 const SHORT_SLEEPS: ScheduleProfile = {
   horizonWindows: 5,
   discontinuityChance: 0.1,
@@ -359,10 +358,7 @@ const stallNeverReleasesActiveSession: PropertyCheck = async (schedule) => {
         `t=${last}: inside the ${schedule.idleWindowMs}ms window plus the daemon's own stall`;
 };
 
-/**
- * Register one test per seed chunk. A `knownFailure` property is a tracked bug: it runs one
- * wide chunk and passes only while a counterexample exists (see expectKnownFailure).
- */
+/** Register one test per seed chunk. */
 function propertyTests(
   name: string,
   firstSeed: number,
@@ -375,20 +371,6 @@ function propertyTests(
     test(`${name} (seeds ${seeds[0]}-${seeds.at(-1)})`, () =>
       assertProperty(seeds, profile, check));
   }
-}
-
-/** Seeds a known failure is searched over; a counterexample is expected well inside them. */
-const KNOWN_FAILURE_SEEDS = 40;
-
-function knownFailure(
-  issue: string,
-  name: string,
-  firstSeed: number,
-  profile: ScheduleProfile,
-  check: PropertyCheck,
-): void {
-  const seeds = Array.from({ length: KNOWN_FAILURE_SEEDS }, (_, i) => firstSeed + i);
-  test(`KNOWN FAILURE ${issue}: ${name}`, () => expectKnownFailure(seeds, profile, check, issue));
 }
 
 describe("session expiry properties under clock discontinuities (#10670)", () => {
@@ -477,17 +459,15 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     exitedOwnerReleased,
   );
 
-  knownFailure(
-    "#10699",
-    "a sleep shorter than the window is forgiven as a stall, so the idle release lands late",
+  propertyTests(
+    "#10699: a sleep shorter than the window counts toward idle, so wake past the window plus grace releases at the first judgement",
     9_100,
     SHORT_SLEEPS,
     idleReleasedDespiteHeartbeats,
   );
 
-  knownFailure(
-    "#10699",
-    "a long daemon-only stall releases a heartbeating owner whose tool activity is within the window plus the stall",
+  propertyTests(
+    "#10699: a long daemon-only stall never releases a heartbeating owner whose tool activity is within the window plus the stall",
     9_200,
     LONG_STALLS,
     stallNeverReleasesActiveSession,

@@ -60,9 +60,15 @@ export type DiscontinuityKind =
    * their owners, and the owner's next heartbeat claims ownership again (#10705).
    */
   | "restart"
-  /** The whole host slept: no producer ran, and every overdue one fires on wake. */
+  /**
+   * The whole host slept: no producer ran, and every overdue one fires on wake. The wall clock
+   * jumps while the monotonic clock stands still (`FakeTimer.simulateHostSleep`, #10699).
+   */
   | "sleep"
-  /** The daemon's event loop blocked: the owner kept sending, and its messages queue to resume. */
+  /**
+   * The daemon's event loop blocked: the owner kept sending, and its messages queue to resume.
+   * Both clocks run, so the daemon can tell it from sleep (#10699).
+   */
   | "stall"
   /** Only the monitor's timer fired late (timer coalescing); everything else ran on time. */
   | "lateTick";
@@ -500,6 +506,10 @@ export async function runSchedule(
   try {
     await world.start(schedule.idleWindowMs);
     for (const instant of instants) {
+      if (instant.discontinuity?.kind === "sleep") {
+        // The gap ends with the host asleep for `ms`; the rest of it the host was awake.
+        world.timer.simulateHostSleep(instant.discontinuity.ms);
+      }
       world.timer.setCurrentTime(instant.at);
       if (instant.discontinuity?.kind === "restart") {
         await world.restart();

@@ -27,9 +27,11 @@ export interface HeartbeatSessionSource {
   cleanupExpiredSessions(): void;
   /**
    * Move every session's lease forward by `lostMs`, the interval the daemon itself stalled for
-   * and cannot have received heartbeats during (#10051). Never past `resumedAt`.
+   * and cannot have received heartbeats during (#10051), and by `sleptMs`, the interval the host
+   * was suspended and no owner could heartbeat (#10699). Only `lostMs` also moves the idle
+   * deadline: host sleep counts toward idle. Never past `resumedAt`.
    */
-  forgiveDaemonStall?(resumedAt: number, lostMs: number): number;
+  forgiveDaemonStall?(resumedAt: number, lostMs: number, sleptMs?: number): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
 }
@@ -77,6 +79,12 @@ export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** How long shutdown waits for releases a scan started before giving up on them. */
 const REAP_STOP_TIMEOUT_MS = 5_000;
+/**
+ * How long a release may stay unsettled before the monitor reports it as stuck (#10704). Its
+ * session is skipped meanwhile, never released twice, but other sessions are still judged on
+ * schedule; this only makes a wedged teardown visible.
+ */
+export const STUCK_REAP_WARN_MS = 30_000;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -114,6 +122,8 @@ export class SessionHeartbeatMonitor {
   private readonly executionVeto: UnsettledExecutionVeto;
   /** When the previous scan finished (or the monitor started); undefined until started. */
   private lastScanSettledAt: number | undefined;
+  /** The same instant on the monotonic clock, which does not run while the host sleeps (#10699). */
+  private lastScanSettledMonotonic: number | undefined;
   /** A running scan has already judged its own lateness; a probe mid-scan would count scan time. */
   private scanInFlight = false;
   /**
@@ -121,6 +131,8 @@ export class SessionHeartbeatMonitor {
    * waits on them: one slow teardown must not delay the expiry checks of every other session.
    */
   private readonly reapsInFlight = new Map<string, Promise<void>>();
+  /** When each in-flight release started, and whether it has been reported as stuck. */
+  private readonly reapStartedAt = new Map<string, { at: number; reported: boolean }>();
 
   constructor(
     private readonly sessions: HeartbeatSessionSource,
@@ -160,7 +172,10 @@ export class SessionHeartbeatMonitor {
   }
 
   start(): void {
-    this.lastScanSettledAt ??= this.timer.now();
+    if (this.lastScanSettledAt === undefined) {
+      this.lastScanSettledAt = this.timer.now();
+      this.lastScanSettledMonotonic = this.monotonicNow();
+    }
     this.sessions.setStallProbe?.(() => this.forgiveStallIfLate());
     if (this.intervalHandle) {
       return;
@@ -216,15 +231,29 @@ export class SessionHeartbeatMonitor {
     }
   }
 
+  /** The injected monotonic clock; a timer without one is treated as a host that never sleeps. */
+  private monotonicNow(): number {
+    return this.timer.monotonicNow?.() ?? this.timer.now();
+  }
+
   /**
-   * How late this scan fired relative to its schedule, judged on the injected
-   * clock. Undefined before the monitor starts, so a manually driven `tick()`
-   * has no schedule to be late against.
+   * How the time since the previous scan splits (#10699). `sleptMs` is how far the wall clock ran
+   * ahead of the monotonic clock: the host was suspended, nothing ran anywhere on it, and that
+   * time counts toward idle. `lateMs` is how much later than scheduled the scan fired while the
+   * host was awake: the daemon's own event loop stalled, which is never held against an owner.
+   * Undefined before the monitor starts, so a manually driven `tick()` has no schedule to be late
+   * against.
    */
-  private scanLatenessMs(now: number): number | undefined {
-    return this.lastScanSettledAt === undefined
-      ? undefined
-      : now - this.lastScanSettledAt - this.checkIntervalMs;
+  private sinceLastScan(
+    now: number,
+    monotonic: number,
+  ): { lateMs: number; sleptMs: number } | undefined {
+    if (this.lastScanSettledAt === undefined || this.lastScanSettledMonotonic === undefined) {
+      return undefined;
+    }
+    const wallMs = now - this.lastScanSettledAt;
+    const awakeMs = Math.min(wallMs, monotonic - this.lastScanSettledMonotonic);
+    return { lateMs: awakeMs - this.checkIntervalMs, sleptMs: wallMs - awakeMs };
   }
 
   /**
@@ -238,23 +267,37 @@ export class SessionHeartbeatMonitor {
 
   /**
    * Idempotent form of the stall check, also run by the session source before each lazy expiry
-   * judgement (#10661). Once a stall is judged, the schedule watermark is moved so the overdue
-   * tick measures only what is still unaccounted for and forgiveness is never applied twice.
+   * judgement (#10661). Once a stall or sleep is judged, the schedule watermarks are moved so the
+   * overdue tick measures only what is still unaccounted for and nothing is forgiven twice.
+   *
+   * Sleep and stall are told apart by the wall clock running ahead of the monotonic one (#10699),
+   * not by length: a daemon stall of any length is forgiven in full (owners kept heartbeating and
+   * the daemon could not hear them), while host sleep of any length counts toward the idle
+   * deadline (owner policy) and only excuses the heartbeat lease, since no owner on a sleeping
+   * host could heartbeat either.
    */
   private forgiveStallIfLate(): void {
     if (this.scanInFlight) {
       return;
     }
     const now = this.timer.now();
-    const lateness = this.scanLatenessMs(now);
-    if (lateness === undefined || lateness <= this.stallThresholdMs) {
+    const monotonic = this.monotonicNow();
+    const gap = this.sinceLastScan(now, monotonic);
+    if (gap === undefined) {
+      return;
+    }
+    const lateMs = gap.lateMs > this.stallThresholdMs ? gap.lateMs : 0;
+    const sleptMs = gap.sleptMs > this.stallThresholdMs ? gap.sleptMs : 0;
+    if (lateMs === 0 && sleptMs === 0) {
       return;
     }
     this.lastScanSettledAt = now - this.checkIntervalMs;
-    const forgiven = this.sessions.forgiveDaemonStall?.(now, lateness) ?? 0;
+    this.lastScanSettledMonotonic = monotonic - this.checkIntervalMs;
+    const forgiven = this.sessions.forgiveDaemonStall?.(now, lateMs, sleptMs) ?? 0;
     logger.warn(
-      `Heartbeat monitor tick fired ${lateness}ms late; the daemon stalled, so ${forgiven} ` +
-        `session(s) get their lease extended by ${lateness}ms instead of being reaped for the stalled interval`,
+      `Heartbeat monitor tick fired ${lateMs}ms late after the host slept ${sleptMs}ms; ` +
+        `${forgiven} session(s) get their lease extended by ${lateMs + sleptMs}ms and their idle ` +
+        `deadline by the ${lateMs}ms the daemon stalled (host sleep counts toward idle)`,
     );
   }
 
@@ -272,9 +315,13 @@ export class SessionHeartbeatMonitor {
       return this.reapStaleSessions();
     } finally {
       this.scanInFlight = false;
-      if (this.lastScanSettledAt !== undefined) {
+      if (this.lastScanSettledAt !== undefined && this.lastScanSettledMonotonic !== undefined) {
         // Never backwards: a scan judged at an earlier clock reading must not reopen a stall.
         this.lastScanSettledAt = Math.max(this.lastScanSettledAt, this.timer.now());
+        this.lastScanSettledMonotonic = Math.max(
+          this.lastScanSettledMonotonic,
+          this.monotonicNow(),
+        );
       }
     }
   }
@@ -284,6 +331,7 @@ export class SessionHeartbeatMonitor {
     const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.reapsInFlight.has(session.sessionId)) {
+        this.reportIfStuck(session.sessionId);
         continue;
       }
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
@@ -324,12 +372,31 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
+    this.reapStartedAt.set(sessionId, { at: this.timer.now(), reported: false });
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {
         this.reapsInFlight.delete(sessionId);
+        this.reapStartedAt.delete(sessionId);
       }
     });
     return logged;
+  }
+
+  /** Warn once when a release has been tearing down for {@link STUCK_REAP_WARN_MS} (#10704). */
+  private reportIfStuck(sessionId: string): void {
+    const started = this.reapStartedAt.get(sessionId);
+    if (!started || started.reported) {
+      return;
+    }
+    const elapsedMs = this.timer.now() - started.at;
+    if (elapsedMs < STUCK_REAP_WARN_MS) {
+      return;
+    }
+    started.reported = true;
+    logger.warn(
+      `Session ${sessionId} release has not settled after ${elapsedMs}ms; its device stays held ` +
+        "until the teardown finishes. Other sessions are still judged on schedule.",
+    );
   }
 
   /**
@@ -361,13 +428,6 @@ export class SessionHeartbeatMonitor {
    * decision rather than a nest of early-continues inside the sweep loop.
    */
   private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
-    const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-    // The daemon's own stall is never held against the owner (#10051).
-    const lastHeartbeat = effectiveLastHeartbeat({
-      lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
-      stallForgivenAt: session.stallForgivenAt,
-    });
-
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
     // the heartbeat lease: the `--cli` process that owns it exits between calls,
     // so nobody is left to heartbeat and a missing first heartbeat says nothing
@@ -377,8 +437,23 @@ export class SessionHeartbeatMonitor {
     // heartbeat: a `--daemon heartbeat` loop proves liveness, not use, and must
     // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
+      const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
       return now - session.lastUsedAt > timeoutMs ? "cli-idle-timeout" : undefined;
     }
+    return this.heartbeatLeaseStaleReason(session, now);
+  }
+
+  /**
+   * The heartbeat-lease half of {@link staleReason}: judged on liveness clocks only, never on
+   * tool activity (#10703, guarded by `test/lint/livenessActivityClockSeparation.test.ts`).
+   */
+  private heartbeatLeaseStaleReason(
+    session: Session,
+    now: number,
+  ): SessionHeartbeatReleaseReason | undefined {
+    const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
+    // The daemon's own stall is never held against the owner (#10051).
+    const lastHeartbeat = effectiveLastHeartbeat(session);
 
     if (!session.hasReceivedHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {

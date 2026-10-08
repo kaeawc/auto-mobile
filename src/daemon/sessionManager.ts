@@ -380,19 +380,6 @@ interface SessionPersistenceMetadata {
   daemonSessionId: string | null;
 }
 
-function rollbackSessionActivityIfCurrent(
-  session: Session,
-  previousActivity: Pick<Session, "lastUsedAt" | "lastHeartbeat" | "expiresAt">,
-  capturedGeneration: number,
-): void {
-  if (session.activityGeneration !== capturedGeneration) {
-    return;
-  }
-  session.lastUsedAt = previousActivity.lastUsedAt;
-  session.lastHeartbeat = previousActivity.lastHeartbeat;
-  session.expiresAt = previousActivity.expiresAt;
-}
-
 /**
  * Re-derive the idle deadline after a policy change widened `sessionTimeoutMs`, never shortening
  * it. The deadline is anchored on the last tool activity (`lastUsedAt`), never on the current time:
@@ -5488,6 +5475,13 @@ export class SessionManager {
    *
    * Allows tools to store data (screenshots, hierarchies) that can be
    * reused by other tools in the same session without re-fetching.
+   *
+   * Cache data only: this never touches the session's activity or liveness clocks (#10703). It is
+   * reached from paths that are not the owner's tool usage — a device incarnation change
+   * resetting readiness, or an observe by device id from any client invalidating it — so stamping
+   * `lastUsedAt` here would let them extend the owner's idle window and make `session-info`'s
+   * `lastUsedAt` stop meaning "last tool call". A tool call's activity is stamped where the call is
+   * admitted (`getOrCreateSession`) and where it ends (`recordToolCallEnded`).
    */
   updateSessionCache(sessionId: string, updates: Partial<SessionCacheData>): void {
     const session = this.getSession(sessionId);
@@ -5500,22 +5494,6 @@ export class SessionManager {
       ...session.cacheData,
       ...updates,
     };
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
-      lastHeartbeat: session.lastHeartbeat,
-      expiresAt: session.expiresAt,
-    };
-    session.lastUsedAt = this.timer.now();
-    session.lastHeartbeat = this.timer.now();
-    session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
-    void this.getBarrier()
-      .track(() => this.recordSessionActivity(session))
-      .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
-      });
-
     logger.debug(`Updated cache for session ${sessionId}`);
   }
 
@@ -5956,32 +5934,10 @@ export class SessionManager {
   }
 
   /**
-   * Get session cache data
+   * Get session cache data. A read: it records no activity (#10703), like the typed getters.
    */
   getSessionCache(sessionId: string): SessionCacheData | null {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      return null;
-    }
-
-    // Update last used time when accessing cache
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
-      lastHeartbeat: session.lastHeartbeat,
-      expiresAt: session.expiresAt,
-    };
-    session.lastUsedAt = this.timer.now();
-    session.lastHeartbeat = this.timer.now();
-    session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
-    void this.getBarrier()
-      .track(() => this.recordSessionActivity(session))
-      .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
-      });
-
-    return session.cacheData;
+    return this.getSession(sessionId)?.cacheData ?? null;
   }
 
   /**
@@ -6269,29 +6225,31 @@ export class SessionManager {
   }
 
   /**
-   * Do not hold the daemon's own stall against any session (#10051).
+   * Do not hold the daemon's own stall, or the host's sleep, against an owner's lease (#10051,
+   * #10699).
    *
-   * Called by the heartbeat monitor when its tick fired later than scheduled: the daemon cannot
-   * have received heartbeats while its event loop was stalled. Each non-CLI session's lease is
-   * moved forward by exactly the lost interval (`lostMs`), never past `resumedAt`, so the stalled
-   * time is not counted against the owner while time the owner genuinely missed before the stall
-   * still is. A stall at least as long as the session's idle window is sleep, not a hiccup, and
-   * is not forgiven (host sleep counts toward idle). Returns how many sessions were extended.
+   * Called by the heartbeat monitor, which tells the two apart by the wall clock running ahead of
+   * the monotonic one rather than by length:
+   *
+   * - `lostMs`: the daemon's event loop stalled while the host was awake. Owners kept
+   *   heartbeating and calling, but the daemon could not hear them, so the lease AND the idle
+   *   deadline move forward by exactly that interval, whatever its length.
+   * - `sleptMs`: the host was suspended. Nothing ran, owners included, so the lease moves forward
+   *   by it, but the idle deadline does not: host sleep counts toward the idle window (owner
+   *   policy, #10661).
+   *
+   * Nothing moves past `resumedAt`, so time an owner genuinely missed before the gap still counts.
+   * CLI sessions keep their own wall-clock idle policy. Returns how many sessions were extended.
    */
-  forgiveDaemonStall(resumedAt: number, lostMs: number): number {
+  forgiveDaemonStall(resumedAt: number, lostMs: number, sleptMs = 0): number {
+    const leaseLostMs = lostMs + sleptMs;
     let forgiven = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
         continue;
       }
-      // Idle time is wall-clock, host sleep included: a stall that alone outlasts the window
-      // (timeout plus suspect grace) is idleness the owner did not use, not a hiccup to forgive.
-      // Judged here so the monitor tick and every lazy lookup reach the same verdict.
-      if (lostMs >= session.sessionTimeoutMs + suspectGraceMsFor(session)) {
-        continue;
-      }
       const leaseStart = effectiveLastHeartbeat(session);
-      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + lostMs));
+      session.stallForgivenAt = Math.max(leaseStart, Math.min(resumedAt, leaseStart + leaseLostMs));
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
       session.expiresAt = Math.max(
@@ -6301,7 +6259,7 @@ export class SessionManager {
       if (session.awaitingOwnerSince !== undefined) {
         session.awaitingOwnerSince = Math.max(
           session.awaitingOwnerSince,
-          Math.min(session.awaitingOwnerSince + lostMs, resumedAt),
+          Math.min(session.awaitingOwnerSince + leaseLostMs, resumedAt),
         );
       }
       forgiven++;

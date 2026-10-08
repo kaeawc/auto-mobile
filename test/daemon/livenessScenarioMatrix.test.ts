@@ -349,8 +349,8 @@ describe("host sleep longer than the idle window (#10661)", () => {
       await scenario.toolCall(session);
       expectHeld(session);
 
-      // A stall shorter than window + suspect grace is forgiven as a daemon hiccup (#10051); the
-      // monitor measures it from its previous scan, so sleep one scan interval beyond that.
+      // Host sleep counts toward the idle window whatever its length (#10699); sleep past the
+      // window plus grace so the session is due on wake.
       const sleptAt = scenario.timer.now();
       scenario.hostSleep(IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS);
       if (order === "owner heartbeat first") {
@@ -363,12 +363,14 @@ describe("host sleep longer than the idle window (#10661)", () => {
       }
       const releasedAt = await scenario.idleUntilReleased(session, 2 * RELEASE_SLACK_MS);
 
-      // The window and the lease both lapsed in the sleep: freed on wake, never held "per timer".
+      // The window lapsed in the sleep: freed on wake, never held "per timer". Sleep never lapses
+      // the heartbeat lease (no owner on a sleeping host can heartbeat), so the release is idle
+      // expiry, not a heartbeat timeout (#10699).
       expect(releasedAt).toBeDefined();
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(scenario.releaseOf(session)?.reason).toBe("heartbeat-timeout");
+      expect(["lazy-expiry", "cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }

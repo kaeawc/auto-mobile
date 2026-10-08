@@ -2347,11 +2347,11 @@ describe("SessionManager", () => {
         manager.recordHeartbeat("session-1");
         repository.finishUpsert();
 
-        // The label write at 100 is session activity; the heartbeat at 150 renews only
-        // liveness and leaves the idle deadline alone (#10656).
+        // Neither the label write at 100 (cache data, #10703) nor the heartbeat at 150 (liveness,
+        // #10656) is tool usage, so the idle clocks stay where the session was created.
         await expect(rebinding).resolves.toMatchObject({
           assignedDevice: "emulator-new",
-          lastUsedAt: 100,
+          lastUsedAt: 0,
           lastHeartbeat: 150,
           expiresAt: 1_000,
           hasReceivedHeartbeat: true,
@@ -2571,7 +2571,7 @@ describe("SessionManager", () => {
       expect(sessionManager.getSession("nope")).toBeNull();
     });
 
-    test("should get session cache without modifying other fields", async () => {
+    test("reading the session cache records no activity (#10703)", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       sessionManager.updateSessionCache("session-1", {
         deviceLabels: { A: "session-1" },
@@ -2582,7 +2582,35 @@ describe("SessionManager", () => {
       const cache = sessionManager.getSessionCache("session-1");
       const session2 = sessionManager.getSession("session-1");
       expect(cache?.deviceLabels).toEqual({ A: "session-1" });
-      expect(session2?.lastUsedAt ?? 0).toBe(initialLastUsed + 10);
+      expect(session2?.lastUsedAt ?? 0).toBe(initialLastUsed);
+    });
+
+    test("cache writes from non-tool paths never move the owner's activity or liveness clocks (#10703)", async () => {
+      const persistence = new FakeDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      const session = sessionManager.getSession("session-1")!;
+      const activityWrite = spyOn(persistence, "recordActivity");
+      const clocks = () => ({
+        lastUsedAt: session.lastUsedAt,
+        expiresAt: session.expiresAt,
+        lastHeartbeat: session.lastHeartbeat,
+      });
+      const before = clocks();
+      fakeTimer.advanceTime(30_000);
+
+      // A device incarnation change, an observe by device id from another client losing
+      // accessibility, and the observe cache write itself: none is the owner using the device.
+      sessionManager.resetDeviceReadinessForDevice("emulator-5554");
+      sessionManager.invalidateAutomationReadinessForDevice("emulator-5554", "a11y lost");
+      sessionManager.setLastHierarchy("session-1", makeHierarchy("root"));
+      sessionManager.updateSessionCache("session-1", { lastObserveTime: fakeTimer.now() });
+
+      expect(session.cacheData.deviceReadiness).toBe("booted");
+      expect(session.cacheData.lastObserveTime).toBe(fakeTimer.now());
+      expect(clocks()).toEqual(before);
+      expect(activityWrite).not.toHaveBeenCalled();
     });
 
     test("should clear specific cache key", async () => {
@@ -3509,7 +3537,8 @@ describe("SessionManager", () => {
     });
   });
 
-  test.each(["heartbeat", "cache update", "cache read"] as const)(
+  // Cache updates and reads record no activity (#10703), so only the heartbeat write remains.
+  test.each(["heartbeat"] as const)(
     "rolls back failed fire-and-forget %s activity",
     async (operation) => {
       const timer = new FakeTimer();
@@ -3537,12 +3566,6 @@ describe("SessionManager", () => {
         if (operation === "heartbeat") {
           manager.recordHeartbeat("activity-session");
         }
-        if (operation === "cache update") {
-          manager.updateSessionCache("activity-session", { lastObserveTime: 1 });
-        }
-        if (operation === "cache read") {
-          manager.getSessionCache("activity-session");
-        }
         await writeStarted.promise;
         await Promise.resolve();
         await Promise.resolve();
@@ -3557,47 +3580,6 @@ describe("SessionManager", () => {
       }
     },
   );
-
-  test("an older failed cache activity write does not revert a newer heartbeat", async () => {
-    const timer = new FakeTimer();
-    const firstWriteStarted = Promise.withResolvers<void>();
-    const failFirstWrite = Promise.withResolvers<void>();
-    let writes = 0;
-    const persistence: DeviceSessionPersistence = {
-      async upsertActiveSession() {},
-      async recordActivity() {
-        writes++;
-        if (writes === 1) {
-          firstWriteStarted.resolve();
-          await failFirstWrite.promise;
-          throw new Error("older activity write failed");
-        }
-      },
-      async markReleased() {},
-    };
-    const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
-    try {
-      const session = await manager.createSession("activity-session", "emulator-5554", "android");
-      timer.advanceTime(10);
-      manager.updateSessionCache("activity-session", { lastObserveTime: 1 });
-      await firstWriteStarted.promise;
-      timer.advanceTime(10);
-      manager.recordHeartbeat("activity-session");
-      const newer = {
-        lastUsedAt: session.lastUsedAt,
-        lastHeartbeat: session.lastHeartbeat,
-        expiresAt: session.expiresAt,
-      };
-      failFirstWrite.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(session).toMatchObject(newer);
-    } finally {
-      failFirstWrite.resolve();
-      manager.stopCleanupTimer();
-    }
-  });
 
   test("acknowledges a liveness ownership claim only after durable persistence", async () => {
     const persistenceStarted = Promise.withResolvers<void>();
@@ -4928,7 +4910,7 @@ describe("SessionManager", () => {
       expect(sessionManager.getLastRenderedDisplayRevision("s1")).toBe(3);
     });
 
-    test("EC3.2: the read records NO session activity, unlike getSessionCache", async () => {
+    test("EC3.2: the read records NO session activity", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const mgr = new SessionManager(fakeTimer, repo, () => barrier);
@@ -4943,20 +4925,20 @@ describe("SessionManager", () => {
         await Promise.resolve();
         expect(activity.length).toBe(activityAfterSet);
 
-        // Contrast: getSessionCache DOES record activity (the behavior we avoid).
+        // getSessionCache is a plain read too (#10703).
         mgr.getSessionCache("s1");
         await Promise.resolve();
-        expect(activity.length).toBe(activityAfterSet + 1);
+        expect(activity.length).toBe(activityAfterSet);
       } finally {
         mgr.stopCleanupTimer();
       }
     });
 
-    test("EC3.2: a full baseline-store cycle (read + write) records activity exactly once", async () => {
+    test("EC3.2: a full baseline-store cycle (read + write) records no activity", async () => {
       // The #3053 defect: the diff baseline did get (→recordActivity) +
-      // set (→recordActivity) = TWO activity UPDATEs per diffed action. With the
-      // side-effect-free reader, one non-observe action's baseline read + update
-      // must record activity exactly once (the write), proving the halving.
+      // set (→recordActivity) = TWO activity UPDATEs per diffed action. Both are now
+      // cache-only (#10703): the action's own tool call records its activity once, where it
+      // is admitted and where it ends, so the baseline store adds no write at all.
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
       const mgr = new SessionManager(fakeTimer, repo, () => barrier);
@@ -4970,7 +4952,7 @@ describe("SessionManager", () => {
         mgr.setLastRenderedObservation("s1", makeObservation("root"));
         await Promise.resolve();
 
-        expect(activity.length).toBe(before + 1);
+        expect(activity.length).toBe(before);
       } finally {
         mgr.stopCleanupTimer();
       }

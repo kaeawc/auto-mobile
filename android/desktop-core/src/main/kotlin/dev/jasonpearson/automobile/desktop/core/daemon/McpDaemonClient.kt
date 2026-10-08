@@ -317,11 +317,7 @@ class McpDaemonClient(
     force: Boolean,
   ): KillDeviceResult {
     val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return try {
-      decodeToolResponse(json, response, serializer<KillDeviceResult>())
-    } catch (e: Exception) {
-      KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
-    }
+    return decodeKillDeviceResponse(json, response)
   }
 
   override fun getDaemonStatus():
@@ -681,7 +677,12 @@ class McpDaemonClient(
 
   private fun DaemonResponse.toInputActionResult(method: String): InputActionResult {
     if (!success) {
-      return InputActionResult(action = method, success = false, error = error)
+      return InputActionResult(
+        action = method,
+        success = false,
+        error = error,
+        code = code?.contentOrNull,
+      )
     }
     val body =
       result
@@ -907,7 +908,12 @@ class McpDaemonClient(
     // after 5s than sit dead for a minute.
     val response = sendRequest(method, withInputSession(params), timeoutMs = inputRequestTimeoutMs)
     if (!response.success) {
-      return InputActionResult(action = method, success = false, error = response.error)
+      return InputActionResult(
+        action = method,
+        success = false,
+        error = response.error,
+        code = response.code?.contentOrNull,
+      )
     }
     val result =
       response.result
@@ -1360,6 +1366,11 @@ data class DaemonResponse(
   val success: Boolean,
   val result: JsonElement? = null,
   val error: String? = null,
+  /**
+   * The daemon's structured error code: a string such as [DEVICE_OWNED_BY_OTHER_SESSION_CODE], or a
+   * JSON-RPC number (`src/daemon/types.ts`), so it is kept as a primitive.
+   */
+  val code: JsonPrimitive? = null,
 )
 
 @Serializable private data class DaemonCapabilitiesResult(val capabilities: List<String>)

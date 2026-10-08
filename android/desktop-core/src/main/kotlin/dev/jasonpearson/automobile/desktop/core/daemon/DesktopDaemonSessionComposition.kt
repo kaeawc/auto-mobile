@@ -124,6 +124,14 @@ data class DesktopDaemonSessionState(
   val requestInput: (String) -> Deferred<Boolean> = { CompletableDeferred(true) },
   /** The blocking form of [requestInput] that input clients wait on (#10730). */
   val inputAllocation: DesktopInputAllocation = DesktopInputAllocation.Unrestricted,
+  /**
+   * The daemon refused an input or device control on this device because another session holds it
+   * (`device_owned_by_other_session`, #10743, #10783): show the pane's held-elsewhere notice, as a
+   * refused bind does, and stop treating the device as held by this session. Also how a transport
+   * with no desktop session (MCP HTTP/STDIO) makes a refusal visible. Ignored for a device no pane
+   * shows. Safe from any thread.
+   */
+  val reportHeldElsewhere: (String) -> Unit = {},
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -307,6 +315,19 @@ fun rememberDesktopDaemonSession(
           carriedBindError = null
           inputDeviceId = deviceId
           controlRequests++
+        }
+      }
+    }
+  val reportHeldElsewhere: (String) -> Unit =
+    remember(socketPath) {
+      { deviceId ->
+        if (currentPanes.any { it.deviceId == deviceId }) {
+          LOG.info("Device $deviceId is held by another session; watching only")
+          heldElsewhereDeviceId = deviceId
+          // The daemon says this session does not hold it, whatever the last bind said: input stops
+          // taking the no-wait path, and leaving the device lets the binding loop drop any hold.
+          heldDevice.compareAndSet(deviceId, null)
+          if (inputDeviceId == deviceId) inputDeviceId = null
         }
       }
     }
@@ -557,5 +578,6 @@ fun rememberDesktopDaemonSession(
     idleReleasedDeviceId = idleReleasedDeviceId,
     requestInput = requestInput,
     inputAllocation = inputAllocation,
+    reportHeldElsewhere = reportHeldElsewhere,
   )
 }

@@ -2,7 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 
 import dev.jasonpearson.automobile.desktop.core.MONOTONIC_NOW_MS
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.daemon.McpToolErrorException
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -183,8 +183,11 @@ class DaemonEmulatorControlExecutor(
       "button ${button.toolValue} $deviceId: dispatch=${MONOTONIC_NOW_MS() - startMs}ms success=${result.success}",
     )
     if (!result.success) {
-      throw McpConnectionException(
+      // Keep the daemon's code so a held-device refusal reaches the caller as one (#10743).
+      throw McpToolErrorException(
         result.error ?: "input/pressButton failed for ${button.toolValue} on $deviceId",
+        code = result.code,
+        deviceId = deviceId,
       )
     }
   }

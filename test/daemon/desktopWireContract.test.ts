@@ -267,6 +267,48 @@ describe("desktop wire contract (#10669, #10730)", () => {
     );
   });
 
+  test("input and a device control on a device another session holds are refused with a typed code", async () => {
+    const wire = await startHarness();
+    await agentHolds(wire, PIXEL.deviceId);
+    await startWatching(wire, DESKTOP_1, 2);
+
+    // A pane whose session no longer holds the device (the hold lapsed and an agent took it) sends
+    // its input and controls under its own session; the daemon refuses both with the typed code
+    // the client matches to show the held-elsewhere notice (#10743, #10783).
+    const tap = await wire.send("desktop", "tap-refused", "input/tap", tapParams(DESKTOP_1));
+    expect(tap).toMatchObject({ success: false, code: "device_owned_by_other_session" });
+    const rotate = await wire.send("desktop", "rotate-refused", "tools/call", {
+      name: "rotate",
+      arguments: {
+        orientation: "landscape",
+        platform: "android",
+        deviceId: PIXEL.deviceId,
+        sessionUuid: DESKTOP_1,
+        [DAEMON_OWNED_SESSIONS_PARAM]: [DESKTOP_1],
+      },
+    });
+    expect(isToolError(rotate)).toBe(true);
+    expect(JSON.parse(textOf(rotate))).toMatchObject({
+      success: false,
+      code: "device_owned_by_other_session",
+      deviceId: PIXEL.deviceId,
+      retryable: false,
+    });
+    await wire.heartbeats("heartbeat-viewing", DESKTOP_1, 2);
+    expect(wire.holderOf(PIXEL.deviceId)).toBe(AGENT);
+
+    checkFixture(
+      wire.fixture(
+        "held-device-input-refused",
+        "An agent holds the device and the desktop sends a tap and a rotate under its own " +
+          "session: the daemon refuses both with code device_owned_by_other_session (the tap on " +
+          "the socket response, the rotate in its tool error payload), and the agent keeps the " +
+          "device (#10743, #10783).",
+        { "desktop-1": DESKTOP_1, agent: AGENT },
+      ),
+    );
+  });
+
   test("closing the tapped pane releases the device; reopening it only watches until the next tap", async () => {
     const wire = await startHarness();
     await startWatching(wire, DESKTOP_1, 2);

@@ -42,6 +42,8 @@ fun LeftSidebarPanel(
   bootedDevices: List<BootedDeviceInfo>? = null,
   onRetryDetection: (() -> Unit)? = null,
   onKillDevice: ((String) -> Unit)? = null,
+  /** Why the last kill of a device failed, by device id; shown on its row. */
+  killDeviceErrors: Map<String, String> = emptyMap(),
   onOpenSettings: (() -> Unit)? = null,
   availableDevicesContent: (@Composable () -> Unit)? = null,
   daemonStatusProvider: (suspend () -> DaemonStatusResponse?)? = null,
@@ -87,6 +89,7 @@ fun LeftSidebarPanel(
       onToggleFavorite = onToggleFavorite,
       devices = bootedDevices,
       onKillDevice = onKillDevice,
+      killDeviceErrors = killDeviceErrors,
       modifier = Modifier.fillMaxWidth(),
     )
 

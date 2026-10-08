@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.desktop.core.control.GestureStreamingConfig
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AppearanceSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DEVICE_OWNED_BY_OTHER_SESSION_CODE
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSessionBinding
 import dev.jasonpearson.automobile.desktop.core.daemon.DeviceSnapshotActions
@@ -740,6 +741,9 @@ fun AutoMobileContent(
   // allocation-bearing daemon session binding (#10660); `activeDeviceId` also holds the
   // display-only auto-selected first device, which must never reserve a device on its own.
   var userSelectedDeviceId by remember { mutableStateOf<String?>(null) }
+  // Why the last sidebar kill of a device failed, shown on its row until the next attempt. A kill
+  // the daemon refuses because another session holds the device (#10785) lands here too.
+  var killDeviceErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
   // Log state changes for debugging
   LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
@@ -2247,24 +2251,37 @@ fun AutoMobileContent(
             sidebarDevices
               .firstOrNull { it.id == deviceId }
               ?.let { device ->
+                killDeviceErrors = killDeviceErrors - device.id
                 screenshotScope.launch(Dispatchers.IO) {
                   try {
+                    // On a Unix daemon this is the desktop session's client, so a device the
+                    // desktop holds is stopped as its holder; without a session (MCP HTTP) the
+                    // call is sessionless and a held device refuses it, shown on the row below.
                     val client = clientProvider?.invoke()
                     val platform = device.toSidebarDeviceInfo().platform
                     LOG.info(
                       "Killing device ${device.name} (${device.id}) via ${client?.transportName}",
                     )
                     val result = client?.killDevice(device.name, device.id, platform)
-                    if (result?.success == false)
+                    if (result?.success == false) {
                       LOG.warn("Failed to kill device: ${result.message}")
+                      killDeviceErrors =
+                        killDeviceErrors + (device.id to (result.message ?: "Failed to kill"))
+                      if (result.code == DEVICE_OWNED_BY_OTHER_SESSION_CODE) {
+                        desktopSessionState.reportHeldElsewhere(device.id)
+                      }
+                    }
                   } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                   } catch (e: Exception) {
                     LOG.warn("Failed to kill device ${device.name}", e)
+                    killDeviceErrors =
+                      killDeviceErrors + (device.id to (e.message ?: "Failed to kill"))
                   }
                 }
               }
           },
+          killDeviceErrors = killDeviceErrors,
           installedApps = installedApps,
           selectedAppId = selectedAppId,
           onAppSelected = { selectedAppId = it },

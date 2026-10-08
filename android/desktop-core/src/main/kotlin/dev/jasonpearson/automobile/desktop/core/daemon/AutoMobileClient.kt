@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
@@ -234,14 +235,14 @@ internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEl
       json.decodeFromString<JsonElement>(text)
     } catch (error: Exception) {
       if (envelopeError) {
-        throw McpConnectionException(toolErrorMessage(json, text), error)
+        throw toolError(json, text, error)
       }
       throw McpConnectionException("Tool response contained invalid JSON", error)
     }
   val payloadObject = payload as? JsonObject
   val success = (payloadObject?.get("success") as? JsonPrimitive)?.booleanOrNull
   if (envelopeError || success == false) {
-    throw McpConnectionException(toolErrorMessage(json, text))
+    throw toolError(json, text)
   }
   return payload
 }
@@ -250,7 +251,28 @@ internal fun checkToolResponse(responseElement: JsonElement, json: Json): JsonEl
 data class KillDeviceResult(
   val success: Boolean = true,
   val message: String? = null,
+  /**
+   * The daemon's structured error code for a failed kill, e.g.
+   * [DEVICE_OWNED_BY_OTHER_SESSION_CODE].
+   */
+  @Transient val code: String? = null,
 )
+
+/**
+ * Decodes a `killDevice` tool response; a failure becomes an unsuccessful result that keeps the
+ * daemon's error code, so a held-device refusal (#10785) stays distinguishable from other errors.
+ */
+internal fun decodeKillDeviceResponse(json: Json, response: JsonElement): KillDeviceResult =
+  try {
+    decodeToolResponse(json, response, serializer<KillDeviceResult>())
+  } catch (e: Exception) {
+    if (e is CancellationException) throw e
+    KillDeviceResult(
+      success = false,
+      message = e.message ?: "Failed to kill device",
+      code = (e as? McpToolErrorException)?.code,
+    )
+  }
 
 @Serializable
 data class UpdateServiceResult(
@@ -336,6 +358,11 @@ data class InputActionResult(
   val textLength: Int? = null,
   val submitted: Boolean? = null,
   val key: String? = null,
+  /**
+   * The daemon's structured code for a refused input, e.g. [DEVICE_OWNED_BY_OTHER_SESSION_CODE]
+   * (#10698). Read from the socket response, not the result body.
+   */
+  val code: String? = null,
 )
 
 internal fun unsupportedInputAction(transportName: String, action: String): InputActionResult =
@@ -523,21 +550,36 @@ internal fun <T> decodeToolResponse(
     response.content.firstOrNull { it.type == "text" }?.text
       ?: throw McpConnectionException("Tool response missing text content")
   if (response.isError) {
-    throw McpConnectionException(toolErrorMessage(json, text))
+    throw toolError(json, text)
   }
   return json.decodeFromString(serializer, text)
 }
 
-private fun toolErrorMessage(json: Json, text: String): String {
+/**
+ * The failure a tool error result reports, keeping the payload's structured `code` and `deviceId`
+ * (a refusal is `{success:false, error, code, deviceId, retryable}`, `shapeToolCallError.ts`) so
+ * callers can act on the code instead of the message.
+ */
+private fun toolError(json: Json, text: String, cause: Throwable? = null): McpToolErrorException {
   val payload = runCatching { json.decodeFromString<JsonElement>(text) }.getOrNull()
   val payloadObject = payload as? JsonObject
+  val code = payloadObject?.let {
+    (it["code"] as? JsonPrimitive)?.contentOrNull
+      ?: ((it["failure"] as? JsonObject)?.get("code") as? JsonPrimitive)?.contentOrNull
+  }
   val structuredMessage = payloadObject?.let {
     (it["error"] as? JsonPrimitive)?.contentOrNull
       ?: (it["message"] as? JsonPrimitive)?.contentOrNull
       ?: (it["reason"] as? JsonPrimitive)?.contentOrNull
       ?: (it["code"] as? JsonPrimitive)?.contentOrNull
   }
-  return structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" }
+  return McpToolErrorException(
+    message =
+      structuredMessage ?: text.removePrefix("Error:").trim().ifBlank { "Tool operation failed" },
+    code = code,
+    deviceId = (payloadObject?.get("deviceId") as? JsonPrimitive)?.contentOrNull,
+    cause = cause,
+  )
 }
 
 internal fun <T> decodeResourceResponse(

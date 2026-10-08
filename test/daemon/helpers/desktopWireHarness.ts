@@ -2,6 +2,10 @@ import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { spyOn } from "bun:test";
 import { DAEMON_OWNED_SESSIONS_PARAM } from "../../../src/daemon/constants";
+import {
+  assertInputRequesterHoldsDevice,
+  TOOL_CALL_REMEDY,
+} from "../../../src/daemon/inputDeviceOwnership";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
@@ -40,6 +44,10 @@ import { createFakeDeviceManager } from "./inputSocketHarness";
  *   `shapeToolCallError`), wrapped in the socket's `success: true` envelope that a
  *   forwarded MCP result rides in. The call is a tracked execution under its
  *   `sessionUuid`, so its end restarts the session's idle window as in production.
+ * - `tools/call rotate` (a pane's device control) runs the same device-ownership
+ *   check `ToolRegistry` applies to a device-aware tool (`assertInputRequesterHoldsDevice`
+ *   with `TOOL_CALL_REMEDY`) and answers a permitted call with a plain success; its
+ *   refusal is shaped by the real `shapeToolCallError`.
  * - Idle release and heartbeat expiry run on {@link FakeTimer}: the
  *   SessionManager's own cleanup interval plus the daemon's
  *   {@link SessionHeartbeatMonitor} reaper, wired as `daemon.ts` wires them.
@@ -388,6 +396,9 @@ export class DesktopWireHarness {
   private async callTool(params: Record<string, unknown>): Promise<DaemonResponse> {
     const name = params.name;
     const args = (params.arguments ?? {}) as Record<string, unknown> & { sessionUuid?: string };
+    if (name === "rotate") {
+      return this.callDeviceControl(name, args);
+    }
     if (name !== "setActiveDevice") {
       throw new Error(`desktop wire harness does not route tools/call ${String(name)}`);
     }
@@ -409,10 +420,41 @@ export class DesktopWireHarness {
       await drainMicrotasks(40);
     }
   }
+
+  /** A device-aware tool call: ToolRegistry's ownership check, then a stand-in success. */
+  private async callDeviceControl(
+    name: string,
+    args: Record<string, unknown> & { sessionUuid?: string },
+  ): Promise<DaemonResponse> {
+    try {
+      assertInputRequesterHoldsDevice({
+        action: name,
+        deviceId: String(args.deviceId),
+        ownerSessionUuid: this.holderOf(String(args.deviceId)) ?? undefined,
+        requesterSessionUuid: args.sessionUuid,
+        sessionManager: this.manager,
+        remedy: TOOL_CALL_REMEDY,
+      });
+      const text = JSON.stringify({ success: true });
+      return {
+        id: "tool",
+        type: "mcp_response",
+        success: true,
+        result: { content: [{ type: "text", text }] },
+      };
+    } catch (error) {
+      return {
+        id: "tool",
+        type: "mcp_response",
+        success: true,
+        result: toolErrorResult(error, name),
+      };
+    }
+  }
 }
 
 /** src/server/index.ts tool-call catch block, for the errors setActiveDevice can raise. */
-function toolErrorResult(error: unknown): unknown {
+function toolErrorResult(error: unknown, toolName = "setActiveDevice"): unknown {
   if (error instanceof TerminalSessionError) {
     const payload = sessionOwnershipLostPayload({
       message: error.message,
@@ -422,7 +464,7 @@ function toolErrorResult(error: unknown): unknown {
     });
     return { content: [{ type: "text", text: JSON.stringify(payload) }], isError: true };
   }
-  return shapeToolCallError(error, { toolName: "setActiveDevice", source: "MCP" });
+  return shapeToolCallError(error, { toolName, source: "MCP" });
 }
 
 function sameResponse(a: WireExchange, b: WireExchange): boolean {

@@ -255,11 +255,7 @@ class McpStdioClient(
     force: Boolean,
   ): KillDeviceResult {
     val response = callTool("killDevice", killDeviceArguments(name, deviceId, platform, force))
-    return try {
-      decodeToolResponse(json, response, serializer<KillDeviceResult>())
-    } catch (e: Exception) {
-      KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
-    }
+    return decodeKillDeviceResponse(json, response)
   }
 
   override fun getDaemonStatus():

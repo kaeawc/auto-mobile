@@ -231,6 +231,24 @@ describe("launchApp overlay:true (#10567)", () => {
     expect(h.ports.released).toEqual([overlayAgentKey(SIMULATOR.deviceId, APP)]);
   });
 
+  test("a failed terminateApp keeps the agent record and connection", async () => {
+    const h = setup();
+    setTerminateAppToolDependencies({
+      createTerminateApp: () => ({
+        execute: async () => ({ success: false, error: "devicectl failed" }),
+      }),
+    });
+    await launch(SIMULATOR, { overlay: true });
+
+    await expect(
+      ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(SIMULATOR, { appId: APP }),
+    ).rejects.toThrow("devicectl failed");
+
+    expect(h.registry.getRecord(SIMULATOR.deviceId, APP)).toBeDefined();
+    expect(h.clients[0]!.closeCount).toBe(0);
+    expect(h.ports.released).toEqual([]);
+  });
+
   test("releasing the session ends the agents on its device", async () => {
     const h = setup();
     await launch(SIMULATOR, { overlay: true });

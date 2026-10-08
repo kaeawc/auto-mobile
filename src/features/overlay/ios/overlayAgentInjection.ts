@@ -183,15 +183,21 @@ export class OverlayAgentRegistry implements OverlayAgentConnections {
     });
   }
 
-  /** Drops the record, closes its connection and releases its port. */
-  release(deviceId: string, bundleId: string): void {
+  /**
+   * Drops the record and closes its connection. The port is released too unless `keepPort` is
+   * set: a relaunch reuses the keyed allocation because the old process still holds the listener
+   * until the cold launch terminates it.
+   */
+  release(deviceId: string, bundleId: string, options: { keepPort?: boolean } = {}): void {
     const key = overlayAgentKey(deviceId, bundleId);
     const record = this.records.get(key);
     if (record === undefined) {
       return;
     }
     this.records.delete(key);
-    this.ports.release(key);
+    if (options.keepPort !== true) {
+      this.ports.release(key);
+    }
     record.client.close();
   }
 
@@ -237,14 +243,18 @@ export interface OverlayAgentInjectorDependencies {
 }
 
 export class OverlayAgentInjector {
+  /** The token of the newest prepared launch per key; only that launch may free the port. */
+  private readonly launchOwners = new Map<string, string>();
+
   constructor(private readonly deps: OverlayAgentInjectorDependencies) {}
 
   /** Validates the target, resolves the dylib, allocates a port and builds the launch env. */
   async prepare(device: BootedDevice, bundleId: string): Promise<PreparedOverlayLaunch> {
     assertOverlayInjectionSupported(device, bundleId);
     const dylib = await this.deps.dylibResolver.ensure();
-    // The relaunch ends any earlier agent for this app; free its connection and port first.
-    this.deps.registry.release(device.deviceId, bundleId);
+    // The relaunch ends any earlier agent for this app; close its connection but keep its port,
+    // which the old process's listener still holds until the cold launch terminates it.
+    this.deps.registry.release(device.deviceId, bundleId, { keepPort: true });
     const key = overlayAgentKey(device.deviceId, bundleId);
     let port: number;
     try {
@@ -257,6 +267,7 @@ export class OverlayAgentInjector {
     }
     try {
       const config = createOverlayAgentLaunchConfig(port, this.deps.idGenerator);
+      this.launchOwners.set(key, config.token);
       return {
         deviceId: device.deviceId,
         bundleId,
@@ -295,12 +306,28 @@ export class OverlayAgentInjector {
       handshake: client.handshake,
     };
     this.deps.registry.register(record);
+    this.disown(prepared);
     return record;
   }
 
-  /** Releases the port of a prepared launch that never attached. */
+  /**
+   * Releases the port of a prepared launch that never attached, unless a newer launch for the
+   * same device and bundle has since prepared and now owns the keyed allocation.
+   */
   abort(prepared: PreparedOverlayLaunch): void {
-    this.deps.ports.release(overlayAgentKey(prepared.deviceId, prepared.bundleId));
+    if (this.disown(prepared)) {
+      this.deps.ports.release(overlayAgentKey(prepared.deviceId, prepared.bundleId));
+    }
+  }
+
+  /** Clears this launch's ownership; true when it was still the newest launch for its key. */
+  private disown(prepared: PreparedOverlayLaunch): boolean {
+    const key = overlayAgentKey(prepared.deviceId, prepared.bundleId);
+    if (this.launchOwners.get(key) !== prepared.token) {
+      return false;
+    }
+    this.launchOwners.delete(key);
+    return true;
   }
 }
 

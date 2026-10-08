@@ -1181,7 +1181,6 @@ const terminateAppHandler = async (
     signal?.throwIfAborted();
     if (device.platform === "ios") {
       iosMutationTokens.clear(device.deviceId, args.appId);
-      getLaunchAppToolDependencies().overlayAgentRegistry.release(device.deviceId, args.appId);
     }
     const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
     mutationMayHaveHappened = true;
@@ -1199,6 +1198,10 @@ const terminateAppHandler = async (
     // uninstall handler below.
     if (!result.success) {
       throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
+    }
+    if (device.platform === "ios") {
+      // Only after a successful termination: a failed one leaves the agent running and reachable.
+      getLaunchAppToolDependencies().overlayAgentRegistry.release(device.deviceId, args.appId);
     }
 
     return createStructuredToolResponse({

@@ -201,16 +201,50 @@ describe("OverlayAgentInjector", () => {
     expect(ports.allocated.size).toBe(0);
   });
 
-  test("relaunching with overlay closes the earlier agent before allocating again", async () => {
+  test("relaunching with overlay closes the earlier agent and keeps its port allocation", async () => {
     const { injector, registry, clients, ports } = harness();
-    await injector.attach(await injector.prepare(SIMULATOR, BUNDLE));
+    const first = await injector.prepare(SIMULATOR, BUNDLE);
+    await injector.attach(first);
 
     const second = await injector.prepare(SIMULATOR, BUNDLE);
 
     expect(clients[0]!.closeCount).toBe(1);
     expect(registry.getRecord(SIMULATOR.deviceId, BUNDLE)).toBeUndefined();
-    expect(ports.released).toEqual([overlayAgentKey(SIMULATOR.deviceId, BUNDLE)]);
+    // The old process still holds the listener, so the relaunch must reuse the same port.
+    expect(ports.released).toEqual([]);
+    expect(second.port).toBe(first.port);
     expect(second.token).toBe("token-2");
+  });
+
+  test("a relaunch succeeds when the range has no spare port", async () => {
+    const { injector, ports } = harness();
+    const first = await injector.prepare(SIMULATOR, BUNDLE);
+    await injector.attach(first);
+    const allocate = ports.allocate.bind(ports);
+    // Only the key's existing allocation is available; any new slot would throw.
+    ports.allocate = (key) => {
+      if (!ports.allocated.has(key)) {
+        throw new Error("No available ports");
+      }
+      return allocate(key);
+    };
+
+    const second = await injector.prepare(SIMULATOR, BUNDLE);
+
+    expect(second.port).toBe(first.port);
+  });
+
+  test("an older launch aborting does not free the port a newer launch owns", async () => {
+    const { injector, ports } = harness();
+    const older = await injector.prepare(SIMULATOR, BUNDLE);
+    const newer = await injector.prepare(SIMULATOR, BUNDLE);
+
+    injector.abort(older);
+    expect(ports.allocated.get(overlayAgentKey(SIMULATOR.deviceId, BUNDLE))).toBe(newer.port);
+    expect(ports.released).toEqual([]);
+
+    injector.abort(newer);
+    expect(ports.released).toEqual([overlayAgentKey(SIMULATOR.deviceId, BUNDLE)]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
@@ -17,11 +17,15 @@ import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import type { BootedDevice } from "../../src/models";
 
 const device: BootedDevice = { platform: "ios", deviceId: "fake-constructor", name: "Fake" };
-afterEach(() => {
+function resetSingletons(): void {
   IOSCtrlProxyManager.resetInstances();
   PortManager.reset();
   PortManager.setPortAvailabilityCheckerForTesting(null);
-});
+}
+// Reset before each test too: in the shared-process lane an earlier file can leave ports
+// allocated in PortManager, which moves the default service port off 8765.
+beforeEach(resetSingletons);
+afterEach(resetSingletons);
 
 test("singleton construction applies undefined dependency defaults", () => {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });

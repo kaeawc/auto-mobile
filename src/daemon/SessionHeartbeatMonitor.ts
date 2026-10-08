@@ -400,13 +400,6 @@ export class SessionHeartbeatMonitor {
    * decision rather than a nest of early-continues inside the sweep loop.
    */
   private staleReason(session: Session, now: number): SessionHeartbeatReleaseReason | undefined {
-    const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-    // The daemon's own stall is never held against the owner (#10051).
-    const lastHeartbeat = effectiveLastHeartbeat({
-      lastHeartbeat: session.lastHeartbeat ?? session.lastUsedAt,
-      stallForgivenAt: session.stallForgivenAt,
-    });
-
     // A CLI-owned session (issue #6870) is judged on wall-clock idleness, not on
     // the heartbeat lease: the `--cli` process that owns it exits between calls,
     // so nobody is left to heartbeat and a missing first heartbeat says nothing
@@ -416,8 +409,23 @@ export class SessionHeartbeatMonitor {
     // heartbeat: a `--daemon heartbeat` loop proves liveness, not use, and must
     // not hold the device with no tool calls (owner decision 2026-10-08).
     if (session.livenessPolicy === "cli-idle") {
+      const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
       return now - session.lastUsedAt > timeoutMs ? "cli-idle-timeout" : undefined;
     }
+    return this.heartbeatLeaseStaleReason(session, now);
+  }
+
+  /**
+   * The heartbeat-lease half of {@link staleReason}: judged on liveness clocks only, never on
+   * tool activity (#10703, guarded by `test/lint/livenessActivityClockSeparation.test.ts`).
+   */
+  private heartbeatLeaseStaleReason(
+    session: Session,
+    now: number,
+  ): SessionHeartbeatReleaseReason | undefined {
+    const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
+    // The daemon's own stall is never held against the owner (#10051).
+    const lastHeartbeat = effectiveLastHeartbeat(session);
 
     if (!session.hasReceivedHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {

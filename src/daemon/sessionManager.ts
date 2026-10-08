@@ -380,19 +380,6 @@ interface SessionPersistenceMetadata {
   daemonSessionId: string | null;
 }
 
-function rollbackSessionActivityIfCurrent(
-  session: Session,
-  previousActivity: Pick<Session, "lastUsedAt" | "lastHeartbeat" | "expiresAt">,
-  capturedGeneration: number,
-): void {
-  if (session.activityGeneration !== capturedGeneration) {
-    return;
-  }
-  session.lastUsedAt = previousActivity.lastUsedAt;
-  session.lastHeartbeat = previousActivity.lastHeartbeat;
-  session.expiresAt = previousActivity.expiresAt;
-}
-
 /**
  * Re-derive the idle deadline after a policy change widened `sessionTimeoutMs`, never shortening
  * it. The deadline is anchored on the last tool activity (`lastUsedAt`), never on the current time:
@@ -5488,6 +5475,13 @@ export class SessionManager {
    *
    * Allows tools to store data (screenshots, hierarchies) that can be
    * reused by other tools in the same session without re-fetching.
+   *
+   * Cache data only: this never touches the session's activity or liveness clocks (#10703). It is
+   * reached from paths that are not the owner's tool usage — a device incarnation change
+   * resetting readiness, or an observe by device id from any client invalidating it — so stamping
+   * `lastUsedAt` here would let them extend the owner's idle window and make `session-info`'s
+   * `lastUsedAt` stop meaning "last tool call". A tool call's activity is stamped where the call is
+   * admitted (`getOrCreateSession`) and where it ends (`recordToolCallEnded`).
    */
   updateSessionCache(sessionId: string, updates: Partial<SessionCacheData>): void {
     const session = this.getSession(sessionId);
@@ -5500,22 +5494,6 @@ export class SessionManager {
       ...session.cacheData,
       ...updates,
     };
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
-      lastHeartbeat: session.lastHeartbeat,
-      expiresAt: session.expiresAt,
-    };
-    session.lastUsedAt = this.timer.now();
-    session.lastHeartbeat = this.timer.now();
-    session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
-    void this.getBarrier()
-      .track(() => this.recordSessionActivity(session))
-      .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
-      });
-
     logger.debug(`Updated cache for session ${sessionId}`);
   }
 
@@ -5956,32 +5934,10 @@ export class SessionManager {
   }
 
   /**
-   * Get session cache data
+   * Get session cache data. A read: it records no activity (#10703), like the typed getters.
    */
   getSessionCache(sessionId: string): SessionCacheData | null {
-    const session = this.getSession(sessionId);
-    if (!session) {
-      return null;
-    }
-
-    // Update last used time when accessing cache
-    const previousActivity = {
-      lastUsedAt: session.lastUsedAt,
-      lastHeartbeat: session.lastHeartbeat,
-      expiresAt: session.expiresAt,
-    };
-    session.lastUsedAt = this.timer.now();
-    session.lastHeartbeat = this.timer.now();
-    session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
-    void this.getBarrier()
-      .track(() => this.recordSessionActivity(session))
-      .catch((error) => {
-        rollbackSessionActivityIfCurrent(session, previousActivity, capturedGeneration);
-        logger.warn(`[SessionManager] Failed to record session activity: ${error}`);
-      });
-
-    return session.cacheData;
+    return this.getSession(sessionId)?.cacheData ?? null;
   }
 
   /**

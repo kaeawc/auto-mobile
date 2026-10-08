@@ -7,6 +7,7 @@
  * all judge a lease the same way.
  */
 
+import type { SessionLivenessClock } from "./sessionClocks";
 import type { Session, SessionLivenessPolicy } from "./sessionManager";
 import { SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 
@@ -102,12 +103,12 @@ export function isLivenessOwnerLeaseLive(snapshot: LivenessOwnerLeaseSnapshot): 
   return livenessLeaseState(snapshot).phase !== "lapsed";
 }
 
-/** The slice of a session the lease reads. */
+/**
+ * The slice of a session the lease reads: its liveness clocks, never an activity clock (#10703).
+ */
 export type LeaseSession = Pick<
   Session,
-  | "lastHeartbeat"
-  | "lastOwnerHeartbeat"
-  | "stallForgivenAt"
+  | SessionLivenessClock
   | "heartbeatTimeoutMs"
   | "livenessPolicy"
   | "hasReceivedHeartbeat"

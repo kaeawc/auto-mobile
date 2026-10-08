@@ -1277,6 +1277,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       }
       throw error;
     }
+    if (isDeviceInventoryTool(name)) {
+      // Inventory reads are admitted read-only (no activity refresh), so their end is not use.
+      executionTracker.markReadOnlySessionAccess(execution.id);
+    }
     if (resolvedImplicitAutolockSessionUuid) {
       // Routing resolved before ToolRegistry, so retain its implicit-session
       // tracking here without following later changes to the socket's default.

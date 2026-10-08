@@ -35,6 +35,12 @@ interface ActiveExecution {
    * reason. Binding the execution to one of them is refused (#9958).
    */
   revokedDeviceBindings?: Map<string, Error>;
+  /**
+   * The call only reads device inventory (`listDevices {sessionUuid}` and friends). Such a call is
+   * admitted without refreshing the session's activity, so its end does not count as session use
+   * either: a poller must not keep a dead owner's session alive.
+   */
+  readOnlySessionAccess?: boolean;
 }
 
 export type ExecutionScope = "session" | "global";
@@ -277,7 +283,18 @@ export class ExecutionTracker {
     };
   }
 
+  /** Mark an execution as a read-only inventory call, whose end is not session use. */
+  markReadOnlySessionAccess(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.readOnlySessionAccess = true;
+    }
+  }
+
   private notifySessionExecutionEnded(execution: ActiveExecution): void {
+    if (execution.readOnlySessionAccess) {
+      return;
+    }
     const sessionUuids = [
       ...new Set(
         [

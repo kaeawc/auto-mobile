@@ -230,4 +230,19 @@ describe("ExecutionTracker session execution-end notification", () => {
     tracker.endExecution(later.id);
     expect(ended).toHaveLength(1);
   });
+
+  it("does not report a read-only inventory call as session use", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const ended: (readonly string[])[] = [];
+    tracker.onSessionExecutionEnded((uuids) => ended.push(uuids));
+
+    const inventory = tracker.startExecution("listDevices", undefined, SESSION);
+    tracker.markReadOnlySessionAccess(inventory.id);
+    tracker.endExecution(inventory.id);
+    expect(ended).toEqual([]);
+
+    const use = tracker.startExecution("tapOn", undefined, SESSION);
+    tracker.endExecution(use.id);
+    expect(ended).toEqual([[SESSION]]);
+  });
 });

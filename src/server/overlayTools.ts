@@ -856,6 +856,19 @@ function clearMutationEvents(
   }
 }
 
+/** A show subscribes (and resets the event epoch) only once its preflight accepted it. */
+function startShowEvents(
+  events: OverlayEventCoordinator,
+  scope: OverlayScope,
+  action: OverlayMutation,
+  id: string | undefined,
+  client: OverlayClient,
+): void {
+  if (action === "show" && id !== undefined) {
+    events.show(scope, id, client);
+  }
+}
+
 function subscribeOverlayDeviceUnbound(listener: (deviceId: string) => void): () => void {
   const state = DaemonState.getInstance();
   if (!state.isInitialized()) {
@@ -900,8 +913,8 @@ async function performMutation(
     dependencies,
     signal,
   );
-  if (args.action === "show" && !failure) {
-    events.show(scope, target.id!, client);
+  if (!failure) {
+    startShowEvents(events, scope, args.action, target.id, client);
   }
   const stage: AssetStage = failure
     ? { uploaded: [], prepared: [], failure }

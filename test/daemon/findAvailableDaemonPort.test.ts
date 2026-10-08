@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { findAvailableDaemonPort } from "../../src/daemon/daemon";
-import { DAEMON_PORT_RANGE_END, DAEMON_PORT_RANGE_START } from "../../src/daemon/constants";
+import {
+  DAEMON_PORT_RANGE_END,
+  DAEMON_PORT_RANGE_START,
+  DEFAULT_DAEMON_PORT,
+} from "../../src/daemon/constants";
 
 function probe(free: readonly number[]) {
   const probed: number[] = [];
@@ -25,18 +29,35 @@ describe("findAvailableDaemonPort", () => {
     );
   });
 
-  test("wraps to ports below the preferred one before giving up", async () => {
-    const { probed, isPortAvailable } = probe([3001]);
-    expect(await findAvailableDaemonPort(3008, isPortAvailable)).toBe(3001);
-    expect(probed).toEqual([3008, 3009, 3010, 3000, 3001]);
+  test("scans upward only: a non-default preferred port never falls back to the default", async () => {
+    const { probed, isPortAvailable } = probe([DEFAULT_DAEMON_PORT, 3001]);
+    await expect(findAvailableDaemonPort(3008, isPortAvailable)).rejects.toThrow(
+      `No available ports in range 3008-${DAEMON_PORT_RANGE_END}`,
+    );
+    expect(probed).toEqual([3008, 3009, 3010]);
+    expect(probed).not.toContain(DEFAULT_DAEMON_PORT);
   });
 
-  test("throws the range error only after every in-range port is probed", async () => {
+  test("falls back to the next free higher port", async () => {
+    const { probed, isPortAvailable } = probe([3001, 3009]);
+    expect(await findAvailableDaemonPort(3008, isPortAvailable)).toBe(3009);
+    expect(probed).toEqual([3008, 3009]);
+  });
+
+  test("the top of the range has no higher fallback and says so", async () => {
+    const { probed, isPortAvailable } = probe([3000]);
+    await expect(findAvailableDaemonPort(DAEMON_PORT_RANGE_END, isPortAvailable)).rejects.toThrow(
+      `Port ${DAEMON_PORT_RANGE_END} is not available (no higher port`,
+    );
+    expect(probed).toEqual([DAEMON_PORT_RANGE_END]);
+  });
+
+  test("throws the range error only after every port from the default upward is probed", async () => {
     const { probed, isPortAvailable } = probe([]);
-    await expect(findAvailableDaemonPort(3000, isPortAvailable)).rejects.toThrow(
+    await expect(findAvailableDaemonPort(DEFAULT_DAEMON_PORT, isPortAvailable)).rejects.toThrow(
       `No available ports in range ${DAEMON_PORT_RANGE_START}-${DAEMON_PORT_RANGE_END}`,
     );
-    expect([...probed].sort((a, b) => a - b)).toEqual(
+    expect(probed).toEqual(
       Array.from(
         { length: DAEMON_PORT_RANGE_END - DAEMON_PORT_RANGE_START + 1 },
         (_, i) => DAEMON_PORT_RANGE_START + i,

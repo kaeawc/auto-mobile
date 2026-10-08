@@ -2151,6 +2151,65 @@ describe("DevicePool", () => {
       expect(replaced?.avdName).toBeUndefined();
     });
 
+    // #10603: an already-running emulator discovered while its console could not
+    // answer `avd name` is pooled as the placeholder with no `avdName`. Nothing
+    // a later resolved name could contradict, so the pool must adopt it rather
+    // than keep the serial unacquirable until a daemon restart.
+    test("adopts a resolved name for a discovered emulator pooled under the placeholder", async () => {
+      const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
+      fakeDeviceManager.bootedDevices = [placeholder];
+      await devicePool.refreshDevices();
+      const pooled = devicePool.getDevice(placeholder.deviceId);
+      expect(pooled).toMatchObject({ name: "Unknown (emulator-5600)" });
+      expect(pooled?.avdName).toBeUndefined();
+      const incarnation = pooled?.incarnation;
+      const resolved = { ...placeholder, name: "am-api36-ga-arm64" };
+      expect(devicePool.matchesRuntimeIdentity(pooled!, resolved)).toBe(true);
+
+      fakeDeviceManager.bootedDevices = [resolved];
+      await devicePool.refreshDevices();
+
+      const upgraded = devicePool.getDevice(placeholder.deviceId);
+      expect(upgraded).toBe(pooled);
+      expect(upgraded).toMatchObject({ name: "am-api36-ga-arm64", incarnation });
+      expect(upgraded?.identityUnresolved).toBeUndefined();
+      expect(devicePool.describesPooledRuntime(resolved)).toBe(true);
+    });
+
+    test("upgrades a discovered placeholder through the discovery funnel too", async () => {
+      const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
+      fakeDeviceManager.bootedDevices = [placeholder];
+      await devicePool.refreshDevices();
+      const incarnation = devicePool.getDevice(placeholder.deviceId)?.incarnation;
+
+      await devicePool.reconcileDiscoveryObservation(
+        [{ ...placeholder, name: "am-api36-ga-arm64" }],
+        "test",
+      );
+
+      expect(devicePool.getDevice(placeholder.deviceId)).toMatchObject({
+        name: "am-api36-ga-arm64",
+        incarnation,
+      });
+      expect(devicePool.isPooledIdentityUnresolved(placeholder.deviceId)).toBe(false);
+    });
+
+    test("does not tolerate a resolved name for a retired placeholder incarnation", async () => {
+      const placeholder = createBootedDevice("emulator-5600", "android", "Unknown (emulator-5600)");
+      const resolved = { ...placeholder, name: "am-api36-ga-arm64" };
+      fakeDeviceManager.bootedDevices = [placeholder];
+      await devicePool.refreshDevices();
+      const retired = devicePool.getDevice(placeholder.deviceId)!;
+
+      await devicePool.removeDevice(placeholder.deviceId);
+      await devicePool.refreshDevices();
+      const current = devicePool.getDevice(placeholder.deviceId)!;
+
+      expect(current.incarnation).toBeGreaterThan(retired.incarnation);
+      expect(devicePool.matchesRuntimeIdentity(retired, resolved)).toBe(false);
+      expect(devicePool.matchesRuntimeIdentity(current, resolved)).toBe(true);
+    });
+
     test("documented blind spot: a same-serial restart inside one discovery interval keeps its incarnation", async () => {
       // Without a discovery-level epoch token there is nothing in an adb
       // listing that distinguishes "still the same emulator process" from "the

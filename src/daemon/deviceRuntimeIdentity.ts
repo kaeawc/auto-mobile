@@ -351,7 +351,9 @@ export class DeviceRuntimeIdentity {
    * Leaving: the observation carries a RESOLVED name. Reaching here at all means
    * {@link namesAgreeOnIdentity} accepted it, i.e. it is the pooled label (or the
    * AVD this pool started), which is proof of continuity — so the entry goes back
-   * to live, unchanged. A resolved name that DISAGREES never reaches this method:
+   * to live, unchanged. A discovered emulator still pooled under the placeholder
+   * has no label to agree with; its first resolved name is adopted for the
+   * current incarnation instead (#10603). A resolved name that DISAGREES never reaches this method:
    * {@link matchesRuntimeIdentity} rejects it upstream and the entry is replaced
    * under a fresh incarnation, retiring the old session exactly as an observed
    * disappearance does.
@@ -401,6 +403,10 @@ export class DeviceRuntimeIdentity {
     // not it is quarantined; recording it on the LIVE path too is what lets a
     // later straggler be recognised as stale before it quarantines anything.
     this.recordIdentityObservation(pooled, this.identityEvidenceForBootedDevice(discovered));
+    // Every path that folds a resolved observation in (the refresh sweep and the
+    // discovery funnel alike) also upgrades a pooled placeholder label, so the
+    // strict-name consumers stop seeing `Unknown (<serial>)` (#10603).
+    this.resolvePlaceholderEmulatorName(pooled, discovered);
     this.clearPooledIdentityReconciliation(pooled);
     if (pooled.identityUnresolved !== true) {
       return;
@@ -895,19 +901,43 @@ export class DeviceRuntimeIdentity {
     if (pooled.platform !== "android" || !isAndroidEmulatorSerial(pooled.id)) {
       return false;
     }
-    const placeholder = unknownAndroidRuntimeName(pooled.id);
     if (this.hasUnresolvedEmulatorName(expected)) {
       return true;
     }
-    // The pooled label is the placeholder. Accept a resolved name only when the
-    // AVD this pool started says so — never on the strength of a name alone.
-    return pooled.name === placeholder && pooled.avdName === expected.name;
+    if (pooled.name !== unknownAndroidRuntimeName(pooled.id)) {
+      return false;
+    }
+    // The pooled label is the placeholder. When this pool started the AVD, the
+    // resolved name must be that AVD — never accepted on the strength of a name
+    // alone. A discovered emulator pooled under the placeholder has no AVD
+    // evidence at all, so a resolved name cannot contradict anything the entry
+    // claims; rejecting it would leave the serial unacquirable until a daemon
+    // restart (#10603). Tolerate it only for the pool's current incarnation.
+    return pooled.avdName === undefined
+      ? this.isCurrentPooledIncarnation(pooled)
+      : pooled.avdName === expected.name;
+  }
+
+  /**
+   * Whether `pooled` is still the entry — and so the connection incarnation —
+   * the pool holds for its serial. A retired or copied entry fails closed.
+   *
+   * The incarnation is the only epoch token the pool tracks for a serial
+   * (discovery carries no adb transport id): an observed disappearance retires
+   * the entry and a later sighting mints a fresh one. A same-serial restart
+   * inside one discovery interval is invisible to it, the blind spot documented
+   * in `test/daemon/devicePool.test.ts`.
+   */
+  private isCurrentPooledIncarnation(pooled: PooledDevice): boolean {
+    const current = this.pool.getDevices().get(pooled.id);
+    return current === pooled && current.incarnation === pooled.incarnation;
   }
 
   /**
    * Whether this pooled device's name is mutable metadata rather than identity.
-   * Delegates to the shared predicate so the pool and the public `startDevice`
-   * validator (`validatePooledDeviceMapping`) cannot drift apart (#5690).
+   * The public `startDevice` validator (`validatePooledDeviceMapping`) reaches
+   * this through {@link matchesRuntimeIdentity}, so the two cannot drift apart
+   * (#5690, #10603).
    */
   private hasMutableDisplayName(pooled: PooledDevice): boolean {
     return hasMutableDisplayName(pooled.platform, pooled.id);
@@ -921,20 +951,38 @@ export class DeviceRuntimeIdentity {
    * an unreadable console never evicts a live entry; without this the tolerated
    * match would also leave the pooled label stuck on the placeholder, and
    * name-based pool consumers (DeviceCriteriaMatcher.filterDevices) would never
-   * match the real AVD. Only a name the pool already vouches for through
-   * `avdName` is adopted, so this cannot rename an entry onto a different AVD.
+   * match the real AVD. When the pool started the AVD, only the name it vouches
+   * for through `avdName` is adopted, so this cannot rename such an entry onto a
+   * different AVD. A discovered emulator (no `avdName`) adopts the first resolved
+   * name read for its current incarnation (#10603); see
+   * {@link namesAgreeOnIdentity}.
    */
   private resolvePlaceholderEmulatorName(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "name">,
+    discovered: Pick<BootedDevice, "name" | "observedAt">,
   ): void {
     if (
       pooled.platform !== "android" ||
       !isAndroidEmulatorSerial(pooled.id) ||
-      pooled.name !== unknownAndroidRuntimeName(pooled.id) ||
-      pooled.avdName === undefined ||
-      pooled.avdName !== discovered.name
+      pooled.name !== unknownAndroidRuntimeName(pooled.id)
     ) {
+      return;
+    }
+    const observation = {
+      deviceId: pooled.id,
+      platform: pooled.platform,
+      name: discovered.name,
+      observedAt: discovered.observedAt,
+    };
+    if (this.hasUnresolvedEmulatorName(observation)) {
+      return;
+    }
+    const vouched =
+      pooled.avdName === undefined
+        ? this.isCurrentPooledIncarnation(pooled) &&
+          this.comparePooledIdentityEvidence(pooled, observation) !== "stale"
+        : pooled.avdName === discovered.name;
+    if (!vouched) {
       return;
     }
     logger.info(`Device ${pooled.id} resolved its AVD name to '${discovered.name}'`);

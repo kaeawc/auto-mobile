@@ -19,6 +19,7 @@ import {
   resetRotateFactory,
 } from "../../src/server/interactionTools";
 import type { ExecResult } from "../../src/models";
+import { logger } from "../../src/utils/logger";
 
 const device = { deviceId: "rotation-device", name: "Pixel", platform: "android" as const };
 const flush = async () => {
@@ -171,12 +172,48 @@ describe("session rotation restoration", () => {
       await flush();
       expect(h.restored).toHaveLength(2);
       h.adb.mismatch = false;
-      h.timer.advanceTime(250);
+      // Backoff doubles the second retry delay.
+      h.timer.advanceTime(500);
       await pending;
       expect(session.cacheData.rotation).toBeUndefined();
       expect(h.adb.user).toBe(2);
       expect(h.adb.auto).toBe(1);
     } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("a restore that never verifies is bounded, logs the reason, and finishes cleanup", async () => {
+    // After a fold/unfold the window manager can keep the recorded settings from
+    // ever verifying. The retry used to run every 250 ms forever, logging `{}`.
+    const h = harness();
+    const warn = spyOn(logger, "warn");
+    try {
+      const session = await h.manager.createSession("rotation-session", device.deviceId, "android");
+      await h.rotate.execute("landscape");
+      h.adb.mismatch = true;
+      await h.manager.releaseSession("rotation-session");
+      const pending = h.manager.getPendingDeviceCleanup(device.deviceId);
+      expect(pending).not.toBeNull();
+      for (const delay of [250, 500, 1000, 2000, 2000]) {
+        h.timer.advanceTime(delay);
+        await flush();
+      }
+      await pending;
+      expect(h.restored).toHaveLength(6);
+      expect(h.timer.getSleepHistory().filter((ms) => ms !== 150)).toEqual([
+        250, 500, 1000, 2000, 2000,
+      ]);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      expect(session.cacheData.rotation).toBeUndefined();
+      const messages = warn.mock.calls.map(([message]) => String(message));
+      expect(messages.some((m) => m.includes("did not verify by read-back"))).toBe(true);
+      expect(messages.some((m) => m.startsWith("Gave up restoring rotation settings"))).toBe(true);
+      h.timer.advanceTime(10_000);
+      await flush();
+      expect(h.restored).toHaveLength(6);
+    } finally {
+      warn.mockRestore();
       h.manager.stopCleanupTimer();
     }
   });

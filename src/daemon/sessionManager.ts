@@ -204,6 +204,8 @@ export interface DeviceStateRestorerFactories {
   networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
   clock: (device: BootedDevice) => ClockRestorer;
   rotation?: (device: BootedDevice) => RotationRestorer;
+  /** Delay before each rotation restore retry; defaults to a short exponential backoff. */
+  rotationBackoff?: BackoffPolicy;
   screenReader?: (device: BootedDevice) => ScreenReaderRestorer;
   /** Delay before each screen-reader restore retry; defaults to a short exponential backoff. */
   screenReaderBackoff?: BackoffPolicy;
@@ -221,6 +223,15 @@ function screenReaderRestorerFactoryFrom(
     ((device) => ({
       restore: (state, signal) => restoreScreenReaderState(device, state, signal),
     }))
+  );
+}
+
+function rotationBackoffFrom(
+  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
+): BackoffPolicy {
+  return (
+    (typeof factories === "function" ? undefined : factories.rotationBackoff) ??
+    DEFAULT_ROTATION_RESTORE_BACKOFF
   );
 }
 
@@ -801,6 +812,17 @@ const DEFAULT_SCREEN_READER_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: 250,
   maxDelayMs: 2_000,
 });
+/**
+ * Rotation restore retries are bounded too. A fold/unfold between the session's
+ * rotation and its release can leave the recorded settings unverifiable (the
+ * window manager owns the new panel's rotation), so an unbounded retry kept the
+ * device quarantined forever. After the cap the device leaves quarantine.
+ */
+const ROTATION_RESTORE_RETRY_ATTEMPTS = 5;
+const DEFAULT_ROTATION_RESTORE_BACKOFF = exponentialBackoff({
+  initialDelayMs: NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
+  maxDelayMs: 2_000,
+});
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
  * Overall budget for the restores one release runs through the ambient signal
@@ -1049,6 +1071,7 @@ export class SessionManager {
     Map<ScreenReaderSessionState, PendingScreenReaderRestore>
   >();
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
+  private readonly rotationRestoreBackoff: BackoffPolicy;
   /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
   private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
   private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
@@ -1313,6 +1336,7 @@ export class SessionManager {
       networkConditionRestorerFactory,
     );
     this.screenReaderRestoreBackoff = screenReaderBackoffFrom(networkConditionRestorerFactory);
+    this.rotationRestoreBackoff = rotationBackoffFrom(networkConditionRestorerFactory);
     this.injectedIosAppNetworkRuleRestorer =
       typeof networkConditionRestorerFactory === "function"
         ? undefined
@@ -4254,8 +4278,9 @@ export class SessionManager {
       return { pending: null };
     }
     logger.warn(
-      `Rotation restore ${result.outcome}; quarantining ${device.deviceId}`,
-      result.outcome === "failed" ? result.error : timeout,
+      `Rotation restore ${result.outcome}; quarantining ${device.deviceId}: ${errorMessage(
+        result.outcome === "failed" ? result.error : timeout,
+      )}`,
     );
     const pending = raceWithDeadline(
       this.retryRotationRestore(device.deviceId, target, restoration, restore),
@@ -4274,8 +4299,9 @@ export class SessionManager {
     return { pending };
   }
 
-  /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
-   * Rotation ownership remains pending beyond the network path's bounded retry batch.
+  /** Same setup drain, deadline and pool quarantine as network restoration.
+   * Retries are bounded with the injected `Backoff`; after the cap the device
+   * leaves quarantine instead of retrying forever.
    */
   private async retryRotationRestore(
     deviceId: string,
@@ -4287,9 +4313,10 @@ export class SessionManager {
     if (result.outcome === "restored") {
       return;
     }
-    logger.warn(`Failed to restore rotation on ${deviceId}`, result.error);
-    while (!target.removed) {
-      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+    logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(result.error)}`);
+    let lastError: unknown = result.error;
+    for (let attempt = 1; attempt <= ROTATION_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.timer.sleep(this.rotationRestoreBackoff.delayForAttempt(attempt));
       if (target.removed) {
         return;
       }
@@ -4297,10 +4324,38 @@ export class SessionManager {
         await restore();
         return;
       } catch (error) {
+        lastError = error;
         logger.warn(
-          `Rotation restore retry failed on ${deviceId}; device remains quarantined`,
-          error,
+          `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
+            `device remains quarantined: ${errorMessage(error)}`,
         );
+      }
+    }
+    this.abandonRotationRestore(deviceId, target, lastError);
+  }
+
+  /** Release the device from quarantine once the bounded rotation retries are spent. */
+  private abandonRotationRestore(
+    deviceId: string,
+    target: PendingRotationRestore,
+    lastError: unknown,
+  ): void {
+    if (target.removed) {
+      return;
+    }
+    const { userRotation, accelerometerRotation } = target.state;
+    logger.warn(
+      `Gave up restoring rotation settings on ${deviceId} after ${ROTATION_RESTORE_RETRY_ATTEMPTS} retries ` +
+        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"} ` +
+        `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
+        `A fold or display change during the session can make the recorded settings unverifiable.`,
+    );
+    target.clear();
+    const targets = this.pendingRotationRestores.get(deviceId);
+    if (targets?.get(target.state) === target) {
+      targets.delete(target.state);
+      if (targets.size === 0) {
+        this.pendingRotationRestores.delete(deviceId);
       }
     }
   }

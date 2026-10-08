@@ -125,3 +125,6 @@ schemas/overlay-asset-contract.json text eol=lf
 test/fixtures/daemon-ps-lstart/*.txt text eol=lf
 # Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
 test/fixtures/accessibility-contrast/*.json text eol=lf
+
+# Real Windows netstat captures keep their CRLF bytes so the parser is tested on them.
+test/fixtures/windows-netstat/*.txt -text

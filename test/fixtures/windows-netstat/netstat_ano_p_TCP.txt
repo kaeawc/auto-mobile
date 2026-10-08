@@ -1,0 +1,44 @@
+
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    0.0.0.0:22             0.0.0.0:0              LISTENING       3924
+  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       4
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1104
+  TCP    0.0.0.0:445            0.0.0.0:0              LISTENING       4
+  TCP    0.0.0.0:1801           0.0.0.0:0              LISTENING       3916
+  TCP    0.0.0.0:2103           0.0.0.0:0              LISTENING       3916
+  TCP    0.0.0.0:2105           0.0.0.0:0              LISTENING       3916
+  TCP    0.0.0.0:2107           0.0.0.0:0              LISTENING       3916
+  TCP    0.0.0.0:2179           0.0.0.0:0              LISTENING       1960
+  TCP    0.0.0.0:3389           0.0.0.0:0              LISTENING       1352
+  TCP    0.0.0.0:5985           0.0.0.0:0              LISTENING       4
+  TCP    0.0.0.0:5986           0.0.0.0:0              LISTENING       4
+  TCP    0.0.0.0:47001          0.0.0.0:0              LISTENING       4
+  TCP    0.0.0.0:49664          0.0.0.0:0              LISTENING       1008
+  TCP    0.0.0.0:49665          0.0.0.0:0              LISTENING       856
+  TCP    0.0.0.0:49666          0.0.0.0:0              LISTENING       2732
+  TCP    0.0.0.0:49667          0.0.0.0:0              LISTENING       2456
+  TCP    0.0.0.0:49668          0.0.0.0:0              LISTENING       2552
+  TCP    0.0.0.0:49670          0.0.0.0:0              LISTENING       3404
+  TCP    0.0.0.0:49671          0.0.0.0:0              LISTENING       3916
+  TCP    0.0.0.0:49686          0.0.0.0:0              LISTENING       980
+  TCP    10.1.0.117:139         0.0.0.0:0              LISTENING       4
+  TCP    10.1.0.117:49948       52.110.4.4:443         ESTABLISHED     8712
+  TCP    10.1.0.117:49952       52.110.4.38:443        ESTABLISHED     8712
+  TCP    10.1.0.117:49955       20.59.87.227:443       ESTABLISHED     4112
+  TCP    10.1.0.117:49991       168.63.129.16:32526    ESTABLISHED     1856
+  TCP    10.1.0.117:50000       168.63.129.16:80       ESTABLISHED     1856
+  TCP    10.1.0.117:50011       168.63.129.16:32526    ESTABLISHED     9760
+  TCP    10.1.0.117:50020       20.59.87.227:443       ESTABLISHED     4112
+  TCP    10.1.0.117:62279       20.85.130.105:443      ESTABLISHED     3612
+  TCP    10.1.0.117:62281       20.85.130.105:443      ESTABLISHED     3612
+  TCP    10.1.0.117:62282       140.82.114.21:443      ESTABLISHED     7412
+  TCP    10.1.0.117:62587       20.190.151.7:443       TIME_WAIT       0
+  TCP    10.1.0.117:62733       172.184.231.67:443     TIME_WAIT       0
+  TCP    127.0.0.1:62725        127.0.0.1:62724        TIME_WAIT       0
+  TCP    127.0.0.1:62741        0.0.0.0:0              LISTENING       8072
+  TCP    127.0.0.1:62741        127.0.0.1:62742        ESTABLISHED     8072
+  TCP    127.0.0.1:62742        127.0.0.1:62741        ESTABLISHED     8072
+  TCP    172.24.128.1:53        0.0.0.0:0              LISTENING       3800
+  TCP    172.24.128.1:139       0.0.0.0:0              LISTENING       4

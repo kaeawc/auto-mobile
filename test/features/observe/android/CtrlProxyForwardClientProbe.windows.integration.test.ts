@@ -13,8 +13,8 @@ import {
 // Real Windows `netstat -ano` truth for #10717. Spawning netstat costs far more
 // than the 100 ms unit budget, so this runs in the host-integration lane, which
 // CI executes on windows-latest. The raw output is written under
-// scratch/netstat-capture (uploaded by the workflow) so a captured fixture can
-// replace the hand-written one in CtrlProxyForwardClientProbe.test.ts.
+// scratch/netstat-capture (uploaded by the workflow) and the captured fixture in
+// test/fixtures/windows-netstat came from it.
 const windowsTest = process.platform === "win32" ? test : test.skip;
 const CAPTURE_DIR =
   process.env.AUTOMOBILE_NETSTAT_CAPTURE_DIR ?? path.join("scratch", "netstat-capture");

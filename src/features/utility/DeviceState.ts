@@ -28,6 +28,16 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import {
+  writeDeviceCameraPoster,
+  type DeviceCameraPosterState,
+  type SetDeviceCameraPosterInput,
+} from "./DeviceCameraPoster";
+import type { QrPosterWriter } from "../../utils/qr/QrPosterWriter";
+import {
+  emulatorConsoleFailureReason,
+  emulatorConsoleReportsFailure,
+} from "../../utils/android-cmdline-tools/emulatorConsoleReply";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
@@ -73,6 +83,7 @@ import {
 } from "../action/Telephony";
 
 export type { DeviceClockState, SetDeviceClockInput } from "./DeviceClock";
+export type { DeviceCameraPosterState, SetDeviceCameraPosterInput };
 
 export const doNotDisturbModeSchema = z.enum(["off", "none", "priority", "alarms"]);
 export type DoNotDisturbMode = z.infer<typeof doNotDisturbModeSchema>;
@@ -419,6 +430,7 @@ export interface DeviceStateResult {
   networkCondition?: NetworkConditionState;
   location?: DeviceLocationState;
   clock?: DeviceClockState;
+  cameraPoster?: DeviceCameraPosterState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -441,6 +453,7 @@ export interface SetDeviceStateInput {
   networkCondition?: SetNetworkConditionInput;
   location?: SetDeviceLocationInput;
   clock?: SetDeviceClockInput;
+  cameraPoster?: SetDeviceCameraPosterInput;
 }
 
 export type SetDeviceLocationInput =
@@ -504,12 +517,14 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   networkCondition: true,
   location: true,
   clock: true,
+  cameraPoster: true,
 };
 
 /**
  * Every field `setState` can write. The keys come from {@link SetDeviceStateInput},
  * and a unit test compares them with the advertised `setDeviceState` schema.
- * Location is write-only because the applied coordinate cannot be read back.
+ * Location and cameraPoster are write-only because neither the applied coordinate nor
+ * the camera frame can be read back.
  */
 export const DEVICE_STATE_WRITABLE_FIELDS: readonly (keyof SetDeviceStateInput)[] = Object.freeze(
   Object.keys(DEVICE_STATE_WRITABLE_FIELD_PRESENCE) as (keyof SetDeviceStateInput)[],
@@ -554,6 +569,9 @@ export interface DeviceStateDependencies {
   canWriteLocation?: () => boolean;
   /** Session attribution is supplied by the handler, never inferred from write admission. */
   onLocationApplied?: () => void;
+  /** Renders `cameraPoster` QR payloads; defaults to the file-backed poster writer. */
+  cameraPosterQrWriter?: QrPosterWriter;
+  cameraPosterFileExists?: (path: string) => boolean;
   clockAdapter?: DeviceClockAdapter;
   clockRestoreRegistry?: DeviceClockRestoreRegistry;
   invalidateClockCaches?: (deviceId: string) => void;
@@ -572,7 +590,13 @@ export interface DeviceStateDependencies {
 
 type RequestedDeviceStates = Pick<
   DeviceStateResult,
-  "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition" | "location" | "clock"
+  | "doNotDisturb"
+  | "biometrics"
+  | "connectivity"
+  | "networkCondition"
+  | "location"
+  | "clock"
+  | "cameraPoster"
 >;
 
 const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
@@ -704,30 +728,7 @@ const ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR =
   "the radios can only be toggled fully on/off (svc data/wifi, privileged). Use an emulator or a " +
   "host-side proxy for degraded-network testing.";
 
-/**
- * The emulator console answers `OK` on success and `KO: <reason>` on failure —
- * a convention the generic adb-shell heuristic (`exception`/`error:`) does not
- * cover, so check for the `KO` sentinel as well.
- */
-export function emulatorConsoleReportsFailure(stdout: string, stderr: string): boolean {
-  const combined = `${stdout}\n${stderr}`.trim();
-  if (!combined) {
-    return false;
-  }
-  if (/(^|\n)\s*KO\b/.test(combined)) {
-    return true;
-  }
-  return outputLooksLikeShellFailure(stdout, stderr);
-}
-
-/**
- * The console's reason for a refusal: its first non-empty reply line, verbatim
- * (`KO: <reason>`). Call only after `emulatorConsoleReportsFailure` returned true.
- */
-export function emulatorConsoleFailureReason(stdout: string, stderr: string): string {
-  const line = `${stdout}\n${stderr}`.split(/\r?\n/).find((candidate) => candidate.trim());
-  return line?.trim() ?? "the console gave no reason";
-}
+export { emulatorConsoleReportsFailure, emulatorConsoleFailureReason };
 
 /**
  * Best-effort parse of the emulator console `network status` free text into the
@@ -1295,7 +1296,8 @@ function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean {
     !input.connectivity &&
     !input.networkCondition &&
     !input.location &&
-    !input.clock
+    !input.clock &&
+    !input.cameraPoster
   );
 }
 
@@ -1471,6 +1473,8 @@ export class DeviceState {
   private readonly clockSignal: AbortSignal;
   private readonly clockMutation: NonNullable<DeviceStateDependencies["clockMutation"]>;
   private readonly invalidateClockCaches: (deviceId: string) => void;
+  private readonly cameraPosterQrWriter?: QrPosterWriter;
+  private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
   private readonly iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
 
@@ -1496,6 +1500,8 @@ export class DeviceState {
     this.invalidateClockCaches =
       dependencies.invalidateClockCaches ??
       ((deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"));
+    this.cameraPosterQrWriter = dependencies.cameraPosterQrWriter;
+    this.cameraPosterFileExists = dependencies.cameraPosterFileExists;
     this.simctl = dependencies.simctl ?? null;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
@@ -1607,7 +1613,8 @@ export class DeviceState {
         | DeviceConnectivityState
         | NetworkConditionState
         | DeviceLocationState
-        | DeviceClockState => state !== undefined,
+        | DeviceClockState
+        | DeviceCameraPosterState => state !== undefined,
     );
     const error = requestedStates.find((state) => state.error)?.error;
 
@@ -1683,6 +1690,15 @@ export class DeviceState {
       ...(input.location ? { location: await this.writeLocation(input.location) } : {}),
       ...(input.clock
         ? { clock: failedClock ?? (await this.writeClock(input.clock, preparedClock, slot)) }
+        : {}),
+      ...(input.cameraPoster
+        ? {
+            cameraPoster: await writeDeviceCameraPoster(this.device, input.cameraPoster, {
+              adbFactory: this.adbFactory,
+              qrWriter: this.cameraPosterQrWriter,
+              fileExists: this.cameraPosterFileExists,
+            }),
+          }
         : {}),
     };
   }

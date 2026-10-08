@@ -44,6 +44,12 @@ const INK_SCAN_MAX_PROBES = 16384;
  * per element bounded.
  */
 const STROKE_SCAN_MAX_PROBES = 65536;
+/** A connected stroke region filling at most this share of its bounding box is glyph-shaped. */
+const GLYPH_MAX_FILL = 0.6;
+/** Thin bars (long side at least 3x the short side) of one colour that read as glyph stems. */
+const GLYPH_MIN_BARS = 3;
+/** Pixels grown across all stroke regions of one colour when judging their shape. */
+const GLYPH_SHAPE_MAX_PIXELS = 65536;
 /** A sampled "background" this close to the text colour is a glyph pixel, not the background. */
 const GLYPH_PIXEL_MAX_DISTANCE = 30;
 /** How far from a sample point to look for the colour a stroke away. */
@@ -991,6 +997,94 @@ export class ContrastChecker {
     }
   }
 
+  /**
+   * Whether the solid strokes of `color` in `bounds` are shaped like glyphs rather than a
+   * filled tonal shape (an avatar, chip, progress track or divider). Each connected region
+   * of the colour is measured: text has a region that fills little of its bounding box
+   * (a curved or open letter), or several thin bars (stems), while a disc, rectangle or
+   * rule is one region that fills most of its box. Region growth is capped at
+   * GLYPH_SHAPE_MAX_PIXELS in total, so a large flat fill stops the search early.
+   */
+  private hasGlyphStrokes(image: RawImage, box: Element["bounds"], color: RGB): boolean {
+    // Regions are keyed by raster index, so keep them on the raster.
+    const bounds = {
+      left: Math.max(0, box.left),
+      top: Math.max(0, box.top),
+      right: Math.min(image.width, box.right),
+      bottom: Math.min(image.height, box.bottom),
+    };
+    const visited = new Set<number>();
+    const budget = { pixels: GLYPH_SHAPE_MAX_PIXELS };
+    let bars = 0;
+    for (const seed of this.solidStrokeSeeds(image, bounds, color)) {
+      if (budget.pixels <= 0 || bars >= GLYPH_MIN_BARS) {
+        break;
+      }
+      if (visited.has(seed.y * image.width + seed.x)) {
+        continue;
+      }
+      const region = this.strokeRegion(image, bounds, color, seed, visited, budget);
+      const width = region.right - region.left + 1;
+      const height = region.bottom - region.top + 1;
+      if (region.count <= width * height * GLYPH_MAX_FILL) {
+        return true;
+      }
+      bars += Math.min(width, height) * 3 <= Math.max(width, height) ? 1 : 0;
+    }
+    return bars >= GLYPH_MIN_BARS;
+  }
+
+  /** The 4-connected region of `color` around `seed` inside `bounds`: its pixel count and extent. */
+  private strokeRegion(
+    image: RawImage,
+    bounds: Element["bounds"],
+    color: RGB,
+    seed: { x: number; y: number },
+    visited: Set<number>,
+    budget: { pixels: number },
+  ): { count: number; left: number; top: number; right: number; bottom: number } {
+    const left = Math.ceil(bounds.left);
+    const top = Math.ceil(bounds.top);
+    const right = Math.ceil(bounds.right) - 1;
+    const bottom = Math.ceil(bounds.bottom) - 1;
+    const region = { count: 0, left: seed.x, top: seed.y, right: seed.x, bottom: seed.y };
+    const pending = [seed.y * image.width + seed.x];
+    visited.add(pending[0]);
+    while (pending.length > 0 && budget.pixels > 0) {
+      const index = pending.pop()!;
+      const x = index % image.width;
+      const y = Math.floor(index / image.width);
+      budget.pixels--;
+      region.count++;
+      region.left = Math.min(region.left, x);
+      region.top = Math.min(region.top, y);
+      region.right = Math.max(region.right, x);
+      region.bottom = Math.max(region.bottom, y);
+      const neighbours = [
+        x > left ? index - 1 : -1,
+        x < right ? index + 1 : -1,
+        y > top ? index - image.width : -1,
+        y < bottom ? index + image.width : -1,
+      ];
+      for (const next of neighbours) {
+        if (next >= 0 && !visited.has(next) && this.isStrokePixel(image, next, color)) {
+          visited.add(next);
+          pending.push(next);
+        }
+      }
+    }
+    return region;
+  }
+
+  private isStrokePixel(image: RawImage, index: number, color: RGB): boolean {
+    const pixel = this.resolvePixelColor(
+      image,
+      index % image.width,
+      Math.floor(index / image.width),
+    );
+    return this.colorDistance(pixel, color) <= STROKE_MAX_DISTANCE;
+  }
+
   private sampleElementColors(
     image: RawImage,
     bounds: Element["bounds"],
@@ -1041,7 +1135,9 @@ export class ContrastChecker {
     const inkText = this.selectTextColor(supported, backgroundColor, perimeter, isSolidStroke);
     // Strokes within INK_MIN_DISTANCE of the background are not ink, so a brighter icon
     // alone can set the extent and leave a faint label beside it unmeasured. Judge faint
-    // solid strokes anywhere inside the box as text too, keeping the lower contrast.
+    // solid strokes anywhere inside the box as text too, keeping the lower contrast. Only
+    // glyph-shaped strokes count: an inset tonal avatar, chip, track or divider in the same
+    // distance band is a filled shape, not text.
     const faintText = ink
       ? clusters.filter(
           (cluster) =>
@@ -1049,7 +1145,7 @@ export class ContrastChecker {
             !this.isSimilarColor(cluster.color, backgroundColor) &&
             this.colorDistance(cluster.color, backgroundColor) <= INK_MIN_DISTANCE &&
             !perimeter.some((edge) => this.isSimilarColor(cluster.color, edge.color)) &&
-            this.hasSolidStroke(image, interior, cluster.color),
+            this.hasGlyphStrokes(image, interior, cluster.color),
         )
       : [];
     const textColor = faintText.reduce(

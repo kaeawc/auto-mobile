@@ -72,3 +72,58 @@ describe("solid-stroke sampling in a large box", () => {
     expect(result!.meetsAA).toBe(false);
   });
 });
+
+/**
+ * A 900x120 row: legible glyph bars and one inset tonal shape 20-40 from the background
+ * (the faint-ink distance band). The shape is not text, so it must not set the ratio.
+ */
+describe("faint tonal shapes beside legible text are not text", () => {
+  const bounds = { left: 0, top: 0, right: 900, bottom: 120 };
+  const shapes: Record<string, (dark: boolean) => Paint> = {
+    "solid chip": (dark) => rect(600, 30, 760, 90, dark ? 47 : 238),
+    avatar: (dark) => disc(800, 60, 30, dark ? 47 : 238),
+    divider: (dark) => rect(150, 100, 850, 103, dark ? 47 : 238),
+    "progress track": (dark) => rect(560, 56, 860, 64, dark ? 47 : 238),
+  };
+  for (const dark of [false, true]) {
+    const theme = dark ? "dark" : "light";
+    const background = dark ? 30 : 255;
+    const ink = dark ? 240 : 0;
+    for (const [name, shape] of Object.entries(shapes)) {
+      test(`${theme}: an inset ${name} does not replace the text colour`, async () => {
+        const image = canvas(900, 120, background, [glyphs(150, 40, 500, 80, ink), shape(dark)]);
+        const result = await check(image, bounds);
+        expect(result).not.toBeNull();
+        expect(result!.textColor.r).toBe(ink);
+        expect(result!.meetsAA).toBe(true);
+      });
+    }
+  }
+});
+
+describe("faint glyph-shaped strokes beside legible text are still text", () => {
+  /** Faint "o" rings: each one fills well under half of its bounding box. */
+  const rings =
+    (value: number): Paint =>
+    (x, y) => {
+      if (x < 560 || x >= 860 || y < 45 || y >= 75) {
+        return undefined;
+      }
+      const d = (((x - 560) % 30) - 15) ** 2 + (y - 60) ** 2;
+      return d >= 64 && d <= 144 ? value : undefined;
+    };
+  for (const dark of [false, true]) {
+    const theme = dark ? "dark" : "light";
+    test(`${theme}: faint ring glyphs keep the lower contrast`, async () => {
+      const faint = dark ? 47 : 238;
+      const image = canvas(900, 120, dark ? 30 : 255, [
+        glyphs(150, 40, 500, 80, dark ? 240 : 0),
+        rings(faint),
+      ]);
+      const result = await check(image, { left: 0, top: 0, right: 900, bottom: 120 });
+      expect(result).not.toBeNull();
+      expect(result!.textColor.r).toBe(faint);
+      expect(result!.meetsAA).toBe(false);
+    });
+  }
+});

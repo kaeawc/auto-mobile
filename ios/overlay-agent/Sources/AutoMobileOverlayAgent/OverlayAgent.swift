@@ -70,6 +70,7 @@ final class OverlayAgent {
         }
         model.onEvent = { [weak server] event in server?.broadcast(event) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
+        model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
         server.start()
         self.server = server
     }
@@ -248,11 +249,34 @@ struct OverlayRootView: View {
         let palette = OverlayPalette.make(theme: model.spec?.theme, systemDark: systemScheme == .dark)
         ZStack {
             if let spec = model.spec {
-                placed(spec)
-                    .opacity(Double(spec.window.opacity ?? 100) / 100)
-                OverlayModalLayer(model: model)
-                    .opacity(Double(spec.window.opacity ?? 100) / 100)
-                dismissControl
+                let chrome = OverlayHostChrome(placementType: spec.window.placement.type)
+                if chrome.reservesDismissBar {
+                    // Like Android's fullscreen window: the bar takes the top of the screen and the
+                    // spec and its dialogs are laid out and clipped below it, so the control never
+                    // covers authored content and a dialog scrim never covers the control.
+                    VStack(spacing: 0) {
+                        dismissBar(chrome, dark: palette.dark)
+                        // The clear base fixes the content area to the space left under the bar;
+                        // the spec and the modal layer are laid out in it separately, so a dialog
+                        // taller than that area neither pushes the bar up nor moves the spec.
+                        Color.clear
+                            .overlay { placed(spec).opacity(Double(spec.window.opacity ?? 100) / 100) }
+                            .overlay {
+                                OverlayModalLayer(model: model)
+                                    .opacity(Double(spec.window.opacity ?? 100) / 100)
+                            }
+                            .clipped()
+                    }
+                } else {
+                    placed(spec)
+                        .opacity(Double(spec.window.opacity ?? 100) / 100)
+                    OverlayModalLayer(model: model)
+                        .opacity(Double(spec.window.opacity ?? 100) / 100)
+                    dismissControl()
+                        .padding(.top, model.safeInsets.top)
+                        .padding(.trailing, max(model.safeInsets.right, 8))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
             }
         }
         // Scheme-aware system controls (text fields, buttons) follow the theme's light or dark.
@@ -300,24 +324,37 @@ struct OverlayRootView: View {
     }
 
     /// Host-owned control the spec cannot remove (#9307).
-    private var dismissControl: some View {
+    private func dismissControl(glyph: Color = .white, fill: Color = Color.black.opacity(0.55)) -> some View {
         Button {
             model.dismiss(reason: .user)
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(glyph)
                 .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.black.opacity(0.55)))
+                .background(Circle().fill(fill))
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .accessibilityIdentifier("automobile-overlay-dismiss")
         .accessibilityLabel("Dismiss overlay")
         .reportFrame(key: "dismiss", model: model)
-        .padding(.top, model.safeInsets.top)
-        .padding(.trailing, max(model.safeInsets.right, 8))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    }
+
+    /// The fullscreen dismiss bar: it clears the status bar and cutout, holds only the control, and
+    /// is translucent and themed like the spec (Android's `overlayDismissColors`, #10522). Its rect
+    /// is a hit rect, so a tap on the bar beside the control still never reaches the covered app.
+    private func dismissBar(_ chrome: OverlayHostChrome, dark: Bool) -> some View {
+        let colors = OverlayHostChrome.dismissBarColors(dark: dark)
+        let content = Color(colors.content)
+        return dismissControl(glyph: content, fill: content.opacity(0.12))
+            .padding(.top, model.safeInsets.top)
+            .padding(.leading, model.safeInsets.left)
+            .padding(.trailing, max(model.safeInsets.right, 8))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(height: chrome.dismissBarHeight(safeTop: model.safeInsets.top), alignment: .bottom)
+            .background(Color(colors.background))
+            .reportFrame(key: "dismissBar", model: model)
     }
 }
 

@@ -18,7 +18,7 @@ setup() {
   TEST_DIR="$(mktemp -d)"
 
   # Stub ktfmt:
-  #  * `--version` prints "ktfmt version <KTFMT_STUB_VERSION>" (default 0.64, the
+  #  * `--version` prints "ktfmt version <KTFMT_STUB_VERSION>" (default 0.65, the
   #    pin). Tests override KTFMT_STUB_VERSION to simulate formatter-version drift,
   #    or set KTFMT_STUB_VERSION="" to simulate an unparseable/failing --version.
   #  * exits 0 for the stdin probe (`--google-style -`) and dry-run.
@@ -33,7 +33,7 @@ setup() {
 if [[ " $* " == *" --version "* ]]; then
   # An empty override simulates a ktfmt whose --version emits no parseable
   # version (or a broken binary); exit non-zero so the gate treats it as unknown.
-  if [[ -z "${KTFMT_STUB_VERSION-0.64}" ]]; then
+  if [[ -z "${KTFMT_STUB_VERSION-0.65}" ]]; then
     exit 1
   fi
   # KTFMT_STUB_NOISE simulates a JVM warning printed to stderr *before* ktfmt's
@@ -42,10 +42,10 @@ if [[ " $* " == *" --version "* ]]; then
     echo "$KTFMT_STUB_NOISE" >&2
   fi
   if [[ -n "${KTFMT_STUB_CRLF:-}" ]]; then
-    printf 'ktfmt version %s\r\n' "${KTFMT_STUB_VERSION:-0.64}"
+    printf 'ktfmt version %s\r\n' "${KTFMT_STUB_VERSION:-0.65}"
     exit 0
   fi
-  echo "ktfmt version ${KTFMT_STUB_VERSION:-0.64}"
+  echo "ktfmt version ${KTFMT_STUB_VERSION:-0.65}"
   exit 0
 fi
 last="${@: -1}"
@@ -239,7 +239,7 @@ STUB
   clean_kt app/src/Base.kt
   git add -A && git commit -qm base
 
-  run env KTFMT_STUB_VERSION="0.64" ONLY_CHANGED_SINCE_SHA="" \
+  run env KTFMT_STUB_VERSION="0.65" ONLY_CHANGED_SINCE_SHA="" \
     ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
@@ -257,7 +257,7 @@ STUB
   [ "$status" -ne 0 ]
   # Names both the found and the pinned version so the failure is actionable.
   [[ "$output" == *"0.66"* ]]
-  [[ "$output" == *"0.64"* ]]
+  [[ "$output" == *"0.65"* ]]
   # It must abort BEFORE doing any per-file work -- a scoped pass is the bug.
   [[ "$output" != *"Kotlin file(s) to process"* ]]
   [[ "$output" != *"properly formatted"* ]]
@@ -270,7 +270,7 @@ STUB
   run env KTFMT_STUB_VERSION="" ONLY_CHANGED_SINCE_SHA="" \
     ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"0.64"* ]]
+  [[ "$output" == *"0.65"* ]]
   [[ "$output" != *"Kotlin file(s) to process"* ]]
 }
 
@@ -279,8 +279,8 @@ STUB
   git add -A && git commit -qm base
 
   # A stderr warning carrying its own version must not be grabbed by the parse;
-  # the gate should still read ktfmt's real 0.64 and pass.
-  run env KTFMT_STUB_VERSION="0.64" \
+  # the gate should still read ktfmt's real 0.65 and pass.
+  run env KTFMT_STUB_VERSION="0.65" \
     KTFMT_STUB_NOISE="OpenJDK 64-Bit Server VM warning: using JDK 11.0.2" \
     ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -292,7 +292,7 @@ STUB
   clean_kt app/src/Base.kt
   git add -A && git commit -qm base
 
-  run env KTFMT_STUB_VERSION="0.64" KTFMT_STUB_CRLF=true \
+  run env KTFMT_STUB_VERSION="0.65" KTFMT_STUB_CRLF=true \
     ONLY_CHANGED_SINCE_SHA="" ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
@@ -303,10 +303,10 @@ STUB
   clean_kt app/src/Base.kt
   git add -A && git commit -qm base
 
-  # A future ktfmt that prints "ktfmt version 0.64.0" must still match the
-  # 2-part pin "0.64": the trailing ".0" is a redundant patch component. Without
-  # normalization this false-fails the gate ("0.64.0" != "0.64").
-  run env KTFMT_STUB_VERSION="0.64.0" ONLY_CHANGED_SINCE_SHA="" \
+  # A future ktfmt that prints "ktfmt version 0.65.0" must still match the
+  # 2-part pin "0.65": the trailing ".0" is a redundant patch component. Without
+  # normalization this false-fails the gate ("0.65.0" != "0.65").
+  run env KTFMT_STUB_VERSION="0.65.0" ONLY_CHANGED_SINCE_SHA="" \
     ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
@@ -318,19 +318,19 @@ STUB
   git add -A && git commit -qm base
 
   # Only a redundant trailing ".0" is normalized away; a real patch build like
-  # "0.64.1" IS a different formatter and must still fail loudly.
-  run env KTFMT_STUB_VERSION="0.64.1" ONLY_CHANGED_SINCE_SHA="" \
+  # "0.65.1" IS a different formatter and must still fail loudly.
+  run env KTFMT_STUB_VERSION="0.65.1" ONLY_CHANGED_SINCE_SHA="" \
     ONLY_TOUCHED_FILES=false bash "$SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"version mismatch"* ]]
-  [[ "$output" == *"0.64.1"* ]]
+  [[ "$output" == *"0.65.1"* ]]
   [[ "$output" != *"Kotlin file(s) to process"* ]]
 }
 
 @test "the gate reads the pin from the shared ktfmt_version.sh (single source)" {
   # Prove single-sourcing without mutating the tracked tree: copy the validator
   # and its sibling pin file into a temp dir, bump the *copy's* pin to 0.99, and
-  # confirm a 0.64 ktfmt now fails against that copy. If the validator hardcoded
+  # confirm a 0.65 ktfmt now fails against that copy. If the validator hardcoded
   # the version instead of sourcing the sibling, editing the copy would be inert.
   local copy_dir="$TEST_DIR/ktfmt_copy"
   mkdir -p "$copy_dir"
@@ -347,7 +347,7 @@ STUB
 
   clean_kt app/src/Base.kt
   git add -A && git commit -qm base
-  run env KTFMT_STUB_VERSION="0.64" ONLY_CHANGED_SINCE_SHA="" \
+  run env KTFMT_STUB_VERSION="0.65" ONLY_CHANGED_SINCE_SHA="" \
     ONLY_TOUCHED_FILES=false bash "$copy_dir/validate_ktfmt.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"0.99"* ]]

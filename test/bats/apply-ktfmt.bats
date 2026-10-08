@@ -16,7 +16,7 @@ setup() {
 
   TEST_DIR="$(mktemp -d)"
 
-  # Stub ktfmt: `--version` reports KTFMT_STUB_VERSION (default 0.64 = pin). For
+  # Stub ktfmt: `--version` reports KTFMT_STUB_VERSION (default 0.65 = pin). For
   # an in-place format run (`--google-style <files...>` via xargs) it strips the
   # FORMAT_ME marker so a test can observe whether formatting actually happened.
   STUB_BIN="$TEST_DIR/bin"
@@ -24,7 +24,7 @@ setup() {
   cat > "$STUB_BIN/ktfmt" <<'STUB'
 #!/usr/bin/env bash
 if [[ " $* " == *" --version "* ]]; then
-  echo "ktfmt version ${KTFMT_STUB_VERSION:-0.64}"
+  echo "ktfmt version ${KTFMT_STUB_VERSION:-0.65}"
   exit 0
 fi
 echo "Done formatting"
@@ -57,7 +57,7 @@ teardown() {
   run env KTFMT_STUB_VERSION="0.66" ONLY_TOUCHED_FILES=true bash "$SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"0.66"* ]]
-  [[ "$output" == *"0.64"* ]]
+  [[ "$output" == *"0.65"* ]]
   # It must abort at the gate, before ever formatting.
   [[ "$output" != *"Applying ktfmt formatting"* ]]
   # The file is untouched -- the wrong formatter never ran.
@@ -68,7 +68,7 @@ teardown() {
   printf 'fun bad() { FORMAT_ME }\n' > app/src/Bad.kt
   git add -A
 
-  run env KTFMT_STUB_VERSION="0.64" ONLY_TOUCHED_FILES=true bash "$SCRIPT"
+  run env KTFMT_STUB_VERSION="0.65" ONLY_TOUCHED_FILES=true bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Found 1 Kotlin file(s) to process"* ]]
   # The pinned formatter ran and stripped the marker.

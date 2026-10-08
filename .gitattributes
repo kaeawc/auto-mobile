@@ -18,6 +18,7 @@ test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
+test/fixtures/desktop-wire/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
 test/fixtures/ios/ipad-ios27-*.json text eol=lf

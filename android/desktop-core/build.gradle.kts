@@ -143,6 +143,14 @@ tasks.withType<Test>().configureEach {
     System.getProperty(key)?.let { value -> systemProperty(key, value) }
   }
 
+  // DesktopWireFixtureCompositionTest replays the desktop<->daemon wire fixtures that
+  // test/daemon/desktopWireContract.test.ts generates (#10669). Declaring them as an input keeps a
+  // fixture-only regeneration from reusing a cached test result.
+  inputs
+    .dir(rootDir.resolve("../test/fixtures/desktop-wire"))
+    .withPropertyName("desktopWireFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+
   // Run this module's tests in a single worker JVM (#5422). desktop-core's Compose UI tests
   // (`runComposeUiTest`) drive real dispatchers, a frame/animation clock, and gesture timing;
   // their waits (`waitForIdle`, bounded `waitUntil`) assume the work they are pacing gets CPU.

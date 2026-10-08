@@ -5250,6 +5250,10 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   describe("SDK event ingestor forwarding", function () {
+    // Every client here injects a FakeIosSdkEventIngestor: the default ingestor
+    // writes to the real DB, and with a caller-exported AUTOMOBILE_DB_DIR (which
+    // stands down the unit-test DB guard) that wall-clock I/O races the fake-timer
+    // poll deadline and leaves the stale navigation identity in place.
     test("forwards a hierarchy_update to the ingestor's recordLayoutTelemetryEvent", async function () {
       const fakeIngestor = new FakeIosSdkEventIngestor();
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
@@ -5344,6 +5348,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const payload = {
         destination: "ScrollPerformanceDemo",
@@ -5387,6 +5395,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (destination: string, timestamp: number): string =>
         Buffer.from(JSON.stringify({ destination, timestamp })).toString("base64");
@@ -5421,6 +5433,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (destination: string, sequenceNumber: number): string =>
         Buffer.from(
@@ -5461,6 +5477,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (destination: string): string =>
         Buffer.from(JSON.stringify({ destination, timestamp: 100 })).toString("base64");
@@ -5495,6 +5515,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (destination: string, timestamp: number): string =>
         Buffer.from(
@@ -5546,6 +5570,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -5652,6 +5680,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encoded = Buffer.from(
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
@@ -5682,6 +5714,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (
         destination: string,
@@ -5763,6 +5799,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -5870,6 +5910,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -5954,6 +5998,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -6038,6 +6086,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -6102,6 +6154,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => ({
@@ -6128,6 +6184,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => ({
@@ -6170,6 +6230,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const originalFetch = globalThis.fetch;
       globalThis.fetch = (async () => ({
@@ -6213,6 +6277,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -6299,6 +6367,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encoded = Buffer.from(
         JSON.stringify({ destination: "OldScreen", timestamp: 1 }),
@@ -6329,6 +6401,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encoded = Buffer.from(
         JSON.stringify({ destination: "StaleScreen", timestamp: 100 }),
@@ -6371,6 +6447,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encode = (payload: Record<string, unknown>): string =>
         Buffer.from(JSON.stringify(payload)).toString("base64");
@@ -6416,6 +6496,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       const encoded = Buffer.from(
         JSON.stringify({ destination: "StaleScreen", timestamp: 100 }),
@@ -6459,6 +6543,10 @@ describe("IOSCtrlProxyClient", function () {
         serverPort,
         factory,
         controlledTimer,
+        undefined,
+        undefined,
+        undefined,
+        new FakeIosSdkEventIngestor(),
       );
       let releaseFetch:
         | ((response: { ok: boolean; json: () => Promise<unknown> }) => void)

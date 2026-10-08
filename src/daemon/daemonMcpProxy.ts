@@ -61,6 +61,8 @@ import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   declaresDeviceSessionInvalid,
   declaresDeviceSessionSuspect,
+  readDeviceSessionSuspectRefusal,
+  type DeviceSessionSuspectRefusal,
   getDeviceIdFromResult,
   getDeviceSessionIdFromResult,
   DEVICE_SESSION_ACQUISITION_TOOLS,
@@ -105,6 +107,7 @@ import {
   runWithoutDaemonLifecycle,
   livenessHandoverMessage,
   livenessHandoverPayload,
+  livenessRecoveryCallWaitMs,
   ownershipConflictLeashMs,
   type LivenessHandover,
   type RecoveryAttemptOutcome,
@@ -178,6 +181,49 @@ export class DaemonToolOutcomeUnknownError extends ActionableError {
     );
     this.name = "DaemonToolOutcomeUnknownError";
   }
+}
+
+/**
+ * An observation-only connection (a heartbeat or liveness recovery) found a lifecycle-capable
+ * connection attempt in flight and did not join it. Nothing was sent to the daemon, so this is not
+ * evidence that the daemon stopped acknowledging heartbeats (#10508).
+ */
+export class LifecycleConnectionInFlightError extends DaemonUnavailableError {
+  constructor() {
+    super("Lifecycle-capable daemon connection is in flight; retry observation-only recovery");
+    this.name = "LifecycleConnectionInFlightError";
+  }
+}
+
+/**
+ * Whether a call the daemon refused as suspect may be forwarded once more after recovery.
+ *
+ * Every tool call reaches a suspect check at session admission, before its handler runs:
+ * `admitIssuedSessionForAutomation` in `src/server/index.ts` (plain tools) or
+ * `src/server/toolRegistry.ts` (device tools, whose earlier enforcement returns at once when a
+ * sessionUuid is given). Plan and critical-section steps wrap a nested refusal in their own error,
+ * so the suspect code at the top of a result always means "nothing ran". The exceptions are tools
+ * whose handler binds or reuses a device session through `DevicePool.bindOrReuseDeviceSession`,
+ * which can reach the same check after starting or binding a device: device acquisition and
+ * `setActiveDevice`. Those are never retried, nor is a refusal for a session other than the one
+ * forwarded (a label-derived session).
+ */
+function isSuspectRefusalRetryable(
+  name: string,
+  forwardedSessionUuid: string,
+  refusal: DeviceSessionSuspectRefusal,
+): boolean {
+  return (
+    refusal.sessionUuid === forwardedSessionUuid &&
+    !isDeviceSessionAcquisitionTool(name) &&
+    name !== "setActiveDevice"
+  );
+}
+
+/** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
+interface ForwardedToolCall {
+  result: any;
+  retryableSuspectRefusal?: DeviceSessionSuspectRefusal;
 }
 
 /** The tool name when replaying it could repeat a device action, else undefined. */
@@ -948,6 +994,8 @@ export class DaemonMcpProxy {
   private readonly ownershipConflictLeashMs: number;
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
+  /** The call-wait bound of the current stretch of liveness recovery (#10508). */
+  private livenessRecoveryCallWait: { episode: number; deadline: number } | undefined;
   /** Detects this proxy's own tick firing later than the lease allows. */
   private readonly tickLateness: TickLatenessClock;
   /** Proxy-clock time of each held session's last acknowledged heartbeat. */
@@ -1236,9 +1284,7 @@ export class DaemonMcpProxy {
 
   private assertConnectionPlanCompatible(allowsLifecycle: boolean): void {
     if (this.connecting && !allowsLifecycle && this.connectingAllowsLifecycle) {
-      throw new DaemonUnavailableError(
-        "Lifecycle-capable daemon connection is in flight; retry observation-only recovery",
-      );
+      throw new LifecycleConnectionInFlightError();
     }
   }
 
@@ -1267,17 +1313,58 @@ export class DaemonMcpProxy {
     }
   }
 
+  /**
+   * Wait for liveness recovery of the sessions this proxy holds, bounded (#10508). Recovery spreads
+   * its attempts over the lease, so an unbounded wait wedged every later call on the connection
+   * for as long as recovery ran, including the call that would let the daemon resume the session.
+   * The bound runs once per stretch of recovery, from the first call that waits on it: once it has
+   * passed, later calls go ahead at once instead of each waiting it out again while the same
+   * recovery keeps running. A call that goes ahead keeps its connection observation-only while the
+   * fence holds, and a handover recorded meanwhile still surfaces from the caller's own checks.
+   */
   private async waitForLivenessRecovery(signal?: AbortSignal): Promise<void> {
     if (
-      daemonLifecycleAllowed() &&
-      this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
+      !daemonLifecycleAllowed() ||
+      !this.heldSessionUuids().some((uuid) => this.livenessRecovery.isRecovering(uuid))
     ) {
+      return;
+    }
+    const deadline = this.livenessRecoveryCallDeadline();
+    const timeoutMs = deadline - this.timer.now();
+    if (timeoutMs <= 0) {
+      // This stretch of recovery already used up its bound on an earlier call; the same recovery
+      // is still running, and waiting it out again would wedge every call on the connection.
+      logger.debug("[DaemonMcpProxy] Liveness recovery still running; call goes ahead without it");
+      return;
+    }
+    try {
       await raceWithDeadline(this.livenessRecovery.settled(), {
         timer: this.timer,
+        timeoutMs,
         signal,
         label: "Daemon liveness recovery",
       });
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn(
+        `[DaemonMcpProxy] Liveness recovery still running after ${timeoutMs}ms; going ahead without it`,
+        error,
+      );
     }
+  }
+
+  /** When calls stop waiting for the current stretch of recovery, fixed by its first waiting call. */
+  private livenessRecoveryCallDeadline(): number {
+    const episode = this.livenessRecovery.busyEpisode();
+    if (this.livenessRecoveryCallWait?.episode !== episode) {
+      this.livenessRecoveryCallWait = {
+        episode,
+        deadline:
+          this.timer.now() +
+          livenessRecoveryCallWaitMs(this.heartbeatLeashMs, this.heartbeatRequestTimeoutMs()),
+      };
+    }
+    return this.livenessRecoveryCallWait.deadline;
   }
 
   private throwIfLivenessHandedOver(): void {
@@ -3133,6 +3220,10 @@ export class DaemonMcpProxy {
    * is forwarded to the daemon so `notifications/progress` ticks relayed back
    * over the socket can be routed to `onProgress`, tagged with that SAME
    * token. Omit both to request no progress relay — nothing is fabricated.
+   *
+   * A call the daemon refuses because a session this proxy holds is suspect is forwarded once
+   * more after the liveness recovery the refusal starts has settled, so the client gets that
+   * call's result, or the handover/loss error recovery left behind, instead of the refusal.
    */
   async callTool(
     name: string,
@@ -3141,6 +3232,61 @@ export class DaemonMcpProxy {
     onProgress?: DaemonProxyProgressCallback,
     signal?: AbortSignal,
   ): Promise<any> {
+    const first = await this.forwardToolCall(name, args, progressToken, onProgress, signal, true);
+    const refusal = first.retryableSuspectRefusal;
+    if (!refusal || !(await this.awaitSuspectSessionRecovery(refusal, signal))) {
+      return first.result;
+    }
+    // Exactly one retry: the refused call never reached its handler (isSuspectRefusalRetryable).
+    // The retry's own pre-forward checks surface a handover or loss recovery recorded.
+    logger.info(`[DaemonMcpProxy] Session ${refusal.sessionUuid} restored; retrying ${name} once`);
+    const retried = await this.forwardToolCall(
+      name,
+      args,
+      progressToken,
+      onProgress,
+      signal,
+      false,
+    );
+    return retried.result;
+  }
+
+  /**
+   * Wait for the recovery a suspect refusal started, bounded by the time the daemon keeps the
+   * session reserved plus one heartbeat request. True when the session is held and no longer
+   * recovering, so the refused call may be forwarded once more; an abort rejects.
+   */
+  private async awaitSuspectSessionRecovery(
+    refusal: DeviceSessionSuspectRefusal,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    const timeoutMs = Math.max(0, refusal.remainingMs) + this.heartbeatRequestTimeoutMs();
+    try {
+      await raceWithDeadline(this.livenessRecovery.settled(), {
+        timer: this.timer,
+        timeoutMs,
+        signal,
+        label: "Suspect session recovery",
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Another session's recovery can outlast the bound; this session's own state decides below.
+      logger.warn(
+        `[DaemonMcpProxy] Liveness recovery did not settle within ${timeoutMs}ms after session ${refusal.sessionUuid} was refused as suspect`,
+        error,
+      );
+    }
+    return !this.closing && !this.livenessRecovery.isRecovering(refusal.sessionUuid);
+  }
+
+  private async forwardToolCall(
+    name: string,
+    args: Record<string, unknown>,
+    progressToken: string | number | undefined,
+    onProgress: DaemonProxyProgressCallback | undefined,
+    signal: AbortSignal | undefined,
+    allowSuspectRetry: boolean,
+  ): Promise<ForwardedToolCall> {
     signal?.throwIfAborted();
     // These are daemon-internal routing markers. Never accept caller-controlled
     // values: only this proxy may add them after selecting its active binding.
@@ -3243,14 +3389,19 @@ export class DaemonMcpProxy {
         if (name === "provisionDevice") {
           await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
         }
-        this.noteSuspectSessionResult(result, forwardedArgs);
+        const retryableSuspectRefusal = this.noteSuspectSessionResult(
+          name,
+          result,
+          forwardedArgs,
+          allowSuspectRetry,
+        );
         this.bindForwardedSessionOnErrorResult(name, forwardedArgs, result, callReleaseEpoch);
-        return result;
+        return { result, retryableSuspectRefusal };
       }
       this.rememberToolSelectionProfile(name, callerArgs, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result, callReleaseEpoch);
-        return result;
+        return { result };
       }
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
@@ -3260,7 +3411,7 @@ export class DaemonMcpProxy {
       // session instead of creating an unseeded transport (issue #4610).
       this.rememberSessionUuid(name, forwardedArgs, callReleaseEpoch);
       this.rememberActiveDeviceSession(name, result, callReleaseEpoch);
-      return result;
+      return { result };
     } catch (error) {
       signal?.throwIfAborted();
       // The success-only rememberSessionUuid above never runs when the handler
@@ -4287,13 +4438,29 @@ export class DaemonMcpProxy {
     }
   }
 
-  /** The daemon refused a tool call because the session is suspect: its owner can still restore it. */
-  private noteSuspectSessionResult(result: unknown, forwardedArgs: Record<string, unknown>): void {
+  /**
+   * The daemon refused a tool call because the session is suspect: its owner can still restore it.
+   * Returns the refusal when the call may be forwarded once more after that recovery.
+   */
+  private noteSuspectSessionResult(
+    name: string,
+    result: unknown,
+    forwardedArgs: Record<string, unknown>,
+    allowRetry: boolean,
+  ): DeviceSessionSuspectRefusal | undefined {
     const sessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (sessionUuid && this.isHeldSession(sessionUuid) && declaresDeviceSessionSuspect(result)) {
-      logger.warn(`[DaemonMcpProxy] Session ${sessionUuid} is suspect; re-heartbeating it now`);
-      this.livenessRecovery.begin(sessionUuid, DAEMON_STALLED_CODE);
+    if (!sessionUuid || !this.isHeldSession(sessionUuid) || !declaresDeviceSessionSuspect(result)) {
+      return undefined;
     }
+    logger.warn(`[DaemonMcpProxy] Session ${sessionUuid} is suspect; re-heartbeating it now`);
+    this.livenessRecovery.begin(sessionUuid, DAEMON_STALLED_CODE);
+    const refusal = readDeviceSessionSuspectRefusal(result);
+    return allowRetry &&
+      refusal &&
+      isSuspectRefusalRetryable(name, sessionUuid, refusal) &&
+      this.livenessRecovery.isRecovering(sessionUuid)
+      ? refusal
+      : undefined;
   }
 
   private async heartbeatOtherHeldSessions(): Promise<void> {
@@ -4382,6 +4549,14 @@ export class DaemonMcpProxy {
     } catch (error) {
       abandoned = true;
       if (this.closing) {
+        return;
+      }
+      if (error instanceof LifecycleConnectionInFlightError) {
+        // The heartbeat was never sent: a tool call is establishing the shared connection. That
+        // says nothing about the daemon, and the next tick retries on that connection (#10508).
+        logger.debug(
+          `[DaemonMcpProxy] Heartbeat for session ${sessionUuid} deferred: ${errorMessage(error)}`,
+        );
         return;
       }
       if (!this.isMissingHeartbeatAcknowledgement(error)) {

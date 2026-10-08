@@ -142,9 +142,10 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
   Remaining non-actor blockers (4 global/static + 2 captures/conversions + 2 conformance):
   `AutoMobileCrashes.signalCrashFilePath` / `previousSignalHandlers` (C signal handler must stay
   lock-free and async-signal-safe); `SdkHighlightOverlayManager.shared`, timer `self` capture and
-  removal-closure conversion (UIKit/Timer state, main-actor pass); `AutoMobileURLProtocol`
-  (non-final class / Sendable-superclass restriction and mutable `startTime`; making it `final` is
-  a public API break, and a URLProtocol subclass cannot be checked Sendable).
+  removal-closure conversion (UIKit/Timer state, main-actor pass). `AutoMobileURLProtocol` is now
+  `final` and `@unchecked Sendable` (all mutable state, instance and static, sits in
+  `OSAllocatedUnfairLock`s); `final` is not a source break because the class is `public`, not
+  `open`, so no other module could subclass it.
   Main-actor sizing: `ViewHierarchyWalker` is a public enum with synchronous public `walk(bundleId:)`
   / `computeHash(_:)`; whole-type `@MainActor` changes public API → nonisolated public facades over
   an isolated internal implementation. Callers: `ViewHierarchyTracker.walkNow()` / `performWalk()`
@@ -155,7 +156,10 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
   Next: UIKit main-actor pass over those two types and the remaining actor-diagnostic files
   (`AutoMobileOsEvents.swift`, `AutoMobileInteractionTracker.swift`, `NavigationAdapters.swift`,
   `AutoMobileFailures.swift`, `ViewHierarchyTracker.swift`); signal-handler globals and URLProtocol
-  decisions; then enable `.v6`. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
+  decisions; then enable `.v6`. **Done (#5839):** the SDK and highlight-core targets (sub-package
+  manifests and the root `Package.swift`) now compile in the Swift 6 language mode with zero
+  concurrency diagnostics on both the macOS host build and a generic iOS Simulator `xcodebuild`;
+  the counts above are historical. The **iOS 17 / macOS 15 floor** is decided and applied (#5839,
   owner decision 2026-10-02): iOS 17 already shipped in #6773;
   the SDK and highlight-core sub-package manifests were aligned here. Use **`OSAllocatedUnfairLock`**
   for the concurrency pass; `Mutex` requires iOS 18.

@@ -11,6 +11,10 @@ import { logger } from "../../src/utils/logger";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import {
+  ADB_TRANSPORT_RESTART_GRACE_MS,
+  InMemoryAdbTransportRestartRegistry,
+} from "../../src/utils/android-cmdline-tools/AdbTransportRestartRegistry";
+import {
   evaluateDeviceDisconnects,
   recordingCandidateIncarnations,
 } from "../../src/daemon/disconnectMonitor";
@@ -38,14 +42,15 @@ interface PlanDisconnectMonitorSurface {
       "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
     >,
     listRecordings: () => Promise<VideoRecordingRecord[]>,
+    transportRestarts?: InMemoryAdbTransportRestartRegistry,
   ): void;
 }
 
-function planDisconnectMonitorHarness() {
+function planDisconnectMonitorHarness(deviceId = "emulator-5554") {
   const timer = new FakeTimer();
   const actions: string[] = [];
   const device = {
-    id: "emulator-5554",
+    id: deviceId,
     platform: "android" as const,
     incarnation: 1,
     assignmentCount: 1,
@@ -164,15 +169,27 @@ function planDisconnectMonitorHarness() {
       return recordings;
     },
   };
-  daemon.startDeviceDisconnectMonitor(manager, () => recordingsReader.list());
+  const transportRestarts = new InMemoryAdbTransportRestartRegistry(timer);
+  daemon.startDeviceDisconnectMonitor(manager, () => recordingsReader.list(), transportRestarts);
   return {
     daemon,
+    transportRestarts,
     manager,
     device,
     devices,
     timer,
     actions,
     recordingsReader,
+    /** The device returns and a new owner acquires it under a fresh incarnation. */
+    replug(sessionId: string) {
+      pooled = true;
+      sessionActive = true;
+      session.sessionId = sessionId;
+      device.sessionId = sessionId;
+      device.incarnation++;
+      device.assignmentCount++;
+      manager.bootedDevices = [{ deviceId: device.id, name: "Pixel", platform: "android" }];
+    },
     async tick() {
       timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
       // run() joins the tick just fired by FakeTimer; it does not start another.
@@ -413,6 +430,107 @@ describe("disconnect monitor during plan execution", () => {
     } finally {
       serverConfig.setPlanExecutionActive(previous);
     }
+  });
+});
+
+describe("physical Android device leaving adb devices (#10493)", () => {
+  const PHONE = "57281FDCH00462";
+
+  async function withInactivePlan(body: () => Promise<void>): Promise<void> {
+    const previous = serverConfig.isPlanExecutionActive();
+    const stopMonitoring = spyOn(getPerformanceMonitor(), "stopMonitoring").mockImplementation(
+      () => {},
+    );
+    try {
+      serverConfig.setPlanExecutionActive(false);
+      await body();
+    } finally {
+      stopMonitoring.mockRestore();
+      serverConfig.setPlanExecutionActive(previous);
+    }
+  }
+
+  test("a physical device absent once is released within one tick", async () => {
+    const h = planDisconnectMonitorHarness(PHONE);
+    await withInactivePlan(async () => {
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.actions).toContain(`remove:${PHONE}`);
+      expect(h.daemon.confirmedDisconnectedDeviceIds.has(PHONE)).toBe(true);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
+  });
+
+  test.each(["emulator-5554", "localhost:5555"])(
+    "%s absent once is only a miss",
+    async (deviceId) => {
+      const h = planDisconnectMonitorHarness(deviceId);
+      await withInactivePlan(async () => {
+        await h.tick();
+        expect(h.daemon.deviceDisconnectMisses.get(deviceId)).toBe(1);
+        expect(h.actions).not.toContain("cancel:plan-session");
+      });
+    },
+  );
+
+  test("an ADB-offline physical device keeps the miss debounce", async () => {
+    const h = planDisconnectMonitorHarness(PHONE);
+    h.manager.offlineDeviceIds.add(PHONE);
+    await withInactivePlan(async () => {
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.get(PHONE)).toBe(1);
+      expect(h.actions).not.toContain("cancel:plan-session");
+    });
+  });
+
+  test.each([
+    ["every platform", ["android", "ios"]],
+    ["only Android", ["android"]],
+  ] as const)("a failed listing (%s) releases nothing", async (_label, failed) => {
+    const h = planDisconnectMonitorHarness(PHONE);
+    for (const platform of failed) {
+      h.manager.failedPlatforms.add(platform);
+    }
+    await withInactivePlan(async () => {
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.actions).not.toContain("cancel:plan-session");
+      expect(h.actions).not.toContain(`remove:${PHONE}`);
+    });
+  });
+
+  test("absent during an AutoMobile adb root restart is only a miss, then released after the grace", async () => {
+    const h = planDisconnectMonitorHarness(PHONE);
+    await withInactivePlan(async () => {
+      const gate = Promise.withResolvers<void>();
+      const restart = h.transportRestarts.runRestart(PHONE, () => gate.promise);
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.get(PHONE)).toBe(1);
+      expect(h.actions).not.toContain("cancel:plan-session");
+      gate.resolve();
+      await restart;
+      h.timer.advanceTime(ADB_TRANSPORT_RESTART_GRACE_MS - DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      expect(h.actions).toContain(`remove:${PHONE}`);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
+  });
+
+  test("after a release, the re-plugged phone's new session is kept", async () => {
+    const h = planDisconnectMonitorHarness(PHONE);
+    await withInactivePlan(async () => {
+      await h.tick();
+      expect(h.actions).toContain("cancel:plan-session");
+      h.replug("new-owner");
+      h.actions.length = 0;
+      await h.tick();
+      await h.tick();
+      expect(h.daemon.deviceDisconnectMisses.has(PHONE)).toBe(false);
+      expect(h.daemon.confirmedDisconnectedDeviceIds.has(PHONE)).toBe(false);
+      expect(h.actions).not.toContain("cancel:new-owner");
+      expect(h.actions).not.toContain(`remove:${PHONE}`);
+    });
   });
 });
 

@@ -29,6 +29,7 @@ import {
   SEND_KEYS_MAX_COMMANDS,
   SEND_KEYS_MAX_MODIFIERS,
   DefaultSendKeysCommandExecutor,
+  IME_COMMIT_READ_BACK_SETTLE_MS,
   SendKeys,
   type SendKeysCommandExecutor,
   type SendKeysInputKey,
@@ -716,7 +717,7 @@ describe("SendKeys", () => {
       success: false,
       error: "No focused editable node found",
     });
-    const clearResult = await executor.clear();
+    const clearResult = await executor.clear(undefined, undefined, "a11y");
     expect(clearResult).toEqual({
       success: false,
       error: "Android event delivery requires a focused editable field",
@@ -849,7 +850,7 @@ describe("SendKeys", () => {
     const { executor, textClient, adb } = imeVerificationHarness(observer);
     const clear = mock(async () => ({ success: false, error: "No focused editable node found" }));
     textClient.client.clear = clear;
-    expect(await executor.clear()).toEqual({
+    expect(await executor.clear(undefined, undefined, "a11y")).toEqual({
       success: false,
       error: "Android event delivery requires a focused editable field",
     });
@@ -1857,7 +1858,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
         );
         const result =
           operation === "clear"
-            ? await executor.clear()
+            ? await executor.clear(undefined, undefined, "a11y")
             : await executor.type({
                 action: "type",
                 text: "a",
@@ -1972,8 +1973,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient, timer: new FakeTimer() },
     );
     const controller = new AbortController();
-    const first = executor.clear(controller.signal);
-    const second = Promise.allSettled([executor.clear(new AbortController().signal)]);
+    const first = executor.clear(controller.signal, undefined, "a11y");
+    const second = Promise.allSettled([
+      executor.clear(new AbortController().signal, undefined, "a11y"),
+    ]);
     await started;
     controller.abort();
     await expect(first).rejects.toMatchObject({ name: "AbortError" });
@@ -2008,7 +2011,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       { textClient },
     );
 
-    expect(await executor.clear()).toMatchObject({ success: true });
+    expect(await executor.clear(undefined, undefined, "a11y")).toMatchObject({ success: true });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
       "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
@@ -2058,8 +2061,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result).toMatchObject({ success: true, resolvedMode: expectedMode });
       expect(textClient.commitViaImeCalls).toEqual([]);
       expect(textClient.calls).not.toContain("clear");
-      // eventAll adds one letter-case read-back (unreadable for a password field).
-      expect(observer.calls).toBe(operation === "insert" ? 2 : 1);
+      // A password field gets no letter-case read-back, so its text never reaches a warning.
+      expect(observer.calls).toBe(1);
       if (operation === "replace") {
         expect(textClient.calls).toContain("replace:new");
       }
@@ -2108,6 +2111,11 @@ describe("DefaultSendKeysCommandExecutor", () => {
       expect(result.error).not.toMatch(/U\+[0-9A-F]{4}/);
       expect(result.error).toContain('operation: "replace"');
       expect(result.error).not.toContain(text);
+      // The refusal names the key-event route it was checked for, not the IME it never used.
+      expect(result.resolvedMode).toBe("eventAll");
+      expect(result).not.toHaveProperty("backend");
+      expect(result).not.toHaveProperty("capability");
+      expect(result).not.toHaveProperty("keyboard");
       expect(adb.getExecutedCommands().filter((cmd) => cmd.includes("input key"))).toEqual([]);
       expect(textClient.calls).toEqual([]);
       expect(textClient.commitViaImeCalls).toEqual([]);
@@ -2154,6 +2162,77 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(adb.getExecutedCommands()).toContain(
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_P",
     );
+    // #9888: a password is never batched into one `input text` command line.
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input text")),
+    ).toEqual([]);
+  });
+
+  // #9888: a password-field eventAll run is never batched, and no log, warning or error carries
+  // its characters, key codes or adb command lines — only `<password, N characters>` counts.
+  for (const mode of ["eventAll", "auto"] as const) {
+    test(`${mode} on a password field logs and reports no typed characters or key codes`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(31);
+      // A real adb failure quotes the command line, key code included.
+      adb.setCommandError(
+        "KEYCODE_X",
+        new Error("Command failed: adb -s emulator-5554 shell input keyevent KEYCODE_X"),
+      );
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        // The read-back shows the typed text in another case, which would otherwise warn.
+        createObserver(focusedAndroidObservation("zQ9 X", { password: "true" })),
+        { textClient: createTextClient().client },
+      );
+      const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+        spyOn(logger, level).mockImplementation(() => {}),
+      );
+      try {
+        const result = await executor.type({ action: "type", text: "Zq9 x", mode });
+
+        expect(result).toMatchObject({ success: false, committedGraphemes: 4 });
+        expect(result.error).toContain("<password, 1 characters>");
+        expect(
+          adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+        ).toEqual([
+          "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_Z",
+          "shell input keyevent KEYCODE_Q",
+          "shell input keyevent KEYCODE_9",
+          "shell input keyevent KEYCODE_SPACE",
+          "shell input keyevent KEYCODE_X",
+        ]);
+        const surfaced = [
+          result.error ?? "",
+          result.warning ?? "",
+          JSON.stringify(spies.map((spy) => spy.mock.calls)),
+        ].join("\n");
+        expect(surfaced).not.toMatch(/KEYCODE|U\+[0-9A-F]{4}|Zq9|zQ9|input keyevent|input text/);
+      } finally {
+        for (const spy of spies) {
+          spy.mockRestore();
+        }
+      }
+    });
+  }
+
+  test("eventAll splits a literal %s across two input text calls", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(31);
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation()),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({ action: "type", text: "50%s 1", mode: "eventAll" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(
+      adb.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+    ).toEqual(["shell input text '50%'", "shell input text 's%s1'"]);
   });
 
   test("auto password replace is not pre-checked and sets the whole value", async () => {
@@ -2450,7 +2529,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
     expect(textClient.commitViaImeCalls).toEqual([]);
     expect(adb.getExecutedCommands()).toContain(`shell ime set ${commitImeId}`);
-    expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
+    expect(adb.getExecutedCommands()).toContain("shell input text 'abc'");
   });
 
   test("auto IME does not fall back after a partial commit", async () => {
@@ -2680,6 +2759,107 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(
       events.indexOf("adb:shell settings delete secure selected_input_method_subtype"),
     ).toBeLessThan(events.indexOf(`adb:shell ime disable ${commitImeId}`));
+  });
+
+  test("ime mode with a non-zero foreground user pins every ime and settings command to that user", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+    adb.setCommandResponse("shell ime list --user 10 -a -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell ime list --user 10 -s", {
+      stdout: `${priorImeId}\n`,
+      stderr: "",
+    });
+    // prior read, activation readback, restore pre-read, restore readback, verification.
+    adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+      { stdout: priorImeId, stderr: "" },
+    ]);
+    const textClient = createTextClient({ commitViaIme: async () => ({ success: true }) });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      { create: () => adb },
+      createObserver(),
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text: "*bold*", mode: "ime" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "ime" });
+    const imeAndSettings = adb
+      .getExecutedCommands()
+      .filter((command) => /^shell (ime|settings) /.test(command));
+    expect(imeAndSettings).toContain(`shell ime enable --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${priorImeId}`);
+    expect(imeAndSettings).toContain(`shell ime disable --user 10 ${commitImeId}`);
+    expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
+  });
+
+  // #10066 (pinned foreground user) x #9888 (case read-back): an auto IME attempt that cannot
+  // activate falls back to eventAll after restoring the keyboard, and the fallback's typing must
+  // still verify letter case exactly once.
+  test("auto IME on a non-zero foreground user restores that user's IME, then the eventAll fallback runs the case read-back once", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setAndroidApiLevel(34);
+    adb.setCommandResponse("shell am get-current-user", { stdout: "10\n", stderr: "" });
+    adb.setCommandResponse("shell ime list --user 10 -a -s", {
+      stdout: `${priorImeId}\n${commitImeId}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell ime list --user 10 -s", {
+      stdout: `${priorImeId}\n`,
+      stderr: "",
+    });
+    // Activation read-back still shows the prior IME, so activation fails verification and the
+    // restore then has to act on the same user.
+    adb.setCommandResponse("shell settings --user 10 get secure default_input_method", {
+      stdout: priorImeId,
+      stderr: "",
+    });
+    const textClient = createTextClient();
+    const reads: number[] = [];
+    const observer = createObserver();
+    observer.execute = async () => {
+      reads.push(reads.length);
+      // The IME or field rewrote the case: the requested "Abc" shows as "abc".
+      return focusedAndroidObservation("abc", {}, 0);
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      observer,
+      { textClient: textClient.client, timer },
+    );
+
+    const result = await executor.type({ action: "type", text: "Abc" });
+
+    expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+    expect(textClient.commitViaImeCalls).toEqual([]);
+    const commands = adb.getExecutedCommands();
+    const imeAndSettings = commands.filter((command) => /^shell (ime|settings) /.test(command));
+    expect(imeAndSettings).toContain(`shell ime set --user 10 ${commitImeId}`);
+    // The readback already shows the prior IME, so the restore needs no `ime set`; it still
+    // undoes the enable and clears the subtype for the pinned user, never for user 0.
+    expect(imeAndSettings).toContain(`shell ime disable --user 10 ${commitImeId}`);
+    expect(imeAndSettings).toContain(
+      "shell settings --user 10 delete secure selected_input_method_subtype",
+    );
+    expect(imeAndSettings.filter((command) => !command.includes("--user 10"))).toEqual([]);
+    expect(commands).toContain("shell input text 'Abc'");
+    // The case read-back ran once: one warning, from one bounded series of settled re-reads.
+    expect(result.warning?.match(/changed the letter case/g)).toHaveLength(1);
+    expect(result.warning).toContain('eventAll typed "Abc"');
+    expect(timer.getSleepHistory().filter((ms) => ms === IME_COMMIT_READ_BACK_SETTLE_MS)).toEqual([
+      IME_COMMIT_READ_BACK_SETTLE_MS,
+      IME_COMMIT_READ_BACK_SETTLE_MS,
+    ]);
   });
 
   test.each([
@@ -3653,26 +3833,67 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("marks a late eventAll key dispatch exception as partially applied", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError("KEYCODE_B", new Error("dispatch rejected"));
+    const { client, calls } = createTextClient();
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
       createObserver(focusedAndroidObservation()),
-      { textClient: createTextClient().client },
+      { textClient: client },
     );
 
-    const result = await executor.type({ action: "type", text: "ab", mode: "eventAll" });
+    const result = await executor.type({ action: "type", text: "a🙂b", mode: "eventAll" });
 
     expect(result).toMatchObject({
       success: false,
       partialApplication: true,
-      committedGraphemes: 1,
+      committedGraphemes: 2,
       error: expect.stringContaining("U+0062"),
     });
+    expect(calls).toEqual(["insert:🙂"]);
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
     ]);
   });
+
+  // #9888: one `input text` process carries a printable run, so a failure may have typed part
+  // of it. The result counts only graphemes delivered before the run and is always partial.
+  for (const { label, text, failingCommand, committedGraphemes } of [
+    {
+      label: "first",
+      text: "bc🙂",
+      failingCommand: "shell input text 'bc'",
+      committedGraphemes: 0,
+    },
+    {
+      label: "later",
+      text: "a🙂bc",
+      failingCommand: "shell input text 'bc'",
+      committedGraphemes: 2,
+    },
+  ]) {
+    test(`marks a failed ${label} eventAll input-text run as partial and counts earlier graphemes`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError(failingCommand, new Error("input text rejected"));
+      const { client } = createTextClient();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: client },
+      );
+
+      const result = await executor.type({ action: "type", text, mode: "eventAll" });
+
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedGraphemes,
+        error: expect.stringContaining("could not deliver graphemes U+0062, U+0063"),
+      });
+      expect(adb.getExecutedCommands()).toContain(failingCommand);
+    });
+  }
 
   test("marks an eventOnly dispatch exception after replacement clearing as partial", async () => {
     const adb = new FakeAdbExecutor();
@@ -3876,6 +4097,21 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(calls).toEqual(["ime:next"]);
     expect(press).toHaveBeenCalledTimes(1);
     expect(press).toHaveBeenCalledWith("tab", undefined, undefined, ["shift"]);
+  });
+
+  test("forwards an IME action warning on semantic keys", async () => {
+    const { client } = createTextClient();
+    client.ime = async () => ({ success: true, warning: "focus moved" });
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(focusedAndroidObservation()),
+      { textClient: client },
+    );
+
+    const result = await executor.key({ action: "key", key: "next" });
+
+    expect(result).toMatchObject({ success: true, warning: "focus moved" });
   });
 
   test("rejects Android semantic keys without a focused editable field", async () => {
@@ -4367,9 +4603,11 @@ describe("SendKeys post-action capture boundary", () => {
 });
 
 describe("SendKeys Android non-idempotent outcomes", () => {
-  // Auto typing into a password field never reaches insert with undeliverable text: it is
-  // refused before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
-  const modes = ["a11y", "eventLast", "eventAll", "autoOlder"] as const;
+  const CARET_PRIMER_TEXT = "x";
+  // autoPassword types deliverable text into a password field whose caret is marked unsafe, so
+  // the eventAll route still reaches insert. Undeliverable text never gets that far: it is refused
+  // before dispatch (#9941), covered by "auto password typing refuses undeliverable text".
+  const modes = ["a11y", "eventLast", "eventAll", "autoPassword", "autoOlder"] as const;
   for (const mode of modes) {
     test.each(["timeout", "disconnect", "abort", "refusal", "notConnected", "success", "preAbort"])(
       `${mode}: insert %s`,
@@ -4381,6 +4619,9 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         const attempts: string[] = [];
         h.client.supportsImeCommit = async () => false;
         h.client.insert = async (value, options) => {
+          if (value === CARET_PRIMER_TEXT) {
+            return { success: true, caretPlaced: false };
+          }
           attempts.push(value);
           const pending = text.requestInsertText(value, 5000, undefined, undefined, {
             abortSignal: options?.abortSignal,
@@ -4402,7 +4643,11 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           }
           return pending;
         };
-        const observation = focusedAndroidObservation("", {}, 1);
+        const observation = focusedAndroidObservation(
+          "",
+          mode === "autoPassword" ? { password: "true" } : {},
+          1,
+        );
         const observer = createObserver(observation);
         const executor = new DefaultSendKeysCommandExecutor(
           android,
@@ -4426,33 +4671,40 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         });
         const command = {
           action: "type" as const,
-          text: "é😀a",
+          text: mode === "autoPassword" ? "abc" : "é😀a",
           mode: mode.startsWith("auto")
             ? ("auto" as const)
             : (mode as "a11y" | "eventLast" | "eventAll"),
         };
+        // An earlier insert in the same call that reports no caret placement makes key events
+        // unsafe from then on, so the autoPassword eventAll route falls back to insert.
+        const primer =
+          mode === "autoPassword"
+            ? [{ action: "type" as const, text: CARET_PRIMER_TEXT, mode: "a11y" as const }]
+            : [];
+        const lead = primer.length;
         if (failure === "preAbort") {
           controller.abort();
           await expect(
-            sendKeys.execute([command], undefined, undefined, controller.signal),
+            sendKeys.execute([...primer, command], undefined, undefined, controller.signal),
           ).rejects.toThrow();
           expect(attempts).toHaveLength(0);
         } else {
           const result = await sendKeys.execute(
-            [command, command],
+            [...primer, command, command],
             undefined,
             undefined,
             controller.signal,
           );
           if (["timeout", "disconnect", "abort"].includes(failure)) {
             expect(result).toMatchObject({ success: false, retryable: false });
-            expect(result.commands[0]).toMatchObject({
+            expect(result.commands[lead]).toMatchObject({
               retryable: false,
               partialApplication: true,
             });
             expect(result.error).toContain("outcome is indeterminate");
             expect(result.error).toContain("may have been entered");
-            expect(result.commands).toHaveLength(1);
+            expect(result.commands).toHaveLength(lead + 1);
             expect(attempts).toHaveLength(1);
             expect(
               h.adb.getExecutedCommands().filter((value) => value.includes("input keyevent")),
@@ -4463,7 +4715,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
           } else {
             expect(result.success).toBe(false);
             expect(result.retryable).toBeUndefined();
-            expect(result.commands[0].partialApplication).toBeUndefined();
+            expect(result.commands[lead].partialApplication).toBeUndefined();
             expect(result.error).not.toContain("indeterminate");
             expect(attempts).toHaveLength(1);
           }
@@ -4722,7 +4974,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     test("polls until the old text is gone before the a11y insert is dispatched", async () => {
       // Reads: pre-clear, then the settled polls.
       const h = harness(["old z", "old z", "old z", ""]);
-      expect(await h.executor.clear(undefined, "2")).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, "2", "a11y")).toEqual({ success: true });
       expect(await h.executor.type({ action: "type", text: "Na1 k", mode: "a11y" })).toMatchObject({
         success: true,
       });
@@ -4735,7 +4987,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("an already-empty field needs only the pre-clear read and no sleep", async () => {
       const h = harness([""]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(1);
       expect(h.timer.getSleepHistory()).toEqual([]);
       expect(h.seq.options[0]).not.toHaveProperty("display");
@@ -4750,7 +5002,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         timestampProvider: { now: async () => 0 },
       });
       const result = await sendKeys.execute([
-        { action: "clear" },
+        { action: "clear", mode: "a11y" },
         { action: "type", text: "5551234", mode: "a11y" },
       ]);
       expect(result.success).toBe(true);
@@ -4764,21 +5016,21 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("a masked field that re-inserts its skeleton still counts as cleared", async () => {
       const h = harness(["(555) 123", "(   )    "]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(2);
       expect(h.timer.getSleepHistory()).toEqual([]);
     });
 
     test("a clear applied on the second read succeeds after one settle", async () => {
       const h = harness(["old z", "old z", "(   )"]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(3);
       expect(h.timer.getSleepHistory()).toEqual([150]);
     });
 
     test("an unreadable first read keeps polling and still notices the unchanged text", async () => {
       const h = harness(["old z", undefined, "old z", "old z"]);
-      const result = await h.executor.clear();
+      const result = await h.executor.clear(undefined, undefined, "a11y");
       expect(result.success).toBe(true);
       expect(result.warning).toContain("still shows its pre-clear text");
       expect(h.seq.reads()).toBe(4);
@@ -4786,7 +5038,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
 
     test("an unreadable first read recovers when a later read shows the clear applied", async () => {
       const h = harness(["old z", undefined, ""]);
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
       expect(h.seq.reads()).toBe(3);
     });
 
@@ -4794,7 +5046,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const h = harness(["old z", undefined]);
-        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
         expect(h.seq.reads()).toBe(4);
         expect(
           loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] The clear could not be verified"),
@@ -4808,7 +5060,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const h = harness([undefined]);
-        expect(await h.executor.clear()).toEqual({ success: true });
+        expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
         expect(h.seq.reads()).toBe(1);
         expect(
           loggerCallsWithPrefix(warning.mock.calls, "[SendKeys] Focused text is unreadable"),
@@ -4822,7 +5074,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       const h = harness([]);
       const hinted = focusedAndroidObservation("Type here", { "hint-text": "Type here" }, 0);
       h.seq.observer.execute = async () => hinted;
-      expect(await h.executor.clear()).toEqual({ success: true });
+      expect(await h.executor.clear(undefined, undefined, "a11y")).toEqual({ success: true });
     });
   });
 
@@ -4965,7 +5217,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         },
       );
 
-      test("eventLast with a prefix replaces it directly with no clear and no read of the field", async () => {
+      test("eventLast with a prefix replaces it directly with no clear and one case read-back", async () => {
         const h = harness(
           [""],
           [{ text: null, isShowingHintText: false, selectionStart: -1, selectionEnd: -1 }],
@@ -4980,7 +5232,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         expect(result.warning).toBeUndefined();
         expect(h.order).not.toContain("clear");
         expect(h.calls).toContain("replace:abc");
-        expect(h.seq.reads()).toBe(1);
+        // The focus check, then the one post-type case read-back (#9888); no clear read.
+        expect(h.seq.reads()).toBe(2);
       });
 
       test("eventAll adds no post-type read for an unchanged-clear check", async () => {
@@ -5040,8 +5293,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           });
           expect(result.success).toBe(true);
           expect(result.warning).toBeUndefined();
-          // Focus check, pre-clear (unreadable password), then the letter-case read-back.
-          expect(h.seq.reads()).toBe(3);
+          // Focus check and pre-clear (unreadable password); a password gets no case read-back.
+          expect(h.seq.reads()).toBe(2);
           expect(h.order.filter((entry) => entry === "clear")).toHaveLength(1);
           const logged = warnedText([...warn.mock.calls, ...info.mock.calls, ...debug.mock.calls]);
           expect(logged).toContain("Focused text is unreadable before the clear");
@@ -5332,22 +5585,13 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
     );
   });
 
-  describe("#9888 eventAll warns about a keyboard letter-case change", () => {
-    test("pins the emitted key events for mixed case with spaces", async () => {
+  describe("#9888 key-event typing warns about an IME letter-case rewrite", () => {
+    test("sends a mixed-case run with spaces in one input text process", async () => {
       const h = harness(["Ab cD ef"]);
       expect(
         await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" }),
       ).toMatchObject({ success: true });
-      expect(keyCommands(h.adb)).toEqual([
-        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_A",
-        "shell input keyevent KEYCODE_B",
-        "shell input keyevent KEYCODE_SPACE",
-        "shell input keyevent KEYCODE_C",
-        "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_D",
-        "shell input keyevent KEYCODE_SPACE",
-        "shell input keyevent KEYCODE_E",
-        "shell input keyevent KEYCODE_F",
-      ]);
+      expect(keyCommands(h.adb)).toEqual(["shell input text 'Ab%scD%sef'"]);
     });
 
     test("a case-only difference stays successful with a warning and is not a partial application", async () => {
@@ -5366,6 +5610,8 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
         expect(result.warning).toContain('typed "Ab cD ef"');
         expect(result.warning).toContain('holds "Ab CD ef"');
         expect(result.warning).toContain("letter case");
+        expect(result.warning).toContain("keyboard or field");
+        expect(result.warning).toContain('mode "ime" or "a11y"');
         expect(h.timer.getSleepHistory()).toEqual([150, 150]);
         expect(h.seq.options.every((o) => o?.skipScreenshot === true)).toBe(true);
         expect(loggerCallsWithPrefix(warn.mock.calls, "[SendKeys] eventAll typed")).toHaveLength(1);
@@ -5388,6 +5634,72 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
       // The first read is the focus pre-check; later reads are the case read-back.
       const h = harness(["Ab cD ef", field]);
       const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
+    });
+
+    test("an exact match is plain success with one read-back after the focus check", async () => {
+      const h = harness(["Ab cD ef"]);
+      const result = await h.executor.type({ action: "type", text: "Ab cD ef", mode: "eventAll" });
+      expect(result).toMatchObject({ success: true });
+      expect(result.warning).toBeUndefined();
+      expect(h.seq.reads()).toBe(2);
+      expect(h.timer.getSleepHistory()).toEqual([]);
+    });
+
+    describe.each(["eventOnly", "eventLast"] as const)("%s", (mode) => {
+      // Text with a cased key event as its tail, so both modes dispatch real key events.
+      const text = "ab cD";
+      const type = (h: ReturnType<typeof harness>) =>
+        h.executor.type({ action: "type", text, mode });
+
+      test("a case-rewritten field is not plain success: it names both texts and the bypass modes", async () => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const h = harness(["", "ab CD"]);
+          const result = await type(h);
+          expect(result.success).toBe(true);
+          expect(result.warning).toContain(`${mode} typed "ab cD"`);
+          expect(result.warning).toContain('holds "ab CD"');
+          expect(result.warning).toContain("keyboard or field");
+          expect(result.warning).toContain('mode "ime" or "a11y"');
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      test("an exact match is plain success with exactly one extra read", async () => {
+        const h = harness(["", "ab cD"]);
+        const result = await type(h);
+        expect(result).toMatchObject({ success: true });
+        expect(result.warning).toBeUndefined();
+        expect(h.seq.reads()).toBe(2);
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      });
+
+      test("caseless text and an unreadable field add no warning", async () => {
+        const caseless = harness([""]);
+        expect(await caseless.executor.type({ action: "type", text: "123", mode })).toMatchObject({
+          success: true,
+        });
+        const unreadable = harness(["", undefined]);
+        const result = await type(unreadable);
+        expect(result).toMatchObject({ success: true });
+        expect(result.warning).toBeUndefined();
+      });
+    });
+
+    test("a password field cannot be read back and keeps plain success", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(34);
+      const observer = createObserver(focusedAndroidObservation("", { password: "true" }));
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        observer,
+        { textClient: createTextClient().client, timer: new FakeTimer() },
+      );
+      const result = await executor.type({ action: "type", text: "aB", mode: "eventOnly" });
       expect(result).toMatchObject({ success: true });
       expect(result.warning).toBeUndefined();
     });

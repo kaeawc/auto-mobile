@@ -39,9 +39,18 @@ import {
   DAEMON_RELEASE_LIVENESS_OWNERSHIP_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_LIST_DEVICE_SESSIONS_METHOD,
+  DAEMON_DEVICE_LEASE_STATUS_METHOD,
+  DAEMON_RELINQUISH_DEVICE_LEASE_METHOD,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
+import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
+import {
+  daemonDeviceLeaseActivitySources,
+  daemonDeviceLeaseRelinquishPort,
+  type DeviceLeaseRelinquishPort,
+} from "./deviceLeaseActivitySources";
+import { decideOwnerRelinquish } from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 
 /** Socket endpoint clients may query before sending optional newer parameters. */
 export const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -58,6 +67,10 @@ export const INPUT_GESTURE_STREAM_CAPABILITY = "input/gestureStream";
 
 export interface DaemonStateAccess {
   isInitialized(): boolean;
+  /** Overrides the production lease-activity sources (tests). */
+  getDeviceLeaseActivitySources?(): DeviceLeaseActivitySources;
+  /** Overrides the production lease-relinquish policy and release (tests). */
+  getDeviceLeaseRelinquishPort?(): DeviceLeaseRelinquishPort;
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     hasSession(sessionId: string): boolean;
@@ -261,6 +274,10 @@ async function handleInitializedDaemonRequest(
       return handleReleaseSession(request, state, executions);
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD:
       return handleListDeviceSessions(request, state);
+    case DAEMON_DEVICE_LEASE_STATUS_METHOD:
+      return handleDeviceLeaseStatus(request, state);
+    case DAEMON_RELINQUISH_DEVICE_LEASE_METHOD:
+      return handleRelinquishDeviceLease(request, state);
     default:
       return {
         success: false,
@@ -756,4 +773,77 @@ async function handleListDeviceSessions(
       totalDeviceSessions: deviceSessions.length,
     },
   };
+}
+
+/**
+ * Report whether this daemon still uses a device, so another AutoMobile process
+ * can decide whether to take over its CtrlProxy forwarding lease (#10497).
+ */
+async function handleDeviceLeaseStatus(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid deviceLeaseStatus parameters: ${parsed.error.message}`,
+    };
+  }
+  const { deviceId } = parsed.data;
+  const manager = state.getSessionManager();
+  const sources =
+    state.getDeviceLeaseActivitySources?.() ??
+    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  return {
+    success: true,
+    result: {
+      pid: process.pid,
+      deviceId,
+      ...readDeviceLeaseActivity(sources, deviceId),
+    },
+  };
+}
+
+/**
+ * Give up this daemon's CtrlProxy forwarding lease on a device when it no longer
+ * uses it, so another AutoMobile process can take it (#10497). The use check and
+ * the release start in one synchronous step, so a tool call or CtrlProxy request
+ * this daemon begins afterwards cannot lose the lease to the requester; it builds
+ * a fresh client that competes for the lease again (#10506 review).
+ */
+async function handleRelinquishDeviceLease(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const parsed = z.object({ deviceId: z.string().min(1) }).safeParse(request.params);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: `Invalid relinquishDeviceLease parameters: ${parsed.error.message}`,
+    };
+  }
+  const { deviceId } = parsed.data;
+  const manager = state.getSessionManager();
+  const sources =
+    state.getDeviceLeaseActivitySources?.() ??
+    daemonDeviceLeaseActivitySources((id) => manager.getSessionForDevice?.(id) ?? null);
+  const port = state.getDeviceLeaseRelinquishPort?.() ?? daemonDeviceLeaseRelinquishPort();
+  const status = { pid: process.pid, deviceId, ...readDeviceLeaseActivity(sources, deviceId) };
+  const decision = decideOwnerRelinquish(status, port.idleMs);
+  if (!decision.release) {
+    return {
+      success: true,
+      result: {
+        ...status,
+        released: false,
+        reason: decision.reason,
+        ...(decision.transient ? { transient: true } : {}),
+      },
+    };
+  }
+  // No await between the use check above and this call: release evicts the
+  // device's client synchronously before its first await.
+  await port.release(deviceId);
+  return { success: true, result: { ...status, released: true, reason: decision.reason } };
 }

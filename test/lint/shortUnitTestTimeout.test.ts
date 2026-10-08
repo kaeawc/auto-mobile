@@ -6,26 +6,44 @@ import { fileURLToPath } from "node:url";
 // The independent Node Unit Timing Budget job measures isolated medians. Test
 // runner deadlines this tight instead fail on scheduler stalls on loaded CI.
 function shortTimeouts(source: string): string[] {
-  const file = ts.createSourceFile("unit.test.ts", source, ts.ScriptTarget.Latest, true);
-  const comments: Array<{ line: number; text: string; standalone: boolean }> = [];
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
+  // This rule reads syntax and explicit line comments, never JSDoc or parents.
+  const file = ts.createSourceFile(
+    "unit.test.ts",
     source,
+    { languageVersion: ts.ScriptTarget.Latest, jsDocParsingMode: ts.JSDocParsingMode.ParseNone },
+    false,
   );
-  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
-    if (token === ts.SyntaxKind.SingleLineCommentTrivia) {
-      comments.push({
-        line: file.getLineAndCharacterOfPosition(scanner.getTokenPos()).line,
-        text: scanner.getTokenText(),
-        standalone:
-          source
-            .slice(source.lastIndexOf("\n", scanner.getTokenPos() - 1) + 1, scanner.getTokenPos())
-            .trim().length === 0,
-      });
+  let comments: Array<{ line: number; text: string; standalone: boolean }> | undefined;
+  const exemptionComments = () => {
+    if (comments) {
+      return comments;
     }
-  }
+    const scanned: Array<{ line: number; text: string; standalone: boolean }> = [];
+    const scanner = ts.createScanner(
+      ts.ScriptTarget.Latest,
+      false,
+      ts.LanguageVariant.Standard,
+      source,
+    );
+    for (
+      let token = scanner.scan();
+      token !== ts.SyntaxKind.EndOfFileToken;
+      token = scanner.scan()
+    ) {
+      if (token === ts.SyntaxKind.SingleLineCommentTrivia) {
+        scanned.push({
+          line: file.getLineAndCharacterOfPosition(scanner.getTokenPos()).line,
+          text: scanner.getTokenText(),
+          standalone:
+            source
+              .slice(source.lastIndexOf("\n", scanner.getTokenPos() - 1) + 1, scanner.getTokenPos())
+              .trim().length === 0,
+        });
+      }
+    }
+    comments = scanned;
+    return comments;
+  };
   const scopes: Map<string, number | undefined>[] = [];
   const found: string[] = [];
   const numericValue = (node: ts.Expression): number | undefined => {
@@ -90,7 +108,7 @@ function shortTimeouts(source: string): string[] {
       if (value !== undefined && value >= 0 && value <= 1000) {
         const callLine = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
         const timeoutLine = file.getLineAndCharacterOfPosition(timeout.getStart(file)).line;
-        const allowed = comments.some(
+        const allowed = exemptionComments().some(
           ({ line, text, standalone }) =>
             ([callLine, timeoutLine].includes(line) ||
               (standalone && [callLine - 1, timeoutLine - 1].includes(line))) &&

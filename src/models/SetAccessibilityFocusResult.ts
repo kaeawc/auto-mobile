@@ -33,4 +33,10 @@ export interface SetAccessibilityFocusResult {
    * retry rather than assume the cursor never moved (#3922).
    */
   confirmed?: boolean;
+
+  /**
+   * Present (true) when the node was already in the requested state (set on a node that already
+   * holds accessibility focus, clear on one that does not), so no action was sent (#10148).
+   */
+  alreadySatisfied?: boolean;
 }

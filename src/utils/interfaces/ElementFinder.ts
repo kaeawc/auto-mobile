@@ -66,7 +66,7 @@ export interface ElementFinder
 
   /**
    * Find clickable elements, optionally restricted to a container.
-   * Used by `DefaultElementSelector.selectClickable` (the tapAny selection
+   * Used by `ResolverElementSelector` (the tapAny selection
    * path) — was implemented on `DefaultElementFinder` but missing from this
    * interface (issue #6252), so callers typed against `ElementFinder` (rather
    * than the concrete class) could not see it.
@@ -102,6 +102,4 @@ export interface ElementFinder
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
   ): Element[];
-
-  isElementKeyboardFocused(element: any): boolean;
 }

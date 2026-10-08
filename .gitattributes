@@ -32,6 +32,8 @@ test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 scripts/unit-test-device-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
+# Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
+android/junit-runner/src/test/resources/captured/*.json text eol=lf
 test/fixtures/android-focus-multidisplay/*.txt text eol=lf
 test/fixtures/android-focus-multidisplay/*.json text eol=lf
 # Byte-exact `cmd locale` captures: pin to LF so a Windows checkout cannot rewrite them to CRLF.

@@ -307,13 +307,84 @@ describe("Clipboard iOS", () => {
     },
   );
 
-  test("clipboard get failure proceeds with paste without verification", async () => {
-    fakeIOSCtrlProxy.setClipboardResults([
-      { success: false, action: "get", error: "read denied", totalTimeMs: 1 },
-      { success: true, action: "paste", totalTimeMs: 1 },
-    ]);
-    expect((await clipboard.execute("paste")).success).toBe(true);
-    expect(hierarchy.getCallCount()).toBe(0);
+  describe("paste through an unreadable pasteboard (#10083)", () => {
+    function unreadableClipboard(): void {
+      fakeIOSCtrlProxy.setClipboardResults([
+        { success: false, action: "get", error: "read denied", totalTimeMs: 1 },
+        { success: true, action: "paste", totalTimeMs: 1 },
+      ]);
+    }
+    const phases = () => fakeIOSCtrlProxy.getClipboardHistory().map((entry) => entry.action);
+
+    test("a changed focused field is a success", async () => {
+      unreadableClipboard();
+      hierarchy.setResults([focusedIOSForm("AB"), focusedIOSForm("AB Z1")]);
+      expect(await clipboard.execute("paste")).toEqual({
+        success: true,
+        action: "paste",
+        text: undefined,
+        method: "a11y",
+      });
+      expect(phases()).toEqual(["get", "paste"]);
+    });
+
+    test("an unchanged focused field reports that nothing was pasted", async () => {
+      unreadableClipboard();
+      hierarchy.setDefaultResult(focusedIOSForm("AB"));
+      const result = await clipboard.execute("paste");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("nothing appears to have been pasted");
+      expect(timer.now()).toBe(1500);
+    });
+
+    test.each([
+      ["no hierarchy before the paste", null],
+      ["no readable focused value before the paste", focusedIOSForm(undefined)],
+    ] as const)("%s never claims success", async (_name, value) => {
+      unreadableClipboard();
+      hierarchy.setDefaultResult(value);
+      const result = await clipboard.execute("paste");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Paste outcome is indeterminate");
+      expect(result.error).toContain("could not be compared");
+      expect(phases()).toEqual(["get", "paste"]);
+    });
+
+    test("a field that becomes unreadable after the paste never claims success", async () => {
+      unreadableClipboard();
+      hierarchy.setResults([focusedIOSForm("AB"), null]);
+      const result = await clipboard.execute("paste");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Paste outcome is indeterminate");
+    });
+
+    test("a secure field is not read or echoed, and success is not claimed", async () => {
+      unreadableClipboard();
+      const secure = focusedIOSForm("hunter2");
+      new DefaultElementParser().traverseNode(
+        new DefaultElementParser().extractRootNodes(secure)[0],
+        (node: ViewHierarchyNode) => {
+          if (node.$?.["resource-id"] === "name-field") {
+            nodeAttributes(node).password = "true";
+          }
+        },
+      );
+      hierarchy.setDefaultResult(secure);
+      const result = await clipboard.execute("paste");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Paste outcome is indeterminate");
+      expect(JSON.stringify(result)).not.toContain("hunter2");
+      expect(hierarchy.getCallCount()).toBe(1);
+    });
+
+    test("a pasteboard known to be empty still skips the field read", async () => {
+      fakeIOSCtrlProxy.setClipboardResults([
+        { success: true, action: "get", text: "", totalTimeMs: 1 },
+        { success: true, action: "paste", totalTimeMs: 1 },
+      ]);
+      expect((await clipboard.execute("paste")).success).toBe(true);
+      expect(hierarchy.getCallCount()).toBe(0);
+    });
   });
 
   test.each([
@@ -412,7 +483,8 @@ describe("Clipboard iOS", () => {
     }
   });
 
-  test("clipboard get exception warns and still sends paste once", async () => {
+  test("clipboard get exception warns, still sends paste once, and verifies through the field", async () => {
+    hierarchy.setResults([focusedIOSForm("AB"), focusedIOSForm("AB Z1")]);
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
     const requests: string[] = [];
     const client = {
@@ -434,7 +506,7 @@ describe("Clipboard iOS", () => {
       );
       expect((await action.execute("paste")).success).toBe(true);
       expect(requests).toEqual(["get", "paste"]);
-      expect(hierarchy.getCallCount()).toBe(0);
+      expect(hierarchy.getCallCount()).toBe(2);
       expect(warning).toHaveBeenCalled();
     } finally {
       warning.mockRestore();

@@ -15,6 +15,7 @@ import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteB
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
+import type { ForwardLeaseReclaimResult } from "../../../src/features/observe/android/CtrlProxyForwardLease";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationScreenshotManager } from "../../../src/features/navigation/NavigationScreenshotManager";
 import { serverConfig } from "../../../src/utils/ServerConfig";
@@ -110,6 +111,20 @@ describe("AndroidCtrlProxyClient", function () {
 
     public getLastOwnerPid(): number | undefined {
       return this.canAcquire ? undefined : this.ownerPid;
+    }
+
+    public reclaimAttempts = 0;
+    public reclaimResult: ForwardLeaseReclaimResult | undefined;
+
+    public get tryReclaimFromStaleOwner(): (() => Promise<ForwardLeaseReclaimResult>) | undefined {
+      const result = this.reclaimResult;
+      if (!result) {
+        return undefined;
+      }
+      return async () => {
+        this.reclaimAttempts++;
+        return result;
+      };
     }
   }
 
@@ -1501,6 +1516,51 @@ describe("AndroidCtrlProxyClient", function () {
     });
   }
 
+  test("logs exactly once when an own-device forward has extra columns", async function () {
+    const row = `${testDevice.deviceId} tcp:52001 tcp:8765 unexpected`;
+    stubForwardLifecycleCommands(() => `${row}\nother-device tcp:52002 tcp:8765 unexpected\n`);
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      await accessibilityServiceClient.sweepOrphanedCtrlProxyPortForwards();
+
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug).toHaveBeenCalledWith(
+        `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52001");
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  for (const site of ["removal check", "active check"] as const) {
+    test(`logs an extra-column row during the ${site}`, async function () {
+      if (site === "active check") {
+        await accessibilityServiceClient.setupPortForwarding();
+      }
+      const row = `${testDevice.deviceId} tcp:8765 tcp:8765 unexpected`;
+      let listings = 0;
+      const targetListing = site === "active check" ? 1 : 2;
+      stubForwardLifecycleCommands(() => (++listings === targetListing ? `${row}\n` : ""));
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        await accessibilityServiceClient.setupPortForwarding();
+
+        const skippedRows = debug.mock.calls.filter(([message]) =>
+          message.includes("Skipping adb forward row with extra columns"),
+        );
+        expect(skippedRows).toEqual([
+          [
+            `[CTRL_PROXY] Skipping adb forward row with extra columns for ${testDevice.deviceId}: ${row}`,
+          ],
+        ]);
+        expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8765");
+      } finally {
+        debug.mockRestore();
+      }
+    });
+  }
+
   test("sweeps a CtrlProxy forward orphaned by a simulated daemon SIGKILL", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
@@ -1732,6 +1792,78 @@ describe("AndroidCtrlProxyClient", function () {
       await expect(client.setupPortForwarding()).rejects.toThrow(
         /Another AutoMobile process \(PID 71579\) owns CtrlProxy forwarding.*stale\/orphaned AutoMobile daemon.*--daemon restart.*kill 71579/s,
       );
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("names the owner's socket and live session when it refuses a takeover (#10497)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    const lease = new FakeCtrlProxyForwardLease(false, 15836);
+    lease.reclaimResult = {
+      acquired: false,
+      ownerPid: 15836,
+      ownerSocketPath: "/tmp/ovl-priv/daemon.sock",
+      reason: `it has live session session-abc on ${testDevice.deviceId}`,
+    };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      const caught = await client.setupPortForwarding().catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+      expect((caught as Error).message).toMatch(
+        /PID 15836, socket \/tmp\/ovl-priv\/daemon\.sock\).*live session session-abc/,
+      );
+      expect(lease.reclaimAttempts).toBe(1);
+      expect((caught as CtrlProxyForwardingLeaseConflictError).transient).toBe(false);
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52004");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("proceeds with forwarding after taking the lease over from an idle owner (#10497)", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => "");
+    const lease = new FakeCtrlProxyForwardLease(false, 15836);
+    lease.reclaimResult = { acquired: true, ownerPid: 15836, reason: "idle" };
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      const caught = await client.setupPortForwarding().catch((error: unknown) => error);
+      expect(caught).not.toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+      expect(lease.reclaimAttempts).toBe(1);
     } finally {
       await client.close();
     }

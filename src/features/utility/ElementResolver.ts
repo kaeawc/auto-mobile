@@ -15,9 +15,16 @@ import { isEditableElementProperties } from "./elementProperties";
 import type { Element } from "../../models/Element";
 import { compareSelectionRank, selectableCandidates } from "./selectionRank";
 import { hasVisibleScreenPart } from "./ElementGeometry";
+import {
+  ambiguousStableViewIdMessage,
+  legacyBareStableViewIdMessage,
+} from "./StableViewIdGuidance";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
+);
+const bareSyntheticNodeKey = new RegExp(
+  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}$`,
 );
 const syntheticNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}(?:-\\d+|~[0-9a-f]{${STABLE_VIEW_ID_TEXT_HASH_LENGTH}})?$`,
@@ -320,6 +327,17 @@ function sameReferenceProof(node: SearchableEntry, ref: ElementReference): boole
 }
 
 /** Pure selection over projected capture data. No hierarchy acquisition or legacy finder calls. */
+/**
+ * Bare ids are unique per namespace (app vs IME), so when IME keys are excluded
+ * the synthetic-id guard must not count them as family peers.
+ */
+function guardNamespaceNodes(
+  nodes: readonly SearchableEntry[],
+  intent: ResolutionIntent,
+): readonly SearchableEntry[] {
+  return intent.excludeImeKeys ? nodes.filter((node) => !isImeKeyEntry(node)) : nodes;
+}
+
 export class ElementResolver {
   constructor(private readonly random: () => number = () => defaultRandom.next()) {}
 
@@ -981,6 +999,7 @@ export class ElementResolver {
         selector.match ?? "exact",
         intent,
         selector.caseSensitive,
+        guardNamespaceNodes(snapshot.nodes, intent),
       );
     }
     if (selector.testTag !== undefined) {
@@ -1141,6 +1160,7 @@ export class ElementResolver {
     matchMode: MatchMode,
     intent: ResolutionIntent,
     caseSensitive?: boolean,
+    captureNodes: readonly SearchableEntry[] = nodes,
   ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     if (matchMode === "regex") {
       return {
@@ -1168,6 +1188,20 @@ export class ElementResolver {
         matchMode,
       };
     }
+    const guard = this.bareSyntheticIdGuard(captureNodes, query);
+    if (guard) {
+      return { matches: [], matchMode, failureReason: "ambiguous", error: guard };
+    }
+    return this.matchNodeKeyOrNamespace(nodes, query, matchMode, intent, native);
+  }
+
+  private matchNodeKeyOrNamespace(
+    nodes: SearchableEntry[],
+    query: string,
+    matchMode: MatchMode,
+    intent: ResolutionIntent,
+    native: SearchableEntry[],
+  ): Pick<ElementResolution, "matches" | "matchMode" | "error" | "failureReason"> {
     const qualified = qualifiedId(query);
     const direct = nodes.filter(
       (node) => node.nodeKey === query && (!intent.requireBounds || node.bounds),
@@ -1231,6 +1265,60 @@ export class ElementResolver {
           }
         : {}),
     };
+  }
+
+  /** Distinct synthetic keys in the capture sharing `base`, bare or suffixed. */
+  private stableViewIdFamilyKeys(captureNodes: readonly SearchableEntry[], base: string): string[] {
+    // The same element can appear in the main hierarchy and a window copy; count
+    // it once (same object, or same key at the same bounds), as ElementFinder does.
+    const seen = new Set<string>();
+    const seenSources = new Set<unknown>();
+    const keys: string[] = [];
+    for (const node of captureNodes) {
+      const key = node.nodeKey;
+      if (
+        key === undefined ||
+        !syntheticNodeKey.test(key) ||
+        !(key === base || key.startsWith(`${base}-`) || key.startsWith(`${base}~`)) ||
+        seenSources.has(node.source)
+      ) {
+        continue;
+      }
+      seenSources.add(node.source);
+      const placement = `${key}|${JSON.stringify(node.bounds ?? null)}`;
+      if (!seen.has(placement)) {
+        seen.add(placement);
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  /**
+   * Guidance for a bare `s2-<hash>` selector that cannot name one element:
+   * a legacy bare-plus-later-ordinal family, or several peers sharing the base
+   * (the producer suffixes every duplicate, so the bare id matches none of
+   * them). Counted over the whole capture, like ElementFinder (#10476).
+   */
+  private bareSyntheticIdGuard(
+    captureNodes: readonly SearchableEntry[],
+    query: string,
+  ): string | null {
+    if (!bareSyntheticNodeKey.test(query)) {
+      return null;
+    }
+    const keys = this.stableViewIdFamilyKeys(captureNodes, query);
+    const hasBare = keys.includes(query);
+    const hasFirstOrdinal = keys.includes(`${query}-1`);
+    const hasLaterOrdinal = keys.some((key) => key.startsWith(`${query}-`) && key !== `${query}-1`);
+    if (hasBare && hasLaterOrdinal && !hasFirstOrdinal) {
+      return legacyBareStableViewIdMessage(query);
+    }
+    if (keys.length > 1) {
+      const suffixed = [...new Set(keys.filter((key) => key !== query))];
+      return ambiguousStableViewIdMessage(query, query, keys.length, suffixed);
+    }
+    return null;
   }
 
   private resolveReference(

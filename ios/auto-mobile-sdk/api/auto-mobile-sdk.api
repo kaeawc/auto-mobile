@@ -501,9 +501,10 @@ public final class AutoMobileNetwork: Sendable
   @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead") public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
-public class AutoMobileURLProtocol: URLProtocol
-  public override class func canInit(with request: URLRequest) -> Bool
-  public override class func canonicalRequest(for request: URLRequest) -> URLRequest
+public final class AutoMobileURLProtocol: URLProtocol, @unchecked Sendable
+  public override static func canInit(with request: URLRequest) -> Bool
+  public override static func canInit(with task: URLSessionTask) -> Bool
+  public override static func canonicalRequest(for request: URLRequest) -> URLRequest
   public override func startLoading()
   public override func stopLoading()
   public func urlSession( _: URLSession, dataTask _: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void )

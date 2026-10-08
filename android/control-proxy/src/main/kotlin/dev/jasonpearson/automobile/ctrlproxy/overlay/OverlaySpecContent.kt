@@ -1,5 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.overlay
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,10 +29,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -45,6 +52,11 @@ internal fun OverlayRuntimeContent(
   interact: suspend (OverlayInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val resolver = LocalContext.current.contentResolver
+  val motion =
+    remember(snapshot.spec) {
+      overlayMotionEnabled(snapshot.spec.motion, readAnimatorDurationScale(resolver))
+    }
   if (snapshot.active) {
     key(runtime) {
       // One ordered queue drained by one coroutine: interactions reach the controller exactly in
@@ -54,6 +66,7 @@ internal fun OverlayRuntimeContent(
       CompositionLocalProvider(
         LocalOverlayTextEpochs provides snapshot.textEpochs,
         LocalOverlayImageCache provides images,
+        LocalOverlayMotion provides motion,
       ) {
         OverlaySpecContent(mapOverlaySpec(snapshot.spec, snapshot.pages).root) { interaction ->
           queue.trySend(interaction)
@@ -66,17 +79,39 @@ internal fun OverlayRuntimeContent(
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun OverlaySpecContent(root: OverlayRenderNode, interact: (OverlayInteraction) -> Unit = {}) {
-  Box(Modifier.semantics { testTagsAsResourceId = true }) {
-    RenderOverlayNode(root, interact)
-    modalOverlaySheets(root).forEach { node ->
-      key(node.identity) { RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact) }
+  OverlayTheme(root) {
+    Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      RenderOverlayNode(root, interact)
+      modalOverlaySheets(root).forEach { node ->
+        key(node.identity) {
+          RenderOverlaySheet(node, overlayNodeModifier(node, interact), interact)
+        }
+      }
     }
   }
 }
 
 @Composable
 private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInteraction) -> Unit) {
-  if (!node.visible) return
+  // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
+  if (LocalOverlayMotion.current && node.source?.visibleWhen != null) {
+    AnimatedVisibility(
+      visible = node.visible,
+      enter = fadeIn() + expandIn(),
+      exit = fadeOut() + shrinkOut(),
+    ) {
+      RenderOverlayNodeContent(node, interact)
+    }
+  } else if (node.visible) {
+    RenderOverlayNodeContent(node, interact)
+  }
+}
+
+@Composable
+private fun RenderOverlayNodeContent(
+  node: OverlayRenderNode,
+  interact: (OverlayInteraction) -> Unit,
+) {
   val modifier = overlayNodeModifier(node, interact)
   when (node.role) {
     "box" ->
@@ -104,8 +139,8 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
         node.text,
         modifier,
         color = node.style.color,
-        fontSize =
-          with(LocalDensity.current) { (node.style.source.textSize ?: 14.0).toFloat().dp.toSp() },
+        // sp, so overlay text follows the system font scale like the app it prototypes (#10436).
+        fontSize = (node.style.source.textSize ?: 14.0).toFloat().sp,
         fontWeight = node.style.fontWeight,
         fontFamily = node.style.fontFamily,
         textAlign = node.style.textAlign,
@@ -135,6 +170,9 @@ private fun RenderOverlayNode(node: OverlayRenderNode, interact: (OverlayInterac
     "bottomSheet" ->
       Unit // Modal content is hoisted above the whole author tree, within this window.
     "textField" -> RenderOverlayTextField(node, modifier, interact)
+    "switch",
+    "checkbox" -> RenderOverlayToggle(node, modifier, interact)
+    "button" -> RenderOverlayButton(node, modifier, interact)
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
@@ -195,7 +233,12 @@ private fun RenderOverlayPager(
 ) {
   val source = node.source as? OverlayPagerNode ?: return
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
-  LaunchedEffect(node.page) { if (pager.currentPage != node.page) pager.scrollToPage(node.page) }
+  val animate = LocalOverlayMotion.current
+  LaunchedEffect(node.page) {
+    if (pager.currentPage != node.page) {
+      if (animate) pager.animateScrollToPage(node.page) else pager.scrollToPage(node.page)
+    }
+  }
   LaunchedEffect(pager) {
     snapshotFlow { pager.isScrollInProgress to pager.settledPage }
       .distinctUntilChanged()
@@ -299,7 +342,7 @@ private fun RenderOverlaySheet(
         .align(Alignment.BottomCenter)
         .fillMaxWidth()
         .height((height - drag).coerceIn(0.0, maxHeight.value.toDouble()).toFloat().dp)
-        .background(node.style.background ?: Color.White)
+        .background(node.style.background ?: MaterialTheme.colorScheme.surface)
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
             onDragStart = { drag = 0.0 },
@@ -340,7 +383,16 @@ private fun overlayNodeModifier(
   interact: (OverlayInteraction) -> Unit,
 ): Modifier {
   val style = node.style.source
+  val actions = node.source?.onTap.orEmpty()
+  val tappable =
+    actions.isNotEmpty() &&
+      node.role != "textField" &&
+      node.role != "bottomSheet" &&
+      node.role !in OVERLAY_COMPONENT_ROLES
   var modifier: Modifier = Modifier
+  // Outermost, as in Material components: reserves a 48 dp touch target around a smaller node
+  // without changing the size it draws at (#10435).
+  if (tappable) modifier = modifier.minimumInteractiveComponentSize()
   modifier = dimensionModifier(modifier, style.width, horizontal = true)
   modifier = dimensionModifier(modifier, style.height, horizontal = false)
   modifier = modifier.alpha((style.alpha ?: 1.0).toFloat())
@@ -349,6 +401,22 @@ private fun overlayNodeModifier(
   node.style.background?.let { modifier = modifier.background(it, shape) }
   style.border?.let {
     modifier = modifier.border(it.width.toFloat().dp, checkNotNull(node.style.borderColor), shape)
+  }
+  // Click handling and semantics go before the inset and authored padding, so the whole drawn node
+  // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
+  if (tappable) modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
+  modifier = modifier.semantics {
+    if (node.role != "textField") text = AnnotatedString(node.text)
+    this[OverlayRole] = node.role
+    if (node.role == "icon" || node.role == "image") role = Role.Image
+    // Compose has no native role for text or layout containers; the kind travels in OverlayRole.
+    overlayContentDescription(node.role, node.text, node.iconName, tappable)?.let {
+      contentDescription = it
+    }
+    overlayStateDescription(node.role, node.page, node.children.size)?.let {
+      stateDescription = it
+    }
+    node.testTag?.let { testTag = it }
   }
   val insetFloor = LocalOverlayInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -387,19 +455,33 @@ private fun overlayNodeModifier(
         bottom = (it.bottom ?: 0.0).toFloat().dp,
       )
   }
-  val actions = node.source?.onTap.orEmpty()
-  if (actions.isNotEmpty() && node.role != "textField" && node.role != "bottomSheet")
-    modifier = modifier.clickable { interact(OverlayInteraction.Tap(actions)) }
-  return modifier.semantics {
-    if (node.role != "textField") text = AnnotatedString(node.text)
-    this[OverlayRole] = node.role
-    if (node.role == "icon" || node.role == "image") role = Role.Image
-    // Compose has no native role for text or layout containers. Preserve the node kind as a label
-    // for empty primitives as well as a custom semantic role; no button role implies tap support.
-    contentDescription = node.text.ifEmpty { node.role }
-    node.testTag?.let { testTag = it }
-  }
+  return modifier
 }
+
+private val SEMANTICS_FREE_CONTAINERS = setOf("box", "row", "column", "scroll", "pager", "spacer")
+
+/**
+ * The accessible label for an overlay node. Authored text wins; an icon-only tappable node reads as
+ * its icon name. Layout containers with neither text nor actions get none, so they stay out of the
+ * skeleton instead of being labelled by their node kind ("box", "row"). Every other node keeps its
+ * kind as the label.
+ */
+internal fun overlayContentDescription(
+  role: String,
+  text: String,
+  iconName: String?,
+  tappable: Boolean,
+): String? =
+  when {
+    text.isNotEmpty() -> text
+    tappable && !iconName.isNullOrEmpty() -> iconName
+    !tappable && role in SEMANTICS_FREE_CONTAINERS -> null
+    else -> role
+  }
+
+/** A pager reports its position (`Page 2 of 4`); other roles carry no state of their own here. */
+internal fun overlayStateDescription(role: String, page: Int, pageCount: Int): String? =
+  if (role == "pager" && pageCount > 0) "Page ${page + 1} of $pageCount" else null
 
 private fun dimensionModifier(
   modifier: Modifier,

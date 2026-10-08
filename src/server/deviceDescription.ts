@@ -397,7 +397,7 @@ export const deviceDescriptionSchema = z
       .strict(),
     unhealthy: z
       .object({
-        reason: z.enum(["biometric-enrollment", "network-condition", "clock"]),
+        reason: z.enum(["biometric-enrollment", "network-condition", "clock", "app-cleanup"]),
         since: z.number(),
       })
       .strict()

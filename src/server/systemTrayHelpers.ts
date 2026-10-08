@@ -34,6 +34,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
+import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
@@ -1206,18 +1207,30 @@ const collectCompositeNotificationCandidates = (
   return candidates;
 };
 
+// Existence checks: `inspect` matches inert labels and collapsed-group children
+// (visible-to-user false); the default tap intent drops text with no tappable owner (#10269).
+const hasTextMatch = (
+  selector: ResolverElementSelector,
+  viewHierarchy: ViewHierarchyResult,
+  text: string,
+  partialMatch: boolean,
+): boolean =>
+  selector.selectByText(viewHierarchy, text, {
+    partialMatch,
+    caseSensitive: false,
+    intentAction: "inspect",
+  }).totalMatches > 0;
+
 const findTextMatch = (
-  finder: ElementFinder,
+  selector: ResolverElementSelector,
   viewHierarchy: ViewHierarchyResult,
   text: string,
 ): SystemTrayTextMatch | null => {
-  const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
-  if (exactMatch) {
+  if (hasTextMatch(selector, viewHierarchy, text, false)) {
     return { text, matchType: "exact" };
   }
 
-  const partialMatch = finder.findElementByText(viewHierarchy, text, undefined, true, false);
-  if (partialMatch) {
+  if (hasTextMatch(selector, viewHierarchy, text, true)) {
     return { text, matchType: "partial" };
   }
 
@@ -1225,21 +1238,19 @@ const findTextMatch = (
 };
 
 const findFirstTextMatch = (
-  finder: ElementFinder,
+  selector: ResolverElementSelector,
   viewHierarchy: ViewHierarchyResult,
   texts: string[],
 ): SystemTrayTextMatch | null => {
   const candidates = texts.map((text) => text.trim()).filter(Boolean);
   for (const text of candidates) {
-    const exactMatch = finder.findElementByText(viewHierarchy, text, undefined, false, false);
-    if (exactMatch) {
+    if (hasTextMatch(selector, viewHierarchy, text, false)) {
       return { text, matchType: "exact" };
     }
   }
 
   for (const text of candidates) {
-    const partialMatch = finder.findElementByText(viewHierarchy, text, undefined, true, false);
-    if (partialMatch) {
+    if (hasTextMatch(selector, viewHierarchy, text, true)) {
       return { text, matchType: "partial" };
     }
   }
@@ -1293,12 +1304,12 @@ const buildNotificationMatch = (
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
 ): SystemTrayMatchResult => {
-  const finder = new DefaultElementFinder();
+  const selector = new ResolverElementSelector();
   const matches: SystemTrayMatchResult["matches"] = {};
   let matched = true;
 
   if (criteria.title) {
-    const titleMatch = findTextMatch(finder, viewHierarchy, criteria.title);
+    const titleMatch = findTextMatch(selector, viewHierarchy, criteria.title);
     if (!titleMatch) {
       matched = false;
     } else {
@@ -1307,7 +1318,7 @@ const buildNotificationMatch = (
   }
 
   if (criteria.body) {
-    const bodyMatch = findTextMatch(finder, viewHierarchy, criteria.body);
+    const bodyMatch = findTextMatch(selector, viewHierarchy, criteria.body);
     if (!bodyMatch) {
       matched = false;
     } else {
@@ -1316,7 +1327,7 @@ const buildNotificationMatch = (
   }
 
   if (criteria.tapActionLabel) {
-    const actionMatch = findTextMatch(finder, viewHierarchy, criteria.tapActionLabel);
+    const actionMatch = findTextMatch(selector, viewHierarchy, criteria.tapActionLabel);
     if (!actionMatch) {
       matched = false;
     } else {
@@ -1325,7 +1336,7 @@ const buildNotificationMatch = (
   }
 
   if (criteria.appId) {
-    const appMatch = findFirstTextMatch(finder, viewHierarchy, appMatchTexts);
+    const appMatch = findFirstTextMatch(selector, viewHierarchy, appMatchTexts);
     if (!appMatch) {
       matched = false;
     } else {

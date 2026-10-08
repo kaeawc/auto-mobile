@@ -81,6 +81,32 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/title" }]);
   });
 
+  test("reports alreadySatisfied when the runner found the node already focused (#10148)", async () => {
+    service.outcome = { alreadySatisfied: true };
+    const result = await makeFeature().execute({ resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(result.alreadySatisfied).toBe(true);
+  });
+
+  test("reports alreadySatisfied when clearing a node that was not focused (#10148)", async () => {
+    service.outcome = { alreadySatisfied: true };
+    const result = await makeFeature().execute({
+      action: "clear",
+      resourceId: "com.example:id/title",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.alreadySatisfied).toBe(true);
+  });
+
+  test("omits alreadySatisfied when the action was actually performed", async () => {
+    const result = await makeFeature().execute({ resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect("alreadySatisfied" in result).toBe(false);
+  });
+
   test("action defaults to 'set' when omitted", async () => {
     const feature = makeFeature();
     await feature.execute({ resourceId: "com.example:id/title" });

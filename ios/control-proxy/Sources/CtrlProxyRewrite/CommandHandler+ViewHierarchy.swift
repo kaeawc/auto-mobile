@@ -43,14 +43,40 @@ extension CommandHandler {
     )
         async throws -> HierarchyUpdateResponse
     {
+        try await hierarchyResponse(request)
+    }
+
+    func handleRequestHierarchyIfStale(
+        _ request: RequestHierarchy,
+        startTime _: Date
+    )
+        async throws -> HierarchyUpdateResponse
+    {
+        try await hierarchyResponse(request)
+    }
+
+    /// Capture and record in one main-actor turn.
+    @MainActor
+    private func hierarchyForRequest(_ request: RequestHierarchy) throws -> ViewHierarchy {
+        let disableAllFiltering = request.disableAllFiltering ?? false
+        // sinceTimestamp is accepted for wire compatibility, but iOS has no UI-change
+        // event signal. Even the active poll interval can miss a change after the last
+        // poll, so a host TTL re-verification must always capture the current screen.
+        return try captureAndRecordHierarchy(disableAllFiltering: disableAllFiltering)
+    }
+
+    private func hierarchyResponse(
+        _ request: RequestHierarchy
+    )
+        async throws -> HierarchyUpdateResponse
+    {
         perf.serial("handleRequestHierarchy")
         defer { perf.end() }
 
-        let disableAllFiltering = request.disableAllFiltering ?? false
         let hierarchy: ViewHierarchy
         do {
             hierarchy = try await trackedAsync("extraction") {
-                try await self.captureHierarchy(disableAllFiltering: disableAllFiltering)
+                try await self.hierarchyForRequest(request)
             }
         } catch {
             print("[CommandHandler] Hierarchy extraction failed: \(error)")
@@ -66,7 +92,8 @@ extension CommandHandler {
             requestId: request.requestId,
             data: enriched,
             perfTiming: perfTiming,
-            frameContext: frameContext.context(for: enriched)
+            frameContext: frameContext.context(for: enriched),
+            servedFromCache: false
         )
     }
 

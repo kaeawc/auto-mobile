@@ -44,6 +44,7 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
   onTap?: () => Promise<void> | void;
   getLastConnectionFailureMessage?: () => string | undefined;
   isLastConnectionFailureForwardingLeaseConflict?: () => boolean;
+  isLastConnectionFailureTransientLeaseConflict?: () => boolean;
 
   isConnected(): boolean {
     return this.connected;
@@ -2262,6 +2263,84 @@ describe("RunnerReadinessService", () => {
         readinessTimeoutMs: 1_000,
       }),
     ).rejects.not.toThrow(/runner did not become responsive/);
+  });
+
+  test("fails fast on a forwarding-lease conflict instead of retrying to the deadline (#10485)", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 15836, socket /tmp/ovl-priv/daemon.sock) owns CtrlProxy " +
+      "forwarding for emulator-5554 and kept it because it has live session s-1 on emulator-5554.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 60_000,
+        readinessTimeoutMs: 60_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).message).toContain("attempts=1 ");
+    expect((error as RunnerReadinessError).message).toContain("live session s-1");
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+  });
+
+  test("retries a time-based lease refusal within the readiness budget (#10485 review)", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    // The owner used the device moments ago; its lease frees on the third attempt.
+    client.connectionResults = [false, false, true];
+    let conflicted = true;
+    client.getLastConnectionFailureMessage = () =>
+      conflicted
+        ? "Another AutoMobile process ... kept it because it used emulator-5554 3s ago."
+        : undefined;
+    client.isLastConnectionFailureForwardingLeaseConflict = () => conflicted;
+    client.isLastConnectionFailureTransientLeaseConflict = () => conflicted;
+    const originalWait = client.waitForConnection.bind(client);
+    client.waitForConnection = async () => {
+      const connected = await originalWait();
+      conflicted = !connected;
+      return connected;
+    };
+    const { service } = createService({ androidClient: client });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android deviceId=emulator-5554",
+      totalDeadlineMs: 60_000,
+      readinessTimeoutMs: 60_000,
+    });
+
+    expect(client.connectionCalls).toBe(3);
+  });
+
+  test("a time-based lease refusal that never lifts still names the conflict at the deadline", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getLastConnectionFailureMessage = () =>
+      "Another AutoMobile process (PID 15836) owns CtrlProxy forwarding for emulator-5554 and kept it because it used emulator-5554 3s ago.";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    client.isLastConnectionFailureTransientLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 5_000,
+        readinessTimeoutMs: 5_000,
+      })
+      .catch((thrown: unknown) => thrown);
+
+    expect(client.connectionCalls).toBeGreaterThan(1);
+    expect((error as Error).message).toContain("used emulator-5554 3s ago");
   });
 
   test("does not flag a terminal connect fault as a deadline exhaustion", async () => {

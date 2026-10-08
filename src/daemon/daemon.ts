@@ -46,6 +46,7 @@ import { DaemonState } from "./daemonState";
 import { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import {
   DEFAULT_DAEMON_PORT,
+  DEFAULT_SOCKET_PATH,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
@@ -58,6 +59,22 @@ import {
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
+import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
+import {
+  getAcceptedAuxSocketConnectionCount,
+  getLiveAuxSocketConnectionCount,
+} from "./socketServer/BaseSocketServer";
+import { readDeviceLeaseActivity } from "./deviceLeaseActivity";
+import { daemonDeviceLeaseActivitySources } from "./deviceLeaseActivitySources";
+import {
+  PrivateDaemonOrphanWatchdog,
+  isHarnessPrivateDaemon,
+  resolvePrivateDaemonOrphanIdleMs,
+} from "./privateDaemonOrphanWatchdog";
+import {
+  resolveCtrlProxyForwardLeaseIdleMs,
+  setCtrlProxyForwardLeaseOwnerSocketPath,
+} from "../features/observe/shared/ctrlProxyForwardLeaseOwnership";
 import { statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
@@ -212,9 +229,14 @@ import {
   evaluateDeviceDisconnects,
   pruneStaleOfflineRecoveryAttempts,
   recordingCandidateIncarnations,
+  selectImmediateDisconnectCandidates,
   selectOfflineRecoveryCandidates,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
+import {
+  defaultAdbTransportRestartRegistry,
+  type AdbTransportRestartLookup,
+} from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -409,6 +431,10 @@ export class Daemon {
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
   private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
   private readonly activeHttpRequests = new Map<string, number>();
+  /** HTTP requests whose response is still open (SSE streams included). */
+  private openHttpRequests = 0;
+  /** HTTP requests ever received. */
+  private httpRequestsSeen = 0;
   private acceptingHttpSessions = false;
   private port: number;
   private host: string;
@@ -417,6 +443,8 @@ export class Daemon {
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private navigationRetentionMonitor: NavigationRetentionMonitor | null = null;
+  private forwardLeaseIdleReleaser: DeviceForwardLeaseIdleReleaser | null = null;
+  private orphanWatchdog: PrivateDaemonOrphanWatchdog | null = null;
   private deviceDisconnectMonitor: SingleFlightInterval | null = null;
   private deferredSessionRecoverySweeps: Set<Promise<void>> = new Set();
   private pidFileWritten = false;
@@ -614,6 +642,18 @@ export class Daemon {
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
           deferFailureFallback: true,
         }),
+      ownerDisconnect: {
+        release: async (session, reason) => {
+          // Like the heartbeat monitor, leave a session with work in flight to its lease.
+          if (this.hasActiveSessionExecution(session.sessionId)) {
+            logger.info(
+              `[Daemon] Kept session ${session.sessionId} after its owner disconnected: executions are still active`,
+            );
+            return;
+          }
+          await this.cancelAndReleaseSession(session.sessionId, reason, false, session);
+        },
+      },
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryPolicy,
       onDeviceFramesInvalidated: (deviceId) => {
@@ -843,6 +883,9 @@ export class Daemon {
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
+    // Record our socket in every CtrlProxy forwarding lease we take, so another
+    // AutoMobile process can ask whether we still use the device (#10497).
+    setCtrlProxyForwardLeaseOwnerSocketPath(SOCKET_PATH);
 
     // Publish the owned DB path in the PID file BEFORE opening the DB so the
     // direct-mode DB-ownership guard can tell a same-file collision from an
@@ -1032,6 +1075,8 @@ export class Daemon {
     this.startHealthCheckTimer();
     this.startHeartbeatMonitor();
     this.startNavigationRetentionMonitor();
+    this.startForwardLeaseIdleReleaser();
+    this.startPrivateDaemonOrphanWatchdog();
 
     startupBenchmark.emit("daemon", {
       host: this.host,
@@ -1153,6 +1198,13 @@ export class Daemon {
     const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
       this.handleHttpRequest(req, res, allowedHosts);
     this.httpServer.on("request", (req, res) => {
+      // Counted for the orphaned private-daemon watchdog (#10497): a retained
+      // MCP session is not a connected client, but an open request is.
+      this.openHttpRequests++;
+      this.httpRequestsSeen++;
+      res.once("close", () => {
+        this.openHttpRequests--;
+      });
       handleRequest(req, res).catch((error) => {
         logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
         if (!res.headersSent) {
@@ -2412,6 +2464,50 @@ export class Daemon {
     this.navigationRetentionMonitor.start();
   }
 
+  /** Give up idle devices' CtrlProxy forwarding leases (#10497). */
+  private startForwardLeaseIdleReleaser(): void {
+    const activitySources = daemonDeviceLeaseActivitySources((deviceId) =>
+      this.sessionManager.getSessionForDevice(deviceId),
+    );
+    this.forwardLeaseIdleReleaser = new DeviceForwardLeaseIdleReleaser(
+      {
+        heldDeviceIds: () => AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds(),
+        activity: (deviceId) => readDeviceLeaseActivity(activitySources, deviceId),
+        release: (deviceId) => AndroidCtrlProxyClient.releaseIdleForwardLease(deviceId),
+      },
+      resolveCtrlProxyForwardLeaseIdleMs(),
+      this.timer,
+    );
+    this.forwardLeaseIdleReleaser.start();
+  }
+
+  /** Stop a private daemon that outlived its launcher with nothing using it (#10497). */
+  private startPrivateDaemonOrphanWatchdog(): void {
+    if (process.platform === "win32" || !isHarnessPrivateDaemon(SOCKET_PATH, DEFAULT_SOCKET_PATH)) {
+      return;
+    }
+    this.orphanWatchdog = new PrivateDaemonOrphanWatchdog(
+      {
+        parentPid: () => process.ppid,
+        clientCount: () =>
+          (this.socketServer?.getClientConnectionCount() ?? 0) +
+          getLiveAuxSocketConnectionCount() +
+          this.openHttpRequests,
+        clientActivityCount: () =>
+          (this.socketServer?.getAcceptedClientConnectionCount() ?? 0) +
+          getAcceptedAuxSocketConnectionCount() +
+          this.httpRequestsSeen,
+        liveSessionCount: () => this.sessionManager.getAllSessions().length,
+        shutdown: () => {
+          setImmediate(() => process.kill(process.pid, "SIGTERM"));
+        },
+      },
+      resolvePrivateDaemonOrphanIdleMs(),
+      this.timer,
+    );
+    this.orphanWatchdog.start();
+  }
+
   private hasActiveSessionExecution(
     sessionId: string,
     query?: ActiveSessionExecutionQuery,
@@ -2554,17 +2650,21 @@ export class Daemon {
       "getBootedDevicesDetailed" | "getAndroidOfflineDeviceIds" | "recoverAndroidOfflineDevices"
     > = new MultiPlatformDeviceManager(),
     listRecordings: typeof listActiveVideoRecordings = listActiveVideoRecordings,
+    transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
   ): void {
     if (this.deviceDisconnectMonitor) {
       return;
     }
 
-    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(deviceManager, () =>
-      this.discoverAndReconcile(deviceManager, {
-        planActive: true,
-        platform: "android",
-        bypassAndroidDeviceListCache: true,
-      }),
+    const checkPlanDeviceLoss = this.createPlanDeviceLossCheck(
+      deviceManager,
+      () =>
+        this.discoverAndReconcile(deviceManager, {
+          planActive: true,
+          platform: "android",
+          bypassAndroidDeviceListCache: true,
+        }),
+      transportRestarts,
     );
 
     this.deviceDisconnectMonitor = new SingleFlightInterval(
@@ -2649,6 +2749,13 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
+            immediateDisconnectDeviceIds: selectImmediateDisconnectCandidates(
+              candidateDeviceIds,
+              candidatePlatforms,
+              bootedDeviceIds,
+              offlineDeviceIds,
+              transportRestarts,
+            ),
           });
 
           if (disconnectResult.skippedAllDiscoveryFailed) {
@@ -2715,12 +2822,14 @@ export class Daemon {
   private createPlanDeviceLossCheck(
     deviceManager: Pick<MultiPlatformDeviceManager, "getAndroidOfflineDeviceIds">,
     discover: PlanDeviceLossPort["discover"],
+    transportRestarts: AdbTransportRestartLookup = defaultAdbTransportRestartRegistry,
   ): (
     result: ReturnType<typeof evaluateDeviceDisconnects>,
     bootedDeviceIds: ReadonlySet<string>,
   ) => Promise<void> {
     const monitor = new PlanDeviceLossMonitor({
       timer: this.timer,
+      isTransportRestarting: (id) => transportRestarts.isRestarting(id),
       getDevice: (id) => this.devicePool.getDevice(id),
       getPlanSessionUuid: (id) =>
         resolveToolSelectionBaseSessionUuid(id, this.sessionManager) ?? id,
@@ -3050,7 +3159,7 @@ export class Daemon {
     }
     if (sessionIdAtDisconnect && sessionAtDisconnect) {
       logger.warn(
-        `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionIdAtDisconnect}`,
+        `[DisconnectMonitor] Device ${deviceId} confirmed disconnected — cancelling session ${sessionIdAtDisconnect}`,
       );
       await this.cancelAndReleaseSession(
         sessionIdAtDisconnect,
@@ -3758,6 +3867,11 @@ export class Daemon {
     this.navigationRetentionMonitor = null;
     const deviceDisconnectMonitor = this.deviceDisconnectMonitor;
     this.deviceDisconnectMonitor = null;
+    this.orphanWatchdog?.stop();
+    this.orphanWatchdog = null;
+    const forwardLeaseIdleReleaser = this.forwardLeaseIdleReleaser;
+    this.forwardLeaseIdleReleaser = null;
+    await forwardLeaseIdleReleaser?.stop();
     await runShutdownCleanupStages(
       [
         {

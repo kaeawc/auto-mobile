@@ -11,8 +11,10 @@ import {
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { logger } from "../../../src/utils/logger";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -389,7 +391,8 @@ test("IME clear without the capability and without a readable length asks for an
   expect(result.commands[0]?.error).toContain("Update the CtrlProxy APK");
   expect(h.clientCalls).toEqual([]);
   expect(h.adb.getExecutedCommands().some((command) => command.includes("KEYCODE_"))).toBe(false);
-  expect(h.selections()).toEqual([activate, restore]);
+  // Key-event deletion needs no keyboard switch, and the failed clear stops the IME type.
+  expect(h.selections()).toEqual([]);
 });
 
 test.each(["ime", "auto", "imeKeyEvents"] as const)(
@@ -412,11 +415,97 @@ test.each(["ime", "auto", "imeKeyEvents"] as const)(
   },
 );
 
-test("clear outside an IME span retains accessibility delivery", async () => {
+test.each([undefined, "auto", "ime"] as const)(
+  "a clear-only call in %s mode clears through the activated IME, never the accessibility clear (#10479)",
+  async (mode) => {
+    const h = fieldHarness();
+    let selectionsAtClear: string[] = [];
+    const commit = h.client.commitViaIme;
+    h.client.commitViaIme = async (...args) => {
+      selectionsAtClear = h.selections();
+      return commit(...args);
+    };
+    const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
+    expect(result.success).toBe(true);
+    expect(h.clientCalls).toEqual(["clearField"]);
+    expect(selectionsAtClear).toEqual([activate]);
+    expect(h.field()).toBe("");
+    expect(h.deletes()).toEqual([]);
+    expectNoAccessibilityClear(h);
+    expect(h.selections()).toEqual([activate, restore]);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test.each([undefined, "ime"] as const)(
+  "a clear-only call in %s mode on an older APK deletes with key events without switching keyboards",
+  async (mode) => {
+    const h = fieldHarness();
+    h.client.supportsImeClearField = async () => false;
+    const result = await h.action.execute([{ action: "clear", ...(mode ? { mode } : {}) }]);
+    expect(result.success).toBe(true);
+    expect(h.clientCalls).toEqual([]);
+    expect(h.deletes().length).toBeGreaterThan(0);
+    expect(h.field()).toBe("");
+    expectNoAccessibilityClear(h);
+    expect(h.selections()).toEqual([]);
+  },
+);
+
+test.each([true, false])(
+  "a clear-only call on a password field never logs its text (clear capability %s)",
+  async (supported) => {
+    const h = fieldHarness("hunter2", { password: "true" });
+    h.client.supportsImeClearField = async () => supported;
+    const spies = (["debug", "info", "warn", "error"] as const).map((level) =>
+      spyOn(logger, level),
+    );
+    try {
+      const result = await h.action.execute([{ action: "clear" }]);
+      expect(result.success).toBe(true);
+      expect(h.field()).toBe("");
+      expectNoAccessibilityClear(h);
+      const logged = spies.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call)));
+      expect(logged.filter((line) => line.includes("hunter2"))).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  },
+);
+
+test("a clear-only call with mode a11y keeps the accessibility clear", async () => {
   const h = harness();
-  expect((await h.action.execute([{ action: "clear" }])).success).toBe(true);
+  const result = await h.action.execute([{ action: "clear", mode: "a11y" }]);
+  expect(result.success).toBe(true);
   expect(h.clientCalls).toEqual(["clear"]);
+  expect(h.adb.getExecutedCommands().some((command) => command.includes("KEYCODE_DEL"))).toBe(
+    false,
+  );
   expect(h.selections()).toEqual([]);
+});
+
+test("an a11y clear inside an IME span uses the accessibility clear and keeps the span", async () => {
+  const h = harness();
+  const result = await h.action.execute([type("a"), { action: "clear", mode: "a11y" }, type("b")]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["commit:a", "clear", "commit:b"]);
+  expect(h.selections()).toEqual([activate, restore]);
+});
+
+test("a clear between a11y types still clears through the IME", async () => {
+  const h = harness();
+  const result = await h.action.execute([
+    { action: "type", text: "a", mode: "a11y" },
+    { action: "clear" },
+    { action: "type", text: "b", mode: "a11y" },
+  ]);
+  expect(result.success).toBe(true);
+  expect(h.clientCalls).toEqual(["insert:a", "clearField", "insert:b"]);
+  expectNoAccessibilityClear(h);
+  // a11y typing ends the span before delivery, so each IME clear restores before the next type.
+  expect(h.selections()).toEqual([activate, restore]);
 });
 
 test("IME replace clears through the input connection before typing", async () => {
@@ -538,7 +627,7 @@ test("non-IME typing restores before a11y delivery; a later IME type reactivates
   expect(h.selections()).toEqual([activate, restore, activate, restore]);
 });
 
-test("single IME type preserves the original complete adb command sequence", async () => {
+test("single IME type pins the user before the original complete adb command sequence", async () => {
   const h = harness();
   const fake = modelDeviceSideRestore(h);
   const result = await h.action.execute([type("x")]);
@@ -548,6 +637,7 @@ test("single IME type preserves the original complete adb command sequence", asy
   expect(h.selections()).toEqual([activate, restore]);
   expect(h.clientCalls).toEqual(["commit:x"]);
   expect(h.adb.getExecutedCommands()).toEqual([
+    "shell am get-current-user",
     "shell settings get secure default_input_method",
     "shell ime list -s",
     "shell settings get secure selected_input_method_subtype",
@@ -569,6 +659,62 @@ test("single IME type preserves the original complete adb command sequence", asy
     `shell ime disable ${AUTO_MOBILE_IME_ID}`,
     "shell ime list -s",
   ]);
+});
+
+test("an IME span pins a non-zero user once and restores that user after all commits", async () => {
+  const h = harness();
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponseSequence("shell am get-current-user", [
+    { stdout: "10", stderr: "" },
+    { stdout: "11", stderr: "" },
+  ]);
+  adb.setCommandResponse("shell ime list --user 10 -a -s", {
+    stdout: `${priorIme}\n${AUTO_MOBILE_IME_ID}\n`,
+    stderr: "",
+  });
+  adb.setCommandResponse("shell ime list --user 10 -s", { stdout: priorIme, stderr: "" });
+  adb.setCommandResponseSequence("shell settings --user 10 get secure default_input_method", [
+    { stdout: priorIme, stderr: "" },
+    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
+    { stdout: AUTO_MOBILE_IME_ID, stderr: "" },
+    { stdout: priorIme, stderr: "" },
+  ]);
+  const fake = modelDeviceSideRestore(h);
+  const adbFactory = { create: () => adb };
+  const executor = new DefaultSendKeysCommandExecutor(h.device, adbFactory, observer, {
+    textClient: h.client,
+    timer: h.timer,
+  });
+  const action = new SendKeys(h.device, adbFactory, {
+    executor,
+    observer,
+    timer: h.timer,
+    timestampProvider: { now: async () => 1 },
+  });
+
+  expect(await action.execute([type("a"), type("b"), type("c")])).toMatchObject({
+    success: true,
+    completedCommands: 3,
+  });
+  expect(fake.priors).toEqual([null, null, null]);
+  expect(h.committed).toEqual(["a", "b", "c"]);
+  const commands = adb.getExecutedCommands();
+  expect(commands.filter((command) => command === "shell am get-current-user")).toHaveLength(1);
+  expect(commands.filter((command) => command.startsWith("shell ime set "))).toEqual([
+    `shell ime set --user 10 ${AUTO_MOBILE_IME_ID}`,
+    `shell ime set --user 10 ${priorIme}`,
+  ]);
+  expect(commands).toContain(`shell ime enable --user 10 ${AUTO_MOBILE_IME_ID}`);
+  expect(commands).toContain(`shell ime disable --user 10 ${AUTO_MOBILE_IME_ID}`);
+  expect(commands).toContain(
+    "shell settings --user 10 delete secure selected_input_method_subtype",
+  );
+  expect(commands.filter((command) => /^shell (ime|settings) /.test(command))).not.toHaveLength(0);
+  expect(
+    commands
+      .filter((command) => /^shell (ime|settings) /.test(command))
+      .every((command) => command.includes("--user 10")),
+  ).toBe(true);
 });
 
 test.each([

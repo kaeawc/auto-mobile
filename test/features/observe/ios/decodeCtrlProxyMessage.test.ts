@@ -76,6 +76,20 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded).toEqual({ requestId: REQ, result: { hierarchy: data, perfTiming } });
   });
 
+  test.each([true, false])(
+    "hierarchy_update retains the optional runner cache marker %p",
+    (servedFromCache) => {
+      expect(
+        decodeCtrlProxyMessage(msg({ type: "hierarchy_update", servedFromCache }))?.result,
+      ).toEqual({
+        hierarchy: undefined,
+        perfTiming: undefined,
+        frameContext: undefined,
+        servedFromCache,
+      });
+    },
+  );
+
   test("hierarchy failure preserves the Swift runner error envelope", () => {
     // Built from WebSocketResponse.error in
     // ios/control-proxy/Sources/CtrlProxyRewrite/Models/WebSocketResponse.swift; no data.
@@ -544,6 +558,43 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  // Issue #10101: the runner reports the rules the app's regex engine rejected.
+  test("set_network_mock_rules_result carries the rejected ids and reasons", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "set_network_mock_rules_result",
+        ok: true,
+        totalTimeMs: 4,
+        rejectedMockIds: ["m1"],
+        rejectedReasons: { m1: "invalid regex" },
+      }),
+    );
+
+    expect(decoded?.result).toEqual({
+      success: true,
+      totalTimeMs: 4,
+      error: undefined,
+      rejectedMockIds: ["m1"],
+      rejectedReasons: { m1: "invalid regex" },
+    });
+  });
+
+  test("set_network_mock_rules_result from an older runner has no rejection fields", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "set_network_mock_rules_result", ok: true, totalTimeMs: 4 }),
+    );
+
+    expect(decoded?.result).toEqual({ success: true, totalTimeMs: 4, error: undefined });
+  });
+
+  test("set_network_mock_rules_result keeps an empty rejection list distinct from none reported", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "set_network_mock_rules_result", ok: true, rejectedMockIds: [] }),
+    );
+
+    expect(decoded?.result).toMatchObject({ rejectedMockIds: [] });
+  });
+
   test("execute_sql_result carries query fields", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({
@@ -738,7 +789,7 @@ function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
 }
 
 /**
- * A rawValue is "explicitly decoded" when the switch has a dedicated case that
+ * A rawValue is "explicitly decoded" when a dedicated decoder
  * reshapes it into a fresh result object. The default branch, by contrast,
  * resolves the message verbatim (`result === message` by identity), so identity
  * equality is a precise, source-parsing-free probe for the default fall-through.
@@ -748,6 +799,57 @@ function isExplicitlyDecoded(rawValue: string): boolean {
   const decoded = decodeCtrlProxyMessage(message);
   return decoded !== null && decoded.result !== message;
 }
+
+// The reviewed Swift/TS contract: main added magic_tap_result (#10328), while
+// this branch added set_network_mock_rules_result (#10101). Pin the set as well
+// as its size so a dropped decoder cannot be hidden by another addition.
+const EXPECTED_RESHAPED_RESPONSE_TYPES = [
+  "action_result",
+  "append_text_result",
+  "clear_preferences_result",
+  "clear_text_result",
+  "clipboard_result",
+  "drag_result",
+  "execute_sql_result",
+  "get_preference_result",
+  "hierarchy_update",
+  "highlight_response",
+  "hinge_angle_result",
+  "ime_action_result",
+  "keyboard_result",
+  "launch_app_result",
+  "list_databases_result",
+  "list_tables_result",
+  "magic_tap_result",
+  "multi_finger_swipe_result",
+  "pinch_result",
+  "preference_files",
+  "preferences",
+  "press_back_result",
+  "press_button_result",
+  "press_home_result",
+  "press_key_result",
+  "recent_apps_result",
+  "remove_preference_result",
+  "reset_permissions_result",
+  "rotate_result",
+  "screenshot",
+  "sdk_capabilities_result",
+  "sdk_trigger_result",
+  "select_all_result",
+  "set_network_error_simulation_result",
+  "set_network_fault_rules_result",
+  "set_network_mock_rules_result",
+  "set_preference_result",
+  "set_text_result",
+  "storage_capabilities_result",
+  "swipe_result",
+  "table_data_result",
+  "table_structure_result",
+  "tap_coordinates_result",
+  "voiceover_set_result",
+  "voiceover_state_result",
+];
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
   const swiftSource = readFileSync(
@@ -769,19 +871,17 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
   //   3. current_focus_result               — focus push, no awaiter
   //   4. traversal_order_result             — traversal push, no awaiter
   //   5. connected                          — connection handshake push
-  //   6. set_network_mock_rules_result      — mock-rules ack
+  //   (set_network_mock_rules_result is now decoded: it carries rejectedMockIds, #10101)
   const FIRE_AND_FORGET_EXCUSES = [
     "set_hierarchy_poll_interval_result",
     "screenshot_error",
     "current_focus_result",
     "traversal_order_result",
     "connected",
-    "set_network_mock_rules_result",
-    "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 50 rawValues", () => {
-    expect(rawValues.length).toBe(50);
+  test("Swift ResponseType declares exactly 51 rawValues", () => {
+    expect(rawValues.length).toBe(51);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -794,8 +894,10 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 43 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(43);
+  test("the decoder explicitly reshapes exactly the 45 expected response types", () => {
+    const reshaped = rawValues.filter(isExplicitlyDecoded).sort();
+    expect(reshaped.length).toBe(45);
+    expect(reshaped).toEqual(EXPECTED_RESHAPED_RESPONSE_TYPES);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -852,6 +954,7 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
 
   /** Fields the decoders must keep, with the response types the runner sets them on. */
   const CARRIED: Record<string, { value: unknown; types: string[] }> = {
+    errorCode: { value: "deadline_completed_late", types: ["swipe_result"] },
     warning: { value: "runner note", types: ["action_result", "press_key_result"] },
     verified: { value: true, types: ["press_key_result"] },
     text: { value: "clipboard text", types: ["clipboard_result"] },
@@ -914,9 +1017,10 @@ describe("decodeCtrlProxyMessage ↔ Swift WebSocketResponse field parity (#1008
  */
 describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => {
   // One row per decoded response type → the value of `success` when the wire
-  // message omits it. 41 rows = the 41 explicitly-decoded ResponseTypes.
+  // message omits it. Keep this table aligned with the exact parity set above.
   const DEFAULT_WHEN_ABSENT: Array<{ type: string; expected: boolean | undefined }> = [
     { type: "hierarchy_update", expected: undefined },
+    { type: "sdk_trigger_result", expected: false },
     { type: "screenshot", expected: true },
     { type: "pinch_result", expected: true },
     { type: "tap_coordinates_result", expected: true },
@@ -938,6 +1042,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "hinge_angle_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
+    { type: "magic_tap_result", expected: false },
     { type: "voiceover_state_result", expected: true },
     { type: "voiceover_set_result", expected: false },
     { type: "multi_finger_swipe_result", expected: true },
@@ -949,6 +1054,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "set_preference_result", expected: false },
     { type: "remove_preference_result", expected: false },
     { type: "clear_preferences_result", expected: false },
+    { type: "set_network_mock_rules_result", expected: false },
     { type: "set_network_fault_rules_result", expected: false },
     { type: "set_network_error_simulation_result", expected: false },
     { type: "execute_sql_result", expected: false },
@@ -1010,8 +1116,10 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 42 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(42);
+  test("the default table covers all 45 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.map((row) => row.type).sort()).toEqual(
+      EXPECTED_RESHAPED_RESPONSE_TYPES,
+    );
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -1049,8 +1157,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 41 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(41);
+  test("the passthrough set is the 44 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(44);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -1076,6 +1184,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     "set_preference_result",
     "remove_preference_result",
     "clear_preferences_result",
+    "set_network_mock_rules_result",
     "set_network_fault_rules_result",
     "set_network_error_simulation_result",
   ];
@@ -1160,4 +1269,27 @@ describe("preference store resolution decoding", () => {
       }
     });
   }
+});
+
+describe("decodeCtrlProxyMessage errorCode (#10161)", () => {
+  // Matches `WebSocketResponse.errorCode` / `CommandError.wireCode`, pinned in
+  // runnerErrorCodes.contract.test.ts. The code is additive: absent from older runners.
+  test("a gesture failure keeps the runner's typed errorCode", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "swipe_result",
+        success: false,
+        error: "Command request_swipe exceeded deadline at 5000ms (gesture completed late)",
+        errorCode: "deadline_completed_late",
+      }),
+    );
+    expect(decoded?.result).toMatchObject({ success: false, errorCode: "deadline_completed_late" });
+  });
+
+  test("a reply from a runner without the field decodes without one", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "swipe_result", success: false, error: "boom" }),
+    );
+    expect(decoded?.result).not.toHaveProperty("errorCode");
+  });
 });

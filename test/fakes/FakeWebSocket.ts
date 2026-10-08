@@ -21,6 +21,15 @@ export enum WebSocketState {
 export type PongMode = "auto" | "withhold";
 
 /**
+ * When the handshake outcome (open, or an "instant"/"timeout" failure being
+ * armed) is delivered. "event-loop" defers failures to a real `setImmediate`;
+ * "microtask" delivers every outcome in a microtask so a test driving a
+ * manual FakeTimer with microtask-only draining (`settleByFakeEvents`) sees
+ * the refusal before it fires the client's fake connection timeout.
+ */
+export type HandshakeScheduling = "event-loop" | "microtask";
+
+/**
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
@@ -40,6 +49,7 @@ export class FakeWebSocket
     connectTimeoutMs: number = 0,
     timer: Timer = defaultTimer,
     pongMode: PongMode = "auto",
+    handshakeScheduling: HandshakeScheduling = "event-loop",
   ) {
     super();
     this.failureMode = failureMode;
@@ -50,7 +60,10 @@ export class FakeWebSocket
     // For success mode with no delay, emit open synchronously after constructor returns
     // This ensures the "open" event fires before any FakeTimer.setTimeout with autoAdvance
     // can schedule its timeout callback via setImmediate
-    if (this.failureMode === "none" && this.connectTimeoutMs === 0) {
+    if (
+      handshakeScheduling === "microtask" ||
+      (this.failureMode === "none" && this.connectTimeoutMs === 0)
+    ) {
       // Use queueMicrotask to emit after constructor returns but before setImmediate callbacks
       queueMicrotask(() => {
         this.handleConnection();
@@ -182,7 +195,12 @@ export function createNthAttemptSuccessWebSocketFactory(
   };
 }
 
-/** Factory whose fake server starts accepting connections after fake time advances. */
+/**
+ * Factory whose fake server starts accepting connections after fake time advances.
+ * Handshakes resolve in a microtask, so drive it with a manual FakeTimer and
+ * `settleByFakeEvents`: a refused dial is then always observed before fake time
+ * reaches the client's connection timeout, independent of real event-loop load.
+ */
 export function createTimeGatedWebSocketFactory(
   gateMs: number,
   timer: Timer,
@@ -200,6 +218,6 @@ export function createTimeGatedWebSocketFactory(
       gateStartedAt ??= timer.now();
     }
     const accepting = gateStartedAt !== undefined && timer.now() - gateStartedAt >= gateMs;
-    return new FakeWebSocket(url, accepting ? "none" : "instant", 0, timer);
+    return new FakeWebSocket(url, accepting ? "none" : "instant", 0, timer, "auto", "microtask");
   };
 }

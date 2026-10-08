@@ -22,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -44,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import dev.jasonpearson.automobile.design.system.components.AutoMobileIconButton
 import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
 import dev.jasonpearson.automobile.slides.components.BulletPointSlideItem
@@ -181,7 +181,7 @@ fun SlidesScreen(
           )
 
           // Day/Night mode toggle - floating in bottom right corner
-          IconButton(
+          AutoMobileIconButton(
             onClick = { themeManager.toggleTheme() },
             modifier =
               Modifier.size(64.dp)

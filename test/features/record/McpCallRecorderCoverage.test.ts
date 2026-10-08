@@ -52,7 +52,8 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   videoRecording: "Starts or stops a host-side capture; not part of the replayed interaction",
   explore: "Builds the navigation graph; an exploration run, not a scripted step",
   navigateTo: "Resolves through a host-local navigation graph, so the step is not portable",
-  overlay: HOST_LOCAL,
+  prototype: HOST_LOCAL,
+  overlay: HOST_LOCAL, // hidden deprecated alias of prototype
   highlight: HOST_LOCAL,
   doctor: READ_ONLY, // hidden/gated, so absent from the generated definitions
   hitTest: READ_ONLY,

@@ -420,6 +420,22 @@ function dispatchCommand<T>(
   }
 }
 
+function serializeCommand<T>(
+  context: DelegateContext,
+  options: SendCommandOptions<T>,
+  requestId: string,
+  timeoutMs: number,
+): string {
+  // The request's own params win over the context's wire deadline (#10084).
+  const params = {
+    ...context.wireDeadlineParams?.(options.messageType, timeoutMs),
+    ...options.params,
+  };
+  return context.serializeRequest
+    ? context.serializeRequest({ type: options.messageType, requestId, ...params })
+    : createMessage(options.messageType, requestId, params);
+}
+
 export async function sendCommand<T>(
   context: DelegateContext,
   options: SendCommandOptions<T>,
@@ -467,9 +483,7 @@ export async function sendCommand<T>(
 
   const abortListener = registerCommandAbort(context, options, requestId);
 
-  const msg = context.serializeRequest
-    ? context.serializeRequest({ type: options.messageType, requestId, ...options.params })
-    : createMessage(options.messageType, requestId, options.params);
+  const msg = serializeCommand(context, options, requestId, timeoutMs);
   dispatchCommand(context, options, requestId, msg, responseErrorFactory);
 
   try {

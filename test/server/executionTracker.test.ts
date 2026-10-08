@@ -7,6 +7,24 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
+  test("tracks per-device activity for forwarding-lease idleness (#10497)", () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1_000);
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["a", "b"]));
+    expect(tracker.getDeviceIdleForMs("emulator-5554")).toBeNull();
+    const a = tracker.startExecution("tapOn");
+    const b = tracker.startExecution("observe");
+    tracker.bindDeviceExecution(a.id, "emulator-5554");
+    tracker.bindDeviceExecution(b.id, "emulator-5554");
+    expect(tracker.getActiveDeviceExecutionCount("emulator-5554")).toBe(2);
+    timer.setCurrentTime(4_000);
+    tracker.endExecution(a.id);
+    tracker.endExecution(b.id);
+    expect(tracker.getActiveDeviceExecutionCount("emulator-5554")).toBe(0);
+    timer.setCurrentTime(9_000);
+    expect(tracker.getDeviceIdleForMs("emulator-5554")).toBe(5_000);
+  });
+
   test("cancels sessionless device work once, excluding discovery and other devices", async () => {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

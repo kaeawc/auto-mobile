@@ -130,6 +130,16 @@ describe("variant carousel composition", () => {
         .placement,
     ).toEqual({ type: "floating", gravity: "topStart", offset: { x: 3, y: -4 } });
   });
+  test("fullscreen content ends above the control row; floating adds no reserve (#10437)", () => {
+    const [page] = pages({ id: "panel", variants: [image] });
+    expect(children(page)[0]).toMatchObject({
+      testTag: "variant-0-content",
+      safeAreaPadding: { edges: ["bottom"] },
+      style: { padding: { bottom: 44 } },
+    });
+    const [floating] = pages({ id: "panel", variants: [image], presentation: "floating" });
+    expect(children(floating)).toHaveLength(1);
+  });
   describe("control row stays reachable (#10086)", () => {
     const labelled = [{ ...image, label: "Red A" }, { ...image, label: "Green B" }, image];
     const edgeCases = [

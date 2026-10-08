@@ -141,9 +141,17 @@ export interface WebSocketMessage {
   unsupported?: boolean;
   requiresVoiceOver?: boolean;
   available?: boolean;
+  /** sdk_trigger_result: the SDK's HTTP status and structured error fields. */
+  statusCode?: number;
+  sdkError?: string;
+  reason?: string;
+  registeredModules?: string[];
+  supportedTriggers?: string[];
   bundleId?: string;
   capabilities?: string[];
   data?: XCTestHierarchy;
+  /** True when a hierarchy response contains a previous runner capture. */
+  servedFromCache?: boolean;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   rotation?: number;
@@ -155,6 +163,8 @@ export interface WebSocketMessage {
   method?: "escape" | "dismissKey" | "returnKey";
   totalTimeMs?: number;
   error?: string;
+  /** Additive typed companion to `error` (see `runnerErrorCodes.ts`); older runners omit it. */
+  errorCode?: string;
   /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
   blockingCommandType?: string;
   blockingElapsedMs?: number;
@@ -371,6 +381,8 @@ export interface CtrlProxyCachedHierarchy {
    * Host clock when this exact device capture was first seen. Unlike
    * `receivedAt`, this is retained when the runner re-delivers the same
    * `updatedAt`, so a repeated push cannot make old content look newly captured.
+   * An explicitly cached runner reply also bounds this by its real `updatedAt`
+   * and stays unverified (`fresh: false`), regardless of clock skew.
    */
   captureReceivedAt?: number;
   fresh: boolean;
@@ -393,6 +405,8 @@ export interface IosHierarchyAcquisition {
 /** A successful synchronous runner response; provenance stays on the host envelope. */
 export interface CtrlProxySyncedHierarchy extends IosHierarchyAcquisition {
   hierarchy: XCTestHierarchy;
+  /** False for a runner cache answer that has not re-verified the current screen. */
+  fresh?: boolean;
   perfTiming?: CtrlProxyPerfTiming;
   frameContext?: string;
 }
@@ -426,6 +440,22 @@ export interface HierarchyDelegateContext extends DelegateContext {
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
   /** Prevent the response for this request from being forwarded to the observation stream. */
   suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
+}
+
+/**
+ * Result of relaying a host trigger to the foreground app's in-app SDK `POST /trigger`
+ * route (#1580). `available: false` means the app does not embed the SDK (or the runner
+ * predates the command); `sdkError` carries the SDK's structured error when it answered.
+ */
+export interface CtrlProxySdkTriggerResult extends BaseResult {
+  available: boolean;
+  /** True when the runner does not know `request_sdk_trigger` (older runner build). */
+  unsupported?: boolean;
+  statusCode?: number;
+  sdkError?: string;
+  reason?: string;
+  registeredModules?: string[];
+  supportedTriggers?: string[];
 }
 
 /** Direct SDK responder call; no VoiceOver gesture or enabled-state requirement. */

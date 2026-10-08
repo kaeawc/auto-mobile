@@ -6,6 +6,7 @@ import {
   FileEmulatorConsoleAuthTokenReader,
   NetEmulatorConsoleTransport,
   consolePortFromSerial,
+  validateSmsMessage,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
   AdbClientFactory,
@@ -13,6 +14,12 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import {
+  defaultIosSdkTriggerSenderFactory,
+  describeIosSdkTriggerFailure,
+  type IosSdkTriggerSenderFactory,
+} from "./IosSdkTrigger";
+import type { CtrlProxySdkTriggerResult } from "../observe/ios/types";
 
 /**
  * Factory for building an EmulatorConsoleClient for a specific emulator console port.
@@ -26,6 +33,10 @@ export const defaultEmulatorConsoleClientFactory: EmulatorConsoleClientFactory =
     new NetEmulatorConsoleTransport(),
     new FileEmulatorConsoleAuthTokenReader(),
   );
+
+/** iOS SDK trigger modules that stand in for the Android emulator console (#1580). */
+export const IOS_CALLKIT_MODULE = "callkit";
+export const IOS_MESSAGES_MODULE = "messages";
 
 export interface PhoneCallOptions {
   action: PhoneCallAction;
@@ -44,6 +55,7 @@ export class Telephony {
     private readonly device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     private readonly consoleFactory: EmulatorConsoleClientFactory = defaultEmulatorConsoleClientFactory,
+    private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,
   ) {
     if (
       adbFactoryOrExecutor &&
@@ -58,6 +70,9 @@ export class Telephony {
   }
 
   async phoneCall(options: PhoneCallOptions): Promise<PhoneCallResult> {
+    if (this.device.platform === "ios") {
+      return this.phoneCallIos(options);
+    }
     const platformError = this.requireAndroid<PhoneCallResult>(() => ({
       success: false,
       action: options.action,
@@ -127,6 +142,9 @@ export class Telephony {
   }
 
   async sendSms(options: SendSmsOptions): Promise<SendSmsResult> {
+    if (this.device.platform === "ios") {
+      return this.sendSmsIos(options);
+    }
     const platformError = this.requireAndroid<SendSmsResult>(() => ({
       success: false,
       phoneNumber: options.phoneNumber,
@@ -167,6 +185,92 @@ export class Telephony {
         supported: true,
         error: errorMessage(error),
       };
+    }
+  }
+
+  /**
+   * iOS has no telephony injection API, so the call is reported through CallKit by the
+   * app's in-app AutoMobile SDK (`callkit` trigger module). Trigger names match the
+   * tool's actions one to one.
+   */
+  private async phoneCallIos(options: PhoneCallOptions): Promise<PhoneCallResult> {
+    const base = { action: options.action, phoneNumber: options.phoneNumber };
+    if (options.action !== "hold" && !options.phoneNumber) {
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        error: `phoneNumber is required for action '${options.action}'`,
+      };
+    }
+    const request = {
+      module: IOS_CALLKIT_MODULE,
+      trigger: options.action,
+      ...(options.phoneNumber ? { payload: { phoneNumber: options.phoneNumber } } : {}),
+    };
+    const result = await this.sendIosTrigger(request);
+    if (!result.success) {
+      return {
+        ...base,
+        success: false,
+        supported: result.available,
+        error: describeIosSdkTriggerFailure(result, request, "phoneCall"),
+      };
+    }
+    return {
+      ...base,
+      success: true,
+      supported: true,
+      message: `${this.phoneCallSuccessMessage(options)} through CallKit in the app's AutoMobile SDK`,
+    };
+  }
+
+  /** iOS: the app's in-app SDK posts an SMS-style local notification (`messages` module). */
+  private async sendSmsIos(options: SendSmsOptions): Promise<SendSmsResult> {
+    const base = { phoneNumber: options.phoneNumber, messageLength: options.message.length };
+    try {
+      // Same body constraints as the Android console path, so both platforms reject the same input.
+      validateSmsMessage(options.message);
+    } catch (error) {
+      logger.warn(`[Telephony] iOS SMS rejected: ${errorMessage(error)}`);
+      return { ...base, success: false, supported: true, error: errorMessage(error) };
+    }
+    const request = {
+      module: IOS_MESSAGES_MODULE,
+      trigger: "sms",
+      payload: { phoneNumber: options.phoneNumber, message: options.message },
+    };
+    const result = await this.sendIosTrigger(request);
+    if (!result.success) {
+      return {
+        ...base,
+        success: false,
+        supported: result.available,
+        error: describeIosSdkTriggerFailure(result, request, "sendSms"),
+      };
+    }
+    return {
+      ...base,
+      success: true,
+      supported: true,
+      message:
+        `Posted an SMS-style notification from ${options.phoneNumber} ` +
+        `(${options.message.length} chars) through the app's AutoMobile SDK`,
+    };
+  }
+
+  private async sendIosTrigger(request: {
+    module: string;
+    trigger: string;
+    payload?: Record<string, unknown>;
+  }): Promise<CtrlProxySdkTriggerResult> {
+    try {
+      return await this.iosSdkTriggers(this.device).requestSdkTrigger(request);
+    } catch (error) {
+      logger.warn(
+        `[Telephony] iOS SDK trigger ${request.module}.${request.trigger} failed: ${errorMessage(error)}`,
+      );
+      return { success: false, available: true, totalTimeMs: 0, error: errorMessage(error) };
     }
   }
 

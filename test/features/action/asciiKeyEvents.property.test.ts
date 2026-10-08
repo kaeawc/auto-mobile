@@ -4,6 +4,8 @@ import {
   buildAsciiKeyEventPlan,
   type KeyEventPlan,
 } from "../../../src/features/action/asciiKeyEvents";
+import { buildAndroidInputTextCommand } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
+import { decodeInputTextCommand } from "./SendKeysTestHarness";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
@@ -172,6 +174,23 @@ describe("buildAsciiKeyEventPlan (property-based)", () => {
         untypeable,
         fc.boolean(),
         (c, supports) => buildAsciiKeyEventPlan(c, supports) === null,
+      ),
+      RUN_OPTIONS,
+    );
+  });
+});
+
+describe("buildAndroidInputTextCommand (property-based)", () => {
+  const printable = fc
+    .array(fc.integer({ min: 0x20, max: 0x7e }), { minLength: 1, maxLength: 40 })
+    .map((codes) => String.fromCharCode(...codes))
+    .filter((text) => !text.includes("%s"));
+
+  test("the device types exactly the printable ASCII text it was given", () => {
+    fc.assert(
+      fc.property(
+        printable,
+        (text) => decodeInputTextCommand(buildAndroidInputTextCommand(text)) === text,
       ),
       RUN_OPTIONS,
     );

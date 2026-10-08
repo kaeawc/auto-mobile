@@ -2,6 +2,7 @@ import type { SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
 import type { DragAndDropTarget } from "../models/DragAndDropOptions";
+import type { HierarchyLayer } from "../models/HierarchyLayer";
 /**
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
@@ -97,6 +98,7 @@ export interface TapOnArgs {
     text: string;
     occurrence?: number;
   };
+  layer?: HierarchyLayer;
   raw?: boolean;
   project?: "full" | "skeleton";
 }
@@ -119,6 +121,7 @@ export interface TapAnyArgs {
     duration?: number;
   };
   scrollableContainer?: boolean;
+  layer?: HierarchyLayer;
   platform?: Platform;
 }
 
@@ -126,6 +129,7 @@ export interface DragAndDropArgs {
   display?: string;
   source: DragAndDropTarget;
   target: DragAndDropTarget;
+  layer?: HierarchyLayer;
   pressDurationMs?: number;
   dragDurationMs?: number;
   holdDurationMs?: number;

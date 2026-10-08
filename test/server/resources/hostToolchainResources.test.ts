@@ -436,7 +436,7 @@ describe("host toolchain resource", () => {
     expect(ios.getCoreDeviceProbe()).toBe(capabilityProbe);
     expect(
       await capabilityProbe.checkSimulatorCommand("one", "info displays", [651, 0, 0]),
-    ).toEqual({ kind: "supported" });
+    ).toMatchObject({ kind: "supported" });
     expect(
       executor.getExecutedCommands().filter((call) => call.includes("--version")),
     ).toHaveLength(2);

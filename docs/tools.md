@@ -18,10 +18,10 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `criticalSection`, `deleteDevice`, `deviceSnapshot`, `displayConfig`, `dragAndDrop`,
 `executePlan`, `explore`, `exportPlan`, `getAppPermissions`, `getDataStore`, `getDeepLinks`,
 `getDeviceState`, `getIosSimulatorCapabilities`, `getNavigationGraph`, `getNetworkGraph`,
-`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`, `overlay`,
+`getNotificationPolicy`, `getPreference`, `highlight`, `hitTest`, `homeScreen`,
 `identifyInteractions`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
-`postNotification`, `pressButton`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
+`postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`, `recordSteps`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
@@ -563,13 +563,14 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>overlay</code>              | Shows, updates, dismisses, awaits events, or reports Android overlays.    |
+| 🪟 <code>prototype</code>            | Shows, updates, dismisses, awaits events, or reports Android prototypes.  |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
-### overlay
+### prototype
 
-The Android-only `overlay` tool is omitted from discovery by default. Enable it
-with `setToolEnabled { toolName: "overlay", enabled: true }`. Its `action` is
+The Android-only `prototype` tool (formerly `overlay`, which remains a hidden
+deprecated alias for one release) is omitted from discovery by default. Enable it
+with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `showVariants`, `update`, `dismiss`, `status`, or `awaitEvent`. `show` requires a full `spec` (id,
 window, optional state, root); `update` requires `id` and exactly one of `spec`
 or a flat `state` patch. Replacement `spec.id` must match `id`. `dismiss`
@@ -614,7 +615,7 @@ with no selection. Cancellation and progress notifications match `awaitEvent`.
 Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing overlay schema and limits
-before contacting CtrlProxy. Verify rendering with `observe`; overlay returns
+before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
 no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
 scroll/pager/tabBar/bottomNav/bottomSheet; actions are emit/setPage/setState/dismiss.
 See the [overlay vocabulary](design-docs/plat/android/overlay-ux.md).
@@ -996,6 +997,19 @@ ambiguity candidates. Scoped and unscoped endpoints can be mixed. These fields
 belong inside each endpoint, not at the top level; unknown endpoint keys and
 malformed recursive containers are rejected.
 
+#### Hierarchy layer
+
+`observe`, `tapOn`, `tapAny`, `sendKeys`, `highlight`, and `dragAndDrop` accept an
+optional top-level `layer` (`"app"` or `"overlay"`) that scopes the view hierarchy
+to one layer of the screen. `app` excludes AutoMobile's own overlay window;
+`overlay` keeps only overlay nodes and fails with an actionable error when no
+overlay is showing. Omit it to search both, topmost first. `observe` applies it
+to the returned hierarchy and to `waitFor` element conditions. `dragAndDrop.layer`
+scopes both the `source` and the `target` drop-target resolution. With `layer: "app"`,
+a coordinate gesture whose point lies under an overlay window is refused before
+dispatch. `layer` on `sendKeys` and `highlight` requires a selector, and `tapOn`
+rejects it together with `accessibilityLink` or `subtext`.
+
 `swipeOn.container` identifies the element to swipe within and accepts the same
 recursive container, per-level index, and selectionStrategy fields. `lookFor`
 accepts exactly one of `elementId` or `text`, plus its own recursive `container`
@@ -1109,7 +1123,11 @@ reports the actual `xcuiTypeText` mechanism as
 `escape`, `backspace`, `delete`, and the four arrow keys; they accept `shift`,
 `ctrl`, `alt`, and `meta`. Semantic keys `next`, `previous`, `done`, `search`,
 `send`, and `go` perform the corresponding IME action and ignore modifiers. A
-standalone `{ "action": "clear" }` command clears the focused field. Execution
+standalone `{ "action": "clear" }` command clears the focused field. On Android
+its default (`auto`) and `ime` modes clear through the CtrlProxy IME
+(`ime_clear_field_v1`), or with key-event deletes on an older APK, so a
+rich-text editor keeps its live formatting; only `mode: "a11y"` uses the
+accessibility `ACTION_SET_TEXT` clear. Execution
 stops on the first failure and returns compact command metadata plus the final
 observation without copying type-command text into the metadata.
 
@@ -1537,7 +1555,7 @@ Devicectl-only simulator features such as orientation, per-display screenshots, 
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator; duration must be an integer from 1 to 1,798,000 ms, and Android intensity must be from 1 to 1,000.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an Android emulator phone call or incoming SMS.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an incoming call or SMS: Android emulator console, or CallKit and a notification through the app's AutoMobile iOS SDK.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -1669,6 +1687,15 @@ Failed restores keep the record for retry. The iOS Simulator reset continues to
 restore light appearance. Failed `displayConfig` results set MCP `isError: true`.
 `shake.duration` is an integer from 1 to 1,798,000 ms (default 1000); the maximum leaves 2 seconds for action-timeout overhead under the 30-minute MCP request limit. Invalid values are rejected before shaking. `shake.intensity` is an Android acceleration value from 1 to 1,000 (default 100); iOS ignores it. The maximum is a conservative bound because the repository does not define an emulator sensor limit. Android shake restores the acceleration vector read before the shake; when read-back fails, it uses the issue-reported emulator resting vector `0:9.77622:0` and includes `restoreWarning` in the result.
 `biometricAuth.errorCode` supplies the BiometricPrompt error code for `action: "error"`.
+On iOS, `match`, `fail`, `cancel` and `error` first arm an `AutoMobileBiometrics`
+override through the app's AutoMobile iOS SDK (DEBUG build, app in the foreground),
+which the app reads with `consumeOverride()`; `ttlMs` and `errorCode` apply as on
+Android. On the Simulator, `match` and `fail` also post the BiometricKit event so a
+pending system prompt completes. Without the SDK, the Simulator falls back to
+BiometricKit events (`match` and `fail` only) and a physical device is unsupported.
+On iOS, `cancel` and `error` only arm the SDK override; the app must read it via
+`consumeOverride()`, as no system prompt is completed for them.
+`enroll` and `unenroll` always use the Simulator.
 
 `postNotification` takes `title`, `body`, and `appId` (target Android package or iOS
 bundle ID; required on iOS, while Android defaults to the foreground app if omitted). `actions` supplies
@@ -1696,6 +1723,10 @@ unchanged. `shake.intensity` sets Android shake intensity (default 100).
 
 `phoneCall.phoneNumber` is required except for the hold action.
 `sendSms.phoneNumber` specifies the sender's number.
+On iOS both tools need the app under test to embed the AutoMobile iOS SDK in a
+DEBUG build and be in the foreground: `phoneCall` reports the call through
+CallKit, and `sendSms` posts an SMS-style local notification. Without the SDK
+they return an error that says so.
 `postNotification.channelId` supplies the Android channel ID or iOS APNs category.
 `imageType` selects `normal` (default) or `bigPicture`; `imagePath` is the host
 image path for `bigPicture`. The host reads only the file's first bytes and
@@ -1811,13 +1842,14 @@ postures. A `foldable` form factor alone does not imply two panels: some foldabl
 AVDs only change posture on one panel. Booted devices use their display inventory.
 
 Booted device entries in `listDevices` and the booted-devices resource optionally carry
-`unhealthy: { reason, since }`. Reasons are `biometric-enrollment`, `network-condition`, or
-`clock`; `since` is the daemon's timestamp in milliseconds. Unresolved restore failures
-exclude devices from available/idle counts and new session allocation. Biometric and
-network failures get three background recovery opportunities with 1s/2s/4s backoff;
+`unhealthy: { reason, since }`. Reasons are `biometric-enrollment`, `network-condition`, `clock`, or
+`app-cleanup` (an `executePlan` app cleanup did not complete); `since` is the daemon's timestamp in milliseconds. Unresolved restore failures
+exclude devices from available/idle counts and new session allocation. Biometric,
+network, and app-cleanup failures get three background recovery opportunities with 1s/2s/4s backoff;
 a live owner is never restored by this recovery. Clock failures retain the existing
 busy quarantine and retry until success or removal. No automatic erase/reboot occurs;
-use `killDevice`/`startDevice` for replacement if recovery is exhausted. Health markers
+use `killDevice`/`startDevice` for replacement if recovery is exhausted (an `app-cleanup` marker that
+exhausts its three attempts is held until then, and the allocation error spells out the `killDevice` call). Health markers
 are in memory only: a daemon restart loses them and does not re-detect dirty state.
 
 `listDevices` filters its booted results. For an unbooted AVD without known display profile metadata, panel and posture
@@ -2002,6 +2034,10 @@ accept the recording `display` argument.
 
 `accessibilityFocus.resourceId` targets a resource ID. `contentDesc` matches the
 exact content description or accessible label, distinct from visible `text`.
+
+Setting focus on a node that already holds accessibility focus, or clearing focus
+on one that does not, succeeds without sending an action and reports
+`alreadySatisfied: true`.
 
 Before acquiring a device, read `automobile:tools` for every tool's default discovery state. Startup enable/disable settings also affect discovery only, not direct `tools/call` by name.
 

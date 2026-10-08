@@ -78,6 +78,27 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         return await postExpectingOK(path: "/network/mock", body: body)
     }
 
+    /// Replace network mock rules and read back which ones the SDK's regex engine rejected. An SDK that
+    /// predates the report answers `{"status":"ok"}` without `rejected`, so the outcome carries no report.
+    public func pushMockRules(_ rules: [NetworkMockRuleDTO]) async -> SdkMockRulesOutcome {
+        guard let body = try? JSONEncoder().encode(SetMockRulesBody(rules: rules)) else {
+            return SdkMockRulesOutcome(ok: false)
+        }
+        guard let responseBody = await postReturningBody(path: "/network/mock", body: body) else {
+            return SdkMockRulesOutcome(ok: false)
+        }
+        guard let reply = try? JSONDecoder().decode(SetMockRulesReply.self, from: responseBody),
+              let rejected = reply.rejected
+        else {
+            return SdkMockRulesOutcome(ok: true)
+        }
+        return SdkMockRulesOutcome(
+            ok: true,
+            rejectedMockIds: rejected.map(\.mockId),
+            rejectedReasons: Dictionary(rejected.map { ($0.mockId, $0.reason) }) { first, _ in first }
+        )
+    }
+
     public func setNetworkFaultRules(_ rules: [NetworkFaultRuleDTO]) async -> Bool {
         guard let body = try? JSONEncoder().encode(SetNetworkFaultRulesBody(rules: rules)) else {
             return false
@@ -114,6 +135,32 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         } catch {
             Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
                 .debug("Magic Tap bridge unavailable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    /// Deliver a host trigger to the SDK's `POST /trigger` route (#1580). Any HTTP reply,
+    /// including a structured 4xx, is returned; nil means the bridge was unreachable.
+    public func sendTrigger(_ body: Data) async -> SdkTriggerReply? {
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: "/trigger", body: body), transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse else { return nil }
+            let payload = try? JSONDecoder().decode(SdkTriggerReplyPayload.self, from: data)
+            return SdkTriggerReply(
+                statusCode: http.statusCode,
+                error: payload?.error,
+                reason: payload?.reason,
+                registeredModules: payload?.registeredModules,
+                supportedTriggers: payload?.supportedTriggers
+            )
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .debug("SDK trigger bridge unavailable: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
@@ -178,6 +225,22 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         }
     }
 
+    /// POST `body`; return the response body only on HTTP 200 (nil for any transport error or other status).
+    private func postReturningBody(path: String, body: Data) async -> Data? {
+        do {
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: path, body: body), transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            return data
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
     private static func logEndpointError(_ error: SdkEndpointError) {
         Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
             .warning("\(error.localizedDescription, privacy: .public)")
@@ -196,6 +259,16 @@ private struct SetMockRulesBody: Encodable {
     let rules: [NetworkMockRuleDTO]
 }
 
+/// The SDK's reply to `POST /network/mock`; `rejected` is absent from an SDK that predates issue #10101.
+private struct SetMockRulesReply: Decodable {
+    struct Rejected: Decodable {
+        let mockId: String
+        let reason: String
+    }
+
+    let rejected: [Rejected]?
+}
+
 private struct SetNetworkFaultRulesBody: Encodable {
     let rules: [NetworkFaultRuleDTO]
 }
@@ -203,6 +276,13 @@ private struct SetNetworkFaultRulesBody: Encodable {
 private struct AddHighlightBody: Encodable {
     let id: String
     let shape: HighlightShape
+}
+
+private struct SdkTriggerReplyPayload: Decodable {
+    let error: String?
+    let reason: String?
+    let registeredModules: [String]?
+    let supportedTriggers: [String]?
 }
 
 private struct MagicTapPayload: Decodable {

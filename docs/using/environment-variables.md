@@ -228,7 +228,12 @@ cannot inherit a session another owner holds, even after that owner's lease
 lapses (#10664). A proxy bound with `--initial-session-uuid` claims on its first
 heartbeat and restores the strict heartbeat policy. By default the proxy mints a
 new owner token per process, so a restarted proxy is a different token and is
-locked out while the previous process's lease is live. A harness that restarts
+locked out while the previous process's lease is live. It keeps claiming for as
+long as the daemon reports the previous owner's hold (the daemon's lease for the
+session plus its suspect grace, whatever the proxy's own lease setting) and wins
+once that hold lapses. Only a previous owner that is still renewing its lease a
+minute after the conflict began counts as a live owner; the new proxy then stops
+claiming and its tool calls report the session as lost (#10701). A harness that restarts
 its proxy passes a stable token with `--liveness-owner-token <token>` (alongside
 `--initial-session-uuid`); the restarted proxy then claims with the same token
 and resumes the session without a conflict. Use a distinct token per harness. A

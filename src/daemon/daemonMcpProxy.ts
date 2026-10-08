@@ -110,6 +110,9 @@ import {
   livenessHandoverPayload,
   livenessRecoveryCallWaitMs,
   ownershipConflictLeashMs,
+  advanceOwnerConflictLeash,
+  type OwnerConflictLeash,
+  type ReportedOwnerHold,
   type LivenessHandover,
   type RecoveryAttemptOutcome,
 } from "./proxyLivenessRecovery";
@@ -312,6 +315,20 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
     throw new Error("heartbeat interval must be a positive finite number");
   }
   return Math.max(1, interval);
+}
+
+/** The owner's hold a conflict refusal reports (#10701); absent from an older daemon. */
+function reportedOwnerHold(error: unknown): ReportedOwnerHold | undefined {
+  if (error === null || typeof error !== "object" || !("livenessOwnerHold" in error)) {
+    return undefined;
+  }
+  const hold = error.livenessOwnerHold;
+  return hold !== null &&
+    typeof hold === "object" &&
+    "holdRemainingMs" in hold &&
+    typeof hold.holdRemainingMs === "number"
+    ? { holdRemainingMs: hold.holdRemainingMs }
+    : undefined;
 }
 
 function isLivenessOwnerConflictError(error: unknown): boolean {
@@ -980,8 +997,8 @@ export class DaemonMcpProxy {
        * evicted, so a conversation that moved to another device stops pinning the old one.
        */
       lastUsedAt: number;
-      /** When the daemon first refused this session's claim as a live-owner conflict (#10050). */
-      conflictSince?: number;
+      /** The daemon's refusals of this session's claim as a live-owner conflict (#10050, #10701). */
+      conflict?: OwnerConflictLeash;
     }
   >();
   /** Supersession is informational; report it at most once per proxy instance. */
@@ -999,7 +1016,7 @@ export class DaemonMcpProxy {
    * When the daemon first refused the latest binding's claim as a live-owner conflict (#10664).
    * Keyed by UUID so a binding change or a successful heartbeat starts a fresh leash.
    */
-  private latestBindingConflict: { sessionUuid: string; since: number } | undefined;
+  private latestBindingConflict: ({ sessionUuid: string } & OwnerConflictLeash) | undefined;
   /**
    * The `--initial-session-uuid` binding was claimed at startup and no tool call has used it yet.
    * While the previous owner is still heartbeating, its refusals must not fence the binding: the
@@ -4814,7 +4831,7 @@ export class DaemonMcpProxy {
       held.claimSent = true;
     }
     if (held) {
-      held.conflictSince = undefined;
+      held.conflict = undefined;
     }
     this.livenessAcks.set(sessionUuid, this.timer.now());
     this.livenessConflictLogged.delete(sessionUuid);
@@ -4840,7 +4857,7 @@ export class DaemonMcpProxy {
       return;
     }
     if (isLivenessOwnerConflictError(error)) {
-      this.handleHeldSessionOwnerConflict(sessionUuid);
+      this.handleHeldSessionOwnerConflict(sessionUuid, reportedOwnerHold(error));
       return;
     }
     if (error instanceof DaemonBoundSessionExpiredError) {
@@ -4861,18 +4878,27 @@ export class DaemonMcpProxy {
    * The daemon refused this held session's claim because another token owns it
    * with a live lease (#10050). The claim stays unsent so each tick retries it,
    * which succeeds once that lease lapses. The other owner's session stays refused for
-   * its lease plus the suspect grace window (#10051), so a refusal is only given up on
-   * after {@link ownershipConflictLeashMs}: one that outlasts it means this proxy cannot
-   * own the session, so it stops heartbeating that session alone; siblings are unaffected.
+   * its lease plus the suspect grace window (#10051), which the refusal reports, so it is only
+   * given up on once that owner keeps renewing past the handoff allowance (#10701): then this
+   * proxy cannot own the session and stops heartbeating that session alone; siblings are
+   * unaffected.
    */
-  private handleHeldSessionOwnerConflict(sessionUuid: string): void {
+  private handleHeldSessionOwnerConflict(
+    sessionUuid: string,
+    hold: ReportedOwnerHold | undefined,
+  ): void {
     const held = this.otherHeldSessions.get(sessionUuid);
     if (!held) {
       return;
     }
-    const now = this.timer.now();
-    held.conflictSince ??= now;
-    if (now - held.conflictSince >= this.ownershipConflictLeashMs) {
+    const { leash, exhausted } = advanceOwnerConflictLeash(
+      held.conflict,
+      this.timer.now(),
+      hold,
+      this.ownershipConflictLeashMs,
+    );
+    held.conflict = leash;
+    if (exhausted) {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is owned by another live liveness owner; no longer heartbeating it`,
       );
@@ -5021,18 +5047,23 @@ export class DaemonMcpProxy {
       // (no local acknowledgement either), the claim stays unsent so the next
       // tick retries it, and the keeper is not failed by the refusal.
       this.noteLivenessOwnerConflict(sessionUuid);
-      this.leashLatestBindingConflict(sessionUuid, isCurrent);
+      this.leashLatestBindingConflict(sessionUuid, isCurrent, reportedOwnerHold(error));
       return true;
     }
     return false;
   }
 
   /**
-   * Give the latest binding the same leash held sessions have (#10664): a refusal that outlasts
-   * the other owner's lease plus grace means this proxy cannot own the session, so it stops
-   * claiming and fences the binding instead of inheriting another proxy's session.
+   * Give the latest binding the same leash held sessions have (#10664): an owner that keeps
+   * renewing past the handoff allowance means this proxy cannot own the session, so it stops
+   * claiming and fences the binding instead of inheriting another proxy's session. An owner that
+   * stopped is waited out for the hold the daemon reports, however long its lease (#10701).
    */
-  private leashLatestBindingConflict(sessionUuid: string, isCurrent: () => boolean): void {
+  private leashLatestBindingConflict(
+    sessionUuid: string,
+    isCurrent: () => boolean,
+    hold: ReportedOwnerHold | undefined,
+  ): void {
     if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
       return;
     }
@@ -5043,11 +5074,16 @@ export class DaemonMcpProxy {
       this.latestBindingConflict = undefined;
       return;
     }
-    const now = this.timer.now();
-    if (this.latestBindingConflict?.sessionUuid !== sessionUuid) {
-      this.latestBindingConflict = { sessionUuid, since: now };
-    }
-    if (now - this.latestBindingConflict.since < this.ownershipConflictLeashMs) {
+    const { leash, exhausted } = advanceOwnerConflictLeash(
+      this.latestBindingConflict?.sessionUuid === sessionUuid
+        ? this.latestBindingConflict
+        : undefined,
+      this.timer.now(),
+      hold,
+      this.ownershipConflictLeashMs,
+    );
+    this.latestBindingConflict = { sessionUuid, ...leash };
+    if (!exhausted) {
       return;
     }
     logger.warn(

@@ -82,6 +82,67 @@ export function livenessRecoveryCallWaitMs(leaseMs: number, requestTimeoutMs: nu
 }
 
 /**
+ * How long a challenger keeps claiming a session whose owner keeps renewing its lease (#10701).
+ * A restarted harness's old proxy exits when its stdin closes, normally within seconds of the new
+ * proxy starting; a minute covers a slow shutdown. An owner still renewing after that is a live
+ * owner, not a handoff in progress, and the challenger gives up.
+ */
+export const LIVE_OWNER_HANDOFF_ALLOWANCE_MS = 60_000;
+
+/**
+ * How far a refusal's reported hold end must move past the latest one seen to count as the owner
+ * renewing its lease, rather than request latency jittering the same hold end.
+ */
+const OWNER_HOLD_RENEWAL_TOLERANCE_MS = 1_000;
+
+/** The owner's hold as a `liveness_owner_conflict` refusal reports it (#10701). */
+export interface ReportedOwnerHold {
+  /** Milliseconds until the owner's hold (lease plus suspect grace) ends. */
+  holdRemainingMs: number;
+}
+
+/** A challenger's view of one session's ownership conflict. */
+export interface OwnerConflictLeash {
+  /** Proxy-clock time of the first refusal. */
+  since: number;
+  /** Latest proxy-clock time the daemon reported the owner's hold to end. */
+  holdEndsAt?: number;
+}
+
+/**
+ * Fold one refused claim into the conflict's leash and say whether the challenger should give up.
+ *
+ * The leash follows the daemon's report of the owner's hold, not the challenger's own lease
+ * config: a daemon lease longer than the proxy's, or an old owner still stopping, is waited out.
+ * Only an owner that renews its hold after the handoff allowance has passed is a live owner the
+ * challenger cannot win against. A refusal without a report (an older daemon) falls back to
+ * `fallbackLeashMs` from the first refusal.
+ */
+export function advanceOwnerConflictLeash(
+  previous: OwnerConflictLeash | undefined,
+  now: number,
+  hold: ReportedOwnerHold | undefined,
+  fallbackLeashMs: number,
+): { leash: OwnerConflictLeash; exhausted: boolean } {
+  const since = previous?.since ?? now;
+  if (!hold) {
+    return { leash: { ...previous, since }, exhausted: now - since >= fallbackLeashMs };
+  }
+  const reportedEnd = now + hold.holdRemainingMs;
+  const seenEnd = previous?.holdEndsAt ?? reportedEnd;
+  // A hold that has (all but) run out is the end of the one already seen, not a renewal: the
+  // next claim wins.
+  if (hold.holdRemainingMs <= OWNER_HOLD_RENEWAL_TOLERANCE_MS) {
+    return { leash: { since, holdEndsAt: seenEnd }, exhausted: false };
+  }
+  const renewed = reportedEnd > seenEnd + OWNER_HOLD_RENEWAL_TOLERANCE_MS;
+  return {
+    leash: { since, holdEndsAt: Math.max(seenEnd, reportedEnd) },
+    exhausted: renewed && now - since >= LIVE_OWNER_HANDOFF_ALLOWANCE_MS,
+  };
+}
+
+/**
  * How long a proxy keeps retrying a claim another owner refuses (#10050). The other owner's
  * session can stay refused for its whole lease plus the suspect grace window, and the retry that
  * wins lands one heartbeat cadence after the daemon lets go, so all three are covered.

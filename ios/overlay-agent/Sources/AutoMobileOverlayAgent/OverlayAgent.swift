@@ -40,14 +40,23 @@ final class OverlayAgent {
     private var hiddenBeforeCovering: [ObjectIdentifier: Bool] = [:]
 
     func boot() {
-        let environment = ProcessInfo.processInfo.environment
-        let port = UInt16(environment["AUTOMOBILE_OVERLAY_PORT"] ?? "") ?? 8771
+        let configuration: OverlayAgentConfiguration
+        switch OverlayAgentConfiguration.from(environment: ProcessInfo.processInfo.environment) {
+        case let .success(parsed):
+            configuration = parsed
+        case let .failure(failure):
+            // Without a host-allocated port and token there is no safe way to listen.
+            NSLog("[AutoMobileOverlayAgent] not starting: %@", failure.description)
+            return
+        }
         NSLog(
-            "[AutoMobileOverlayAgent] loaded into %@, listening on 127.0.0.1:%d",
+            "[AutoMobileOverlayAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",
+            OverlayAgentProtocol.agentVersion,
+            OverlayAgentProtocol.protocolVersion,
             Bundle.main.bundleIdentifier ?? "?",
-            port
+            configuration.port
         )
-        let server = OverlayServer(port: port) { [weak self] message, reply in
+        let server = OverlayServer(configuration: configuration) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
         model.onEvent = { [weak server] event in server?.broadcast(event) }
@@ -149,17 +158,7 @@ final class OverlayAgent {
                 let spec = try decode(OverlaySpec.self, message["spec"])
                 model.show(spec)
                 result(true, extra: missingAssetsExtra())
-            case "update_overlay":
-                guard let current = model.spec, current.id == message["id"] as? String else {
-                    return result(false, "No overlay with id \(message["id"] ?? "nil") is shown")
-                }
-                if message["spec"] != nil {
-                    try model.replace(decode(OverlaySpec.self, message["spec"]))
-                    updateAppAccessibility()
-                } else {
-                    try model.mergeState(decode([String: JSONValue].self, message["state"]))
-                }
-                result(true, extra: missingAssetsExtra())
+            // No update_overlay (#10550): a same-id show_overlay replaces the shown overlay.
             case "dismiss_overlay":
                 // Like Android's OverlayController: an id that is not the shown overlay fails, and
                 // the dismissal still emits the terminal `dismissed` event that event waiters
